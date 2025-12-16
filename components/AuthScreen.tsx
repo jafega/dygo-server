@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { UserRole } from '../types';
 import * as AuthService from '../services/authService';
 import { Mail, Lock, User, ArrowRight, Loader2, Server, WifiOff, CheckCircle, ExternalLink, Copy } from 'lucide-react';
+import { GOOGLE_CLIENT_ID } from '../services/config';
 import { API_URL } from '../services/config';
 
 // Custom Dygo Logo Component for Auth
@@ -64,6 +65,40 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
     const token = params.get('resetToken');
     if (token) {
         setResetToken(token);
+    }
+
+    // Initialize Google Identity Services if client id is present
+    const googleClient = (window as any)._dygo_google_client_initialized;
+    const clientId = GOOGLE_CLIENT_ID || null;
+    if (!googleClient && clientId) {
+        // Load the GIS script dynamically
+        const script = document.createElement('script');
+        script.src = 'https://accounts.google.com/gsi/client';
+        script.async = true;
+        script.defer = true;
+        script.onload = () => {
+            const google = (window as any).google;
+            if (!google) return;
+            google.accounts.id.initialize({
+                client_id: clientId,
+                callback: async (response: any) => {
+                    // response.credential is the ID token
+                    try {
+                        setIsLoading(true);
+                        await AuthService.signInWithGoogle(response.credential);
+                        onAuthSuccess();
+                    } catch (err: any) {
+                        setError(err?.message || 'Error con Google Sign-In');
+                    } finally {
+                        setIsLoading(false);
+                    }
+                }
+            });
+            // Render a button into the container
+            google.accounts.id.renderButton(document.getElementById('gsi-button'), { theme: 'outline', size: 'large' });
+            (window as any)._dygo_google_client_initialized = true;
+        };
+        document.head.appendChild(script);
     }
   }, []);
 
@@ -134,6 +169,13 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
             {error && (
                 <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100 animate-in fade-in slide-in-from-top-1">
                     {error}
+                </div>
+            )}
+
+            {/* Google Sign-In (renders if VITE_GOOGLE_CLIENT_ID is set) */}
+            {GOOGLE_CLIENT_ID && (
+                <div className="mb-4 flex justify-center">
+                    <div id="gsi-button" />
                 </div>
             )}
 

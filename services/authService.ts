@@ -126,6 +126,24 @@ export const login = async (email: string, password: string): Promise<User> => {
   return user;
 };
 
+// Sign in / Sign up with Google using an ID token from Google Identity Services
+export const signInWithGoogle = async (idToken: string): Promise<User> => {
+    if (USE_BACKEND) {
+        const res = await fetch(`${API_URL}/auth/google`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idToken })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Error signing in with Google');
+        }
+        const user = await res.json();
+        localStorage.setItem(CURRENT_USER_KEY, user.id);
+        return user;
+    }
+
+    throw new Error('Google Sign-in is only supported when USE_BACKEND is true');
+};
+
 export const logout = () => {
   localStorage.removeItem(CURRENT_USER_KEY);
 };

@@ -11,6 +11,8 @@ export interface User {
   // Optional fields used by password reset flow (dev/local)
   passwordResetToken?: string;
   passwordResetExpires?: number;
+  // Optional OAuth fields
+  googleId?: string;
 }
 
 export interface Invitation {
