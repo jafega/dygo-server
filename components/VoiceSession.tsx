@@ -55,7 +55,13 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
 
     const startSession = async () => {
       try {
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+if (!apiKey) {
+  throw new Error("Falta VITE_GEMINI_API_KEY en Render (frontend)");
+}
+const ai = new GoogleGenAI({ apiKey });
+
+
         const user = await getCurrentUser();
         
         // 1. Audio Setup
@@ -223,10 +229,11 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
         sessionRef.current = await sessionPromise;
 
       } catch (err) {
-        console.error("Init error", err);
-        setError("No se pudo establecer la llamada.");
-        setStatus('error');
-      }
+  console.error("Init error", err);
+  setError(err instanceof Error ? err.message : "No se pudo establecer la llamada.");
+  setStatus('error');
+}
+
     };
 
     startSession();
