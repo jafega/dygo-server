@@ -419,7 +419,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
     }
 
     switch (event.type) {
-*** End Patch      case 'invoice.payment_failed': {
+      case 'invoice.payment_failed': {
         const invoice = event.data.object;
         const subscriptionId = invoice.subscription;
         const subs = db.users.filter(u => u.stripeSubscriptionId === subscriptionId);
