@@ -224,12 +224,15 @@ app.get('/api/goals', (req, res) => {
   const { userId } = req.query;
   const db = getDb();
 
+  const safeGoals = Array.isArray(db.goals) ? db.goals : [];
+
   const goals = userId
-    ? db.goals.filter((g) => g.userId === userId)
-    : db.goals;
+    ? safeGoals.filter((g) => String(g.userId) === String(userId))
+    : safeGoals;
 
   res.json(goals);
 });
+
 
 // Sincronizar metas completas de un usuario
 app.post('/api/goals/sync', (req, res) => {

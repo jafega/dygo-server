@@ -249,7 +249,7 @@ const dayEntries = selectedDate
   ? safeEntries.filter(e => e.date === selectedDate)
   : [];
 
-  const safeGoals = Array.isArray(goals) ? goals : [];
+const safeGoals = Array.isArray(goals) ? goals : [];
 
 const assignedGoals = safeGoals.filter(
   g => g.createdBy === 'PSYCHOLOGIST'

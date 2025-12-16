@@ -49,8 +49,23 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   const feedbackFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setEntries(getEntriesForUser(patient.id));
-    setGoals(getGoalsForUser(patient.id));
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const [e, g] = await Promise.all([
+          getEntriesForUser(patient.id),
+          getGoalsForUser(patient.id)
+        ]);
+        if (!cancelled) {
+          setEntries(e);
+          setGoals(g);
+        }
+      } catch (err) {
+        console.error('Error loading patient data', err);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
   }, [patient.id]);
 
   // Filter entries based on role (Psych sees patient data) and TIME RANGE
@@ -121,19 +136,24 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
       setActiveTab('TIMELINE'); // Switch back to timeline to show form
   };
 
-  const handleSaveNotes = (entry: JournalEntry) => {
+  const handleSaveNotes = async (entry: JournalEntry) => {
       const updated: JournalEntry = {
           ...entry,
           psychologistNote: internalNote,
           psychologistFeedback: feedback
       };
       
-      updateEntry(updated);
-      setEntries(prev => prev.map(e => e.id === entry.id ? updated : e));
-      setEditingEntryId(null);
+      try {
+        await updateEntry(updated);
+        setEntries(prev => prev.map(e => e.id === entry.id ? updated : e));
+      } catch (err) {
+        console.error('Error saving notes', err);
+      } finally {
+        setEditingEntryId(null);
+      }
   };
 
-  const handleCreateEntry = () => {
+  const handleCreateEntry = async () => {
       const newEntry: JournalEntry = {
           id: crypto.randomUUID(),
           userId: patient.id,
@@ -149,9 +169,15 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
           createdBy: 'PSYCHOLOGIST'
       };
 
-      saveEntry(newEntry);
-      setEntries(getEntriesForUser(patient.id));
-      setIsCreating(false);
+      try {
+        await saveEntry(newEntry);
+        const e = await getEntriesForUser(patient.id);
+        setEntries(e);
+      } catch (err) {
+        console.error('Error creating entry', err);
+      } finally {
+        setIsCreating(false);
+      }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, target: 'INTERNAL' | 'FEEDBACK') => {

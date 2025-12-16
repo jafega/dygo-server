@@ -63,7 +63,8 @@ const GoalsPanel: React.FC<GoalsPanelProps> = ({
                 <p className="text-center text-slate-400 text-sm py-4 italic">Sin tareas activas.</p>
             )}
             
-            {goals.map(goal => {
+            {(Array.isArray(goals) ? goals : []).map(goal => {
+
                 const isAssigned = goal.createdBy === 'PSYCHOLOGIST';
                 return (
                     <div key={goal.id} className={`p-3 rounded-xl border transition-all ${goal.completed ? 'bg-slate-50 border-slate-200 opacity-70' : isAssigned ? 'bg-purple-50/50 border-purple-200 shadow-sm' : 'bg-white border-slate-200 shadow-sm'}`}>
