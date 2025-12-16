@@ -1,6 +1,6 @@
 import { JournalEntry, Goal, UserSettings, Invitation, User, PatientSummary } from '../types';
 import * as AuthService from './authService';
-import { API_URL, USE_BACKEND } from './config';
+import { API_URL, USE_BACKEND, ALLOW_LOCAL_FALLBACK } from './config';
 
 const ENTRIES_KEY = 'ai_diary_entries_v2';
 const GOALS_KEY = 'ai_diary_goals_v2';
@@ -13,7 +13,11 @@ export const getEntriesForUser = async (userId: string): Promise<JournalEntry[]>
       try {
           const res = await fetch(`${API_URL}/entries?userId=${userId}`);
           if (res.ok) return (await res.json()).sort((a: any, b: any) => b.timestamp - a.timestamp);
-      } catch (e) { console.warn("Backend fail", e); }
+          throw new Error(`Server error: ${res.status}`);
+      } catch (e) {
+          if (ALLOW_LOCAL_FALLBACK) { console.warn("Backend fail, using local fallback", e); }
+          else throw new Error('No se puede conectar con el servidor. Asegúrate de ejecutar `node server.js`.');
+      }
   }
   // Local Fallback
   const stored = localStorage.getItem(ENTRIES_KEY);
@@ -24,21 +28,21 @@ export const getEntriesForUser = async (userId: string): Promise<JournalEntry[]>
 export const saveEntry = async (entry: JournalEntry): Promise<void> => {
   if (USE_BACKEND) {
       try {
-          // Check if exists (PUT) or new (POST)
-          // Simplified: Always POST for new, PUT for update. 
-          // We assume the ID check happens in caller or we try one then other. 
-          // Actually, let's just assume POST is create. But to be safe, we check local logic:
-          // Ideally the API handles upsert, but here we explicitly separate.
-          // For simplicity in this demo, we'll try to UPDATE, if 404 then CREATE? No.
-          // Let's just use POST for everything in a 'sync' style or check ID.
-          // Better: We implement updateEntry separately.
-          await fetch(`${API_URL}/entries`, {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify(entry)
+          // If an ID exists try to update first, otherwise create
+          if (entry.id) {
+              const res = await fetch(`${API_URL}/entries/${entry.id}`, {
+                  method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(entry)
+              });
+              if (res.ok) return;
+              // If update failed with 404, try POST
+              if (res.status !== 404) throw new Error(`Error saving entry (${res.status})`);
+          }
+          const createRes = await fetch(`${API_URL}/entries`, {
+              method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(entry)
           });
+          if (!createRes.ok) throw new Error(`Error creating entry (${createRes.status})`);
           return;
-      } catch(e) { console.warn("Backend fail", e); }
+      } catch(e) { if (ALLOW_LOCAL_FALLBACK) { console.warn("Backend fail, saved locally", e); } else { throw e; } }
   }
 
   const entries = JSON.parse(localStorage.getItem(ENTRIES_KEY) || '[]');
@@ -50,20 +54,30 @@ export const saveEntry = async (entry: JournalEntry): Promise<void> => {
 
 export const updateEntry = async (updatedEntry: JournalEntry): Promise<void> => {
     if (USE_BACKEND) {
-        await fetch(`${API_URL}/entries/${updatedEntry.id}`, {
-            method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(updatedEntry)
-        });
-        return;
+        try {
+            const res = await fetch(`${API_URL}/entries/${updatedEntry.id}`, {
+                method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(updatedEntry)
+            });
+            if (!res.ok) throw new Error(`Error updating entry (${res.status})`);
+            return;
+        } catch (e) {
+            if (ALLOW_LOCAL_FALLBACK) { console.warn('Update entry failed, saving locally.', e); }
+            else { throw e; }
+        }
     }
     await saveEntry(updatedEntry);
 };
 
 export const deleteEntry = async (id: string): Promise<void> => {
     if (USE_BACKEND) {
-        await fetch(`${API_URL}/entries/${id}`, { method: 'DELETE' });
-        return;
+        try {
+            const res = await fetch(`${API_URL}/entries/${id}`, { method: 'DELETE' });
+            if (!res.ok) throw new Error(`Error deleting entry (${res.status})`);
+            return;
+        } catch (e) {
+            if (ALLOW_LOCAL_FALLBACK) { console.warn('Delete entry failed, removing locally.', e); }
+            else { throw e; }
+        }
     }
     const entries = JSON.parse(localStorage.getItem(ENTRIES_KEY) || '[]');
     localStorage.setItem(ENTRIES_KEY, JSON.stringify(entries.filter((e:any) => e.id !== id)));
@@ -74,13 +88,53 @@ export const getLastDaysEntries = async (userId: string, days: number): Promise<
   return entries.slice(0, days);
 };
 
+// Migrate localStorage data to backend for a user (called at init when backend is available)
+export const migrateLocalToBackend = async (userId: string) => {
+    if (!USE_BACKEND) return;
+    try {
+        // Entries
+        const localEntries = JSON.parse(localStorage.getItem(ENTRIES_KEY) || '[]') as JournalEntry[];
+        const userEntries = localEntries.filter(e => String(e.userId) === String(userId));
+        for (const e of userEntries) {
+            try { await saveEntry(e); } catch (err) { console.warn('Failed to migrate entry', e.id, err); }
+        }
+
+        // Goals
+        const localGoals = JSON.parse(localStorage.getItem(GOALS_KEY) || '[]') as Goal[];
+        const userGoals = localGoals.filter(g => String(g.userId) === String(userId));
+        if (userGoals.length > 0) {
+            try { await saveUserGoals(userId, userGoals); } catch (err) { console.warn('Failed to migrate goals', err); }
+        }
+
+        // Settings
+        const allSettings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+        if (allSettings[userId]) {
+            try { await saveSettings(userId, allSettings[userId]); } catch (err) { console.warn('Failed to migrate settings', err); }
+        }
+
+        // Invitations
+        const localInvs = JSON.parse(localStorage.getItem(INVITATIONS_KEY) || '[]') as Invitation[];
+        for (const inv of localInvs.filter(i => i.toUserEmail === (await AuthService.getUserById(userId))?.email || '')) {
+            try { await sendInvitation(inv.fromPsychologistId, inv.fromPsychologistName, inv.toUserEmail); } catch (err) { console.warn('Failed to migrate invitation', inv.id, err); }
+        }
+
+        console.log('✅ Local data migration attempted');
+    } catch (e) {
+        console.error('Error during migration', e);
+    }
+};
+
 // --- Goals ---
 export const getGoalsForUser = async (userId: string): Promise<Goal[]> => {
     if (USE_BACKEND) {
         try {
             const res = await fetch(`${API_URL}/goals?userId=${userId}`);
             if (res.ok) return await res.json();
-        } catch(e) {}
+            throw new Error(`Server error: ${res.status}`);
+        } catch(e) {
+            if (ALLOW_LOCAL_FALLBACK) { console.warn('Get goals failed, using local fallback', e); }
+            else { throw new Error('No se puede conectar con el servidor para obtener goals.'); }
+        }
     }
     const all = JSON.parse(localStorage.getItem(GOALS_KEY) || '[]');
     return all.filter((g:any) => g.userId === userId);
@@ -89,13 +143,12 @@ export const getGoalsForUser = async (userId: string): Promise<Goal[]> => {
 export const saveUserGoals = async (userId: string, userGoals: Goal[]) => {
     if (USE_BACKEND) {
         try {
-            await fetch(`${API_URL}/goals/sync`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ userId, goals: userGoals })
+            const res = await fetch(`${API_URL}/goals/sync`, {
+                method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ userId, goals: userGoals })
             });
+            if (!res.ok) throw new Error(`Error syncing goals (${res.status})`);
             return;
-        } catch(e) {}
+        } catch(e) { if (ALLOW_LOCAL_FALLBACK) { console.warn('Save goals failed, storing locally', e); } else { throw e; } }
     }
     const all = JSON.parse(localStorage.getItem(GOALS_KEY) || '[]');
     const other = all.filter((g:any) => g.userId !== userId);
@@ -112,7 +165,10 @@ export const getSettings = async (userId: string): Promise<UserSettings> => {
                 const data = await res.json();
                 return { ...defaults, ...data };
             }
-        } catch(e) {}
+            throw new Error(`Server error: ${res.status}`);
+        } catch(e) {
+            if (ALLOW_LOCAL_FALLBACK) { console.warn('Fetch settings failed, using local fallback', e); } else { throw new Error('No se puede conectar con el servidor para obtener settings.'); }
+        }
     }
     const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
     return { ...defaults, ...(all[userId] || {}) };
@@ -120,12 +176,13 @@ export const getSettings = async (userId: string): Promise<UserSettings> => {
 
 export const saveSettings = async (userId: string, settings: UserSettings): Promise<void> => {
     if (USE_BACKEND) {
-        await fetch(`${API_URL}/settings/${userId}`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(settings)
-        });
-        return;
+        try {
+            const res = await fetch(`${API_URL}/settings/${userId}`, {
+                method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(settings)
+            });
+            if (!res.ok) throw new Error(`Error saving settings (${res.status})`);
+            return;
+        } catch(e) { if (ALLOW_LOCAL_FALLBACK) { console.warn('Save settings failed, storing locally', e); } else { throw e; } }
     }
     const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
     all[userId] = settings;
@@ -138,7 +195,10 @@ const getInvitations = async (): Promise<Invitation[]> => {
         try {
             const res = await fetch(`${API_URL}/invitations`);
             if (res.ok) return await res.json();
-        } catch(e) {}
+            throw new Error(`Server error: ${res.status}`);
+        } catch(e) {
+            if (ALLOW_LOCAL_FALLBACK) { console.warn('Fetch invitations failed, using local fallback', e); } else { throw new Error('No se puede conectar con el servidor para obtener invitaciones.'); }
+        }
     }
     return JSON.parse(localStorage.getItem(INVITATIONS_KEY) || '[]');
 };
@@ -170,12 +230,14 @@ export const sendInvitation = async (fromPsychId: string, fromName: string, toEm
     };
 
     if (USE_BACKEND) {
-        await fetch(`${API_URL}/invitations`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(newInv)
-        });
-        return;
+        try {
+            const res = await fetch(`${API_URL}/invitations`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(newInv) });
+            if (!res.ok) throw new Error(`Error creating invitation (${res.status})`);
+            return;
+        } catch (e) {
+            if (ALLOW_LOCAL_FALLBACK) { invs.push(newInv); localStorage.setItem(INVITATIONS_KEY, JSON.stringify(invs)); console.warn('Create invitation failed, saved locally', e); return; }
+            throw e;
+        }
     }
     invs.push(newInv);
     localStorage.setItem(INVITATIONS_KEY, JSON.stringify(invs));
@@ -198,11 +260,13 @@ export const acceptInvitation = async (invitationId: string, userId: string) => 
 
     if (USE_BACKEND) {
         inv.status = 'ACCEPTED';
-        await fetch(`${API_URL}/invitations/${inv.id}`, {
-            method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(inv)
-        });
+        try {
+            const res = await fetch(`${API_URL}/invitations/${inv.id}`, { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(inv) });
+            if (!res.ok) throw new Error(`Error accepting invitation (${res.status})`);
+        } catch (e) {
+            if (ALLOW_LOCAL_FALLBACK) { inv.status = 'ACCEPTED'; localStorage.setItem(INVITATIONS_KEY, JSON.stringify(invs)); console.warn('Accept invitation failed, saved locally', e); }
+            else { throw e; }
+        }
     } else {
         inv.status = 'ACCEPTED';
         localStorage.setItem(INVITATIONS_KEY, JSON.stringify(invs));
@@ -225,8 +289,11 @@ export const acceptInvitation = async (invitationId: string, userId: string) => 
 
 export const rejectInvitation = async (invitationId: string) => {
     if (USE_BACKEND) {
-        await fetch(`${API_URL}/invitations/${invitationId}`, { method: 'DELETE' });
-        return;
+        try {
+            const res = await fetch(`${API_URL}/invitations/${invitationId}`, { method: 'DELETE' });
+            if (!res.ok) throw new Error(`Error rejecting invitation (${res.status})`);
+            return;
+        } catch (e) { if (ALLOW_LOCAL_FALLBACK) { const invs = (await getInvitations()).filter(i => i.id !== invitationId); localStorage.setItem(INVITATIONS_KEY, JSON.stringify(invs)); console.warn('Reject invitation failed, updated locally', e); return; } else { throw e; } }
     }
     const invs = (await getInvitations()).filter(i => i.id !== invitationId);
     localStorage.setItem(INVITATIONS_KEY, JSON.stringify(invs));

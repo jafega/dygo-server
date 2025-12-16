@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ViewState, JournalEntry, Goal, UserSettings, WeeklyReport, User } from './types';
 import * as StorageService from './services/storageService';
 import * as AuthService from './services/authService';
+import { USE_BACKEND } from './services/config';
 import { analyzeJournalEntry, analyzeGoalsProgress, generateWeeklyReport } from './services/genaiService';
 import VoiceSession from './components/VoiceSession';
 import CalendarView from './components/CalendarView';
@@ -52,6 +53,10 @@ const App: React.FC = () => {
         const user = await AuthService.getCurrentUser();
         if (user) {
             setCurrentUser(user);
+            // If backend is available, try to migrate any local data for this user
+            if (USE_BACKEND) {
+                try { await StorageService.migrateLocalToBackend(user.id); } catch (e) { console.warn('Migration skipped', e); }
+            }
             await loadUserData(user.id);
             await checkInvitations(user.email);
             setViewState(user.role === 'PSYCHOLOGIST' ? ViewState.PATIENTS : ViewState.CALENDAR);

@@ -33,7 +33,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
       { id: 'Kore', name: 'Kore (Femenina)' }, { id: 'Puck', name: 'Puck (Masculina)' },
       { id: 'Charon', name: 'Charon (Profunda)' }, { id: 'Fenrir', name: 'Fenrir (Rápida)' }, { id: 'Aoede', name: 'Aoede (Expresiva)' }
   ];
-  const languages = [ { id: 'es-ES', name: 'Español' }, { id: 'en-US', name: 'Inglés' }, { id: 'fr-FR', name: 'Francés' } ];
+  const languages = [ { id: 'es-ES', name: 'Español (España)' }, { id: 'en-US', name: 'Inglés' }, { id: 'fr-FR', name: 'Francés' } ];
 
   // Password change state
   const [currentPasswordInput, setCurrentPasswordInput] = useState('');
