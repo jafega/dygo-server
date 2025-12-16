@@ -171,3 +171,74 @@ export const updateUser = async (updatedUser: User) => {
         saveLocalUsers(users);
     }
 };
+
+// Change password for the current user. If a current password is stored, it must match.
+export const changePassword = async (currentPassword: string, newPassword: string) => {
+    const current = await getCurrentUser();
+    if (!current) throw new Error('No hay usuario autenticado.');
+
+    const stored = await getUserById(current.id);
+    if (!stored) throw new Error('Usuario no encontrado.');
+
+    // If a password exists, verify it. Otherwise allow setting a new password.
+    if (stored.password && stored.password !== currentPassword) {
+        throw new Error('Contraseña actual incorrecta.');
+    }
+
+    const updated = { ...stored, password: newPassword } as User;
+    await updateUser(updated);
+};
+
+export const requestPasswordReset = async (email: string): Promise<{ success: boolean; resetLink?: string; previewUrl?: string }> => {
+  const normalizedEmail = email.trim().toLowerCase();
+
+  if (USE_BACKEND) {
+    try {
+      const res = await fetch(`${API_URL}/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: normalizedEmail })
+      });
+      if (!res.ok) return { success: false };
+      const data = await res.json();
+      // Backend may return either resetLink (dev fallback) or previewUrl (Ethereal). Pass both through.
+      return { success: !!data.success, resetLink: data.resetLink, previewUrl: data.previewUrl };
+    } catch (e) {
+      console.warn('Backend offline, falling back to local reset flow.');
+    }
+  }
+
+  // Local fallback: attach token to user object
+  const users = getLocalUsers();
+  const user = users.find(u => u.email && u.email.trim().toLowerCase() === normalizedEmail);
+  if (!user) return { success: true };
+
+  const token = crypto.randomUUID();
+  const expires = Date.now() + 1000 * 60 * 60;
+  const updated = { ...user, passwordResetToken: token, passwordResetExpires: expires } as User;
+  await updateUser(updated);
+  return { success: true, resetLink: `${window.location.origin}/?resetToken=${token}` };
+};
+
+export const resetPasswordWithToken = async (token: string, newPassword: string) => {
+  if (USE_BACKEND) {
+    const res = await fetch(`${API_URL}/auth/reset-password`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, newPassword })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Error resetting password');
+    }
+    return;
+  }
+
+  // Local fallback
+  const users = getLocalUsers();
+  const user = users.find(u => (u as any).passwordResetToken === token && (u as any).passwordResetExpires > Date.now());
+  if (!user) throw new Error('Token inválido o expirado');
+  const updated = { ...user, password: newPassword } as User;
+  // remove token fields
+  delete (updated as any).passwordResetToken;
+  delete (updated as any).passwordResetExpires;
+  await updateUser(updated);
+};

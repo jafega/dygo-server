@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { UserSettings, Invitation, User } from '../types';
-import { getPendingInvitationsForEmail, acceptInvitation, rejectInvitation, getPsychologistsForPatient, revokeAccess, getAllPsychologists, linkPatientToPsychologist } from '../services/storageService';
+import { getPendingInvitationsForEmail, acceptInvitation, rejectInvitation, getPsychologistsForPatient, revokeAccess, getAllPsychologists, linkPatientToPsychologist, getSentInvitationsForPsychologist, getPatientsForPsychologist } from '../services/storageService';
 import { getCurrentUser, updateUser } from '../services/authService';
 import { X, Bell, Clock, Shield, UserCheck, Trash2, LogOut, Globe, Mic, Camera, Search, UserPlus } from 'lucide-react';
 import * as AuthService from '../services/authService';
@@ -20,7 +20,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
   const [voice, setVoice] = useState(settings.voice || 'Kore');
   const [activeTab, setActiveTab] = useState<'general' | 'privacy'>('general');
   const [invitations, setInvitations] = useState<Invitation[]>([]);
+  const [sentInvitations, setSentInvitations] = useState<Invitation[]>([]);
   const [myPsychologists, setMyPsychologists] = useState<User[]>([]);
+  const [myPatients, setMyPatients] = useState<any[]>([]);
   const [showPsychSearch, setShowPsychSearch] = useState(false);
   const [psychSearchTerm, setPsychSearchTerm] = useState('');
   const [allPsychologists, setAllPsychologists] = useState<User[]>([]);
@@ -33,13 +35,26 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
   ];
   const languages = [ { id: 'es-ES', name: 'Español' }, { id: 'en-US', name: 'Inglés' }, { id: 'fr-FR', name: 'Francés' } ];
 
+  // Password change state
+  const [currentPasswordInput, setCurrentPasswordInput] = useState('');
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
+  const [changePasswordStatus, setChangePasswordStatus] = useState<'idle'|'success'|'error'>('idle');
+  const [changePasswordMsg, setChangePasswordMsg] = useState('');
+
   useEffect(() => {
     const load = async () => {
         const u = await getCurrentUser();
         setCurrentUser(u);
-        if (u && u.role === 'PATIENT') {
+        if (!u) return;
+
+        if (u.role === 'PATIENT') {
             setInvitations(await getPendingInvitationsForEmail(u.email));
             setMyPsychologists(await getPsychologistsForPatient(u.id));
+        } else if (u.role === 'PSYCHOLOGIST') {
+            // For psychologists, load patients and sent invitations
+            setSentInvitations(await getSentInvitationsForPsychologist(u.id));
+            setMyPatients(await getPatientsForPsychologist(u.id));
         }
     };
     load();
@@ -109,6 +124,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
 
   const handleConnectPsych = async (psychId: string) => {
       if (!currentUser) return;
+      // Defensive: check if already connected
+      if (myPsychologists.some(mp => mp.id === psychId)) {
+          alert('Ya tienes a este especialista conectado.');
+          return;
+      }
       await linkPatientToPsychologist(currentUser.id, psychId);
       setMyPsychologists(await getPsychologistsForPatient(currentUser.id));
       setInvitations(prev => prev.filter(i => i.fromPsychologistId !== psychId));
@@ -129,12 +149,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
              <h2 className="text-xl font-bold text-slate-800">Perfil y Ajustes</h2>
              <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
         </div>
-        {currentUser?.role === 'PATIENT' && (
-            <div className="flex border-b border-slate-100 shrink-0">
-                <button onClick={() => setActiveTab('general')} className={`flex-1 py-3 text-sm font-medium ${activeTab === 'general' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-500'}`}>General</button>
-                <button onClick={() => setActiveTab('privacy')} className={`flex-1 py-3 text-sm font-medium ${activeTab === 'privacy' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-500'}`}>Privacidad</button>
-            </div>
-        )}
+        {/* Show tabs for all roles (Patient and Psychologist) */}
+        <div className="flex border-b border-slate-100 shrink-0">
+            <button onClick={() => setActiveTab('general')} className={`flex-1 py-3 text-sm font-medium ${activeTab === 'general' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-500'}`}>General</button>
+            <button onClick={() => setActiveTab('privacy')} className={`flex-1 py-3 text-sm font-medium ${activeTab === 'privacy' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-500'}`}>Privacidad</button>
+        </div>
         <div className="p-6 overflow-y-auto">
             {activeTab === 'general' ? (
                 <div className="space-y-6">
@@ -160,6 +179,42 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                         {enabled && <div className="space-y-2"><label className="block text-sm text-slate-500 flex items-center gap-2"><Clock size={14} /> Hora</label><input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="w-full p-3 bg-slate-50 border rounded-xl" /></div>}
                     </div>
                     <div className="pt-4 border-t border-slate-100 space-y-3">
+                        <div className="space-y-2">
+                            <h4 className="text-sm font-bold">Cambiar contraseña</h4>
+                            <p className="text-xs text-slate-500">Introduce tu contraseña actual y la nueva.</p>
+                            <div className="grid grid-cols-1 gap-2 mt-2">
+                                <input type="password" placeholder="Contraseña actual" value={currentPasswordInput} onChange={(e) => setCurrentPasswordInput(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                                <input type="password" placeholder="Nueva contraseña" value={newPasswordInput} onChange={(e) => setNewPasswordInput(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                                <input type="password" placeholder="Confirmar nueva" value={confirmPasswordInput} onChange={(e) => setConfirmPasswordInput(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                                <div className="flex gap-2">
+                                    <button onClick={async () => {
+                                        // Validation
+                                        setChangePasswordStatus('idle');
+                                        setChangePasswordMsg('');
+                                        if (!newPasswordInput || newPasswordInput.length < 6) {
+                                            setChangePasswordStatus('error');
+                                            setChangePasswordMsg('La nueva contraseña debe tener al menos 6 caracteres.');
+                                            return;
+                                        }
+                                        if (newPasswordInput !== confirmPasswordInput) {
+                                            setChangePasswordStatus('error');
+                                            setChangePasswordMsg('Las contraseñas no coinciden.');
+                                            return;
+                                        }
+                                        try {
+                                            await AuthService.changePassword(currentPasswordInput, newPasswordInput);
+                                            setChangePasswordStatus('success');
+                                            setChangePasswordMsg('Contraseña actualizada.');
+                                            setCurrentPasswordInput(''); setNewPasswordInput(''); setConfirmPasswordInput('');
+                                        } catch (err: any) {
+                                            setChangePasswordStatus('error');
+                                            setChangePasswordMsg(err?.message || 'Error actualizando contraseña.');
+                                        }
+                                    }} className="bg-indigo-600 text-white rounded-lg px-4 py-2 text-sm">Cambiar contraseña</button>
+                                </div>
+                                {changePasswordStatus !== 'idle' && <div className={`mt-2 p-2 rounded text-sm ${changePasswordStatus === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>{changePasswordMsg}</div>}
+                            </div>
+                        </div>
                          <button onClick={handleSave} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium">Guardar Cambios</button>
                         <button onClick={handleLogoutClick} className="w-full py-3 text-red-500 hover:bg-red-50 rounded-xl font-medium flex items-center justify-center gap-2"><LogOut size={16} /> Cerrar Sesión</button>
                     </div>
@@ -172,11 +227,55 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                          <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-3">
                              <div className="flex justify-between items-center mb-1"><h4 className="text-sm font-bold text-slate-700">Directorio</h4><button onClick={togglePsychSearch} className="text-slate-400 hover:text-slate-600"><X size={16} /></button></div>
                              <input type="text" placeholder="Buscar..." value={psychSearchTerm} onChange={(e) => setPsychSearchTerm(e.target.value)} className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg" />
-                             <div className="max-h-40 overflow-y-auto space-y-2 mt-2">{availablePsychs.length === 0 ? <p className="text-xs text-slate-400 text-center py-2 italic">Sin resultados.</p> : availablePsychs.map(psych => (<div key={psych.id} className="bg-white p-2 rounded-lg border flex items-center justify-between"><div className="flex flex-col"><span className="text-sm font-medium text-slate-800">{psych.name}</span><span className="text-xs text-slate-400">{psych.email}</span></div><button onClick={() => handleConnectPsych(psych.id)} className="bg-indigo-600 text-white p-1 rounded"><UserPlus size={14}/></button></div>))}</div>
+                             <div className="max-h-40 overflow-y-auto space-y-2 mt-2">{availablePsychs.length === 0 ? <p className="text-xs text-slate-400 text-center py-2 italic">Sin resultados.</p> : availablePsychs.map(psych => {
+                                     const isConnected = myPsychologists.some(mp => mp.id === psych.id);
+                                     const isSelf = psych.id === currentUser?.id;
+                                     return (
+                                         <div key={psych.id} className="bg-white p-2 rounded-lg border flex items-center justify-between">
+                                            <div className="flex flex-col">
+                                                <span className="text-sm font-medium text-slate-800">{psych.name}</span>
+                                                <span className="text-xs text-slate-400">{psych.email}</span>
+                                            </div>
+                                            {isConnected || isSelf ? (
+                                                <button disabled className="bg-slate-200 text-slate-400 p-1 rounded opacity-70 cursor-not-allowed">{isConnected ? 'Conectado' : 'Tú'}</button>
+                                            ) : (
+                                                <button onClick={() => handleConnectPsych(psych.id)} className="bg-indigo-600 text-white p-1 rounded" aria-label={`Conectar con ${psych.name}`}><UserPlus size={14}/></button>
+                                            )}
+                                         </div>
+                                     );
+                                 })}</div>
                          </div>
                      )}
-                     {invitations.length > 0 && <div><h3 className="text-xs font-bold uppercase text-slate-400 mb-3">Pendientes</h3><div className="space-y-2">{invitations.map(inv => (<div key={inv.id} className="bg-white border p-3 rounded-lg"><p className="text-sm mb-2">{inv.fromPsychologistName}</p><div className="flex gap-2"><button onClick={() => handleAcceptInv(inv.id)} className="flex-1 bg-indigo-600 text-white text-xs py-1 rounded">Aceptar</button><button onClick={() => handleRejectInv(inv.id)} className="flex-1 bg-slate-100 text-slate-600 text-xs py-1 rounded">Rechazar</button></div></div>))}</div></div>}
-                     <div><h3 className="text-xs font-bold uppercase text-slate-400 mb-3">Con Acceso</h3>{myPsychologists.length === 0 ? <p className="text-sm text-slate-400 italic">Nadie tiene acceso.</p> : <div className="space-y-2">{myPsychologists.map(psych => (<div key={psych.id} className="flex justify-between p-3 bg-slate-50 rounded-lg border"><div className="flex items-center gap-3"><UserCheck size={16} className="text-green-500" /><div className="flex flex-col"><span className="text-sm font-medium text-slate-800">{psych.name}</span><span className="text-xs text-slate-400">{psych.email}</span></div></div><button onClick={() => handleRevoke(psych.id)} className="text-slate-400 hover:text-red-500"><Trash2 size={16} /></button></div>))}</div>}</div>
+                     {currentUser?.role === 'PATIENT' ? (
+                         <>
+                           {invitations.length > 0 && <div><h3 className="text-xs font-bold uppercase text-slate-400 mb-3">Pendientes</h3><div className="space-y-2">{invitations.map(inv => (<div key={inv.id} className="bg-white border p-3 rounded-lg"><p className="text-sm mb-2">{inv.fromPsychologistName}</p><div className="flex gap-2"><button onClick={() => handleAcceptInv(inv.id)} className="flex-1 bg-indigo-600 text-white text-xs py-1 rounded">Aceptar</button><button onClick={() => handleRejectInv(inv.id)} className="flex-1 bg-slate-100 text-slate-600 text-xs py-1 rounded">Rechazar</button></div></div>))}</div></div>}
+                           <div><h3 className="text-xs font-bold uppercase text-slate-400 mb-3">Con Acceso</h3>{myPsychologists.length === 0 ? <p className="text-sm text-slate-400 italic">Nadie tiene acceso.</p> : <div className="space-y-2">{myPsychologists.map(psych => (<div key={psych.id} className="flex justify-between p-3 bg-slate-50 rounded-lg border"><div className="flex items-center gap-3"><UserCheck size={16} className="text-green-500" /><div className="flex flex-col"><span className="text-sm font-medium text-slate-800">{psych.name}</span><span className="text-xs text-slate-400">{psych.email}</span></div></div><button onClick={() => handleRevoke(psych.id)} className="text-slate-400 hover:text-red-500"><Trash2 size={16} /></button></div>))}</div>}</div>
+                         </>
+                     ) : (
+                         <>
+                             {sentInvitations.length > 0 && (
+                                 <div>
+                                     <h3 className="text-xs font-bold uppercase text-slate-400 mb-3">Solicitudes Enviadas</h3>
+                                     <div className="space-y-2">
+                                         {sentInvitations.map(inv => (
+                                             <div key={inv.id} className="bg-white border p-3 rounded-lg flex items-center justify-between">
+                                                 <div>
+                                                     <p className="text-sm font-medium">{inv.toUserEmail}</p>
+                                                     <p className="text-xs text-slate-400">{new Date(inv.timestamp).toLocaleString()}</p>
+                                                 </div>
+                                                 <span className="text-xs text-orange-700 bg-orange-100 px-2 py-1 rounded">{inv.status}</span>
+                                             </div>
+                                         ))}
+                                     </div>
+                                 </div>
+                             )}
+
+                             <div>
+                                 <h3 className="text-xs font-bold uppercase text-slate-400 mb-3">Pacientes</h3>
+                                 {myPatients.length === 0 ? <p className="text-sm text-slate-400 italic">No tienes pacientes asignados.</p> : <div className="space-y-2">{myPatients.map((p:any) => (<div key={p.id} className="flex justify-between p-3 bg-slate-50 rounded-lg border"><div className="flex items-center gap-3"><UserCheck size={16} className="text-green-500" /><div className="flex flex-col"><span className="text-sm font-medium text-slate-800">{p.name}</span><span className="text-xs text-slate-400">{p.email}</span></div></div><button onClick={async () => { if(confirm('¿Revocar acceso a este paciente?')) { await revokeAccess(p.id, currentUser!.id); setMyPatients(await getPatientsForPsychologist(currentUser!.id)); } }} className="text-slate-400 hover:text-red-500"><Trash2 size={16} /></button></div>))}</div>}
+                             </div>
+                         </>
+                     )}
                 </div>
             )}
         </div>

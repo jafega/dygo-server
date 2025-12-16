@@ -8,6 +8,9 @@ export interface User {
   role: UserRole;
   avatarUrl?: string; // Profile picture (Base64)
   accessList: string[]; // For Patients: List of Psychologist IDs who can view data. For Psychs: List of Patient IDs.
+  // Optional fields used by password reset flow (dev/local)
+  passwordResetToken?: string;
+  passwordResetExpires?: number;
 }
 
 export interface Invitation {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { UserRole } from '../types';
 import * as AuthService from '../services/authService';
-import { Mail, Lock, User, ArrowRight, Loader2, Server, WifiOff, CheckCircle } from 'lucide-react';
+import { Mail, Lock, User, ArrowRight, Loader2, Server, WifiOff, CheckCircle, ExternalLink, Copy } from 'lucide-react';
 import { API_URL } from '../services/config';
 
 // Custom Dygo Logo Component for Auth
@@ -32,6 +32,19 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [serverStatus, setServerStatus] = useState<'checking' | 'online' | 'offline'>('checking');
 
+  // Forgot / Reset Password state
+  const [showForgot, setShowForgot] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotStatus, setForgotStatus] = useState<'idle'|'success'|'error'>('idle');
+  const [forgotMsg, setForgotMsg] = useState('');
+  const [forgotPreviewUrl, setForgotPreviewUrl] = useState<string | null>(null);
+
+  const [resetToken, setResetToken] = useState<string | null>(null);
+  const [resetNewPassword, setResetNewPassword] = useState('');
+  const [resetConfirmPassword, setResetConfirmPassword] = useState('');
+  const [resetStatus, setResetStatus] = useState<'idle'|'success'|'error'>('idle');
+  const [resetMsg, setResetMsg] = useState('');
+
   // Check server health on mount
   useEffect(() => {
     const checkServer = async () => {
@@ -45,6 +58,13 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         }
     };
     checkServer();
+
+    // If a resetToken is present in the URL, open reset flow
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('resetToken');
+    if (token) {
+        setResetToken(token);
+    }
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -118,6 +138,36 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
             )}
 
             <form onSubmit={handleSubmit} className="space-y-4">
+                {/* If a resetToken is present, show Reset form */}
+                {resetToken && (
+                    <div className="p-4 bg-slate-50 rounded-lg border border-slate-100">
+                        <p className="text-sm text-slate-700 mb-2">Restablecer contraseña</p>
+                        <input type="password" placeholder="Nueva contraseña" value={resetNewPassword} onChange={(e) => setResetNewPassword(e.target.value)} className="w-full px-3 py-2 rounded border mb-2" />
+                        <input type="password" placeholder="Confirmar nueva contraseña" value={resetConfirmPassword} onChange={(e) => setResetConfirmPassword(e.target.value)} className="w-full px-3 py-2 rounded border mb-2" />
+                        <div className="flex gap-2">
+                            <button type="button" onClick={async () => {
+                                setResetStatus('idle'); setResetMsg('');
+                                if (!resetNewPassword || resetNewPassword.length < 6) { setResetStatus('error'); setResetMsg('La contraseña debe tener al menos 6 caracteres.'); return; }
+                                if (resetNewPassword !== resetConfirmPassword) { setResetStatus('error'); setResetMsg('Las contraseñas no coinciden.'); return; }
+                                try {
+                                    await AuthService.resetPasswordWithToken(resetToken, resetNewPassword);
+                                    setResetStatus('success');
+                                    setResetMsg('Contraseña restablecida. Ahora puedes iniciar sesión.');
+                                    // Clear token from URL
+                                    const url = new URL(window.location.href);
+                                    url.searchParams.delete('resetToken');
+                                    window.history.replaceState({}, document.title, url.toString());
+                                    setResetToken(null);
+                                    setResetNewPassword(''); setResetConfirmPassword('');
+                                } catch (err: any) {
+                                    setResetStatus('error'); setResetMsg(err?.message || 'Error restableciendo contraseña');
+                                }
+                            }} className="px-4 py-2 rounded bg-indigo-600 text-white">Restablecer</button>
+                        </div>
+                        {resetStatus !== 'idle' && <div className={`mt-2 text-sm ${resetStatus === 'success' ? 'text-green-700' : 'text-red-700'}`}>{resetMsg}</div>}
+                    </div>
+                )}
+
                 {!isLogin && (
                     <div className="relative">
                         <User className="absolute left-3 top-3.5 text-slate-400 w-5 h-5" />
@@ -155,6 +205,53 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                         disabled={isLoading}
                     />
                 </div>
+
+                {isLogin && (
+                    <div className="text-right mt-2 mb-2">
+                        <button onClick={() => { setShowForgot(!showForgot); setForgotStatus('idle'); setForgotMsg(''); }} className="text-sm text-indigo-600 hover:underline">¿Olvidaste tu contraseña?</button>
+                    </div>
+                )}
+
+                {/* Forgot Password Form */}
+                {showForgot && (
+                    <div className="mb-4 p-4 bg-amber-50 rounded-lg border border-amber-100">
+                        <p className="text-sm text-amber-800 mb-2">Introduce tu correo y te enviaremos un enlace para restablecer la contraseña.</p>
+                        <div className="flex gap-2">
+                            <input type="email" placeholder="Correo electrónico" value={forgotEmail} onChange={(e) => setForgotEmail(e.target.value)} className="flex-1 px-3 py-2 rounded border bg-white text-sm" />
+                            <button onClick={async () => {
+                                setForgotStatus('idle'); setForgotMsg(''); setForgotPreviewUrl(null);
+                                try {
+                                    const res = await AuthService.requestPasswordReset(forgotEmail || email);
+                                    setForgotStatus('success');
+                                    setForgotMsg('Si existe una cuenta con ese correo, recibirás un enlace.');
+                                    // Show preview URL or reset link if returned by the backend
+                                    if ((res as any).previewUrl) {
+                                        setForgotPreviewUrl((res as any).previewUrl as string);
+                                        setForgotMsg('Enviado (vista previa disponible).');
+                                    } else if (res.resetLink) {
+                                        setForgotPreviewUrl(res.resetLink);
+                                        setForgotMsg('Enlace de prueba disponible (usa solo en desarrollo).');
+                                    }
+                                } catch (err: any) {
+                                    setForgotStatus('error');
+                                    setForgotMsg(err?.message || 'Error solicitando el enlace');
+                                }
+                            }} className="px-4 py-2 rounded bg-amber-600 text-white text-sm">Enviar</button>
+                        </div>
+                        {forgotStatus !== 'idle' && <div className={`mt-2 text-sm ${forgotStatus === 'success' ? 'text-green-700' : 'text-red-700'}`}>{forgotMsg}</div>}
+
+                        {forgotPreviewUrl && (
+                            <div className="mt-2 flex items-center gap-3">
+                                <a href={forgotPreviewUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-indigo-600 hover:underline flex items-center gap-1">
+                                    <ExternalLink size={14} /> Abrir vista previa del correo
+                                </a>
+                                <button onClick={() => { navigator.clipboard?.writeText(forgotPreviewUrl); }} className="text-sm text-slate-500 flex items-center gap-1">
+                                    <Copy size={14} /> Copiar enlace
+                                </button>
+                            </div>
+                        )}
+                        </div>
+                    )}
 
                 {!isLogin && (
                     <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl">
