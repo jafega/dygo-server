@@ -207,5 +207,26 @@ export const changePassword = async (currentPassword: string, newPassword: strin
     await updateUser(updated);
 };
 
+// Demo reset endpoint (for forgot password button): calls backend /auth/reset-password-demo
+export const resetPasswordDemo = async (email: string, newPassword: string, secret?: string) => {
+    if (USE_BACKEND) {
+        const res = await fetch(`${API_URL}/auth/reset-password-demo`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, newPassword, secret })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Error resetting password');
+        }
+        return;
+    }
+
+    // Local fallback: update user directly
+    const users = getLocalUsers();
+    const idx = users.findIndex(u => u.email && u.email.trim().toLowerCase() === email.trim().toLowerCase());
+    if (idx === -1) throw new Error('Usuario no encontrado (Local).');
+    users[idx] = { ...users[idx], password: newPassword } as User;
+    saveLocalUsers(users);
+};
+
 
 

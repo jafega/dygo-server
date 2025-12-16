@@ -33,6 +33,15 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [serverStatus, setServerStatus] = useState<'checking' | 'online' | 'offline'>('checking');
 
+  // Forgot password demo UI
+  const [showForgotDemo, setShowForgotDemo] = useState(false);
+  const [forgotEmailInput, setForgotEmailInput] = useState('');
+  const [forgotNewPassword, setForgotNewPassword] = useState('');
+  const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
+  const [forgotSecret, setForgotSecret] = useState('');
+  const [forgotStatus, setForgotStatus] = useState<'idle'|'success'|'error'>('idle');
+  const [forgotMsg, setForgotMsg] = useState('');
+
 
 
   // Check server health on mount
@@ -165,6 +174,44 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
 
             <form onSubmit={handleSubmit} className="space-y-4">
 
+                {/* Forgot password (demo) toggle */}
+                {isLogin && (
+                    <div className="text-right mt-2 mb-2">
+                        <button onClick={() => { setShowForgotDemo(!showForgotDemo); setForgotStatus('idle'); setForgotMsg(''); }} className="text-sm text-indigo-600 hover:underline">¿Olvidaste tu contraseña?</button>
+                    </div>
+                )}
+
+                {/* Forgot Password Demo Form */}
+                {showForgotDemo && (
+                    <div className="mb-4 p-4 bg-amber-50 rounded-lg border border-amber-100">
+                        <p className="text-sm text-amber-800 mb-2">Introduce tu correo y una nueva contraseña para restablecerla (demo).</p>
+                        <div className="flex flex-col gap-2">
+                            <input type="email" placeholder="Correo electrónico" value={forgotEmailInput} onChange={(e) => setForgotEmailInput(e.target.value)} className="w-full px-3 py-2 rounded border bg-white text-sm" />
+                            <input type="password" placeholder="Nueva contraseña" value={forgotNewPassword} onChange={(e) => setForgotNewPassword(e.target.value)} className="w-full px-3 py-2 rounded border bg-white text-sm" />
+                            <input type="password" placeholder="Confirmar nueva contraseña" value={forgotConfirmPassword} onChange={(e) => setForgotConfirmPassword(e.target.value)} className="w-full px-3 py-2 rounded border bg-white text-sm" />
+                            {process.env.NODE_ENV === 'production' && (
+                                <input type="password" placeholder="Secreto (producción)" value={forgotSecret} onChange={(e) => setForgotSecret(e.target.value)} className="w-full px-3 py-2 rounded border bg-white text-sm" />
+                            )}
+                            <div className="flex gap-2 items-center">
+                                <button type="button" onClick={async () => {
+                                    setForgotStatus('idle'); setForgotMsg('');
+                                    if (!forgotEmailInput || !forgotNewPassword || !forgotConfirmPassword) { setForgotStatus('error'); setForgotMsg('Rellena todos los campos.'); return; }
+                                    if (forgotNewPassword.length < 6) { setForgotStatus('error'); setForgotMsg('La contraseña debe tener al menos 6 caracteres.'); return; }
+                                    if (forgotNewPassword !== forgotConfirmPassword) { setForgotStatus('error'); setForgotMsg('Las contraseñas no coinciden.'); return; }
+                                    try {
+                                        await AuthService.resetPasswordDemo(forgotEmailInput, forgotNewPassword, forgotSecret || undefined);
+                                        setForgotStatus('success'); setForgotMsg('Contraseña restablecida. Ahora puedes iniciar sesión.');
+                                        setShowForgotDemo(false);
+                                        setEmail(forgotEmailInput); setPassword(forgotNewPassword);
+                                    } catch (err: any) {
+                                        setForgotStatus('error'); setForgotMsg(err?.message || 'Error restableciendo contraseña');
+                                    }
+                                }} className="px-4 py-2 rounded bg-amber-600 text-white text-sm">Restablecer</button>
+                                <div className={`text-sm ${forgotStatus === 'success' ? 'text-green-700' : 'text-red-700'}`}>{forgotMsg}</div>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {!isLogin && (
                     <div className="relative">

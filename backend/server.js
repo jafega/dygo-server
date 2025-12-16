@@ -196,6 +196,35 @@ app.post('/api/auth/google', async (req, res) => {
   }
 });
 
+// --- DEMO PASSWORD RESET (secure-ish) ---
+// Allows resetting a user's password by email. For production you MUST set PASSWORD_RESET_SECRET in the env,
+// otherwise this endpoint is only allowed when NODE_ENV !== 'production'.
+app.post('/api/auth/reset-password-demo', (req, res) => {
+  try {
+    const { email, newPassword, secret } = req.body || {};
+    if (!email || !newPassword) return res.status(400).json({ error: 'email and newPassword are required' });
+    if (newPassword.length < 6) return res.status(400).json({ error: 'Password too short' });
+
+    // If in production, require secret env var to match
+    if (process.env.NODE_ENV === 'production') {
+      if (!process.env.PASSWORD_RESET_SECRET) return res.status(500).json({ error: 'Reset disabled' });
+      if (!secret || secret !== process.env.PASSWORD_RESET_SECRET) return res.status(403).json({ error: 'Invalid secret' });
+    }
+
+    const db = getDb();
+    const user = db.users.find(u => u.email && String(u.email).toLowerCase() === String(email).toLowerCase());
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    user.password = newPassword;
+    saveDb(db);
+    console.log(`🔒 Password reset (demo) for ${user.email}`);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Error in /api/auth/reset-password-demo', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 
 
 // --- RUTAS DE USUARIOS ---

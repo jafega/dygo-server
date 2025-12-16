@@ -27,6 +27,10 @@ Optional: Enable Google Sign-In (OAuth)
 - Add `VITE_GOOGLE_CLIENT_ID` to your `.env.local` with a Google OAuth Client ID (Web applications).
 - The auth screen will show a Google Sign-In button automatically when this value is present.
 
+Forgotten password (demo reset)
+- This build provides a demo 'reset password' flow from the auth screen. Click '¿Olvidaste tu contraseña?' and enter the email and a new password to reset it.
+- For production safety, set `PASSWORD_RESET_SECRET` in `backend/.env` — when that is set and `NODE_ENV=production`, the reset endpoint will require the secret. In development the endpoint works without the secret for convenience.
+
 3. Run the app:
    `npm run dev`
 
