@@ -12,6 +12,7 @@ import WeeklyReportModal from './components/WeeklyReportModal';
 import SettingsModal from './components/SettingsModal';
 import PatientDashboard from './components/PatientDashboard';
 import AuthScreen from './components/AuthScreen';
+import SuperAdmin from './components/SuperAdmin';
 import { Mic, LayoutDashboard, Target, BookOpen, User as UserIcon, Stethoscope, ArrowLeftRight, CheckSquare, Loader2 } from 'lucide-react';
 
 // Custom Dygo Logo Component
@@ -281,6 +282,35 @@ const personalGoals = safeGoals.filter(
       return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-indigo-600"><Loader2 className="animate-spin w-10 h-10" /></div>;
   }
 
+  // Superadmin view
+  if (currentUser && viewState === ViewState.SUPERADMIN) {
+    return (
+      <div className="min-h-screen bg-white text-slate-900 pb-20 md:pb-0 relative">
+        <div className="max-w-5xl mx-auto p-4 md:p-8 space-y-8">
+          <header className="flex items-center justify-between">
+            <h1 className="text-2xl font-bold">Superadmin</h1>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setViewState(ViewState.CALENDAR)} className="px-3 py-2 bg-slate-100 rounded">Volver</button>
+              <div className="ml-2"><ProfileCircle onClick={() => setShowSettings(true)} /></div>
+            </div>
+          </header>
+
+          <SuperAdmin />
+
+          {showSettings && (
+            <SettingsModal 
+              settings={settings} 
+              onSave={handleSaveSettings} 
+              onClose={() => { setShowSettings(false); if(currentUser) checkInvitations(currentUser.email); }} 
+              onLogout={handleLogout}
+              onUserUpdate={handleUserUpdate}
+            />
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // Psychologist View
   if (currentUser?.role === 'PSYCHOLOGIST' && psychViewMode === 'DASHBOARD') {
       return (
@@ -308,6 +338,10 @@ const personalGoals = safeGoals.filter(
                                 <UserIcon size={18} /> <span>Mi Diario Personal</span>
                             </button>
                             <div className="hidden md:block"><ProfileCircle onClick={() => setShowSettings(true)} /></div>
+                            {/* Superadmin access */}
+                            {currentUser && String(currentUser.email).toLowerCase() === 'garryjavi@gmail.com' && (
+                                <button onClick={() => setViewState(ViewState.SUPERADMIN)} className="px-4 py-2 bg-amber-50 text-amber-800 rounded-full text-sm ml-2">Superadmin</button>
+                            )}
                         </div>
                     </header>
 

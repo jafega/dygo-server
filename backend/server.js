@@ -225,6 +225,36 @@ app.post('/api/auth/reset-password-demo', (req, res) => {
   }
 });
 
+// --- ADMIN: Reset any user's password (restricted to superadmin)
+app.post('/api/admin/reset-user-password', (req, res) => {
+  try {
+    const requesterId = req.headers['x-user-id'] || req.headers['x-userid'] || req.body?.requesterId;
+    if (!requesterId) return res.status(401).json({ error: 'Missing requester id in header x-user-id' });
+
+    const db = getDb();
+    const requester = db.users.find(u => u.id === String(requesterId));
+    if (!requester) return res.status(403).json({ error: 'Requester not found or unauthorized' });
+
+    // Only allow the superadmin by email
+    if (String(requester.email).toLowerCase() !== 'garryjavi@gmail.com') return res.status(403).json({ error: 'Forbidden' });
+
+    const { targetEmail, newPassword } = req.body || {};
+    if (!targetEmail || !newPassword) return res.status(400).json({ error: 'targetEmail and newPassword required' });
+    if (String(newPassword).length < 6) return res.status(400).json({ error: 'Password too short' });
+
+    const user = db.users.find(u => u.email && String(u.email).toLowerCase() === String(targetEmail).toLowerCase());
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    user.password = newPassword;
+    saveDb(db);
+    console.log(`🔒 Admin ${requester.email} reset password for ${user.email}`);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Error in /api/admin/reset-user-password', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 
 
 // --- RUTAS DE USUARIOS ---

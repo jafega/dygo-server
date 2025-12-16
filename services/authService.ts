@@ -228,5 +228,32 @@ export const resetPasswordDemo = async (email: string, newPassword: string, secr
     saveLocalUsers(users);
 };
 
+// Superadmin reset for any user
+export const adminResetUserPassword = async (targetEmail: string, newPassword: string) => {
+    if (USE_BACKEND) {
+        // send header with current user id so backend can authorize
+        const current = await getCurrentUser();
+        const headers: Record<string,string> = { 'Content-Type': 'application/json' };
+        if (current?.id) headers['x-user-id'] = current.id;
+        const res = await fetch(`${API_URL}/admin/reset-user-password`, {
+            method: 'POST', headers, body: JSON.stringify({ targetEmail, newPassword })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Error resetting user password');
+        }
+        return;
+    }
+
+    // Local fallback: only allow if current user is the superadmin
+    const current = await getCurrentUser();
+    if (!current || String(current.email).toLowerCase() !== 'garryjavi@gmail.com') throw new Error('Forbidden (local)');
+    const users = getLocalUsers();
+    const idx = users.findIndex(u => u.email && u.email.trim().toLowerCase() === targetEmail.trim().toLowerCase());
+    if (idx === -1) throw new Error('Usuario no encontrado (Local).');
+    users[idx] = { ...users[idx], password: newPassword } as User;
+    saveLocalUsers(users);
+};
+
 
 
