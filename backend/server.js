@@ -304,6 +304,10 @@ app.post('/api/settings/:userId', (req, res) => {
   res.json({ success: true });
 });
 
+app.get('/', (_req, res) => {
+  res.send('DYGO API OK ✅ Usa /api/users, /api/entries, etc.');
+});
+
 // --- INICIO DEL SERVIDOR ---
 app.listen(PORT, '0.0.0.0', () => {
   console.log('\n🚀 SERVIDOR DYGO (ES MODULES) LISTO');
