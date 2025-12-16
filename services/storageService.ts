@@ -114,7 +114,10 @@ export const migrateLocalToBackend = async (userId: string) => {
 
         // Invitations
         const localInvs = JSON.parse(localStorage.getItem(INVITATIONS_KEY) || '[]') as Invitation[];
-        for (const inv of localInvs.filter(i => i.toUserEmail === (await AuthService.getUserById(userId))?.email || '')) {
+        const user = await AuthService.getUserById(userId);
+        const userEmail = user?.email || '';
+        const invsToMigrate = localInvs.filter(i => i.toUserEmail === userEmail);
+        for (const inv of invsToMigrate) {
             try { await sendInvitation(inv.fromPsychologistId, inv.fromPsychologistName, inv.toUserEmail); } catch (err) { console.warn('Failed to migrate invitation', inv.id, err); }
         }
 
