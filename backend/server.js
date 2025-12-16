@@ -255,6 +255,64 @@ app.post('/api/admin/reset-user-password', (req, res) => {
   }
 });
 
+// --- ADMIN: Delete a user and all associated data (restricted to superadmin)
+app.delete('/api/admin/delete-user', (req, res) => {
+  try {
+    const requesterId = req.headers['x-user-id'] || req.headers['x-userid'] || req.body?.requesterId;
+    if (!requesterId) return res.status(401).json({ error: 'Missing requester id in header x-user-id' });
+
+    const db = getDb();
+    const requester = db.users.find(u => u.id === String(requesterId));
+    if (!requester) return res.status(403).json({ error: 'Requester not found or unauthorized' });
+
+    // Only allow the superadmin by email
+    if (String(requester.email).toLowerCase() !== 'garryjavi@gmail.com') return res.status(403).json({ error: 'Forbidden' });
+
+    const { targetEmail } = req.body || {};
+    if (!targetEmail) return res.status(400).json({ error: 'targetEmail required' });
+
+    const user = db.users.find(u => u.email && String(u.email).toLowerCase() === String(targetEmail).toLowerCase());
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    // Prevent removing the superadmin account itself
+    if (String(user.email).toLowerCase() === 'garryjavi@gmail.com') return res.status(403).json({ error: 'Cannot delete superadmin' });
+
+    // 1) Remove user's entries
+    db.entries = db.entries.filter((e) => String(e.userId) !== String(user.id));
+
+    // 2) Remove user's goals
+    db.goals = db.goals.filter((g) => String(g.userId) !== String(user.id));
+
+    // 3) Remove invitations sent by or for this user
+    db.invitations = db.invitations.filter((i) => {
+      if (!i) return false;
+      const fromMatch = i.fromPsychologistId && String(i.fromPsychologistId) === String(user.id);
+      const toMatch = i.toUserEmail && String(i.toUserEmail).toLowerCase() === String(user.email).toLowerCase();
+      return !(fromMatch || toMatch);
+    });
+
+    // 4) Remove this user's id from other users' accessList
+    db.users.forEach((u) => {
+      if (Array.isArray(u.accessList)) {
+        u.accessList = u.accessList.filter((id) => String(id) !== String(user.id));
+      }
+    });
+
+    // 5) Remove settings for this user
+    if (db.settings && db.settings[user.id]) delete db.settings[user.id];
+
+    // 6) Finally, remove the user record
+    db.users = db.users.filter((u) => String(u.id) !== String(user.id));
+
+    saveDb(db);
+    console.log(`🗑️ Admin ${requester.email} deleted user ${user.email} and associated data`);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Error in /api/admin/delete-user', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 
 
 // --- RUTAS DE USUARIOS ---

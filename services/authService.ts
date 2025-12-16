@@ -255,5 +255,68 @@ export const adminResetUserPassword = async (targetEmail: string, newPassword: s
     saveLocalUsers(users);
 };
 
+// Delete a user and all their local data (or call backend admin delete endpoint)
+export const adminDeleteUser = async (targetEmail: string) => {
+    if (USE_BACKEND) {
+        const current = await getCurrentUser();
+        const headers: Record<string,string> = { 'Content-Type': 'application/json' };
+        if (current?.id) headers['x-user-id'] = current.id;
+        const res = await fetch(`${API_URL}/admin/delete-user`, {
+            method: 'DELETE', headers, body: JSON.stringify({ targetEmail })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Error deleting user');
+        }
+        return;
+    }
+
+    // Local fallback: only allow if current user is the superadmin
+    const current = await getCurrentUser();
+    if (!current || String(current.email).toLowerCase() !== 'garryjavi@gmail.com') throw new Error('Forbidden (local)');
+
+    // Remove user from local users
+    const users = getLocalUsers();
+    const idx = users.findIndex(u => u.email && u.email.trim().toLowerCase() === targetEmail.trim().toLowerCase());
+    if (idx === -1) throw new Error('Usuario no encontrado (Local).');
+    const user = users[idx];
+    users.splice(idx, 1);
+
+    // Remove entries
+    const entriesKey = 'ai_diary_entries_v2';
+    const entries = JSON.parse(localStorage.getItem(entriesKey) || '[]');
+    const filteredEntries = entries.filter((e:any) => String(e.userId) !== String(user.id));
+    localStorage.setItem(entriesKey, JSON.stringify(filteredEntries));
+
+    // Remove goals
+    const goalsKey = 'ai_diary_goals_v2';
+    const goals = JSON.parse(localStorage.getItem(goalsKey) || '[]');
+    const filteredGoals = goals.filter((g:any) => String(g.userId) !== String(user.id));
+    localStorage.setItem(goalsKey, JSON.stringify(filteredGoals));
+
+    // Remove invitations
+    const invKey = 'ai_diary_invitations_v1';
+    const invs = JSON.parse(localStorage.getItem(invKey) || '[]');
+    const filteredInvs = invs.filter((i:any) => {
+        const fromMatch = i.fromPsychologistId && String(i.fromPsychologistId) === String(user.id);
+        const toMatch = i.toUserEmail && String(i.toUserEmail).toLowerCase() === String(user.email).toLowerCase();
+        return !(fromMatch || toMatch);
+    });
+    localStorage.setItem(invKey, JSON.stringify(filteredInvs));
+
+    // Remove settings
+    const settingsKey = 'ai_diary_settings_v3';
+    const allSettings = JSON.parse(localStorage.getItem(settingsKey) || '{}');
+    if (allSettings[user.id]) { delete allSettings[user.id]; localStorage.setItem(settingsKey, JSON.stringify(allSettings)); }
+
+    // Remove user id from other users' accessList
+    const uidx = users.findIndex(u => true);
+    users.forEach(u => {
+        if (Array.isArray(u.accessList)) u.accessList = u.accessList.filter((id:any) => String(id) !== String(user.id));
+    });
+
+    saveLocalUsers(users);
+};
+
 
 
