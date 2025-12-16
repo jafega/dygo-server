@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UserRole } from '../types';
 import * as AuthService from '../services/authService';
-import { Mail, Lock, User, ArrowRight } from 'lucide-react';
+import { Mail, Lock, User, ArrowRight, Loader2, Server, WifiOff, CheckCircle } from 'lucide-react';
+import { API_URL } from '../services/config';
 
 // Custom Dygo Logo Component for Auth
 const DygoLogoAuth: React.FC = () => (
@@ -28,38 +29,70 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<UserRole>('PATIENT');
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [serverStatus, setServerStatus] = useState<'checking' | 'online' | 'offline'>('checking');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Check server health on mount
+  useEffect(() => {
+    const checkServer = async () => {
+        try {
+            // Simple ping to users endpoint to check connectivity
+            const res = await fetch(`${API_URL}/users`, { method: 'HEAD' });
+            setServerStatus('online');
+        } catch (e) {
+            console.warn("Server check failed:", e);
+            setServerStatus('offline');
+        }
+    };
+    checkServer();
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setIsLoading(true);
 
     try {
       if (isLogin) {
-        AuthService.login(email, password);
+        await AuthService.login(email, password);
       } else {
         if (!name || !email || !password) {
-            setError("Todos los campos son obligatorios");
-            return;
+            throw new Error("Todos los campos son obligatorios");
         }
-        AuthService.register(name, email, password, role);
+        await AuthService.register(name, email, password, role);
       }
       onAuthSuccess();
     } catch (err: any) {
       setError(err.message || "Error de autenticación");
+      setIsLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-slate-100 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-slate-100 flex items-center justify-center p-4 relative">
+      
+      {/* Server Status Indicator (Helpful for debugging) */}
+      <div className="absolute top-4 right-4 flex items-center gap-2 px-3 py-1.5 bg-white/80 backdrop-blur rounded-full text-xs font-medium shadow-sm border border-slate-100">
+          {serverStatus === 'checking' && <><Loader2 size={12} className="animate-spin text-slate-400"/> <span className="text-slate-500">Buscando servidor...</span></>}
+          {serverStatus === 'online' && <><CheckCircle size={12} className="text-green-500"/> <span className="text-green-700">Servidor Conectado</span></>}
+          {serverStatus === 'offline' && <><WifiOff size={12} className="text-red-500"/> <span className="text-red-600">Servidor Desconectado</span></>}
+      </div>
+
       <div className="bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden flex flex-col">
         
         {/* Header */}
-        <div className="bg-indigo-600 p-8 text-center flex flex-col items-center">
-            <div className="mb-4">
+        <div className="bg-indigo-600 p-8 text-center flex flex-col items-center relative overflow-hidden">
+            {/* Background Pattern */}
+            <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
+                 <div className="absolute top-[-50px] right-[-50px] w-40 h-40 bg-white rounded-full blur-3xl"></div>
+                 <div className="absolute bottom-[-20px] left-[-20px] w-32 h-32 bg-indigo-300 rounded-full blur-2xl"></div>
+            </div>
+
+            <div className="mb-4 relative z-10">
                 <DygoLogoAuth />
             </div>
-            <h1 className="text-4xl font-bold text-white tracking-tight mb-1 font-dygo">dygo</h1>
-            <p className="text-indigo-200 text-sm">Tu espacio de crecimiento personal</p>
+            <h1 className="text-4xl font-bold text-white tracking-tight mb-1 font-dygo relative z-10">dygo</h1>
+            <p className="text-indigo-200 text-sm relative z-10">Tu espacio de crecimiento personal</p>
         </div>
 
         {/* Form */}
@@ -68,8 +101,18 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                 {isLogin ? 'Bienvenido de nuevo' : 'Crea tu cuenta'}
             </h2>
 
+            {serverStatus === 'offline' && (
+                <div className="mb-6 p-3 bg-amber-50 text-amber-800 text-xs rounded-lg border border-amber-200 flex items-start gap-2">
+                    <Server size={16} className="shrink-0 mt-0.5" />
+                    <div>
+                        <strong>Aviso:</strong> El servidor backend no responde. 
+                        Asegúrate de tener una terminal abierta con el comando <code>node server.js</code>.
+                    </div>
+                </div>
+            )}
+
             {error && (
-                <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100">
+                <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100 animate-in fade-in slide-in-from-top-1">
                     {error}
                 </div>
             )}
@@ -81,9 +124,10 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                         <input 
                             type="text" 
                             placeholder="Nombre completo"
-                            className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800"
+                            className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800 transition-all"
                             value={name}
                             onChange={(e) => setName(e.target.value)}
+                            disabled={isLoading}
                         />
                     </div>
                 )}
@@ -93,9 +137,10 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                     <input 
                         type="email" 
                         placeholder="Correo electrónico"
-                        className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800"
+                        className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800 transition-all"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
+                        disabled={isLoading}
                     />
                 </div>
 
@@ -104,9 +149,10 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                     <input 
                         type="password" 
                         placeholder="Contraseña"
-                        className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800"
+                        className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800 transition-all"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
+                        disabled={isLoading}
                     />
                 </div>
 
@@ -131,9 +177,14 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
 
                 <button 
                     type="submit"
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-indigo-200 flex items-center justify-center gap-2 mt-4"
+                    disabled={isLoading}
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-indigo-200 flex items-center justify-center gap-2 mt-4"
                 >
-                    {isLogin ? 'Entrar en dygo' : 'Unirse a dygo'} <ArrowRight size={18} />
+                    {isLoading ? (
+                        <><Loader2 className="animate-spin" size={20} /> Procesando...</>
+                    ) : (
+                        <>{isLogin ? 'Entrar en dygo' : 'Unirse a dygo'} <ArrowRight size={18} /></>
+                    )}
                 </button>
             </form>
 

@@ -1,7 +1,9 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { JournalEntry, Goal, WeeklyReport, EmotionStructure } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+
+export const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
 interface AnalysisResult {
   summary: string;
@@ -16,6 +18,7 @@ const getFeedbackText = (feedback?: string | { text: string }): string => {
     if (typeof feedback === 'string') return feedback;
     return feedback.text;
 };
+
 
 export async function analyzeJournalEntry(transcript: string, date: string, userId: string, pastEntries?: JournalEntry[]): Promise<JournalEntry> {
   // Construct context from past psychologist feedback if available
@@ -56,6 +59,11 @@ export async function analyzeJournalEntry(transcript: string, date: string, user
     Transcripción:
     "${transcript}"
   `;
+
+  if (!ai) {
+  throw new Error("Falta la API key de Gemini");
+}
+
 
   const response = await ai.models.generateContent({
     model: "gemini-2.5-flash",
@@ -109,6 +117,9 @@ export async function analyzeJournalEntry(transcript: string, date: string, user
 
 // Function to generate simple text summary for the USER (Personal advice)
 export async function generateWeeklyInsights(entries: JournalEntry[]): Promise<string> {
+   if (!ai) {
+  throw new Error("Falta la API key de Gemini");
+}
   if (entries.length === 0) return "No hay suficientes datos para generar insights.";
 
   const inputData = entries.map(e => ({
@@ -143,6 +154,9 @@ export async function generateWeeklyInsights(entries: JournalEntry[]): Promise<s
 
 // New: Function to generate objective clinical summary for the PSYCHOLOGIST
 export async function generateClinicalSummary(entries: JournalEntry[]): Promise<string> {
+   if (!ai) {
+  throw new Error("Falta la API key de Gemini");
+}
   if (entries.length === 0) return "No hay suficientes datos para generar un resumen clínico.";
 
   const prompt = `
@@ -170,6 +184,9 @@ export async function generateClinicalSummary(entries: JournalEntry[]): Promise<
 
 // New: Structured Weekly Report
 export async function generateWeeklyReport(entries: JournalEntry[]): Promise<WeeklyReport> {
+   if (!ai) {
+  throw new Error("Falta la API key de Gemini");
+}
   const prompt = `
     Analiza las siguientes entradas de diario de la última semana y genera un "Informe Semanal".
     Entradas: ${JSON.stringify(entries.map(e => ({ date: e.date, text: e.summary, emotions: e.emotions })))}
@@ -200,6 +217,9 @@ export async function generateWeeklyReport(entries: JournalEntry[]): Promise<Wee
 
 // New: Track Goals Progress
 export async function analyzeGoalsProgress(transcript: string, goals: Goal[]): Promise<Goal[]> {
+   if (!ai) {
+  throw new Error("Falta la API key de Gemini");
+}
   if (goals.length === 0) return [];
 
   const prompt = `

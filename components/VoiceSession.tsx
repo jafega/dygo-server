@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
+import { LiveServerMessage, Modality } from '@google/genai';
+import { ai } from '../services/genaiService';
 import { createPcmBlob, decodeAudioData, base64ToUint8Array } from '../services/audioUtils';
 import { getLastDaysEntries } from '../services/storageService';
 import { getCurrentUser } from '../services/authService';
 import { Mic, MicOff, PhoneOff, Phone, User, Signal } from 'lucide-react';
 import { ClinicalNoteContent, UserSettings } from '../types';
+
 
 interface VoiceSessionProps {
   onSessionEnd: (transcript: string) => void;
@@ -54,12 +56,15 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
     let isMounted = true;
 
     const startSession = async () => {
+      if (!ai) {
+  setError("Falta la API key de Gemini (VITE_GEMINI_API_KEY)");
+  setStatus("error");
+  return;
+}
+
       try {
         const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-if (!apiKey) {
-  throw new Error("Falta VITE_GEMINI_API_KEY en Render (frontend)");
-}
-const ai = new GoogleGenAI({ apiKey });
+
 
 
         const user = await getCurrentUser();

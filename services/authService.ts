@@ -32,8 +32,6 @@ export const initializeDemoData = async () => {
     const hasPsych = users.some(u => u.role === 'PSYCHOLOGIST');
     
     if (!hasPsych && !USE_BACKEND) {
-        // Only seed local storage automatically. 
-        // For backend, you'd usually seed the DB once or via a script.
         const demoPsychs: User[] = [
             { id: 'psych-demo-1', name: 'Dra. Elena Foster', email: 'elena@dygo.health', password: '123', role: 'PSYCHOLOGIST', accessList: [] },
             { id: 'psych-demo-2', name: 'Dr. Marc Spector', email: 'marc@dygo.health', password: '123', role: 'PSYCHOLOGIST', accessList: [] }
@@ -54,18 +52,25 @@ export const register = async (name: string, email: string, password: string, ro
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ name, email: normalizedEmail, password, role: normalizedRole })
           });
+          
           if (!res.ok) {
-              const err = await res.json();
-              throw new Error(err.error || 'Error al registrar');
+              let errMsg = 'Error al registrar';
+              try {
+                  const err = await res.json();
+                  errMsg = err.error || errMsg;
+              } catch {
+                  errMsg = `Error del servidor (${res.status}). Asegúrate de que 'node server.js' esté corriendo sin errores.`;
+              }
+              throw new Error(errMsg);
           }
+          
           const user = await res.json();
           localStorage.setItem(CURRENT_USER_KEY, user.id);
           return user;
       } catch (e) {
           console.error(e);
-          // If backend fails, throw error (don't fallback for writes to avoid sync issues)
-          if (e instanceof Error && e.message.includes('Failed to fetch')) {
-             throw new Error("No se puede conectar con el servidor.");
+          if (e instanceof Error && (e.message.includes('Failed to fetch') || e.message.includes('NetworkError'))) {
+             throw new Error("No se puede conectar con el servidor. ¿Has ejecutado 'node server.js'?");
           }
           throw e;
       }
@@ -95,17 +100,18 @@ export const login = async (email: string, password: string): Promise<User> => {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ email: normalizedEmail, password })
           });
-          if (!res.ok) throw new Error("Credenciales inválidas");
+          if (!res.ok) {
+               if (res.status === 401) throw new Error("Credenciales inválidas");
+               throw new Error(`Error del servidor (${res.status})`);
+          }
           const user = await res.json();
           localStorage.setItem(CURRENT_USER_KEY, user.id);
           return user;
       } catch (e) {
-          if (e instanceof Error && e.message.includes('Failed to fetch')) {
-              // Fallback to local if server is down is tricky for auth, but let's allow it for demo
-              console.warn("Server down, trying local login...");
-          } else {
-              throw e;
+          if (e instanceof Error && (e.message.includes('Failed to fetch') || e.message.includes('NetworkError'))) {
+             throw new Error("No se puede conectar con el servidor. ¿Has ejecutado 'node server.js'?");
           }
+          throw e;
       }
   }
 
