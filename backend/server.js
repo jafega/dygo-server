@@ -339,11 +339,12 @@ app.post('/api/stripe/create-checkout-session', async (req, res) => {
       saveDb(db);
     }
 
-    // Use a price id from env if provided, otherwise create a product+price on the fly
-    let priceId = process.env.STRIPE_PRICE_ID;
+    // Prefer an explicit EUR price id (STRIPE_PRICE_ID_EUR) for the €9.99 monthly plan.
+    // Fall back to generic STRIPE_PRICE_ID if present. Otherwise create a product+price in EUR on the fly.
+    let priceId = process.env.STRIPE_PRICE_ID_EUR || process.env.STRIPE_PRICE_ID;
     if (!priceId) {
-      const product = await stripe.products.create({ name: 'DYGO Premium Monthly', description: 'Subscripción mensual a DYGO Premium' });
-      const price = await stripe.prices.create({ product: product.id, currency: 'usd', recurring: { interval: 'month' }, unit_amount: 499 }); // $4.99
+      const product = await stripe.products.create({ name: 'DYGO Premium Monthly (EUR)', description: 'Subscripción mensual a DYGO Premium (€9.99)' });
+      const price = await stripe.prices.create({ product: product.id, currency: 'eur', recurring: { interval: 'month' }, unit_amount: 999 }); // €9.99
       priceId = price.id;
     }
 

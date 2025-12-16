@@ -114,6 +114,16 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
         }
     };
     load();
+    // If user returns from Checkout (hosted Checkout), refresh current user to pick updated premium status
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('session') === 'success') {
+        (async () => {
+            const refreshed = await getCurrentUser();
+            setCurrentUser(refreshed);
+            // Remove query param to avoid repeated refreshes
+            try { const url = new URL(window.location.href); url.searchParams.delete('session'); window.history.replaceState({}, '', url.toString()); } catch(e) {}
+        })();
+    }
   }, []);
 
   const handleSave = () => {
