@@ -55,4 +55,7 @@ Forgotten password (demo reset)
 3. Run the app:
    `npm run dev`
 
+## UI updates
+- The **Superadmin** user management view was updated for improved responsiveness on small screens: controls stack vertically on mobile, buttons expand to full width when needed, and long names/emails are truncated for better layout. 
+
 

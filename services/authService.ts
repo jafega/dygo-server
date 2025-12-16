@@ -1,5 +1,5 @@
 import { User } from '../types';
-import { API_URL, USE_BACKEND } from './config';
+import { API_URL, USE_BACKEND, ALLOW_LOCAL_FALLBACK } from './config';
 
 const USERS_KEY = 'ai_diary_users_v1';
 const CURRENT_USER_KEY = 'ai_diary_current_user_id';
@@ -23,8 +23,14 @@ export const getUsers = async (): Promise<User[]> => {
         const data = await res.json();
         return Array.isArray(data) ? data : [];
       }
+      throw new Error(`Server error: ${res.status}`);
     } catch (e) {
-      console.warn("Backend offline, falling back to local.");
+      // If explicit fallback is allowed we use local users, otherwise surface an error
+      if (ALLOW_LOCAL_FALLBACK) {
+        console.warn("Backend offline, falling back to local (ALLOW_LOCAL_FALLBACK=true).", e);
+        return getLocalUsers();
+      }
+      throw new Error("No se puede conectar con el servidor. Asegúrate de ejecutar 'node server.js' y que el backend esté disponible.");
     }
   }
   return getLocalUsers();
@@ -72,6 +78,13 @@ export const register = async (name: string, email: string, password: string, ro
           return user;
       } catch (e) {
           console.error(e);
+          // If allowed, fall back to local registration (development)
+          if (ALLOW_LOCAL_FALLBACK) {
+              const users = getLocalUsers();
+              if (users.find(u => u.email === normalizedEmail)) throw new Error("El email ya está registrado (Local fallback).");
+              const newUser: User = { id: crypto.randomUUID(), name, email: normalizedEmail, password, role: normalizedRole, accessList: [] };
+              users.push(newUser); saveLocalUsers(users); localStorage.setItem(CURRENT_USER_KEY, newUser.id); return newUser;
+          }
           if (e instanceof Error && (e.message.includes('Failed to fetch') || e.message.includes('NetworkError'))) {
              throw new Error("No se puede conectar con el servidor. ¿Has ejecutado 'node server.js'?");
           }
@@ -79,7 +92,7 @@ export const register = async (name: string, email: string, password: string, ro
       }
   }
 
-  // Local Fallback
+  // Local Fallback when backend usage is disabled entirely
   const users = getLocalUsers();
   if (users.find(u => u.email === normalizedEmail)) throw new Error("El email ya está registrado (Local).");
   
@@ -111,6 +124,14 @@ export const login = async (email: string, password: string): Promise<User> => {
           localStorage.setItem(CURRENT_USER_KEY, user.id);
           return user;
       } catch (e) {
+          // If allowed, try a local login fallback (development only)
+          if (ALLOW_LOCAL_FALLBACK) {
+              const users = getLocalUsers();
+              const user = users.find(u => u.email === normalizedEmail && u.password === password);
+              if (!user) throw new Error("Credenciales inválidas (Local fallback).");
+              localStorage.setItem(CURRENT_USER_KEY, user.id);
+              return user;
+          }
           if (e instanceof Error && (e.message.includes('Failed to fetch') || e.message.includes('NetworkError'))) {
              throw new Error("No se puede conectar con el servidor. ¿Has ejecutado 'node server.js'?");
           }
@@ -159,7 +180,11 @@ export const getUserById = async (id: string): Promise<User | undefined> => {
       try {
           const res = await fetch(`${API_URL}/users/${id}`);
           if (res.ok) return await res.json();
-      } catch(e) { console.warn("Fetch error", e); }
+          throw new Error(`Server error: ${res.status}`);
+      } catch(e) {
+          if (ALLOW_LOCAL_FALLBACK) { console.warn("Fetch error, using local fallback.", e); return getLocalUsers().find(u => u.id === id); }
+          throw new Error("No se puede conectar con el servidor para obtener el usuario.");
+      }
   }
   return getLocalUsers().find(u => u.id === id);
 };
@@ -173,13 +198,23 @@ export const getUserByEmail = async (email: string): Promise<User | undefined> =
 export const updateUser = async (updatedUser: User) => {
     if (USE_BACKEND) {
         try {
-            await fetch(`${API_URL}/users/${updatedUser.id}`, {
+            const res = await fetch(`${API_URL}/users/${updatedUser.id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(updatedUser)
             });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || `Error updating user (${res.status})`);
+            }
             return;
-        } catch (e) { console.error(e); }
+        } catch (e) {
+            if (ALLOW_LOCAL_FALLBACK) {
+                console.warn('Update user failed, using local fallback.', e);
+            } else {
+                throw e instanceof Error ? e : new Error('Error updating user and no local fallback allowed.');
+            }
+        }
     }
 
     const users = getLocalUsers();

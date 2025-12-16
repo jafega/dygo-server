@@ -3,6 +3,7 @@ import { User } from '../types';
 import * as AuthService from '../services/authService';
 import { Trash2 } from 'lucide-react';
 
+// Responsive: mobile-first layout using Tailwind — stacks controls on small screens and truncates long text
 const SuperAdmin: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(false);
@@ -62,34 +63,34 @@ const SuperAdmin: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-white p-8">
+    <div className="min-h-screen bg-white px-4 py-6 sm:p-8">
       <h1 className="text-2xl font-bold mb-4">Superadmin — Gestionar usuarios</h1>
-      <div className="mb-4 flex gap-2">
-        <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar por nombre o email" className="flex-1 px-3 py-2 border rounded-lg" />
-        <button className="px-4 py-2 bg-indigo-600 text-white rounded-lg" onClick={async () => { setLoading(true); const us = await AuthService.getUsers(); setUsers(us); setLoading(false); }}>Refrescar</button>
+      <div className="mb-4 flex flex-col sm:flex-row gap-2">
+        <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar por nombre o email" className="flex-1 px-3 py-2 border rounded-lg w-full" />
+        <button className="px-4 py-2 bg-indigo-600 text-white rounded-lg w-full sm:w-auto" onClick={async () => { setLoading(true); const us = await AuthService.getUsers(); setUsers(us); setLoading(false); }}>Refrescar</button>
       </div>
 
       <div className="bg-slate-50 rounded-xl p-4 shadow-sm">
         {loading ? <div>Cargando usuarios…</div> : (
           <div className="space-y-3">
             {filtered.map(u => (
-              <div key={u.id} className="p-3 bg-white border rounded-xl flex items-center justify-between gap-4 shadow-sm transition-shadow hover:shadow-md">
-                <div className="flex-1">
-                  <div className="text-sm font-medium">{u.name} <span className="text-xs text-slate-500">({u.role})</span></div>
-                  <div className="text-xs text-slate-500">{u.email}</div>
+              <div key={u.id} className="p-3 bg-white border rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm transition-shadow hover:shadow-md">
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium truncate">{u.name} <span className="text-xs text-slate-500">({u.role})</span></div>
+                  <div className="text-xs text-slate-500 truncate">{u.email}</div>
                 </div>
-                <div className="w-64 flex items-center gap-2">
-                  <input type="password" placeholder="Nueva contraseña" className="flex-1 px-3 py-2 border rounded-lg" value={resetStates[u.id]?.newPassword || ''} onChange={(e)=>handleChangePw(u.id, e.target.value)} />
-                  <button onClick={() => handleReset(u)} className="px-3 py-2 bg-rose-600 text-white rounded-lg">Reset</button>
+                <div className="w-full sm:w-64 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <input type="password" placeholder="Nueva contraseña" className="flex-1 px-3 py-2 border rounded-lg w-full" value={resetStates[u.id]?.newPassword || ''} onChange={(e)=>handleChangePw(u.id, e.target.value)} />
+                  <button onClick={() => handleReset(u)} className="px-3 py-2 bg-rose-600 text-white rounded-lg w-full sm:w-auto">Reset</button>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <div className="w-40 text-sm">
+                <div className="flex items-center gap-2 mt-2 sm:mt-0">
+                  <div className="w-full sm:w-40 text-sm">
                     {resetStates[u.id]?.status === 'pending' && <span className="text-slate-500">Procesando…</span>}
                     {resetStates[u.id]?.status === 'success' && <span className="text-green-600">{resetStates[u.id].msg}</span>}
                     {resetStates[u.id]?.status === 'error' && <span className="text-red-600">{resetStates[u.id].msg}</span>}
                   </div>
-                  <button onClick={() => promptDelete(u)} className="p-2 rounded-lg bg-red-50 hover:bg-red-100 text-rose-600 border border-red-100 flex items-center gap-2"><Trash2 size={16} /> Eliminar</button>
+                  <button onClick={() => promptDelete(u)} className="p-2 rounded-lg bg-red-50 hover:bg-red-100 text-rose-600 border border-red-100 flex items-center gap-2 w-full sm:w-auto justify-center"><Trash2 size={16} /> <span className="ml-2 hidden sm:inline">Eliminar</span></button>
                 </div>
               </div>
             ))}
