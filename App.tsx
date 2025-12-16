@@ -243,9 +243,22 @@ const App: React.FC = () => {
     await StorageService.saveSettings(currentUser.id, newSettings);
   };
 
-  const dayEntries = selectedDate ? entries.filter(e => e.date === selectedDate) : [];
-  const assignedGoals = goals.filter(g => g.createdBy === 'PSYCHOLOGIST');
-  const personalGoals = goals.filter(g => g.createdBy !== 'PSYCHOLOGIST');
+const safeEntries = Array.isArray(entries) ? entries : [];
+
+const dayEntries = selectedDate
+  ? safeEntries.filter(e => e.date === selectedDate)
+  : [];
+
+  const safeGoals = Array.isArray(goals) ? goals : [];
+
+const assignedGoals = safeGoals.filter(
+  g => g.createdBy === 'PSYCHOLOGIST'
+);
+
+const personalGoals = safeGoals.filter(
+  g => g.createdBy !== 'PSYCHOLOGIST'
+);
+
   
   const ProfileCircle = ({ onClick, className }: { onClick: () => void, className?: string }) => (
     <button onClick={onClick} className={`relative rounded-full overflow-hidden transition-transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${className}`}>
