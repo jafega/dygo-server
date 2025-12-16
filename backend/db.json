@@ -41,5 +41,12 @@
       "timestamp": 1765835854972
     }
   ],
-  "settings": {}
+  "settings": {
+    "93bd3163-7b1f-4ecf-af36-89d1be5f6a77": {
+      "notificationsEnabled": false,
+      "notificationTime": "20:00",
+      "language": "es-ES",
+      "voice": "Kore"
+    }
+  }
 }
