@@ -5,14 +5,11 @@
   "type": "module",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "mailhog": "docker run --rm -p 1025:1025 -p 8025:8025 mailhog/mailhog"
+    "start": "node server.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
-    "express": "^4.21.0",
-    "dotenv": "^16.3.1",
-    "nodemailer": "^6.9.4"
+    "express": "^4.21.0"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.23",

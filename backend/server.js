@@ -6,10 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import dotenv from 'dotenv';
-import nodemailer from 'nodemailer';
 
-dotenv.config();
 
 // --- CONFIGURACIÓN PARA ES MODULES ---
 // En ES Modules no existe __dirname, así que lo recreamos:
@@ -21,49 +18,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const DB_FILE = path.join(__dirname, 'db.json');
 
-// --- OPTIONAL SMTP CONFIGURATION ---
-// Set SMTP_HOST, SMTP_PORT, SMTP_SECURE (true/false), SMTP_USER, SMTP_PASS and SMTP_FROM in your env
-let transporter = null;
-let useEthereal = false; // When true, we're using Nodemailer's Ethereal test account (dev-only)
 
-if (process.env.SMTP_HOST) {
-  const transportOpts = {
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT) || 587,
-    secure: process.env.SMTP_SECURE === 'true'
-  };
-
-  // Only add auth when credentials are provided (MailHog does not require auth)
-  if (process.env.SMTP_USER && process.env.SMTP_PASS) {
-    transportOpts.auth = { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS };
-  }
-
-  transporter = nodemailer.createTransport(transportOpts);
-  console.log('✉️ SMTP configured for sending emails:', process.env.SMTP_HOST, 'from:', process.env.SMTP_FROM || 'noreply');
-}
-
-// If no SMTP provided and not in production, create an Ethereal test account so emails work without configuration
-(async () => {
-  if (!transporter && process.env.NODE_ENV !== 'production') {
-    try {
-      console.log('⚙️ No SMTP configured - creating Ethereal test account for dev email sending');
-      const testAccount = await nodemailer.createTestAccount();
-      transporter = nodemailer.createTransport({
-        host: testAccount.smtp.host,
-        port: testAccount.smtp.port,
-        secure: testAccount.smtp.secure,
-        auth: {
-          user: testAccount.user,
-          pass: testAccount.pass
-        }
-      });
-      useEthereal = true;
-      console.log('✉️ Ethereal account created (dev only). Preview sent messages with the URL returned in send responses or check nodemailer getTestMessageUrl.');
-    } catch (err) {
-      console.warn('⚠️ Failed to create Ethereal test account:', err);
-    }
-  }
-})();
 
 // --- MIDDLEWARE ---
 app.use(cors());
@@ -74,8 +29,6 @@ const createInitialDb = () => ({
   users: [],
   entries: [],
   goals: [],
-  // Stores one-time reset tokens: { token, userId, expires }
-  resetTokens: [],
   invitations: [],
   settings: {}
 });
@@ -243,101 +196,7 @@ app.post('/api/auth/google', async (req, res) => {
   }
 });
 
-// --- PASSWORD RESET (DEV) ---
-// Request password reset (generates a token and logs a link)
-app.post('/api/auth/forgot-password', async (req, res) => {
-  try {
-    const { email } = req.body || {};
-    if (!email) return res.status(400).json({ error: 'Email is required' });
 
-    const db = getDb();
-    const user = db.users.find(u => u.email && u.email.toLowerCase() === String(email).toLowerCase());
-
-    // Always respond success to avoid user enumeration
-    if (!user) {
-      console.log(`Password reset requested for non-existing email: ${email}`);
-      return res.json({ success: true });
-    }
-
-    const token = crypto.randomUUID();
-    const expires = Date.now() + 1000 * 60 * 60; // 1 hour
-
-    db.resetTokens = db.resetTokens || [];
-    db.resetTokens.push({ token, userId: user.id, expires });
-    saveDb(db);
-
-    const origin = req.headers.origin || `http://localhost:${PORT}`;
-    const resetLink = `${origin}/?resetToken=${token}`;
-
-    // If SMTP is configured (or Ethereal test account exists), attempt to send an email; otherwise log and return the link for dev convenience
-    if (transporter) {
-      const mailOptions = {
-        from: process.env.SMTP_FROM || `no-reply@${req.hostname || 'dygo.local'}`,
-        to: user.email,
-        subject: 'Dygo - Restablecer contraseña',
-        text: `Para restablecer tu contraseña visita: ${resetLink}`,
-        html: `<p>Para restablecer tu contraseña, haz clic <a href="${resetLink}">aquí</a>.</p>`
-      };
-
-      try {
-        const info = await transporter.sendMail(mailOptions);
-        console.log(`✉️ Password reset email sent to ${user.email}: ${info.messageId}`);
-
-        // If we're using Ethereal, nodemailer provides a preview URL
-        if (useEthereal) {
-          const previewUrl = nodemailer.getTestMessageUrl(info);
-          if (previewUrl) {
-            console.log(`🔍 Ethereal preview URL: ${previewUrl}`);
-            // For development convenience return the preview URL so frontends can display it
-            return res.json({ success: true, previewUrl });
-          }
-        }
-
-        // For real SMTP providers, return success only (do not include preview links)
-        return res.json({ success: true });
-      } catch (err) {
-        console.error('❌ Error sending reset email:', err);
-        // Fallback to logging the link and returning it
-        console.log(`🔐 Password reset link for ${user.email}: ${resetLink}`);
-        return res.json({ success: true, resetLink });
-      }
-    }
-
-    // No SMTP configured: log and return link (useful for local development)
-    console.log(`🔐 Password reset link for ${user.email}: ${resetLink}`);
-    return res.json({ success: true, resetLink });
-  } catch (error) {
-    console.error('Error in /api/auth/forgot-password', error);
-    return res.status(500).json({ error: 'Internal error' });
-  }
-});
-
-// Reset password with token
-app.post('/api/auth/reset-password', (req, res) => {
-  try {
-    const { token, newPassword } = req.body || {};
-    if (!token || !newPassword) return res.status(400).json({ error: 'Token and newPassword are required' });
-
-    const db = getDb();
-    const t = (db.resetTokens || []).find(rt => rt.token === token);
-    if (!t || t.expires < Date.now()) return res.status(400).json({ error: 'Token invalid or expired' });
-
-    const user = db.users.find(u => u.id === t.userId);
-    if (!user) return res.status(404).json({ error: 'User not found' });
-
-    user.password = newPassword;
-
-    // Remove token
-    db.resetTokens = (db.resetTokens || []).filter(rt => rt.token !== token);
-    saveDb(db);
-
-    console.log(`✅ Password reset for user ${user.email}`);
-    return res.json({ success: true });
-  } catch (error) {
-    console.error('Error in /api/auth/reset-password', error);
-    return res.status(500).json({ error: 'Internal error' });
-  }
-});
 
 // --- RUTAS DE USUARIOS ---
 app.get('/api/users/:id', (req, res) => {
