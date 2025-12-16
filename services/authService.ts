@@ -330,6 +330,7 @@ export const createCheckoutSession = async () => {
         users[idx].isPremium = true;
         users[idx].premiumUntil = Date.now() + 30 * 24 * 60 * 60 * 1000;
         saveLocalUsers(users);
+        // Also note: support opening Settings to refresh the UI; return current url
         return { url: window.location.href };
     }
 

@@ -394,7 +394,8 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
   const payload = req.body;
 
   let event;
-  if (process.env.STRIPE_WEBHOOK_SECRET) {
+  // If webhook secret is configured, verify signature; otherwise accept unfingerprinted events (dev only)
+  if (process.env.STRIPE_WEBHOOK_SECRET && process.env.STRIPE_SECRET_KEY) {
     try {
       const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2022-11-15' });
       event = stripe.webhooks.constructEvent(payload, sig, process.env.STRIPE_WEBHOOK_SECRET);
@@ -403,35 +404,21 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
       return res.status(400).send(`Webhook Error: ${err.message}`);
     }
   } else {
-    // Without webhook secret, parse body (only for dev). req.body is a Buffer because of express.raw
+    // Development mode: accept raw JSON payloads for testing with the included helper scripts
     try { event = JSON.parse(payload.toString()); } catch (e) { return res.status(400).send('Invalid payload'); }
   }
 
   try {
     const db = getDb();
 
-    switch (event.type) {
-      case 'checkout.session.completed': {
-        const session = event.data.object;
-        // Retrieve subscription data
-        if (session.mode !== 'subscription') break;
-        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2022-11-15' });
-        const subscription = await stripe.subscriptions.retrieve(session.subscription);
-        const customerId = subscription.customer;
-        const subId = subscription.id;
-        const periodEnd = subscription.current_period_end * 1000;
+    // Safety: ensure event has type and data to avoid crashes from fake payloads
+    if (!event || !event.type) {
+      console.warn('Received webhook with missing type');
+      return res.status(400).send('Missing event type');
+    }
 
-        const user = db.users.find(u => u.stripeCustomerId === customerId || (u.email && String(u.email).toLowerCase() === String(session.customer_details?.email).toLowerCase()));
-        if (user) {
-          user.isPremium = true;
-          user.premiumUntil = periodEnd;
-          user.stripeSubscriptionId = subId;
-          saveDb(db);
-          console.log(`✅ User ${user.email} marked premium until ${new Date(periodEnd)}`);
-        }
-        break;
-      }
-      case 'invoice.payment_failed': {
+    switch (event.type) {
+*** End Patch      case 'invoice.payment_failed': {
         const invoice = event.data.object;
         const subscriptionId = invoice.subscription;
         const subs = db.users.filter(u => u.stripeSubscriptionId === subscriptionId);

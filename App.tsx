@@ -144,14 +144,6 @@ const App: React.FC = () => {
     }
 
     setViewState(ViewState.CALENDAR); 
-    // Premium check: AI-assisted journaling requires DYGO Premium
-    if (!(currentUser.isPremium || (currentUser.premiumUntil && Number(currentUser.premiumUntil) > Date.now()))) {
-      if (confirm('Esta función requiere DYGO Premium. ¿Abrir ajustes para activar la suscripción?')) {
-        setShowSettings(true);
-      }
-      return;
-    }
-
     setIsProcessing(true);
     try {
       const now = new Date();
@@ -236,14 +228,6 @@ const App: React.FC = () => {
         alert("Necesitas al menos 2 entradas recientes.");
         return;
       }
-      // Premium check: generating weekly report is a premium feature
-      if (!(currentUser.isPremium || (currentUser.premiumUntil && Number(currentUser.premiumUntil) > Date.now()))) {
-        if (confirm('Generar un reporte semanal requiere DYGO Premium. ¿Abrir ajustes para activar la suscripción?')) {
-          setShowSettings(true);
-        }
-        return;
-      }
-
       const report = await generateWeeklyReport(last7Days);
       setWeeklyReport(report);
     } catch (e) {
@@ -408,18 +392,8 @@ const personalGoals = safeGoals.filter(
                     <ArrowLeftRight size={16} /> <span>Volver a Pacientes</span>
                 </button>
              )}
-            <button
-               onClick={() => {
-                 // If not premium, prompt to upgrade and open settings
-                 if (!(currentUser?.isPremium || (currentUser?.premiumUntil && Number(currentUser.premiumUntil) > Date.now()))) {
-                   if (confirm('Grabar y analizar entradas con IA requiere DYGO Premium. ¿Abrir ajustes para suscribirte?')) setShowSettings(true);
-                   return;
-                 }
-                 handleStartSession();
-               }}
-               className={`${!(currentUser?.isPremium || (currentUser?.premiumUntil && Number(currentUser.premiumUntil) > Date.now())) ? 'opacity-70 cursor-not-allowed' : ''} bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-full font-medium flex items-center justify-center gap-2 transition-all shadow-lg hover:shadow-indigo-500/30 flex-1 md:flex-none`}
-            >
-                <Mic size={20} /> <span className="hidden md:inline">Grabar entrada</span><span className="md:hidden">Grabar</span>
+            <button onClick={handleStartSession} className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-full font-medium flex items-center justify-center gap-2 transition-all shadow-lg hover:shadow-indigo-500/30 flex-1 md:flex-none">
+               <Mic size={20} /> <span className="hidden md:inline">Grabar entrada</span><span className="md:hidden">Grabar</span>
             </button>
              <div className="hidden md:block"><ProfileCircle onClick={() => setShowSettings(true)} /></div>
           </div>
@@ -455,11 +429,8 @@ const personalGoals = safeGoals.filter(
                {activeTab === 'insights' ? (
                  <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
                     <InsightsPanel entries={entries} />
-                    <button
-                        onClick={handleGenerateReport}
-                        className={`${!(currentUser?.isPremium || (currentUser?.premiumUntil && Number(currentUser.premiumUntil) > Date.now())) ? 'opacity-70 cursor-not-allowed' : ''} w-full py-4 bg-gradient-to-r from-purple-500 to-indigo-500 text-white rounded-2xl shadow-md hover:shadow-lg transition-all font-semibold flex items-center justify-center gap-2`}
-                    >
-                        <BookOpen size={20} /> Ver Reporte Semanal
+                    <button onClick={handleGenerateReport} className="w-full py-4 bg-gradient-to-r from-purple-500 to-indigo-500 text-white rounded-2xl shadow-md hover:shadow-lg transition-all font-semibold flex items-center justify-center gap-2">
+                      <BookOpen size={20} /> Ver Reporte Semanal
                     </button>
                  </div>
                ) : (
