@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { UserSettings, Invitation, User } from '../types';
 import { getPendingInvitationsForEmail, acceptInvitation, rejectInvitation, getPsychologistsForPatient, revokeAccess, getAllPsychologists, linkPatientToPsychologist, getSentInvitationsForPsychologist, getPatientsForPsychologist } from '../services/storageService';
 import { getCurrentUser, updateUser } from '../services/authService';
-import { X, Bell, Clock, Shield, UserCheck, Trash2, LogOut, Globe, Mic, Camera, Search, UserPlus } from 'lucide-react';
+import { X, Bell, Clock, Shield, UserCheck, Trash2, LogOut, Globe, Mic, Camera, Search, UserPlus, Eye, EyeOff } from 'lucide-react';
 import * as AuthService from '../services/authService';
 
 interface SettingsModalProps {
@@ -41,6 +41,57 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
   const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
   const [changePasswordStatus, setChangePasswordStatus] = useState<'idle'|'success'|'error'>('idle');
   const [changePasswordMsg, setChangePasswordMsg] = useState('');
+
+  // UX states for password inputs
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNew, setShowNew] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+
+  const computeStrength = (pw: string) => {
+    let score = 0;
+    if (!pw) return { score: 0, color: 'bg-transparent', label: 'Introduce una contraseña' };
+    if (pw.length >= 8) score++;
+    if (/[0-9]/.test(pw)) score++;
+    if (/[A-Z]/.test(pw)) score++;
+    if (/[^A-Za-z0-9]/.test(pw)) score++;
+    let color = 'bg-red-400';
+    let label = 'Muy débil';
+    if (score <= 1) { color = 'bg-red-400'; label = 'Muy débil'; }
+    else if (score === 2) { color = 'bg-orange-400'; label = 'Débil'; }
+    else if (score === 3) { color = 'bg-yellow-400'; label = 'Fuerte'; }
+    else { color = 'bg-green-400'; label = 'Muy fuerte'; }
+    return { score, color, label };
+  };
+
+  const { score: strengthScore, color: strengthColor, label: strengthLabel } = computeStrength(newPasswordInput);
+
+  const canSubmit = () => {
+    if (isChangingPassword) return false;
+    if (newPasswordInput.length < 8) return false;
+    if (newPasswordInput !== confirmPasswordInput) return false;
+    if (currentUser?.password && !currentPasswordInput) return false;
+    return true;
+  };
+
+  const handleChangePassword = async () => {
+    setChangePasswordStatus('idle');
+    setChangePasswordMsg('');
+    setIsChangingPassword(true);
+    try {
+      await AuthService.changePassword(currentPasswordInput, newPasswordInput);
+      setChangePasswordStatus('success');
+      setChangePasswordMsg('Contraseña actualizada.');
+      setCurrentPasswordInput(''); setNewPasswordInput(''); setConfirmPasswordInput('');
+      // auto-hide success
+      setTimeout(() => { setChangePasswordStatus('idle'); setChangePasswordMsg(''); }, 3000);
+    } catch (err: any) {
+      setChangePasswordStatus('error');
+      setChangePasswordMsg(err?.message || 'Error actualizando contraseña.');
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -178,45 +229,93 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                         <div className="flex items-center justify-between"><label className="font-medium text-slate-700">Recordatorio diario</label><button onClick={() => setEnabled(!enabled)} className={`w-12 h-6 rounded-full transition-colors relative ${enabled ? 'bg-indigo-500' : 'bg-slate-300'}`}><div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${enabled ? 'left-7' : 'left-1'}`}></div></button></div>
                         {enabled && <div className="space-y-2"><label className="block text-sm text-slate-500 flex items-center gap-2"><Clock size={14} /> Hora</label><input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="w-full p-3 bg-slate-50 border rounded-xl" /></div>}
                     </div>
-                    <div className="pt-4 border-t border-slate-100 space-y-3">
-                        <div className="space-y-2">
-                            <h4 className="text-sm font-bold">Cambiar contraseña</h4>
-                            <p className="text-xs text-slate-500">Introduce tu contraseña actual y la nueva.</p>
-                            <div className="grid grid-cols-1 gap-2 mt-2">
-                                <input type="password" placeholder="Contraseña actual" value={currentPasswordInput} onChange={(e) => setCurrentPasswordInput(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
-                                <input type="password" placeholder="Nueva contraseña" value={newPasswordInput} onChange={(e) => setNewPasswordInput(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
-                                <input type="password" placeholder="Confirmar nueva" value={confirmPasswordInput} onChange={(e) => setConfirmPasswordInput(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
-                                <div className="flex gap-2">
-                                    <button onClick={async () => {
-                                        // Validation
-                                        setChangePasswordStatus('idle');
-                                        setChangePasswordMsg('');
-                                        if (!newPasswordInput || newPasswordInput.length < 6) {
-                                            setChangePasswordStatus('error');
-                                            setChangePasswordMsg('La nueva contraseña debe tener al menos 6 caracteres.');
-                                            return;
-                                        }
-                                        if (newPasswordInput !== confirmPasswordInput) {
-                                            setChangePasswordStatus('error');
-                                            setChangePasswordMsg('Las contraseñas no coinciden.');
-                                            return;
-                                        }
-                                        try {
-                                            await AuthService.changePassword(currentPasswordInput, newPasswordInput);
-                                            setChangePasswordStatus('success');
-                                            setChangePasswordMsg('Contraseña actualizada.');
-                                            setCurrentPasswordInput(''); setNewPasswordInput(''); setConfirmPasswordInput('');
-                                        } catch (err: any) {
-                                            setChangePasswordStatus('error');
-                                            setChangePasswordMsg(err?.message || 'Error actualizando contraseña.');
-                                        }
-                                    }} className="bg-indigo-600 text-white rounded-lg px-4 py-2 text-sm">Cambiar contraseña</button>
+                    <div className="pt-4 border-t border-slate-100 space-y-4">
+                        <div className="bg-white p-4 rounded-xl border">
+                            <div className="flex items-start justify-between">
+                                <div>
+                                    <h4 className="text-sm font-bold">Cambiar contraseña</h4>
+                                    <p className="text-xs text-slate-500">Introduce tu contraseña actual y la nueva.</p>
                                 </div>
-                                {changePasswordStatus !== 'idle' && <div className={`mt-2 p-2 rounded text-sm ${changePasswordStatus === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>{changePasswordMsg}</div>}
+                            </div>
+
+                            <div className="mt-3 space-y-3">
+                                <div className="grid grid-cols-1 gap-3">
+                                    {/* Current password */}
+                                    <div className="relative">
+                                        <input
+                                            type={showCurrent ? 'text' : 'password'}
+                                            placeholder="Contraseña actual"
+                                            value={currentPasswordInput}
+                                            onChange={(e) => setCurrentPasswordInput(e.target.value)}
+                                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm pr-10"
+                                            aria-label="Contraseña actual"
+                                        />
+                                        <button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400" onClick={() => setShowCurrent(!showCurrent)} aria-label="Mostrar contraseña actual">
+                                            {showCurrent ? <EyeOff size={18} /> : <Eye size={18} />}
+                                        </button>
+                                    </div>
+
+                                    {/* New password */}
+                                    <div className="relative">
+                                        <input
+                                            type={showNew ? 'text' : 'password'}
+                                            placeholder="Nueva contraseña"
+                                            value={newPasswordInput}
+                                            onChange={(e) => setNewPasswordInput(e.target.value)}
+                                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm pr-10"
+                                            aria-label="Nueva contraseña"
+                                        />
+                                        <button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400" onClick={() => setShowNew(!showNew)} aria-label="Mostrar nueva contraseña">
+                                            {showNew ? <EyeOff size={18} /> : <Eye size={18} />}
+                                        </button>
+
+                                        {/* Strength meter */}
+                                        <div className="mt-2">
+                                            <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                                                <div className={`${strengthColor} h-2 rounded-full`} style={{ width: `${(strengthScore / 4) * 100}%` }} />
+                                            </div>
+                                            <p className="mt-1 text-xs text-slate-500">{strengthLabel}</p>
+                                        </div>
+                                    </div>
+
+                                    {/* Confirm new password */}
+                                    <div className="relative">
+                                        <input
+                                            type={showConfirm ? 'text' : 'password'}
+                                            placeholder="Confirmar nueva"
+                                            value={confirmPasswordInput}
+                                            onChange={(e) => setConfirmPasswordInput(e.target.value)}
+                                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm pr-10"
+                                            aria-label="Confirmar nueva contraseña"
+                                        />
+                                        <button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400" onClick={() => setShowConfirm(!showConfirm)} aria-label="Mostrar confirmar contraseña">
+                                            {showConfirm ? <EyeOff size={18} /> : <Eye size={18} />}
+                                        </button>
+                                    </div>
+
+                                    {/* Feedback message */}
+                                    {changePasswordStatus !== 'idle' && (
+                                        <div className={`mt-1 p-2 rounded text-sm ${changePasswordStatus === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>{changePasswordMsg}</div>
+                                    )}
+
+                                    {/* Submit button */}
+                                    <div>
+                                        <button
+                                            onClick={handleChangePassword}
+                                            disabled={!canSubmit() || isChangingPassword}
+                                            className={`w-full py-3 rounded-xl font-medium text-white ${!canSubmit() || isChangingPassword ? 'bg-indigo-300 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                                        >
+                                            {isChangingPassword ? <span className="inline-flex items-center gap-2"><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Guardando...</span> : 'Cambiar contraseña'}
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                         <button onClick={handleSave} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium">Guardar Cambios</button>
-                        <button onClick={handleLogoutClick} className="w-full py-3 text-red-500 hover:bg-red-50 rounded-xl font-medium flex items-center justify-center gap-2"><LogOut size={16} /> Cerrar Sesión</button>
+
+                        <div className="space-y-2">
+                            <button onClick={handleSave} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium">Guardar Cambios</button>
+                            <button onClick={handleLogoutClick} className="w-full py-3 text-red-500 hover:bg-red-50 rounded-xl font-medium flex items-center justify-center gap-2"><LogOut size={16} /> Cerrar Sesión</button>
+                        </div>
                     </div>
                 </div>
             ) : (
