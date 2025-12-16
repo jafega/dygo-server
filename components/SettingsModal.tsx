@@ -153,32 +153,52 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
       reader.onloadend = async () => {
           const base64 = reader.result as string;
           const updatedUser = { ...currentUser, avatarUrl: base64 };
-          await updateUser(updatedUser);
-          setCurrentUser(updatedUser);
-          if (onUserUpdate) onUserUpdate(updatedUser);
+          try {
+              await updateUser(updatedUser);
+              setCurrentUser(updatedUser);
+              if (onUserUpdate) onUserUpdate(updatedUser);
+          } catch (err:any) {
+              console.error('Error updating avatar', err);
+              alert(err?.message || 'Error guardando avatar. Comprueba la conexión con el servidor.');
+          }
       };
       reader.readAsDataURL(file);
   };
 
   const handleAcceptInv = async (invId: string) => {
-      if (currentUser) {
+      if (!currentUser) return;
+      try {
           await acceptInvitation(invId, currentUser.id);
           setInvitations(prev => prev.filter(i => i.id !== invId));
           setMyPsychologists(await getPsychologistsForPatient(currentUser.id));
+      } catch (err:any) {
+          console.error('Error accepting invitation', err);
+          alert(err?.message || 'Error aceptando invitación. Comprueba la conexión con el servidor.');
       }
   };
 
   const handleRejectInv = async (invId: string) => {
-      await rejectInvitation(invId);
-      setInvitations(prev => prev.filter(i => i.id !== invId));
-  };
+      try {
+          await rejectInvitation(invId);
+          setInvitations(prev => prev.filter(i => i.id !== invId));
+      } catch (err:any) {
+          console.error('Error rejecting invitation', err);
+          alert(err?.message || 'Error rechazando invitación. Comprueba la conexión con el servidor.');
+      }
+  };  
 
   const handleRevoke = async (psychId: string) => {
-      if (currentUser && window.confirm('¿Revocar acceso?')) {
+      if (!currentUser) return;
+      if (!window.confirm('¿Revocar acceso?')) return;
+      try {
           await revokeAccess(currentUser.id, psychId);
           setMyPsychologists(prev => prev.filter(u => u.id !== psychId));
+      } catch (err:any) {
+          console.error('Error revoking access', err);
+          alert(err?.message || 'Error revocando acceso. Comprueba la conexión con el servidor.');
+          try { setMyPsychologists(await getPsychologistsForPatient(currentUser.id)); } catch(e){}
       }
-  };
+  }; 
 
   const togglePsychSearch = async () => {
       if (!showPsychSearch) {
@@ -195,10 +215,15 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
           alert('Ya tienes a este especialista conectado.');
           return;
       }
-      await linkPatientToPsychologist(currentUser.id, psychId);
-      setMyPsychologists(await getPsychologistsForPatient(currentUser.id));
-      setInvitations(prev => prev.filter(i => i.fromPsychologistId !== psychId));
-      alert("Conexión establecida.");
+      try {
+          await linkPatientToPsychologist(currentUser.id, psychId);
+          setMyPsychologists(await getPsychologistsForPatient(currentUser.id));
+          setInvitations(prev => prev.filter(i => i.fromPsychologistId !== psychId));
+          alert("Conexión establecida.");
+      } catch (err:any) {
+          console.error('Error connecting to psychologist', err);
+          alert(err?.message || 'Error conectando con el especialista. Comprueba la conexión con el servidor.');
+      }
   };
 
   const availablePsychs = allPsychologists.filter(p => {

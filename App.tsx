@@ -159,7 +159,14 @@ const App: React.FC = () => {
         analyzeGoalsProgress(transcript, goals.filter(g => !g.completed))
       ]);
       
-      await StorageService.saveEntry(newEntry);
+      try {
+        await StorageService.saveEntry(newEntry);
+      } catch (err:any) {
+        console.error('Error saving entry', err);
+        alert(err?.message || 'Error guardando la entrada. Comprueba la conexión con el servidor.');
+        setIsProcessing(false);
+        return;
+      }
       
       const updatedEntries = await StorageService.getEntriesForUser(currentUser.id);
       setEntries(updatedEntries);
@@ -169,7 +176,12 @@ const App: React.FC = () => {
         return updated ? updated : g;
       });
       setGoals(finalGoals);
-      await StorageService.saveUserGoals(currentUser.id, finalGoals);
+      try {
+        await StorageService.saveUserGoals(currentUser.id, finalGoals);
+      } catch (err:any) {
+        console.error('Error saving goals after session', err);
+        alert(err?.message || 'Error guardando las metas. Comprueba la conexión con el servidor.');
+      }
       
       setSelectedDate(today);
     } catch (error) {
@@ -191,23 +203,44 @@ const App: React.FC = () => {
       aiFeedback: '¡Empieza hoy mismo!',
       createdBy: 'USER'
     };
-    const updated = [...goals, newGoal];
+    const prev = goals;
+    const updated = [...prev, newGoal];
     setGoals(updated);
-    await StorageService.saveUserGoals(currentUser.id, updated);
+    try {
+      await StorageService.saveUserGoals(currentUser.id, updated);
+    } catch (err: any) {
+      console.error('Error saving goals', err);
+      setGoals(prev);
+      alert(err?.message || 'Error guardando la meta. Comprueba la conexión con el servidor.');
+    }
   };
 
   const handleToggleGoal = async (id: string) => {
     if (!currentUser) return;
+    const prev = goals;
     const updated = goals.map(g => g.id === id ? { ...g, completed: !g.completed } : g);
     setGoals(updated);
-    await StorageService.saveUserGoals(currentUser.id, updated);
+    try {
+      await StorageService.saveUserGoals(currentUser.id, updated);
+    } catch (err: any) {
+      console.error('Error toggling goal', err);
+      setGoals(prev);
+      alert(err?.message || 'Error actualizando la meta. Comprueba la conexión con el servidor.');
+    }
   };
 
   const handleDeleteGoal = async (id: string) => {
     if (!currentUser) return;
+    const prev = goals;
     const updated = goals.filter(g => g.id !== id);
     setGoals(updated);
-    await StorageService.saveUserGoals(currentUser.id, updated);
+    try {
+      await StorageService.saveUserGoals(currentUser.id, updated);
+    } catch (err: any) {
+      console.error('Error deleting goal', err);
+      setGoals(prev);
+      alert(err?.message || 'Error eliminando la meta. Comprueba la conexión con el servidor.');
+    }
   };
 
   const handleDeleteEntry = async (id: string) => {
@@ -244,8 +277,16 @@ const App: React.FC = () => {
 
   const handleSaveSettings = async (newSettings: UserSettings) => {
     if (!currentUser) return;
+    const prev = settings;
     setSettings(newSettings);
-    await StorageService.saveSettings(currentUser.id, newSettings);
+    try {
+      await StorageService.saveSettings(currentUser.id, newSettings);
+    } catch (err:any) {
+      console.error('Error saving settings', err);
+      setSettings(prev);
+      alert(err?.message || 'Error guardando ajustes. Comprueba la conexión con el servidor.');
+      throw err;
+    }
   };
 
 const safeEntries = Array.isArray(entries) ? entries : [];

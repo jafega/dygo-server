@@ -58,4 +58,9 @@ Forgotten password (demo reset)
 ## UI updates
 - The **Superadmin** user management view was updated for improved responsiveness on small screens: controls stack vertically on mobile, buttons expand to full width when needed, and long names/emails are truncated for better layout. 
 
+## Persistence & Backend
+- All user data (entradas, metas, settings, invitaciones, usuarios) **must** be saved in the server-side database (`backend/db.json`) when `USE_BACKEND` is enabled.
+- By default the app tries to use the backend (see `services/config.ts`). If the backend is unavailable, the app will surface an error unless you explicitly set `VITE_ALLOW_LOCAL_FALLBACK=true` in `.env.local` for development convenience (NOT recommended in production).
+- The app now attempts to migrate any localStorage data to the backend on login when the backend is reachable.
+
 
