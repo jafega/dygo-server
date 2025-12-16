@@ -6,6 +6,10 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
+import Stripe from 'stripe';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 
 // --- CONFIGURACIÓN PARA ES MODULES ---
@@ -313,6 +317,158 @@ app.delete('/api/admin/delete-user', (req, res) => {
   }
 });
 
+// --- STRIPE: create checkout session and portal session ---
+app.post('/api/stripe/create-checkout-session', async (req, res) => {
+  try {
+    const requesterId = req.headers['x-user-id'] || req.headers['x-userid'];
+    if (!requesterId) return res.status(401).json({ error: 'Missing requester id' });
+
+    if (!process.env.STRIPE_SECRET_KEY) return res.status(500).json({ error: 'Stripe not configured on server' });
+
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2022-11-15' });
+    const db = getDb();
+    const user = db.users.find(u => u.id === String(requesterId));
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    // Create or reuse customer
+    let customerId = user.stripeCustomerId;
+    if (!customerId) {
+      const customer = await stripe.customers.create({ email: user.email, name: user.name });
+      customerId = customer.id;
+      user.stripeCustomerId = customerId;
+      saveDb(db);
+    }
+
+    // Use a price id from env if provided, otherwise create a product+price on the fly
+    let priceId = process.env.STRIPE_PRICE_ID;
+    if (!priceId) {
+      const product = await stripe.products.create({ name: 'DYGO Premium Monthly', description: 'Subscripción mensual a DYGO Premium' });
+      const price = await stripe.prices.create({ product: product.id, currency: 'usd', recurring: { interval: 'month' }, unit_amount: 499 }); // $4.99
+      priceId = price.id;
+    }
+
+    const successUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}?session=success`;
+    const cancelUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}?session=cancel`;
+
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      payment_method_types: ['card'],
+      line_items: [{ price: priceId, quantity: 1 }],
+      customer: customerId,
+      success_url: successUrl,
+      cancel_url: cancelUrl
+    });
+
+    return res.json({ url: session.url });
+  } catch (err) {
+    console.error('Error creating checkout session', err);
+    return res.status(500).json({ error: 'Error creating checkout session' });
+  }
+});
+
+app.post('/api/stripe/create-portal-session', async (req, res) => {
+  try {
+    const requesterId = req.headers['x-user-id'] || req.headers['x-userid'];
+    if (!requesterId) return res.status(401).json({ error: 'Missing requester id' });
+    if (!process.env.STRIPE_SECRET_KEY) return res.status(500).json({ error: 'Stripe not configured on server' });
+
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2022-11-15' });
+    const db = getDb();
+    const user = db.users.find(u => u.id === String(requesterId));
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user.stripeCustomerId) return res.status(400).json({ error: 'No stripe customer' });
+
+    const returnUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const session = await stripe.billingPortal.sessions.create({ customer: user.stripeCustomerId, return_url: returnUrl });
+    return res.json({ url: session.url });
+  } catch (err) {
+    console.error('Error creating portal session', err);
+    return res.status(500).json({ error: 'Error creating portal session' });
+  }
+});
+
+// --- STRIPE: webhook to keep subscription status in sync ---
+// Use raw body for signature verification
+app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  const payload = req.body;
+
+  let event;
+  if (process.env.STRIPE_WEBHOOK_SECRET) {
+    try {
+      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2022-11-15' });
+      event = stripe.webhooks.constructEvent(payload, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    } catch (err) {
+      console.warn('Webhook signature verification failed, event rejected');
+      return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+  } else {
+    // Without webhook secret, parse body (only for dev). req.body is a Buffer because of express.raw
+    try { event = JSON.parse(payload.toString()); } catch (e) { return res.status(400).send('Invalid payload'); }
+  }
+
+  try {
+    const db = getDb();
+
+    switch (event.type) {
+      case 'checkout.session.completed': {
+        const session = event.data.object;
+        // Retrieve subscription data
+        if (session.mode !== 'subscription') break;
+        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2022-11-15' });
+        const subscription = await stripe.subscriptions.retrieve(session.subscription);
+        const customerId = subscription.customer;
+        const subId = subscription.id;
+        const periodEnd = subscription.current_period_end * 1000;
+
+        const user = db.users.find(u => u.stripeCustomerId === customerId || (u.email && String(u.email).toLowerCase() === String(session.customer_details?.email).toLowerCase()));
+        if (user) {
+          user.isPremium = true;
+          user.premiumUntil = periodEnd;
+          user.stripeSubscriptionId = subId;
+          saveDb(db);
+          console.log(`✅ User ${user.email} marked premium until ${new Date(periodEnd)}`);
+        }
+        break;
+      }
+      case 'invoice.payment_failed': {
+        const invoice = event.data.object;
+        const subscriptionId = invoice.subscription;
+        const subs = db.users.filter(u => u.stripeSubscriptionId === subscriptionId);
+        subs.forEach(u => { u.isPremium = false; u.premiumUntil = undefined; });
+        saveDb(db);
+        break;
+      }
+      case 'customer.subscription.deleted': {
+        const subscription = event.data.object;
+        const subscriptionId = subscription.id;
+        const subs = db.users.filter(u => u.stripeSubscriptionId === subscriptionId);
+        subs.forEach(u => { u.isPremium = false; u.premiumUntil = undefined; u.stripeSubscriptionId = undefined; });
+        saveDb(db);
+        break;
+      }
+      case 'invoice.payment_succeeded': {
+        const invoice = event.data.object;
+        const subscriptionId = invoice.subscription;
+        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2022-11-15' });
+        const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+        const periodEnd = subscription.current_period_end * 1000;
+        const subs = db.users.filter(u => u.stripeSubscriptionId === subscriptionId || u.stripeCustomerId === subscription.customer);
+        subs.forEach(u => { u.isPremium = true; u.premiumUntil = periodEnd; u.stripeSubscriptionId = subscriptionId; });
+        saveDb(db);
+        break;
+      }
+      default:
+        // ignore
+    }
+
+    res.json({ received: true });
+  } catch (err) {
+    console.error('Error handling webhook', err);
+    res.status(500).send('Webhook handler error');
+  }
+});
+
 
 
 // --- RUTAS DE USUARIOS ---
@@ -321,11 +477,29 @@ app.get('/api/users/:id', (req, res) => {
   const user = db.users.find((u) => u.id === req.params.id);
 
   if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+  // Recompute premium status if needed
+  if (user.premiumUntil && Number(user.premiumUntil) < Date.now()) {
+    user.isPremium = false;
+    user.premiumUntil = undefined;
+    saveDb(db);
+  }
+
   res.json(user);
 });
 
 app.get('/api/users', (_req, res) => {
   const db = getDb();
+
+  // Normalize premium flags
+  db.users.forEach(u => {
+    if (u.premiumUntil && Number(u.premiumUntil) < Date.now()) {
+      u.isPremium = false;
+      u.premiumUntil = undefined;
+    }
+  });
+  saveDb(db);
+
   res.json(db.users);
 });
 

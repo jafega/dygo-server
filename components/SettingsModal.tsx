@@ -42,6 +42,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
   const [changePasswordStatus, setChangePasswordStatus] = useState<'idle'|'success'|'error'>('idle');
   const [changePasswordMsg, setChangePasswordMsg] = useState('');
 
+  const [premiumLoading, setPremiumLoading] = useState(false);
+  const [premiumError, setPremiumError] = useState('');
+
   // UX states for password inputs
   const [showCurrent, setShowCurrent] = useState(false);
   const [showNew, setShowNew] = useState(false);
@@ -309,6 +312,62 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                                         </button>
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+
+                        {/* PREMIUM CARD */}
+                        <div className="bg-white p-4 rounded-xl border">
+                            <div className="flex items-start justify-between">
+                                <div>
+                                    <h4 className="text-sm font-bold">DYGO Premium</h4>
+                                    <p className="text-xs text-slate-500">Suscripción mensual. Obtén acceso a funciones premium como análisis de entradas por voz y generación de reporte semanal. (En este demo la suscripción sólo marca tu cuenta como premium).</p>
+                                </div>
+                                <div className="text-sm">
+                                    {currentUser?.isPremium || (currentUser?.premiumUntil && Number(currentUser.premiumUntil) > Date.now()) ? (
+                                        <span className="px-2 py-1 bg-green-50 text-green-700 rounded-full text-xs">Activo</span>
+                                    ) : (
+                                        <span className="px-2 py-1 bg-slate-100 text-slate-600 rounded-full text-xs">No activo</span>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="mt-3 space-y-3">
+                                <div className="flex items-center justify-between gap-3">
+                                    {!(currentUser?.isPremium || (currentUser?.premiumUntil && Number(currentUser.premiumUntil) > Date.now())) ? (
+                                        <div className="flex gap-2">
+                                          <button onClick={async () => {
+                                              setPremiumLoading(true);
+                                              try {
+                                                  const resp = await AuthService.createCheckoutSession();
+                                                  // Open Stripe hosted checkout in a new tab
+                                                  if (resp?.url) window.open(resp.url, '_blank');
+                                              } catch (err:any) {
+                                                  console.error(err);
+                                                  setPremiumError(err?.message || 'Error al iniciar pago');
+                                              } finally { setPremiumLoading(false); }
+                                          }} className={`flex-1 py-3 rounded-xl font-medium text-white ${premiumLoading ? 'bg-indigo-300 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'}`} disabled={premiumLoading}>
+                                              {premiumLoading ? 'Redirigiendo...' : 'Activar Premium'}
+                                          </button>
+                                          <button onClick={async () => { const refreshed = await getCurrentUser(); setCurrentUser(refreshed || null); }} className="px-3 py-2 rounded-xl bg-white border">Actualizar</button>
+                                        </div>
+                                    ) : (
+                                        <div className="flex-1 flex gap-2">
+                                            <button onClick={async () => {
+                                                setPremiumLoading(true);
+                                                try {
+                                                    const resp = await AuthService.createBillingPortalSession();
+                                                    if (resp?.url) window.open(resp.url, '_blank');
+                                                } catch (err:any) {
+                                                    setPremiumError(err?.message || 'Error abriendo portal');
+                                                } finally { setPremiumLoading(false); }
+                                            }} className="flex-1 py-3 rounded-xl bg-white border hover:bg-slate-50">Administrar suscripción</button>
+                                            <button onClick={async () => { const refreshed = await getCurrentUser(); setCurrentUser(refreshed || null); }} className="px-3 py-2 rounded-xl border">Actualizar</button>
+                                            <div className="text-xs text-slate-500 mt-2">Válido hasta: {currentUser?.premiumUntil ? new Date(Number(currentUser.premiumUntil)).toLocaleDateString() : '—'}</div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {premiumError && <div className="mt-1 p-2 rounded text-sm bg-red-50 text-red-800">{premiumError}</div>}
                             </div>
                         </div>
 

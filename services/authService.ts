@@ -318,5 +318,52 @@ export const adminDeleteUser = async (targetEmail: string) => {
     saveLocalUsers(users);
 };
 
+// Stripe: create a Checkout session (redirect to Stripe hosted checkout)
+export const createCheckoutSession = async () => {
+    if (!USE_BACKEND) {
+        // Local demo: just toggle premium for 30 days
+        const current = await getCurrentUser();
+        if (!current) throw new Error('No authenticated user');
+        const users = getLocalUsers();
+        const idx = users.findIndex(u => u.id === current.id);
+        if (idx === -1) throw new Error('Usuario no encontrado (Local).');
+        users[idx].isPremium = true;
+        users[idx].premiumUntil = Date.now() + 30 * 24 * 60 * 60 * 1000;
+        saveLocalUsers(users);
+        return { url: window.location.href };
+    }
+
+    const current = await getCurrentUser();
+    if (!current) throw new Error('No authenticated user');
+    const headers: Record<string,string> = { 'Content-Type': 'application/json' };
+    if (current?.id) headers['x-user-id'] = current.id;
+    const res = await fetch(`${API_URL}/api/stripe/create-checkout-session`, { method: 'POST', headers, body: JSON.stringify({}) });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Error creating checkout session');
+    }
+    return await res.json();
+};
+
+export const createBillingPortalSession = async () => {
+    if (!USE_BACKEND) {
+        const current = await getCurrentUser();
+        if (!current) throw new Error('No authenticated user');
+        // Local demo: just return same page
+        return { url: window.location.href };
+    }
+
+    const current = await getCurrentUser();
+    if (!current) throw new Error('No authenticated user');
+    const headers: Record<string,string> = { 'Content-Type': 'application/json' };
+    if (current?.id) headers['x-user-id'] = current.id;
+    const res = await fetch(`${API_URL}/api/stripe/create-portal-session`, { method: 'POST', headers, body: JSON.stringify({}) });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Error creating portal session');
+    }
+    return await res.json();
+};
+
 
 

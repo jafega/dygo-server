@@ -10,6 +10,12 @@ export interface User {
   accessList: string[]; // For Patients: List of Psychologist IDs who can view data. For Psychs: List of Patient IDs.
   // Optional OAuth fields
   googleId?: string;
+
+  // Premium subscription fields
+  isPremium?: boolean;
+  premiumUntil?: number; // timestamp in ms
+  stripeCustomerId?: string;
+  stripeSubscriptionId?: string;
 }
 
 export interface Invitation {
