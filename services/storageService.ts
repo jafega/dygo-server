@@ -148,6 +148,18 @@ export const sendInvitation = async (fromPsychId: string, fromName: string, toEm
     if (invs.find(i => i.fromPsychologistId === fromPsychId && i.toUserEmail === toEmail && i.status === 'PENDING')) {
         throw new Error("Invitación ya pendiente.");
     }
+
+    // Prevent sending an invitation if the patient is already linked to this psychologist
+    try {
+        const existingUser = await AuthService.getUserByEmail(toEmail.trim());
+        if (existingUser && existingUser.accessList && existingUser.accessList.includes(fromPsychId)) {
+            throw new Error('Paciente ya agregado.');
+        }
+    } catch (err) {
+        // If AuthService throws due to network and we are using backend, let the original flow handle it.
+        // We only want to block in clear cases where we can check the user locally or via backend.
+    }
+
     const newInv: Invitation = {
         id: crypto.randomUUID(),
         fromPsychologistId: fromPsychId,

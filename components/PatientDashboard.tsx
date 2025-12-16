@@ -59,10 +59,31 @@ const PatientDashboard: React.FC = () => {
     setInviteStep('DECISION');
     setInviteStatus('idle');
     setMsg('');
+
+    // If user exists and is already part of our patients, surface that immediately
+    if (existingUser && currentUser) {
+        const already = existingUser.accessList && existingUser.accessList.includes(currentUser.id);
+        const inPatients = patients.some(p => p.id === existingUser.id);
+        if (already || inPatients) {
+            setInviteStatus('error');
+            setMsg('Este paciente ya está en tu lista.');
+        }
+    }
   };
 
   const handleSendRequest = async () => {
     if (!currentUser || !inviteEmail) return;
+
+    // Re-check if the patient is already added to avoid race conditions
+    if (foundUser) {
+        const already = (foundUser.accessList && foundUser.accessList.includes(currentUser.id)) || patients.some(p => p.id === foundUser.id);
+        if (already) {
+            setInviteStatus('error');
+            setMsg('Este paciente ya está en tu lista.');
+            return;
+        }
+    }
+
     try {
         await sendInvitation(currentUser.id, currentUser.name, inviteEmail.trim());
         setInviteStatus('success');
@@ -136,12 +157,29 @@ const PatientDashboard: React.FC = () => {
                          <button onClick={() => setInviteStep('INPUT')} className="text-xs text-indigo-600 hover:underline flex items-center gap-1"><ArrowLeft size={12} /> Cambiar</button>
                      </div>
                      {foundUser ? (
-                         <div className="bg-green-50 border border-green-200 rounded-xl p-5 text-center shadow-sm">
-                             <div className="w-12 h-12 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-3"><UserCheck size={24} /></div>
-                             <h5 className="font-bold text-green-900 text-lg mb-1">Usuario Encontrado</h5>
-                             <p className="text-sm text-green-800 mb-4"><strong>{foundUser.name}</strong> ya tiene cuenta.</p>
-                             <button onClick={handleSendRequest} className="w-full py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center justify-center gap-2"><Send size={16} /> Enviar Solicitud</button>
-                         </div>
+                        // If the found user is already added, show an informative state and disable the send button
+                        (() => {
+                            const alreadyAdded = (foundUser.accessList && foundUser.accessList.includes(currentUser?.id)) || patients.some(p => p.id === foundUser.id);
+                            if (alreadyAdded) {
+                                return (
+                                    <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-5 text-center shadow-sm">
+                                        <div className="w-12 h-12 bg-yellow-100 text-yellow-700 rounded-full flex items-center justify-center mx-auto mb-3"><UserCheck size={24} /></div>
+                                        <h5 className="font-bold text-yellow-900 text-lg mb-1">Paciente Ya Añadido</h5>
+                                        <p className="text-sm text-yellow-800 mb-4"><strong>{foundUser.name}</strong> ya forma parte de tus pacientes.</p>
+                                        <button disabled className="w-full py-2.5 bg-yellow-400 text-white rounded-lg flex items-center justify-center gap-2 opacity-70 cursor-not-allowed"><UserCheck size={16} /> Añadido</button>
+                                    </div>
+                                );
+                            }
+
+                            return (
+                                <div className="bg-green-50 border border-green-200 rounded-xl p-5 text-center shadow-sm">
+                                    <div className="w-12 h-12 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-3"><UserCheck size={24} /></div>
+                                    <h5 className="font-bold text-green-900 text-lg mb-1">Usuario Encontrado</h5>
+                                    <p className="text-sm text-green-800 mb-4"><strong>{foundUser.name}</strong> ya tiene cuenta.</p>
+                                    <button onClick={handleSendRequest} className="w-full py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center justify-center gap-2"><Send size={16} /> Enviar Solicitud</button>
+                                </div>
+                            );
+                        })()
                      ) : (
                          <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 text-center shadow-sm">
                              <div className="w-12 h-12 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-3"><UserX size={24} /></div>
