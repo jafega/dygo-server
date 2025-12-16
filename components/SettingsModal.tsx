@@ -44,6 +44,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
 
   const [premiumLoading, setPremiumLoading] = useState(false);
   const [premiumError, setPremiumError] = useState('');
+    const [premiumUrl, setPremiumUrl] = useState<string | null>(null);
+    const [portalUrl, setPortalUrl] = useState<string | null>(null);
 
   // UX states for password inputs
   const [showCurrent, setShowCurrent] = useState(false);
@@ -318,10 +320,18 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                         {/* PREMIUM CARD */}
                         <div className="bg-white p-4 rounded-xl border">
                             <div className="flex items-start justify-between">
-                                <div>
-                                    <h4 className="text-sm font-bold">DYGO Premium</h4>
-                                    <p className="text-xs text-slate-500">Suscripción mensual. Obtén acceso a funciones premium como análisis de entradas por voz y generación de reporte semanal. (En este demo la suscripción sólo marca tu cuenta como premium).</p>
-                                </div>
+                                    <div>
+                                        <div className="flex items-center gap-3">
+                                            <h4 className="text-sm font-bold">DYGO Premium</h4>
+                                            <span className="text-xs px-2 py-0.5 bg-slate-100 text-slate-600 rounded">$4.99 / mes</span>
+                                        </div>
+                                        <p className="text-xs text-slate-500">Suscripción mensual. Obtén acceso a funciones premium como análisis de entradas por voz y generación de reporte semanal. (En este demo la suscripción sólo marca tu cuenta como premium).</p>
+                                        <ul className="mt-2 text-xs text-slate-500 list-disc ml-4">
+                                            <li>Análisis de entradas por voz con IA</li>
+                                            <li>Generación de reporte semanal</li>
+                                            <li>Acceso prioritario a nuevas funciones</li>
+                                        </ul>
+                                    </div>
                                 <div className="text-sm">
                                     {currentUser?.isPremium || (currentUser?.premiumUntil && Number(currentUser.premiumUntil) > Date.now()) ? (
                                         <span className="px-2 py-1 bg-green-50 text-green-700 rounded-full text-xs">Activo</span>
@@ -337,10 +347,19 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                                         <div className="flex gap-2">
                                           <button onClick={async () => {
                                               setPremiumLoading(true);
+                                              setPremiumError('');
+                                              setPremiumUrl(null);
                                               try {
                                                   const resp = await AuthService.createCheckoutSession();
-                                                  // Open Stripe hosted checkout in a new tab
-                                                  if (resp?.url) window.open(resp.url, '_blank');
+                                                  if (resp?.url) {
+                                                      setPremiumUrl(resp.url);
+                                                      const w = window.open(resp.url, '_blank', 'noopener,noreferrer');
+                                                      if (!w) {
+                                                          setPremiumError('El navegador bloqueó la nueva pestaña. Usa el enlace que aparece abajo.');
+                                                      } else {
+                                                          setPremiumError('Se abrió Stripe en una nueva pestaña. Vuelve y pulsa "Actualizar" para refrescar tu estado.');
+                                                      }
+                                                  }
                                               } catch (err:any) {
                                                   console.error(err);
                                                   setPremiumError(err?.message || 'Error al iniciar pago');
@@ -354,9 +373,15 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                                         <div className="flex-1 flex gap-2">
                                             <button onClick={async () => {
                                                 setPremiumLoading(true);
+                                                setPremiumError('');
+                                                setPortalUrl(null);
                                                 try {
                                                     const resp = await AuthService.createBillingPortalSession();
-                                                    if (resp?.url) window.open(resp.url, '_blank');
+                                                    if (resp?.url) {
+                                                        setPortalUrl(resp.url);
+                                                        const w = window.open(resp.url, '_blank', 'noopener,noreferrer');
+                                                        if (!w) setPremiumError('El navegador bloqueó la nueva pestaña para el portal. Usa el enlace que aparece abajo.');
+                                                    }
                                                 } catch (err:any) {
                                                     setPremiumError(err?.message || 'Error abriendo portal');
                                                 } finally { setPremiumLoading(false); }
@@ -368,6 +393,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                                 </div>
 
                                 {premiumError && <div className="mt-1 p-2 rounded text-sm bg-red-50 text-red-800">{premiumError}</div>}
+                                {premiumUrl && <div className="mt-2 text-sm"><a className="text-indigo-600 underline" href={premiumUrl} target="_blank" rel="noopener noreferrer">Si la pestaña no se abrió, haz clic aquí para completar el pago</a></div>}
+                                {portalUrl && <div className="mt-2 text-sm"><a className="text-indigo-600 underline" href={portalUrl} target="_blank" rel="noopener noreferrer">Abrir el portal de facturación</a></div>}
                             </div>
                         </div>
 
