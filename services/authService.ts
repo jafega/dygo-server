@@ -17,12 +17,15 @@ const saveLocalUsers = (users: User[]) => {
 
 export const getUsers = async (): Promise<User[]> => {
   if (USE_BACKEND) {
-      try {
-        const res = await fetch(`${API_URL}/users`);
-        if (res.ok) return await res.json();
-      } catch (e) {
-        console.warn("Backend offline, falling back to local.");
+    try {
+      const res = await fetch(`${API_URL}/users`);
+      if (res.ok) {
+        const data = await res.json();
+        return Array.isArray(data) ? data : [];
       }
+    } catch (e) {
+      console.warn("Backend offline, falling back to local.");
+    }
   }
   return getLocalUsers();
 };
