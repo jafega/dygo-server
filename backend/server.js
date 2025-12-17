@@ -28,7 +28,7 @@ const DB_FILE = path.join(__dirname, 'db.json');
 app.use(cors());
 app.use(express.json({ limit: '50mb' })); // Reemplaza a body-parser
 
-// --- ACCESO A "BASE DE DATOS" (db.json) ---
+// --- ACCESO A "BASE DE DATOS" (db.json o SQLite opcional) ---
 const createInitialDb = () => ({
   users: [],
   entries: [],
@@ -37,7 +37,67 @@ const createInitialDb = () => ({
   settings: {}
 });
 
+// If you want durable persistence across restarts on platforms like Render, set USE_SQLITE=true
+// and optionally SQLITE_DB_FILE to a persistent volume path. Otherwise the default db.json is used.
+const USE_SQLITE = String(process.env.USE_SQLITE || '').toLowerCase() === 'true';
+const SQLITE_DB_FILE = process.env.SQLITE_DB_FILE || path.join(__dirname, 'database.sqlite');
+let sqliteDb = null;
+
+if (USE_SQLITE) {
+  try {
+    const Database = (await import('better-sqlite3')).default;
+    sqliteDb = new Database(SQLITE_DB_FILE);
+    // Simple key-value store table: table, id, data (JSON)
+    sqliteDb.prepare(`CREATE TABLE IF NOT EXISTS store (
+      table_name TEXT NOT NULL,
+      id TEXT NOT NULL,
+      data TEXT NOT NULL,
+      PRIMARY KEY (table_name, id)
+    )`).run();
+
+    // If db.json exists and sqlite is empty, migrate JSON content into sqlite
+    const count = sqliteDb.prepare("SELECT COUNT(*) as c FROM store").get().c;
+    if (count === 0 && fs.existsSync(DB_FILE)) {
+      try {
+        const content = fs.readFileSync(DB_FILE, 'utf-8');
+        if (content && content.trim()) {
+          const parsed = JSON.parse(content);
+          const insert = sqliteDb.prepare('INSERT OR REPLACE INTO store(table_name,id,data) VALUES(@table,@id,@data)');
+          const insertTx = sqliteDb.transaction((dbObj) => {
+            (dbObj.users || []).forEach(u => insert.run({ table: 'users', id: u.id, data: JSON.stringify(u) }));
+            (dbObj.entries || []).forEach(e => insert.run({ table: 'entries', id: e.id, data: JSON.stringify(e) }));
+            (dbObj.goals || []).forEach(g => insert.run({ table: 'goals', id: g.id, data: JSON.stringify(g) }));
+            (dbObj.invitations || []).forEach(i => insert.run({ table: 'invitations', id: i.id, data: JSON.stringify(i) }));
+            const settings = dbObj.settings || {};
+            Object.keys(settings).forEach(k => insert.run({ table: 'settings', id: k, data: JSON.stringify(settings[k]) }));
+          });
+          insertTx(parsed);
+          console.log('✅ Migrated db.json to SQLite');
+        }
+      } catch (mErr) {
+        console.error('❌ Failed migrating db.json to sqlite', mErr);
+      }
+    }
+
+    console.log('✅ SQLite persistence enabled:', SQLITE_DB_FILE);
+  } catch (err) {
+    console.error('❌ Unable to enable SQLite persistence, falling back to db.json (install better-sqlite3?)', err);
+    sqliteDb = null;
+  }
+}
+
 const getDb = () => {
+  if (sqliteDb) {
+    const read = (table) => sqliteDb.prepare('SELECT data FROM store WHERE table_name = ?').all(table).map(r => JSON.parse(r.data));
+    const users = read('users');
+    const entries = read('entries');
+    const goals = read('goals');
+    const invitations = read('invitations');
+    const settingsArr = read('settings');
+    const settings = Object.fromEntries(settingsArr.map((s) => [s.id, s]));
+    return { users, entries, goals, invitations, settings };
+  }
+
   // 1. Si no existe, crearla
   if (!fs.existsSync(DB_FILE)) {
     console.log('⚠️ db.json no encontrado. Creando nueva base de datos...');
@@ -73,6 +133,31 @@ const getDb = () => {
 };
 
 const saveDb = (data) => {
+  if (sqliteDb) {
+    const del = sqliteDb.prepare('DELETE FROM store WHERE table_name = ?');
+    const insert = sqliteDb.prepare('INSERT OR REPLACE INTO store(table_name,id,data) VALUES(@table,@id,@data)');
+    const tx = sqliteDb.transaction((dbObj) => {
+      del.run('users');
+      del.run('entries');
+      del.run('goals');
+      del.run('invitations');
+      del.run('settings');
+
+      (dbObj.users || []).forEach(u => insert.run({ table: 'users', id: u.id, data: JSON.stringify(u) }));
+      (dbObj.entries || []).forEach(e => insert.run({ table: 'entries', id: e.id, data: JSON.stringify(e) }));
+      (dbObj.goals || []).forEach(g => insert.run({ table: 'goals', id: g.id, data: JSON.stringify(g) }));
+      (dbObj.invitations || []).forEach(i => insert.run({ table: 'invitations', id: i.id, data: JSON.stringify(i) }));
+      const settings = dbObj.settings || {};
+      Object.keys(settings).forEach(k => insert.run({ table: 'settings', id: k, data: JSON.stringify(settings[k]) }));
+    });
+    try {
+      tx(data);
+    } catch (e) {
+      console.error('❌ Error guardando en SQLite:', e);
+    }
+    return;
+  }
+
   try {
     fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf-8');
   } catch (error) {
@@ -642,11 +727,69 @@ app.post('/api/settings/:userId', (req, res) => {
   res.json({ success: true });
 });
 
+app.get('/api/health', (_req, res) => {
+  try {
+    if (sqliteDb) {
+      // attempt a tiny write and delete to ensure store writable
+      const id = `hc-${Date.now()}`;
+      const insert = sqliteDb.prepare('INSERT OR REPLACE INTO store(table_name,id,data) VALUES(?,?,?)');
+      const del = sqliteDb.prepare('DELETE FROM store WHERE table_name = ? AND id = ?');
+      insert.run('healthcheck', id, JSON.stringify({ ts: Date.now() }));
+      del.run('healthcheck', id);
+      return res.json({ ok: true, persistence: 'sqlite', sqliteFile: SQLITE_DB_FILE });
+    }
+    // json fallback: try writing and rolling back by creating a temp file
+    try {
+      const tmp = `${DB_FILE}.tmp.${Date.now()}`;
+      fs.writeFileSync(tmp, 'ok');
+      fs.unlinkSync(tmp);
+      return res.json({ ok: true, persistence: 'json', dbFile: DB_FILE });
+    } catch (e) {
+      console.error('Healthcheck filesystem failed', e);
+      return res.status(500).json({ ok: false, error: 'Filesystem not writable' });
+    }
+  } catch (err) {
+    console.error('Healthcheck error', err);
+    return res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+app.get('/api/dbinfo', (_req, res) => {
+  try {
+    if (sqliteDb) {
+      const users = sqliteDb.prepare("SELECT COUNT(*) as c FROM store WHERE table_name = 'users'").get().c;
+      const entries = sqliteDb.prepare("SELECT COUNT(*) as c FROM store WHERE table_name = 'entries'").get().c;
+      const goals = sqliteDb.prepare("SELECT COUNT(*) as c FROM store WHERE table_name = 'goals'").get().c;
+      const invitations = sqliteDb.prepare("SELECT COUNT(*) as c FROM store WHERE table_name = 'invitations'").get().c;
+      const settings = sqliteDb.prepare("SELECT COUNT(*) as c FROM store WHERE table_name = 'settings'").get().c;
+      return res.json({ persistence: 'sqlite', sqliteFile: SQLITE_DB_FILE, counts: { users, entries, goals, invitations, settings } });
+    }
+
+    // json fallback
+    const db = getDb();
+    return res.json({ persistence: 'json', dbFile: DB_FILE, counts: { users: (db.users||[]).length, entries: (db.entries||[]).length, goals: (db.goals||[]).length, invitations: (db.invitations||[]).length, settings: Object.keys(db.settings||{}).length } });
+  } catch (err) {
+    console.error('Error getting db info', err);
+    return res.status(500).json({ error: 'Error getting db info' });
+  }
+});
+
 app.get('/', (_req, res) => {
   res.send('DYGO API OK ✅ Usa /api/users, /api/entries, etc.');
 });
 
 // --- INICIO DEL SERVIDOR ---
+// Warn in production if persistence is likely ephemeral
+if (process.env.NODE_ENV === 'production' && !USE_SQLITE) {
+  console.warn('⚠️ Running in production without SQLite. Data written to local db.json may be lost on platforms with ephemeral filesystems. Consider enabling SQLite or using a managed DB.');
+}
+if (USE_SQLITE) {
+  console.log(`📦 Using SQLite DB: ${SQLITE_DB_FILE}`);
+  if (process.env.NODE_ENV === 'production') {
+    console.warn('⚠️ Ensure that the SQLite file path is on a persistent disk in your hosting environment (e.g., Render persistent disk).');
+  }
+}
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log('\n🚀 SERVIDOR DYGO (ES MODULES) LISTO');
   console.log(`📡 URL: http://localhost:${PORT}`);

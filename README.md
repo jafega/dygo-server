@@ -63,4 +63,26 @@ Forgotten password (demo reset)
 - By default the app tries to use the backend (see `services/config.ts`). If the backend is unavailable, the app will surface an error unless you explicitly set `VITE_ALLOW_LOCAL_FALLBACK=true` in `.env.local` for development convenience (NOT recommended in production).
 - The app now attempts to migrate any localStorage data to the backend on login when the backend is reachable.
 
+Persistence note ⚠️
+- Some hosting platforms (Render, Vercel, etc.) provide ephemeral filesystems for web services; writing to a local file (e.g. `db.json` or `database.sqlite`) on those platforms can be lost after restarts or redeploys (often within minutes). To make data durable you must either:
+  1. Enable SQLite and mount a persistent disk on your host, then set `USE_SQLITE=true` and `SQLITE_DB_FILE` to the persistent path, or
+  2. Use a managed database (Postgres, MySQL, etc.). If you prefer, I can add Postgres support and a migration path from the JSON store.
+
+If you want me to implement Postgres support and automatic migration, I can add it and tests. Otherwise, let me know which option you prefer and I’ll provide deployment steps for Render (or your hosting).
+
+Render-specific steps to enable SQLite persistence (works since you already have a mounted disk at `/var/data`):
+
+1. In Render dashboard, go to your Service > Environment / Variables and add:
+   - `USE_SQLITE=true`
+   - `SQLITE_DB_FILE=/var/data/database.sqlite`
+2. Make sure the service has the `/var/data` volume mounted as a persistent disk (Render: add a Persistent Disk and mount it at `/var/data`).
+3. Deploy/restart the service. On first run the server will create `database.sqlite` there and attempt to migrate data from `db.json` into the SQLite tables (if the sqlite store is empty).
+
+Verify:
+- Call `GET https://<your-service>/api/dbinfo` — it will return JSON with `persistence: "sqlite"`, `sqliteFile`, and counts for users/entries/goals/invitations/settings.
+- Call `GET https://<your-service>/api/health` to ensure persistence is writable (returns 200 when ok).
+- Create a test entry via the API (`POST /api/entries`) and call `/api/dbinfo` again to verify the `entries` count increased.
+- Confirm data persists across redeploys/restarts.
+
+If you'd like, I can add an optional health-check endpoint that fails when persistence isn't writable (helpful for Render's health checks), or implement Postgres support instead for a managed DB. Which would you prefer?
 
