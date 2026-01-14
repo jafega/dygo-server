@@ -165,6 +165,24 @@ export const signInWithGoogle = async (idToken: string): Promise<User> => {
     throw new Error('Google Sign-in is only supported when USE_BACKEND is true');
 };
 
+// Sign in with Supabase (exchange Supabase access token with backend)
+export const signInWithSupabase = async (accessToken: string): Promise<User> => {
+    if (USE_BACKEND) {
+        const res = await fetch(`${API_URL}/auth/supabase`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ access_token: accessToken })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Error signing in with Supabase');
+        }
+        const user = await res.json();
+        localStorage.setItem(CURRENT_USER_KEY, user.id);
+        return user;
+    }
+
+    throw new Error('Supabase Sign-in is only supported when USE_BACKEND is true');
+};
+
 export const logout = () => {
   localStorage.removeItem(CURRENT_USER_KEY);
 };

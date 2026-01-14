@@ -12,3 +12,7 @@ export const GOOGLE_CLIENT_ID = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID 
 // by setting VITE_ALLOW_LOCAL_FALLBACK=true in .env.local (not recommended for prod).
 export const USE_BACKEND = true; 
 export const ALLOW_LOCAL_FALLBACK = (String((import.meta as any).env?.VITE_ALLOW_LOCAL_FALLBACK || '').toLowerCase() === 'true');
+
+// Supabase client env (frontend)
+export const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || '';
+export const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';

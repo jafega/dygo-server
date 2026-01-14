@@ -68,7 +68,20 @@ Persistence note ⚠️
   1. Enable SQLite and mount a persistent disk on your host, then set `USE_SQLITE=true` and `SQLITE_DB_FILE` to the persistent path, or
   2. Use a managed database (Postgres, MySQL, etc.). If you prefer, I can add Postgres support and a migration path from the JSON store.
 
-If you want me to implement Postgres support and automatic migration, I can add it and tests. Otherwise, let me know which option you prefer and I’ll provide deployment steps for Render (or your hosting).
+Postgres support is available: set a `DATABASE_URL` environment variable (e.g. `postgres://user:pass@host:5432/dbname`) and the server will create required tables and attempt to migrate data from `db.json` or SQLite into Postgres on first run. Verify with `GET /api/dbinfo` which will return `persistence: "postgres"` when active. If you want, I can add a CLI migration tool and tests for the Postgres path.
+
+Supabase (Postgres + Auth) quick guide:
+- Set these env vars in your deployment:
+  - `DATABASE_URL` (Postgres connection string, add `?sslmode=require` if needed)
+  - `SUPABASE_URL` (e.g. `https://<project>.supabase.co`)
+  - `SUPABASE_ANON_KEY` (frontend anon key)
+  - `SUPABASE_SERVICE_ROLE_KEY` (server role key, keep secret)
+- To enable OAuth with Supabase:
+  1. Configure Google provider at Supabase Dashboard → Auth → Providers (add redirect URL `https://<your-app>/` or `https://<your-app>/?supabase_auth=1`).
+  2. Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to your frontend env (.env.local or Render env).
+  3. The app's auth screen will redirect to Supabase and handle the callback, exchanging the access token with `POST /api/auth/supabase` to create/return a local user.
+
+If you'd like, I can add a migration audit/CLI or integration tests for Supabase auth.
 
 Render-specific steps to enable SQLite persistence (works since you already have a mounted disk at `/var/data`):
 

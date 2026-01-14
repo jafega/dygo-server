@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { UserRole } from '../types';
 import * as AuthService from '../services/authService';
 import { Mail, Lock, User, ArrowRight, Loader2, Server, WifiOff, CheckCircle } from 'lucide-react';
-import { GOOGLE_CLIENT_ID } from '../services/config';
+import { GOOGLE_CLIENT_ID, SUPABASE_URL, SUPABASE_ANON_KEY } from '../services/config';
 import { API_URL } from '../services/config';
+import { createClient } from '@supabase/supabase-js';
 
 // Custom Dygo Logo Component for Auth
 const DygoLogoAuth: React.FC = () => (
@@ -60,7 +61,40 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
 
 
 
-    // Initialize Google Identity Services if client id is present
+    // Initialize Supabase client if configured and handle redirect callback
+    const supabaseClient = (SUPABASE_URL && SUPABASE_ANON_KEY) ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+
+    // If we detect a Supabase OAuth redirect with an access_token in the hash, extract it and send to backend
+    const handleSupabaseCallback = async () => {
+        try {
+            const hash = window.location.hash || '';
+            if (!hash) return;
+            // Supabase returns tokens in the hash fragment: e.g. #access_token=...
+            const params = new URLSearchParams(hash.replace('#', '?'));
+            const accessToken = params.get('access_token');
+            if (!accessToken) return;
+
+            setIsLoading(true);
+            // Use AuthService helper to exchange token and get/create local user
+            try {
+                await AuthService.signInWithSupabase(accessToken);
+            } catch (err:any) {
+                throw err;
+            }
+            // Clean up URL (remove hash)
+            history.replaceState(null, '', window.location.pathname + window.location.search);
+            onAuthSuccess();
+        } catch (err: any) {
+            setError(err?.message || 'Error con Supabase Sign-In');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    // Run the callback handler on mount
+    handleSupabaseCallback();
+
+    // If older Google flow is still desired, keep GIS conditional rendering
     const googleClient = (window as any)._dygo_google_client_initialized;
     const clientId = GOOGLE_CLIENT_ID || null;
     if (!googleClient && clientId) {
@@ -162,6 +196,29 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
             {error && (
                 <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100 animate-in fade-in slide-in-from-top-1">
                     {error}
+                </div>
+            )}
+
+            {/* Supabase OAuth button (preferred) */}
+            {SUPABASE_URL && SUPABASE_ANON_KEY && (
+                <div className="mb-4 flex justify-center">
+                    <button onClick={async () => {
+                        try {
+                            setIsLoading(true);
+                            const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+                            const { data, error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: `${window.location.origin}/?supabase_auth=1` } });
+                            if (error) throw error;
+                            // Some flows return a URL to redirect to
+                            if (data?.url) window.location.href = data.url;
+                        } catch (err: any) {
+                            setError(err?.message || 'Error iniciando OAuth');
+                        } finally {
+                            setIsLoading(false);
+                        }
+                    }} className="w-full max-w-xs bg-white text-slate-700 rounded-xl px-4 py-3 shadow-sm hover:shadow-md flex items-center justify-center gap-3">
+                        <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" fill="#22c55e"/><path d="M7.5 12a4.5 4.5 0 0 1 9 0" stroke="#064e3b" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                        <span className="text-sm font-medium">Iniciar con Google (Supabase)</span>
+                    </button>
                 </div>
             )}
 

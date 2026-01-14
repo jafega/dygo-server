@@ -42,6 +42,8 @@ const createInitialDb = () => ({
 const USE_SQLITE = String(process.env.USE_SQLITE || '').toLowerCase() === 'true';
 const SQLITE_DB_FILE = process.env.SQLITE_DB_FILE || path.join(__dirname, 'database.sqlite');
 let sqliteDb = null;
+let pgPool = null;
+const USE_POSTGRES = !!process.env.DATABASE_URL;
 
 if (USE_SQLITE) {
   try {
@@ -55,30 +57,6 @@ if (USE_SQLITE) {
       PRIMARY KEY (table_name, id)
     )`).run();
 
-    // If db.json exists and sqlite is empty, migrate JSON content into sqlite
-    const count = sqliteDb.prepare("SELECT COUNT(*) as c FROM store").get().c;
-    if (count === 0 && fs.existsSync(DB_FILE)) {
-      try {
-        const content = fs.readFileSync(DB_FILE, 'utf-8');
-        if (content && content.trim()) {
-          const parsed = JSON.parse(content);
-          const insert = sqliteDb.prepare('INSERT OR REPLACE INTO store(table_name,id,data) VALUES(@table,@id,@data)');
-          const insertTx = sqliteDb.transaction((dbObj) => {
-            (dbObj.users || []).forEach(u => insert.run({ table: 'users', id: u.id, data: JSON.stringify(u) }));
-            (dbObj.entries || []).forEach(e => insert.run({ table: 'entries', id: e.id, data: JSON.stringify(e) }));
-            (dbObj.goals || []).forEach(g => insert.run({ table: 'goals', id: g.id, data: JSON.stringify(g) }));
-            (dbObj.invitations || []).forEach(i => insert.run({ table: 'invitations', id: i.id, data: JSON.stringify(i) }));
-            const settings = dbObj.settings || {};
-            Object.keys(settings).forEach(k => insert.run({ table: 'settings', id: k, data: JSON.stringify(settings[k]) }));
-          });
-          insertTx(parsed);
-          console.log('✅ Migrated db.json to SQLite');
-        }
-      } catch (mErr) {
-        console.error('❌ Failed migrating db.json to sqlite', mErr);
-      }
-    }
-
     console.log('✅ SQLite persistence enabled:', SQLITE_DB_FILE);
   } catch (err) {
     console.error('❌ Unable to enable SQLite persistence, falling back to db.json (install better-sqlite3?)', err);
@@ -86,7 +64,108 @@ if (USE_SQLITE) {
   }
 }
 
+if (USE_POSTGRES) {
+  try {
+    const { Pool } = await import('pg');
+    const poolConfig = { connectionString: process.env.DATABASE_URL, max: 10 };
+
+    // Supabase and many managed Postgres instances require SSL. Detect common indicators and set ssl config.
+    // - If `DATABASE_URL` contains `sslmode=require` or user sets SUPABASE_SSL=true, enable ssl with relaxed verification.
+    if ((process.env.DATABASE_URL && process.env.DATABASE_URL.includes('sslmode=require')) || process.env.SUPABASE_SSL === 'true') {
+      poolConfig.ssl = { rejectUnauthorized: false };
+      console.log('ℹ️ Enabling SSL for Postgres connection (rejectUnauthorized: false)');
+    }
+
+    pgPool = new Pool(poolConfig);
+
+    // Ensure tables exist
+    await pgPool.query(`CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, data JSONB NOT NULL)`);
+    await pgPool.query(`CREATE TABLE IF NOT EXISTS entries (id TEXT PRIMARY KEY, data JSONB NOT NULL)`);
+    await pgPool.query(`CREATE TABLE IF NOT EXISTS goals (id TEXT PRIMARY KEY, data JSONB NOT NULL)`);
+    await pgPool.query(`CREATE TABLE IF NOT EXISTS invitations (id TEXT PRIMARY KEY, data JSONB NOT NULL)`);
+    await pgPool.query(`CREATE TABLE IF NOT EXISTS settings (id TEXT PRIMARY KEY, data JSONB NOT NULL)`);
+
+    // If Postgres empty, try to migrate from sqlite or db.json
+    const { rows } = await pgPool.query("SELECT COUNT(*) as c FROM entries");
+    const count = parseInt(rows[0].c, 10);
+    if (count === 0) {
+      console.log('ℹ️ Postgres empty, attempting migration from sqlite or db.json');
+      // Prefer sqlite if present
+      if (sqliteDb) {
+        try {
+          const read = (table) => sqliteDb.prepare('SELECT id, data FROM store WHERE table_name = ?').all(table);
+          const insert = (table, id, data) => pgPool.query(`INSERT INTO ${table} (id, data) VALUES ($1,$2)`, [id, data]);
+          const users = read('users');
+          for (const u of users) await insert('users', u.id, JSON.parse(u.data));
+          const entries = read('entries');
+          for (const e of entries) await insert('entries', e.id, JSON.parse(e.data));
+          const goals = read('goals');
+          for (const g of goals) await insert('goals', g.id, JSON.parse(g.data));
+          const invitations = read('invitations');
+          for (const i of invitations) await insert('invitations', i.id, JSON.parse(i.data));
+          const settings = read('settings');
+          for (const s of settings) await insert('settings', s.id, JSON.parse(s.data));
+          console.log('✅ Migrated data from SQLite to Postgres');
+        } catch (mErr) { console.error('❌ Failed migrating from sqlite to postgres', mErr); }
+      } else if (fs.existsSync(DB_FILE)) {
+        try {
+          const content = fs.readFileSync(DB_FILE, 'utf-8');
+          if (content && content.trim()) {
+            const parsed = JSON.parse(content);
+            const insert = async (table, items, isObj = false) => {
+              if (!items) return;
+              if (isObj) {
+                for (const k of Object.keys(items)) {
+                  await pgPool.query(`INSERT INTO ${table} (id, data) VALUES ($1,$2)`, [k, items[k]]);
+                }
+              } else {
+                for (const it of items) await pgPool.query(`INSERT INTO ${table} (id, data) VALUES ($1,$2)`, [it.id, it]);
+              }
+            };
+            await insert('users', parsed.users);
+            await insert('entries', parsed.entries);
+            await insert('goals', parsed.goals);
+            await insert('invitations', parsed.invitations);
+            await insert('settings', parsed.settings, true);
+            console.log('✅ Migrated db.json to Postgres');
+          }
+        } catch (mErr) { console.error('❌ Failed migrating db.json to postgres', mErr); }
+      }
+    }
+
+    console.log('✅ Postgres persistence enabled (DATABASE_URL)', process.env.DATABASE_URL ? '<redacted>' : '');
+
+    // Load current data into in-memory cache for fast sync with existing sync logic
+    try {
+      const q = async (table) => {
+        const r = await pgPool.query(`SELECT id, data FROM ${table}`);
+        return r.rows.map(row => ({ id: row.id, ...row.data }));
+      };
+      const users = await q('users');
+      const entries = await q('entries');
+      const goals = await q('goals');
+      const invitations = await q('invitations');
+      const settingsArr = await q('settings');
+      const settings = Object.fromEntries(settingsArr.map(s => [s.id, s]));
+      pgDbCache = { users, entries, goals, invitations, settings };
+      console.log('ℹ️ Postgres data loaded into cache');
+    } catch (err) {
+      console.error('❌ Failed populating pg cache', err);
+    }
+  } catch (err) {
+    console.error('❌ Unable to enable Postgres persistence', err);
+    pgPool = null;
+  }
+}
+
+let pgDbCache = null;
+
 const getDb = () => {
+  // Postgres: return in-memory cache (keeps handler sync)
+  if (pgPool && pgDbCache) {
+    return pgDbCache;
+  }
+
   if (sqliteDb) {
     const read = (table) => sqliteDb.prepare('SELECT data FROM store WHERE table_name = ?').all(table).map(r => JSON.parse(r.data));
     const users = read('users');
@@ -133,6 +212,41 @@ const getDb = () => {
 };
 
 const saveDb = (data) => {
+  // Keep in-memory cache in sync for Postgres, then persist in background
+  if (pgPool) {
+    pgDbCache = data;
+    (async () => {
+      let client;
+      try {
+        client = await pgPool.connect();
+        await client.query('BEGIN');
+        await client.query('DELETE FROM users');
+        await client.query('DELETE FROM entries');
+        await client.query('DELETE FROM goals');
+        await client.query('DELETE FROM invitations');
+        await client.query('DELETE FROM settings');
+
+        const insert = async (table, id, obj) => client.query(`INSERT INTO ${table} (id, data) VALUES ($1,$2)`, [id, obj]);
+
+        for (const u of (data.users || [])) await insert('users', u.id, u);
+        for (const e of (data.entries || [])) await insert('entries', e.id, e);
+        for (const g of (data.goals || [])) await insert('goals', g.id, g);
+        for (const i of (data.invitations || [])) await insert('invitations', i.id, i);
+        const settings = data.settings || {};
+        for (const k of Object.keys(settings)) await insert('settings', k, settings[k]);
+
+        await client.query('COMMIT');
+      } catch (err) {
+        if (client) await client.query('ROLLBACK').catch(() => {});
+        console.error('❌ Error guardando en Postgres:', err);
+      } finally {
+        if (client) client.release();
+      }
+    })();
+
+    return;
+  }
+
   if (sqliteDb) {
     const del = sqliteDb.prepare('DELETE FROM store WHERE table_name = ?');
     const insert = sqliteDb.prepare('INSERT OR REPLACE INTO store(table_name,id,data) VALUES(@table,@id,@data)');
@@ -207,6 +321,60 @@ app.post('/api/auth/register', (req, res) => {
   } catch (error) {
     console.error('❌ Error en /api/auth/register:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// Supabase OAuth token exchange + user validation
+app.post('/api/auth/supabase', async (req, res) => {
+  try {
+    const { access_token } = req.body || {};
+    if (!access_token) return res.status(400).json({ error: 'access_token is required' });
+    if (!process.env.SUPABASE_URL) return res.status(500).json({ error: 'SUPABASE_URL not configured' });
+
+    // Validate token against Supabase /auth/v1/user
+    const userInfoRes = await fetch(`${process.env.SUPABASE_URL.replace(/\/$/, '')}/auth/v1/user`, {
+      headers: {
+        'Authorization': `Bearer ${access_token}`,
+        'apikey': process.env.SUPABASE_ANON_KEY || ''
+      }
+    });
+
+    if (!userInfoRes.ok) {
+      console.warn('Invalid Supabase token response:', await userInfoRes.text());
+      return res.status(400).json({ error: 'Invalid supabase token' });
+    }
+
+    const supUser = await userInfoRes.json();
+    // supUser contains `email`, `id` (supabase user id), etc.
+
+    const db = getDb();
+    let user = db.users.find(u => u.email && String(u.email).toLowerCase() === String(supUser.email).toLowerCase());
+
+    if (!user) {
+      user = {
+        id: crypto.randomUUID(),
+        name: supUser.user_metadata?.full_name || supUser.email || 'Sin nombre',
+        email: supUser.email,
+        password: '',
+        role: 'PATIENT',
+        accessList: [],
+        supabaseId: supUser.id
+      };
+      db.users.push(user);
+      saveDb(db);
+      console.log('✅ Created new user from Supabase sign-in:', user.email);
+    } else {
+      // Ensure supabaseId is set
+      if (!user.supabaseId) {
+        user.supabaseId = supUser.id;
+        saveDb(db);
+      }
+    }
+
+    return res.json(user);
+  } catch (err) {
+    console.error('Error in /api/auth/supabase', err);
+    return res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -738,6 +906,21 @@ app.get('/api/health', (_req, res) => {
       del.run('healthcheck', id);
       return res.json({ ok: true, persistence: 'sqlite', sqliteFile: SQLITE_DB_FILE });
     }
+
+    if (pgPool) {
+      // try a tiny write and delete in Postgres
+      const id = `hc-${Date.now()}`;
+      (async () => {
+        try {
+          const client = await pgPool.connect();
+          await client.query('INSERT INTO settings (id, data) VALUES ($1,$2)', [id, { ts: Date.now() }]);
+          await client.query('DELETE FROM settings WHERE id = $1', [id]);
+          client.release();
+        } catch (e) { console.error('Healthcheck pg failed', e); }
+      })();
+      return res.json({ ok: true, persistence: 'postgres' });
+    }
+
     // json fallback: try writing and rolling back by creating a temp file
     try {
       const tmp = `${DB_FILE}.tmp.${Date.now()}`;
@@ -754,7 +937,7 @@ app.get('/api/health', (_req, res) => {
   }
 });
 
-app.get('/api/dbinfo', (_req, res) => {
+app.get('/api/dbinfo', async (_req, res) => {
   try {
     if (sqliteDb) {
       const users = sqliteDb.prepare("SELECT COUNT(*) as c FROM store WHERE table_name = 'users'").get().c;
@@ -763,6 +946,20 @@ app.get('/api/dbinfo', (_req, res) => {
       const invitations = sqliteDb.prepare("SELECT COUNT(*) as c FROM store WHERE table_name = 'invitations'").get().c;
       const settings = sqliteDb.prepare("SELECT COUNT(*) as c FROM store WHERE table_name = 'settings'").get().c;
       return res.json({ persistence: 'sqlite', sqliteFile: SQLITE_DB_FILE, counts: { users, entries, goals, invitations, settings } });
+    }
+
+    if (pgPool) {
+      const usersRes = await pgPool.query('SELECT COUNT(*) as c FROM users');
+      const entriesRes = await pgPool.query('SELECT COUNT(*) as c FROM entries');
+      const goalsRes = await pgPool.query('SELECT COUNT(*) as c FROM goals');
+      const invitationsRes = await pgPool.query('SELECT COUNT(*) as c FROM invitations');
+      const settingsRes = await pgPool.query('SELECT COUNT(*) as c FROM settings');
+      const users = parseInt(usersRes.rows[0].c, 10);
+      const entries = parseInt(entriesRes.rows[0].c, 10);
+      const goals = parseInt(goalsRes.rows[0].c, 10);
+      const invitations = parseInt(invitationsRes.rows[0].c, 10);
+      const settings = parseInt(settingsRes.rows[0].c, 10);
+      return res.json({ persistence: 'postgres', counts: { users, entries, goals, invitations, settings } });
     }
 
     // json fallback
