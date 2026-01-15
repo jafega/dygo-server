@@ -8,6 +8,7 @@
   },
   "main": "server.js",
   "scripts": {
+    "build": "echo \"backend: no build step\"",
     "start": "node server.js",
     "post-test-event": "node scripts/post_test_event.js test/fixtures/invoice_payment_failed.json",
     "check-checkout": "node scripts/check_checkout.js",
