@@ -4,9 +4,6 @@
 // Set this to true to use the "Real Backend".
 export const API_URL =  (import.meta as any).env?.VITE_API_URL || '/api';
 
-// Google OAuth client id (set in .env.local as VITE_GOOGLE_CLIENT_ID for the frontend)
-export const GOOGLE_CLIENT_ID = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID || '';
-
 // Simple check to see if we should try using backend.
 // In production this should be true. For development you can allow a local fallback
 // by setting VITE_ALLOW_LOCAL_FALLBACK=true in .env.local (not recommended for prod).

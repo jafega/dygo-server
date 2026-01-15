@@ -417,57 +417,6 @@ app.post('/api/auth/login', (req, res) => {
   }
 });
 
-// --- GOOGLE OAUTH / SIGN-IN ---
-// Client sends an ID token (JWT) obtained from Google Identity Services.
-// We validate it using Google's tokeninfo endpoint and create/find a local user.
-app.post('/api/auth/google', async (req, res) => {
-  try {
-    const { idToken } = req.body || {};
-    if (!idToken) return res.status(400).json({ error: 'idToken is required' });
-
-    // Validate token with Google's tokeninfo endpoint
-    const tokenInfoRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`);
-    if (!tokenInfoRes.ok) {
-      console.warn('Invalid Google id token response:', await tokenInfoRes.text());
-      return res.status(400).json({ error: 'Invalid id token' });
-    }
-
-    const tokenInfo = await tokenInfoRes.json();
-    const { email, name, sub: googleId, aud } = tokenInfo;
-
-    // Optional: If GOOGLE_CLIENT_ID is set, verify audience
-    if (process.env.GOOGLE_CLIENT_ID && aud !== process.env.GOOGLE_CLIENT_ID) {
-      console.warn('Google id_token aud mismatch', aud, process.env.GOOGLE_CLIENT_ID);
-      return res.status(400).json({ error: 'Token audience mismatch' });
-    }
-
-    const db = getDb();
-    let user = db.users.find(u => u.email && String(u.email).toLowerCase() === String(email).toLowerCase());
-
-    if (!user) {
-      // Create a new user (default to PATIENT role). Mark as google-linked account
-      user = {
-        id: crypto.randomUUID(),
-        name: name || 'Sin nombre',
-        email,
-        password: '',
-        role: 'PATIENT',
-        accessList: [],
-        googleId
-      };
-      db.users.push(user);
-      saveDb(db);
-      console.log('✅ Created new user from Google sign-in:', user.email);
-    }
-
-    // Return the user
-    return res.json(user);
-  } catch (err) {
-    console.error('Error in /api/auth/google', err);
-    return res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
 // --- DEMO PASSWORD RESET (secure-ish) ---
 // Allows resetting a user's password by email. For production you MUST set PASSWORD_RESET_SECRET in the env,
 // otherwise this endpoint is only allowed when NODE_ENV !== 'production'.

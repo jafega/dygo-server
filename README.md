@@ -23,10 +23,6 @@ View your app in AI Studio: https://ai.studio/apps/drive/1JPTsVij3m8trFrph34MVx0
 
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 
-Optional: Enable Google Sign-In (OAuth)
-- Add `VITE_GOOGLE_CLIENT_ID` to your `.env.local` with a Google OAuth Client ID (Web applications).
-- The auth screen will show a Google Sign-In button automatically when this value is present.
-
 Optional: Enable Stripe (DYGO Premium demo)
 - Add your Stripe keys to `backend/.env` (use test keys when developing):
   - `STRIPE_SECRET_KEY` (server secret) and `STRIPE_PUBLISHABLE_KEY` (client publishable key).

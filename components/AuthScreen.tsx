@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { UserRole } from '../types';
 import * as AuthService from '../services/authService';
 import { Mail, Lock, User, ArrowRight, Loader2, Server, WifiOff, CheckCircle } from 'lucide-react';
-import { GOOGLE_CLIENT_ID, SUPABASE_URL, SUPABASE_ANON_KEY } from '../services/config';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../services/config';
 import { API_URL } from '../services/config';
 import { createClient } from '@supabase/supabase-js';
 
@@ -64,14 +64,29 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
     // Initialize Supabase client if configured and handle redirect callback
     const supabaseClient = (SUPABASE_URL && SUPABASE_ANON_KEY) ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-    // If we detect a Supabase OAuth redirect with an access_token in the hash, extract it and send to backend
+    // If we detect a Supabase OAuth redirect with code or access_token, extract it and send to backend
     const handleSupabaseCallback = async () => {
         try {
+            if (!supabaseClient) return;
+            const url = new URL(window.location.href);
             const hash = window.location.hash || '';
-            if (!hash) return;
-            // Supabase returns tokens in the hash fragment: e.g. #access_token=...
-            const params = new URLSearchParams(hash.replace('#', '?'));
-            const accessToken = params.get('access_token');
+            const hasCode = url.searchParams.get('code');
+            const hasSupabaseAuth = url.searchParams.get('supabase_auth');
+            const hasHashToken = hash.includes('access_token=');
+
+            if (!hasCode && !hasSupabaseAuth && !hasHashToken) return;
+
+            let accessToken: string | null = null;
+
+            if (hasCode) {
+                const { data, error } = await supabaseClient.auth.exchangeCodeForSession(window.location.href);
+                if (error) throw error;
+                accessToken = data?.session?.access_token || null;
+            } else if (hasHashToken) {
+                const params = new URLSearchParams(hash.replace('#', '?'));
+                accessToken = params.get('access_token');
+            }
+
             if (!accessToken) return;
 
             setIsLoading(true);
@@ -81,8 +96,10 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
             } catch (err:any) {
                 throw err;
             }
-            // Clean up URL (remove hash)
-            history.replaceState(null, '', window.location.pathname + window.location.search);
+            // Clean up URL (remove hash and auth params)
+            url.searchParams.delete('code');
+            url.searchParams.delete('supabase_auth');
+            history.replaceState(null, '', url.pathname + url.search);
             onAuthSuccess();
         } catch (err: any) {
             setError(err?.message || 'Error con Supabase Sign-In');
@@ -94,39 +111,6 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
     // Run the callback handler on mount
     handleSupabaseCallback();
 
-    // If older Google flow is still desired, keep GIS conditional rendering
-    const googleClient = (window as any)._dygo_google_client_initialized;
-    const clientId = GOOGLE_CLIENT_ID || null;
-    if (!googleClient && clientId) {
-        // Load the GIS script dynamically
-        const script = document.createElement('script');
-        script.src = 'https://accounts.google.com/gsi/client';
-        script.async = true;
-        script.defer = true;
-        script.onload = () => {
-            const google = (window as any).google;
-            if (!google) return;
-            google.accounts.id.initialize({
-                client_id: clientId,
-                callback: async (response: any) => {
-                    // response.credential is the ID token
-                    try {
-                        setIsLoading(true);
-                        await AuthService.signInWithGoogle(response.credential);
-                        onAuthSuccess();
-                    } catch (err: any) {
-                        setError(err?.message || 'Error con Google Sign-In');
-                    } finally {
-                        setIsLoading(false);
-                    }
-                }
-            });
-            // Render a button into the container
-            google.accounts.id.renderButton(document.getElementById('gsi-button'), { theme: 'outline', size: 'large' });
-            (window as any)._dygo_google_client_initialized = true;
-        };
-        document.head.appendChild(script);
-    }
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -222,12 +206,6 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                 </div>
             )}
 
-            {/* Google Sign-In (renders if VITE_GOOGLE_CLIENT_ID is set) */}
-            {GOOGLE_CLIENT_ID && (
-                <div className="mb-4 flex justify-center">
-                    <div id="gsi-button" />
-                </div>
-            )}
 
             <form onSubmit={handleSubmit} className="space-y-4">
 
