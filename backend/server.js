@@ -989,6 +989,12 @@ app.post('/api/settings/:userId', (req, res) => {
 
 app.get('/api/health', (_req, res) => {
   try {
+    const envStatus = {
+      databaseUrlSet: !!process.env.DATABASE_URL,
+      supabaseSsl: String(process.env.SUPABASE_SSL || '').toLowerCase() === 'true',
+      useSqlite: USE_SQLITE
+    };
+
     if (sqliteDb) {
       // attempt a tiny write and delete to ensure store writable
       const id = `hc-${Date.now()}`;
@@ -996,21 +1002,23 @@ app.get('/api/health', (_req, res) => {
       const del = sqliteDb.prepare('DELETE FROM store WHERE table_name = ? AND id = ?');
       insert.run('healthcheck', id, JSON.stringify({ ts: Date.now() }));
       del.run('healthcheck', id);
-      return res.json({ ok: true, persistence: 'sqlite', sqliteFile: SQLITE_DB_FILE });
+      return res.json({ ok: true, persistence: 'sqlite', sqliteFile: SQLITE_DB_FILE, env: envStatus });
     }
 
     if (pgPool) {
-      // try a tiny write and delete in Postgres
-      const id = `hc-${Date.now()}`;
+      // try a simple query in Postgres
       (async () => {
+        let client;
         try {
-          const client = await pgPool.connect();
-          await client.query('INSERT INTO settings (id, data) VALUES ($1,$2)', [id, { ts: Date.now() }]);
-          await client.query('DELETE FROM settings WHERE id = $1', [id]);
-          client.release();
-        } catch (e) { console.error('Healthcheck pg failed', e); }
+          client = await pgPool.connect();
+          await client.query('SELECT 1');
+        } catch (e) {
+          console.error('Healthcheck pg failed', e);
+        } finally {
+          if (client) client.release();
+        }
       })();
-      return res.json({ ok: true, persistence: 'postgres' });
+      return res.json({ ok: true, persistence: 'postgres', env: envStatus });
     }
 
     // json fallback: try writing and rolling back by creating a temp file
@@ -1018,10 +1026,10 @@ app.get('/api/health', (_req, res) => {
       const tmp = `${DB_FILE}.tmp.${Date.now()}`;
       fs.writeFileSync(tmp, 'ok');
       fs.unlinkSync(tmp);
-      return res.json({ ok: true, persistence: 'json', dbFile: DB_FILE });
+      return res.json({ ok: true, persistence: 'json', dbFile: DB_FILE, env: envStatus });
     } catch (e) {
       console.error('Healthcheck filesystem failed', e);
-      return res.status(500).json({ ok: false, error: 'Filesystem not writable' });
+      return res.status(500).json({ ok: false, error: 'Filesystem not writable', env: envStatus });
     }
   } catch (err) {
     console.error('Healthcheck error', err);
