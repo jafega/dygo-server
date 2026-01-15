@@ -363,7 +363,10 @@ app.post('/api/auth/supabase', async (req, res) => {
     // supUser contains `email`, `id` (supabase user id), etc.
 
     const db = getDb();
-    let user = db.users.find(u => u.email && String(u.email).toLowerCase() === String(supUser.email).toLowerCase());
+    let user = db.users.find(u => u.supabaseId && String(u.supabaseId) === String(supUser.id));
+    if (!user) {
+      user = db.users.find(u => u.email && String(u.email).toLowerCase() === String(supUser.email).toLowerCase());
+    }
 
     if (!user) {
       user = {
@@ -376,14 +379,18 @@ app.post('/api/auth/supabase', async (req, res) => {
         supabaseId: supUser.id
       };
       db.users.push(user);
+      if (!db.settings) db.settings = {};
+      if (!db.settings[user.id]) db.settings[user.id] = {};
       saveDb(db);
       console.log('✅ Created new user from Supabase sign-in:', user.email);
     } else {
       // Ensure supabaseId is set
       if (!user.supabaseId) {
         user.supabaseId = supUser.id;
-        saveDb(db);
       }
+      if (!db.settings) db.settings = {};
+      if (!db.settings[user.id]) db.settings[user.id] = {};
+      saveDb(db);
     }
 
     return res.json(user);
