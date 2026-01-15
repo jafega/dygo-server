@@ -423,12 +423,14 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                         )}
 
                         {entries.length === 0 && !isCreating ? (
-                            <div className="text-center py-20 opacity-50 flex flex-col items-center">
-                                <div className="w-16 h-16 bg-slate-200 rounded-full flex items-center justify-center mb-4">
-                                    <FileText size={24} className="text-slate-400" />
+                            <div className="text-center py-20 flex flex-col items-center">
+                                <div className="w-full max-w-md bg-gradient-to-br from-slate-50 to-white border border-slate-200 rounded-2xl p-8 shadow-sm">
+                                    <div className="w-16 h-16 bg-indigo-50 rounded-full flex items-center justify-center mb-4 mx-auto">
+                                        <FileText size={24} className="text-indigo-400" />
+                                    </div>
+                                    <h3 className="text-lg font-bold text-slate-700">Historia Clínica Vacía</h3>
+                                    <p className="text-slate-500 mt-2 text-sm">No hay registros aún. Crea una nota para iniciar el historial clínico.</p>
                                 </div>
-                                <h3 className="text-lg font-bold text-slate-600">Historia Clínica Vacía</h3>
-                                <p className="text-slate-500 mt-2 max-w-sm text-sm">No hay registros aún.</p>
                             </div>
                         ) : (
                             <div className="space-y-6 md:space-y-8 relative max-w-5xl mx-auto pl-12 md:pl-0">
@@ -456,9 +458,9 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                             
                                             {/* Content Card */}
                                             <div className={`
-                                                w-full md:w-[calc(50%-4rem)] p-4 md:p-6 bg-white rounded-xl border shadow-sm transition-all hover:shadow-md 
+                                                w-full md:w-[calc(50%-4rem)] p-4 md:p-6 bg-white/95 rounded-2xl border shadow-sm transition-all hover:shadow-lg 
                                                 ${isPsychEntry ? 'border-purple-100 ring-1 ring-purple-50' : 'border-slate-200'}
-                                                md:group-odd:mr-auto md:group-even:ml-auto
+                                                md:group-odd:mr-auto md:group-even:ml-auto backdrop-blur
                                             `}>
                                                 
                                                 {/* Entry Header */}
@@ -466,9 +468,13 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                                     <div className="flex flex-col">
                                                         <time className="text-base md:text-lg font-bold text-slate-800">{entry.date}</time>
                                                         {isPsychEntry ? (
-                                                            <span className="text-[10px] text-purple-600 font-bold uppercase tracking-wider mt-0.5">Nota Clínica</span>
+                                                            <span className="inline-flex items-center gap-1 text-[10px] text-purple-700 font-bold uppercase tracking-wider mt-1 bg-purple-50 border border-purple-100 px-2 py-0.5 rounded-full w-fit">
+                                                                <Stethoscope size={10} /> Nota Clínica
+                                                            </span>
                                                         ) : (
-                                                            <span className="text-[10px] text-indigo-500 font-medium mt-0.5">Diario del Paciente</span>
+                                                            <span className="inline-flex items-center gap-1 text-[10px] text-indigo-600 font-bold uppercase tracking-wider mt-1 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full w-fit">
+                                                                <Calendar size={10} /> Diario del Paciente
+                                                            </span>
                                                         )}
                                                     </div>
                                                     
@@ -484,10 +490,12 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                                 {/* Patient Summary */}
                                                 {!isPsychEntry && (
                                                     <div className="mb-4">
-                                                        <p className="text-slate-700 text-sm md:text-base leading-relaxed">{entry.summary}</p>
+                                                        <div className="bg-slate-50 border border-slate-100 rounded-xl p-3">
+                                                            <p className="text-slate-700 text-sm md:text-base leading-relaxed">{entry.summary}</p>
+                                                        </div>
                                                         <div className="mt-2 flex flex-wrap gap-1.5">
                                                             {entry.emotions.map(em => (
-                                                                <span key={em} className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full border border-slate-200 font-medium">
+                                                                <span key={em} className="text-[10px] bg-white text-slate-600 px-2 py-0.5 rounded-full border border-slate-200 font-semibold shadow-[inset_0_1px_0_0_rgba(255,255,255,0.8)]">
                                                                     {em}
                                                                 </span>
                                                             ))}
@@ -532,15 +540,37 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                                 ) : (
                                                     <div className="space-y-3 pt-1">
                                                         {(pNote.text || pNote.attachments.length > 0) && (
-                                                            <div className="bg-amber-50 rounded-lg p-3 border border-amber-100 relative">
-                                                                <h5 className="text-[10px] font-bold text-amber-800 uppercase mb-1">Nota Interna</h5>
-                                                                <p className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">{pNote.text}</p>
+                                                            <div className="bg-amber-50 rounded-xl p-3 border border-amber-100 relative">
+                                                                <h5 className="text-[10px] font-bold text-amber-800 uppercase mb-1 flex items-center gap-1">
+                                                                    <FileText size={11} /> Nota Interna
+                                                                </h5>
+                                                                {pNote.text && (
+                                                                    <p className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">{pNote.text}</p>
+                                                                )}
+                                                                {pNote.attachments.length > 0 && (
+                                                                    <div className="mt-2 flex flex-wrap gap-2">
+                                                                        {pNote.attachments.map(att => (
+                                                                            <AttachmentThumb key={att.id} att={att} />
+                                                                        ))}
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                         )}
                                                         {(pFeed.text || pFeed.attachments.length > 0) && (
-                                                            <div className={`rounded-lg p-3 border relative ${isPsychEntry ? 'bg-white border-indigo-100' : 'bg-indigo-50 border-indigo-100'}`}>
-                                                                <h5 className="text-[10px] font-bold text-indigo-800 uppercase mb-1">Feedback Paciente</h5>
-                                                                <p className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">{pFeed.text}</p>
+                                                            <div className={`rounded-xl p-3 border relative ${isPsychEntry ? 'bg-white border-indigo-100' : 'bg-indigo-50 border-indigo-100'}`}>
+                                                                <h5 className="text-[10px] font-bold text-indigo-800 uppercase mb-1 flex items-center gap-1">
+                                                                    <MessageCircle size={11} /> Feedback Paciente
+                                                                </h5>
+                                                                {pFeed.text && (
+                                                                    <p className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">{pFeed.text}</p>
+                                                                )}
+                                                                {pFeed.attachments.length > 0 && (
+                                                                    <div className="mt-2 flex flex-wrap gap-2">
+                                                                        {pFeed.attachments.map(att => (
+                                                                            <AttachmentThumb key={att.id} att={att} />
+                                                                        ))}
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                         )}
                                                     </div>
@@ -638,19 +668,32 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                             
                             {/* Mood Evolution Chart */}
                             <div className="bg-white p-4 md:p-6 rounded-2xl border border-slate-200 shadow-sm">
-                                <h3 className="text-lg font-bold text-slate-800 mb-4 md:mb-6 flex items-center gap-2">
-                                    <TrendingUp className="text-indigo-500" /> Evolución Anímica
-                                </h3>
-                                <div className="h-48 md:h-64 w-full">
+                                <div className="flex items-center justify-between gap-3 mb-4 md:mb-6">
+                                    <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                                        <TrendingUp className="text-indigo-500" /> Evolución Anímica
+                                    </h3>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[10px] font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">{analyticsRange === 'WEEK' ? '7 días' : analyticsRange === 'MONTH' ? '30 días' : '12 meses'}</span>
+                                        <span className="text-xs text-slate-400">0–10</span>
+                                    </div>
+                                </div>
+                                <div className="h-52 md:h-64 w-full rounded-xl bg-gradient-to-b from-slate-50 via-white to-white border border-slate-100 p-2 shadow-inner">
                                     {chartData.length > 0 ? (
                                         <ResponsiveContainer width="100%" height="100%">
-                                            <LineChart data={chartData} margin={{ top: 20, right: 20, left: 0, bottom: 0 }}>
-                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                                                <XAxis dataKey="date" tick={{fontSize: 10, fill: '#64748b'}} axisLine={false} tickLine={false} dy={10} />
-                                                <YAxis domain={[0, 10]} tick={{fontSize: 10, fill: '#64748b'}} axisLine={false} tickLine={false} width={25} />
+                                            <LineChart data={chartData} margin={{ top: 8, right: 12, left: -10, bottom: 0 }}>
+                                                <defs>
+                                                    <linearGradient id="moodGradient" x1="0" y1="0" x2="1" y2="0">
+                                                        <stop offset="0%" stopColor="#6366f1" />
+                                                        <stop offset="100%" stopColor="#8b5cf6" />
+                                                    </linearGradient>
+                                                </defs>
+                                                <CartesianGrid strokeDasharray="6 6" vertical={false} stroke="#e5e7eb" />
+                                                <XAxis dataKey="date" tick={{fontSize: 10, fill: '#94a3b8'}} axisLine={false} tickLine={false} dy={10} />
+                                                <YAxis domain={[0, 10]} tick={{fontSize: 10, fill: '#94a3b8'}} axisLine={false} tickLine={false} width={28} />
                                                 <RechartsTooltip 
-                                                    contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
-                                                    itemStyle={{color: '#6366f1', fontSize: '14px', fontWeight: 'bold'}}
+                                                    contentStyle={{borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.08)'}}
+                                                    itemStyle={{color: '#4f46e5', fontSize: '12px', fontWeight: 600}}
+                                                    labelStyle={{fontSize: '11px', color: '#64748b'}}
                                                     cursor={{stroke: '#cbd5e1', strokeWidth: 1}}
                                                     isAnimationActive={false}
                                                     formatter={(value: number) => [value, 'Puntuación']}
@@ -658,10 +701,10 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                                 <Line 
                                                     type="monotone" 
                                                     dataKey="score" 
-                                                    stroke="#6366f1" 
+                                                    stroke="url(#moodGradient)" 
                                                     strokeWidth={3} 
                                                     dot={{fill: '#6366f1', strokeWidth: 2, r: 4, stroke: '#fff'}} 
-                                                    activeDot={{r: 6}}
+                                                    activeDot={{r: 7, stroke: '#6366f1', strokeWidth: 2}}
                                                     isAnimationActive={true}
                                                 >
                                                     <LabelList dataKey="score" position="top" offset={10} style={{ fontSize: '10px', fill: '#6366f1', fontWeight: 'bold' }} />

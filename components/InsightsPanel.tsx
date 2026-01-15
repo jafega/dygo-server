@@ -104,30 +104,43 @@ const InsightsPanel: React.FC<InsightsPanelProps> = ({ entries, mode = 'PERSONAL
     <div className="space-y-6">
       {/* Chart Section - Conditionally Rendered */}
       {!hideChart && (
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-            <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
-                <TrendingUp className="w-5 h-5 text-indigo-500"/>
-                {isClinical ? "Evolución Anímica (Últimos 14 días)" : "Tu Ánimo Reciente"}
-            </h3>
-            <div className="h-48 w-full">
+          <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-100">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+                  <TrendingUp className="w-5 h-5 text-indigo-500"/>
+                  {isClinical ? "Evolución Anímica (Últimos 14 días)" : "Tu Ánimo Reciente"}
+              </h3>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">14 días</span>
+                <div className="text-xs text-slate-400">0–10</div>
+              </div>
+            </div>
+            <div className="h-52 w-full rounded-xl bg-gradient-to-b from-slate-50 via-white to-white border border-slate-100 p-2 shadow-inner">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                <LineChart data={chartData} margin={{ top: 8, right: 12, left: -10, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="moodGradient" x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="0%" stopColor="#6366f1" />
+                      <stop offset="100%" stopColor="#8b5cf6" />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="6 6" vertical={false} stroke="#e5e7eb" />
                   <XAxis dataKey="date" tick={{fontSize: 10, fill: '#94a3b8'}} axisLine={false} tickLine={false} />
-                  <YAxis domain={[0, 10]} hide />
+                  <YAxis domain={[0, 10]} tick={{fontSize: 10, fill: '#94a3b8'}} axisLine={false} tickLine={false} width={28} />
                   <Tooltip 
-                    contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
-                    itemStyle={{color: '#6366f1', fontSize: '12px'}}
+                    contentStyle={{borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.08)'}}
+                    itemStyle={{color: '#4f46e5', fontSize: '12px', fontWeight: 600}}
+                    labelStyle={{fontSize: '11px', color: '#64748b'}}
                     isAnimationActive={false}
                     formatter={(value: number) => [value, 'Puntuación']}
                   />
                   <Line 
                     type="monotone" 
                     dataKey="score" 
-                    stroke="#6366f1" 
+                    stroke="url(#moodGradient)" 
                     strokeWidth={3} 
                     dot={{fill: '#6366f1', strokeWidth: 2, r: 4, stroke: '#fff'}} 
-                    activeDot={{r: 6}}
+                    activeDot={{r: 7, stroke: '#6366f1', strokeWidth: 2}}
                   />
                 </LineChart>
               </ResponsiveContainer>
