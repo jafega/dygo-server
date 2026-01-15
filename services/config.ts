@@ -6,6 +6,9 @@ const ENV_API_URL = (import.meta as any).env?.VITE_API_URL as string | undefined
 const getDefaultApiUrl = () => {
 	if (typeof window === 'undefined') return '/api';
 	const host = window.location.hostname;
+	if (host === 'localhost' || host === '127.0.0.1') {
+		return 'http://localhost:3001/api';
+	}
 	// If frontend is on Vercel without API proxy, default to the known backend.
 	if (host.endsWith('.vercel.app') && !host.includes('dygo-server')) {
 		return 'https://dygo-server.vercel.app/api';
@@ -18,11 +21,7 @@ export const API_URL = ENV_API_URL || getDefaultApiUrl();
 // In production this should be true. For development you can allow a local fallback
 // by setting VITE_ALLOW_LOCAL_FALLBACK=true in .env.local (not recommended for prod).
 export const USE_BACKEND = true; 
-const isLocalhost = typeof window !== 'undefined' && (
-	window.location.hostname === 'localhost' ||
-	window.location.hostname === '127.0.0.1'
-);
-export const ALLOW_LOCAL_FALLBACK = isLocalhost && (String((import.meta as any).env?.VITE_ALLOW_LOCAL_FALLBACK || '').toLowerCase() === 'true');
+export const ALLOW_LOCAL_FALLBACK = false;
 
 // Supabase client env (frontend)
 export const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || '';

@@ -25,6 +25,7 @@ const IS_SERVERLESS = !!(process.env.VERCEL || process.env.VERCEL_ENV);
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const SUPABASE_REST_ONLY = String(process.env.SUPABASE_REST_ONLY || '').toLowerCase() === 'true';
+const DISALLOW_LOCAL_PERSISTENCE = String(process.env.DISALLOW_LOCAL_PERSISTENCE || 'true').toLowerCase() === 'true';
 
 
 
@@ -52,6 +53,31 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '50mb' })); // Reemplaza a body-parser
+
+// Block local persistence when configured (force remote storage like Supabase/Postgres)
+app.use((req, res, next) => {
+  const isWrite = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method);
+  const hasRemote = !!pgPool || !!supabaseAdmin;
+  if (isWrite && DISALLOW_LOCAL_PERSISTENCE && !hasRemote) {
+    return res.status(503).json({
+      error: 'Persistencia remota no disponible. Configura Supabase/DB antes de guardar.'
+    });
+  }
+  return next();
+});
+
+// Block reads when local persistence is disallowed and no remote is configured
+app.use((req, res, next) => {
+  const hasRemote = !!pgPool || !!supabaseAdmin;
+  const isApi = req.path.startsWith('/api');
+  const isHealth = req.path === '/api/health' || req.path === '/api/dbinfo';
+  if (DISALLOW_LOCAL_PERSISTENCE && !hasRemote && isApi && !isHealth) {
+    return res.status(503).json({
+      error: 'Persistencia remota no disponible. Configura Supabase/DB para leer datos.'
+    });
+  }
+  return next();
+});
 
 // --- ACCESO A "BASE DE DATOS" (db.json o SQLite opcional) ---
 const createInitialDb = () => ({
@@ -336,6 +362,9 @@ async function saveSupabaseDb(data, prevCache = null) {
 }
 
 const getDb = () => {
+  if (DISALLOW_LOCAL_PERSISTENCE && !pgPool && !supabaseAdmin && !sqliteDb) {
+    return createInitialDb();
+  }
   // Postgres: return in-memory cache (keeps handler sync)
   if (pgPool && pgDbCache) {
     return pgDbCache;
@@ -359,6 +388,9 @@ const getDb = () => {
 
   // 1. Si no existe, crearla
   if (!fs.existsSync(DB_FILE)) {
+    if (DISALLOW_LOCAL_PERSISTENCE) {
+      return createInitialDb();
+    }
     console.log('⚠️ db.json no encontrado. Creando nueva base de datos...');
     const initialDb = createInitialDb();
     fs.writeFileSync(DB_FILE, JSON.stringify(initialDb, null, 2), 'utf-8');
@@ -1060,7 +1092,7 @@ app.get('/api/entries', (req, res) => {
   const db = getDb();
 
   const entries = userId
-    ? db.entries.filter((e) => e.userId === userId)
+    ? db.entries.filter((e) => String(e.userId) === String(userId))
     : db.entries;
 
   res.json(entries);

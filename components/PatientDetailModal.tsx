@@ -43,6 +43,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   // Edit/Create State
   const [internalNote, setInternalNote] = useState<ClinicalNoteContent>({ text: '', attachments: [] });
   const [feedback, setFeedback] = useState<ClinicalNoteContent>({ text: '', attachments: [] });
+    const [noteType, setNoteType] = useState<'INTERNAL' | 'FEEDBACK'>('INTERNAL');
   
   // Refs for file inputs
   const internalFileInputRef = useRef<HTMLInputElement>(null);
@@ -130,12 +131,14 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
       setIsCreating(false);
       setInternalNote(normalizeNote(entry.psychologistNote));
       setFeedback(normalizeNote(entry.psychologistFeedback));
+      setNoteType('INTERNAL');
   };
 
   const handleStartCreate = () => {
       setEditingEntryId(null);
       setInternalNote({ text: '', attachments: [] });
       setFeedback({ text: '', attachments: [] });
+      setNoteType('INTERNAL');
       setIsCreating(true);
       setActiveTab('TIMELINE'); // Switch back to timeline to show form
   };
@@ -399,65 +402,80 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                 </div>
 
                                 <div className="flex flex-col gap-4 md:gap-6">
-                                    {/* Internal Note Input */}
-                                    <div>
-                                        <div className="flex justify-between items-center mb-2">
-                                            <label className="text-xs font-bold text-amber-700 uppercase tracking-wider flex items-center gap-1">
-                                                <FileText size={12} /> Nota Interna
-                                            </label>
-                                            <button onClick={() => internalFileInputRef.current?.click()} className="text-xs text-slate-500 hover:text-indigo-600 flex items-center gap-1">
-                                                <Paperclip size={12} /> <span className="hidden sm:inline">Adjuntar</span>
-                                            </button>
-                                            <input type="file" ref={internalFileInputRef} className="hidden" onChange={(e) => handleFileUpload(e, 'INTERNAL')} accept="image/*,application/pdf" />
-                                        </div>
-                                        <textarea 
-                                            className="w-full p-3 text-sm border border-slate-300 rounded-lg bg-white text-slate-900 focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none shadow-sm"
-                                            rows={4}
-                                            value={internalNote.text}
-                                            onChange={(e) => setInternalNote(prev => ({...prev, text: e.target.value}))}
-                                            placeholder="Notas privadas..."
-                                        />
-                                        {internalNote.attachments.length > 0 && (
-                                            <div className="flex gap-2 mt-2 overflow-x-auto pb-1">
-                                                {internalNote.attachments.map(att => (
-                                                    <div key={att.id} className="relative group/att shrink-0 w-10 h-10">
-                                                        <img src={att.url} alt="att" className="w-full h-full rounded object-cover border border-slate-200" />
-                                                        <button onClick={() => removeAttachment(att.id, 'INTERNAL')} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5"><X size={8} /></button>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
+                                    <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl p-1 w-fit">
+                                        <button
+                                            onClick={() => setNoteType('INTERNAL')}
+                                            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1 ${noteType === 'INTERNAL' ? 'bg-white text-amber-700 shadow-sm border border-amber-100' : 'text-slate-500 hover:text-slate-700'}`}
+                                        >
+                                            <FileText size={12} /> Nota Interna
+                                        </button>
+                                        <button
+                                            onClick={() => setNoteType('FEEDBACK')}
+                                            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1 ${noteType === 'FEEDBACK' ? 'bg-white text-indigo-700 shadow-sm border border-indigo-100' : 'text-slate-500 hover:text-slate-700'}`}
+                                        >
+                                            <MessageCircle size={12} /> Feedback Paciente
+                                        </button>
                                     </div>
 
-                                    {/* Feedback Input */}
-                                    <div>
-                                        <div className="flex justify-between items-center mb-2">
-                                            <label className="text-xs font-bold text-indigo-700 uppercase tracking-wider flex items-center gap-1">
-                                                <MessageCircle size={12} /> Feedback Paciente
-                                            </label>
-                                            <button onClick={() => feedbackFileInputRef.current?.click()} className="text-xs text-slate-500 hover:text-indigo-600 flex items-center gap-1">
-                                                <Paperclip size={12} /> <span className="hidden sm:inline">Adjuntar</span>
-                                            </button>
-                                            <input type="file" ref={feedbackFileInputRef} className="hidden" onChange={(e) => handleFileUpload(e, 'FEEDBACK')} accept="image/*,application/pdf" />
-                                        </div>
-                                        <textarea 
-                                            className="w-full p-3 text-sm border border-slate-300 rounded-lg bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none shadow-sm"
-                                            rows={4}
-                                            value={feedback.text}
-                                            onChange={(e) => setFeedback(prev => ({...prev, text: e.target.value}))}
-                                            placeholder="Instrucciones para el paciente..."
-                                        />
-                                        {feedback.attachments.length > 0 && (
-                                            <div className="flex gap-2 mt-2 overflow-x-auto pb-1">
-                                                {feedback.attachments.map(att => (
-                                                    <div key={att.id} className="relative group/att shrink-0 w-10 h-10">
-                                                        <img src={att.url} alt="att" className="w-full h-full rounded object-cover border border-slate-200" />
-                                                        <button onClick={() => removeAttachment(att.id, 'FEEDBACK')} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5"><X size={8} /></button>
-                                                    </div>
-                                                ))}
+                                    {noteType === 'INTERNAL' ? (
+                                        <div>
+                                            <div className="flex justify-between items-center mb-2">
+                                                <label className="text-xs font-bold text-amber-700 uppercase tracking-wider flex items-center gap-1">
+                                                    <FileText size={12} /> Nota Interna
+                                                </label>
+                                                <button onClick={() => internalFileInputRef.current?.click()} className="text-xs text-slate-500 hover:text-indigo-600 flex items-center gap-1">
+                                                    <Paperclip size={12} /> <span className="hidden sm:inline">Adjuntar</span>
+                                                </button>
+                                                <input type="file" ref={internalFileInputRef} className="hidden" onChange={(e) => handleFileUpload(e, 'INTERNAL')} accept="image/*,application/pdf" />
                                             </div>
-                                        )}
-                                    </div>
+                                            <textarea 
+                                                className="w-full p-3 text-sm border border-slate-300 rounded-lg bg-white text-slate-900 focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none shadow-sm"
+                                                rows={4}
+                                                value={internalNote.text}
+                                                onChange={(e) => setInternalNote(prev => ({...prev, text: e.target.value}))}
+                                                placeholder="Notas privadas..."
+                                            />
+                                            {internalNote.attachments.length > 0 && (
+                                                <div className="flex gap-2 mt-2 overflow-x-auto pb-1">
+                                                    {internalNote.attachments.map(att => (
+                                                        <div key={att.id} className="relative group/att shrink-0 w-10 h-10">
+                                                            <img src={att.url} alt="att" className="w-full h-full rounded object-cover border border-slate-200" />
+                                                            <button onClick={() => removeAttachment(att.id, 'INTERNAL')} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5"><X size={8} /></button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <div>
+                                            <div className="flex justify-between items-center mb-2">
+                                                <label className="text-xs font-bold text-indigo-700 uppercase tracking-wider flex items-center gap-1">
+                                                    <MessageCircle size={12} /> Feedback Paciente
+                                                </label>
+                                                <button onClick={() => feedbackFileInputRef.current?.click()} className="text-xs text-slate-500 hover:text-indigo-600 flex items-center gap-1">
+                                                    <Paperclip size={12} /> <span className="hidden sm:inline">Adjuntar</span>
+                                                </button>
+                                                <input type="file" ref={feedbackFileInputRef} className="hidden" onChange={(e) => handleFileUpload(e, 'FEEDBACK')} accept="image/*,application/pdf" />
+                                            </div>
+                                            <textarea 
+                                                className="w-full p-3 text-sm border border-slate-300 rounded-lg bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none shadow-sm"
+                                                rows={4}
+                                                value={feedback.text}
+                                                onChange={(e) => setFeedback(prev => ({...prev, text: e.target.value}))}
+                                                placeholder="Instrucciones para el paciente..."
+                                            />
+                                            {feedback.attachments.length > 0 && (
+                                                <div className="flex gap-2 mt-2 overflow-x-auto pb-1">
+                                                    {feedback.attachments.map(att => (
+                                                        <div key={att.id} className="relative group/att shrink-0 w-10 h-10">
+                                                            <img src={att.url} alt="att" className="w-full h-full rounded object-cover border border-slate-200" />
+                                                            <button onClick={() => removeAttachment(att.id, 'FEEDBACK')} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5"><X size={8} /></button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="flex flex-col-reverse sm:flex-row justify-end gap-3 pt-4 border-t border-slate-100 mt-4">
@@ -526,6 +544,11 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                                     </div>
                                                     
                                                     <div className="flex flex-col items-end gap-1">
+                                                        {!isPsychEntry && (
+                                                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${entry.sentimentScore >= 7 ? 'bg-green-50 text-green-700 border-green-200' : entry.sentimentScore >= 4 ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+                                                                {entry.sentimentScore}/10
+                                                            </span>
+                                                        )}
                                                         {!isEditing && (
                                                             <button onClick={() => handleEditClick(entry)} className="text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-1 rounded-full hover:bg-indigo-100 transition-colors">
                                                                 {isPsychEntry ? 'Editar' : 'Añadir Nota'}
@@ -538,6 +561,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                                 {!isPsychEntry && (
                                                     <div className="mb-4">
                                                         <div className="bg-slate-50 border border-slate-100 rounded-xl p-3">
+                                                            <h5 className="text-[10px] font-bold uppercase text-slate-400 mb-1">Resumen del paciente</h5>
                                                             <p className="text-slate-700 text-sm md:text-base leading-relaxed">{entry.summary}</p>
                                                         </div>
                                                         <div className="mt-2 flex flex-wrap gap-1.5">
@@ -553,29 +577,46 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                                 {/* Editor Mode */}
                                                 {isEditing ? (
                                                     <div className="space-y-4 bg-slate-50 p-4 rounded-xl border border-slate-200 animate-in fade-in">
-                                                        <div>
-                                                            <label className="text-xs font-bold text-amber-700 uppercase tracking-wider flex items-center gap-1 mb-1">
+                                                        <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl p-1 w-fit">
+                                                            <button
+                                                                onClick={() => setNoteType('INTERNAL')}
+                                                                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1 ${noteType === 'INTERNAL' ? 'bg-amber-50 text-amber-700 border border-amber-100' : 'text-slate-500 hover:text-slate-700'}`}
+                                                            >
                                                                 <FileText size={12} /> Nota Interna
-                                                            </label>
-                                                            <textarea 
-                                                                className="w-full p-3 text-sm border border-slate-300 rounded-lg bg-white text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none"
-                                                                rows={3}
-                                                                value={internalNote.text}
-                                                                onChange={(e) => setInternalNote(prev => ({...prev, text: e.target.value}))}
-                                                            />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => setNoteType('FEEDBACK')}
+                                                                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1 ${noteType === 'FEEDBACK' ? 'bg-indigo-50 text-indigo-700 border border-indigo-100' : 'text-slate-500 hover:text-slate-700'}`}
+                                                            >
+                                                                <MessageCircle size={12} /> Feedback
+                                                            </button>
                                                         </div>
 
-                                                        <div>
-                                                            <label className="text-xs font-bold text-indigo-700 uppercase tracking-wider flex items-center gap-1 mb-1">
-                                                                <MessageCircle size={12} /> Feedback
-                                                            </label>
-                                                            <textarea 
-                                                                className="w-full p-3 text-sm border border-slate-300 rounded-lg bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
-                                                                rows={3}
-                                                                value={feedback.text}
-                                                                onChange={(e) => setFeedback(prev => ({...prev, text: e.target.value}))}
-                                                            />
-                                                        </div>
+                                                        {noteType === 'INTERNAL' ? (
+                                                            <div>
+                                                                <label className="text-xs font-bold text-amber-700 uppercase tracking-wider flex items-center gap-1 mb-1">
+                                                                    <FileText size={12} /> Nota Interna
+                                                                </label>
+                                                                <textarea 
+                                                                    className="w-full p-3 text-sm border border-slate-300 rounded-lg bg-white text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none"
+                                                                    rows={3}
+                                                                    value={internalNote.text}
+                                                                    onChange={(e) => setInternalNote(prev => ({...prev, text: e.target.value}))}
+                                                                />
+                                                            </div>
+                                                        ) : (
+                                                            <div>
+                                                                <label className="text-xs font-bold text-indigo-700 uppercase tracking-wider flex items-center gap-1 mb-1">
+                                                                    <MessageCircle size={12} /> Feedback
+                                                                </label>
+                                                                <textarea 
+                                                                    className="w-full p-3 text-sm border border-slate-300 rounded-lg bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                                    rows={3}
+                                                                    value={feedback.text}
+                                                                    onChange={(e) => setFeedback(prev => ({...prev, text: e.target.value}))}
+                                                                />
+                                                            </div>
+                                                        )}
 
                                                         <div className="flex justify-end gap-2 pt-2">
                                                             <button onClick={() => setEditingEntryId(null)} className="px-3 py-1.5 text-xs text-slate-600 bg-white border border-slate-200 rounded">Cancelar</button>
