@@ -93,9 +93,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   const filteredEntries = getFilteredEntries();
       const patientDiaryEntries = filteredEntries.filter(e => {
           if (e.createdBy === 'PSYCHOLOGIST') return false;
-          const hasTranscript = Boolean(e.transcript && e.transcript.trim().length > 0);
-          const hasNonClinicalEmotion = Array.isArray(e.emotions) ? e.emotions.some(em => em !== 'Clínico') : false;
-          return hasTranscript || hasNonClinicalEmotion;
+          return Boolean(e.transcript && e.transcript.trim().length > 0);
       });
 
       const avgSentiment = patientDiaryEntries.length > 0
@@ -514,91 +512,61 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                 </div>
                             </div>
                         ) : (
-                            <div className="space-y-6 md:space-y-8 relative w-full">
-                                {/* Vertical Line: Left */}
-                                <div className="absolute top-0 bottom-0 left-5 w-0.5 bg-gradient-to-b from-transparent via-slate-200 to-transparent"></div>
+                            <div className="relative w-full">
+                                <div className="absolute top-0 bottom-0 left-4 w-px bg-gradient-to-b from-transparent via-slate-200 to-transparent"></div>
 
-                                {entries.map((entry) => {
-                                    const pNote = normalizeNote(entry.psychologistNote);
-                                    const pFeed = normalizeNote(entry.psychologistFeedback);
-                                    const isEditing = editingEntryId === entry.id;
-                                    const isPsychEntry = entry.createdBy === 'PSYCHOLOGIST';
-                                    const timeLabel = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-                                    const hasAttachments = (pNote.attachments?.length || 0) + (pFeed.attachments?.length || 0) > 0;
+                                <div className="space-y-4">
+                                    {entries.map((entry) => {
+                                        const pNote = normalizeNote(entry.psychologistNote);
+                                        const pFeed = normalizeNote(entry.psychologistFeedback);
+                                        const isEditing = editingEntryId === entry.id;
+                                        const isPsychEntry = entry.createdBy === 'PSYCHOLOGIST';
+                                        const timeLabel = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+                                        const hasAttachments = (pNote.attachments?.length || 0) + (pFeed.attachments?.length || 0) > 0;
 
-                                    return (
-                                        <div key={entry.id} className="relative group pl-12">
-                                            
-                                            {/* Central Dot */}
-                                            <div className={`
-                                                flex items-center justify-center w-10 h-10 md:w-12 md:h-12 rounded-full border-4 border-slate-50 shadow-md shrink-0 z-10 
-                                                absolute left-0 top-3
-                                                ${isPsychEntry ? 'bg-purple-100 text-purple-600 ring-4 ring-purple-50' : 'bg-indigo-100 text-indigo-600 ring-4 ring-indigo-50'}
-                                            `}>
-                                                {isPsychEntry ? <Stethoscope className="w-5 h-5 md:w-6 md:h-6" /> : <Calendar className="w-5 h-5 md:w-6 md:h-6 font-bold" />}
-                                            </div>
+                                        return (
+                                            <div key={entry.id} className="relative pl-10">
+                                                <div className={`absolute left-0 top-6 w-3 h-3 rounded-full border-4 border-white shadow-sm ${isPsychEntry ? 'bg-purple-400' : 'bg-indigo-400'}`}></div>
 
-                                            {/* Connector */}
-                                            <div className={`absolute top-9 left-9 h-px w-6 ${isPsychEntry ? 'bg-purple-100' : 'bg-indigo-100'}`}></div>
-                                            
-                                            {/* Content Card */}
-                                            <div className={`
-                                                w-full p-4 md:p-6 bg-white/95 rounded-2xl border shadow-sm transition-all hover:shadow-lg relative overflow-hidden
-                                                ${isPsychEntry ? 'border-purple-100 ring-1 ring-purple-50' : 'border-slate-200'}
-                                                backdrop-blur
-                                            `}>
-                                                <div className={`absolute inset-x-0 top-0 h-1 ${isPsychEntry ? 'bg-gradient-to-r from-purple-400 to-indigo-400' : 'bg-gradient-to-r from-indigo-400 to-sky-400'}`}></div>
-                                                
-                                                {/* Entry Header */}
-                                                <div className="flex justify-between items-start mb-3 pb-3 border-b border-slate-100">
-                                                    <div className="flex flex-col">
-                                                        <time className="text-base md:text-lg font-bold text-slate-800">{entry.date}</time>
-                                                        {isPsychEntry ? (
-                                                            <span className="inline-flex items-center gap-1 text-[10px] text-purple-700 font-bold uppercase tracking-wider mt-1 bg-purple-50 border border-purple-100 px-2 py-0.5 rounded-full w-fit">
-                                                                <Stethoscope size={10} /> Nota Clínica
-                                                            </span>
-                                                        ) : (
-                                                            <span className="inline-flex items-center gap-1 text-[10px] text-indigo-600 font-bold uppercase tracking-wider mt-1 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full w-fit">
-                                                                <Calendar size={10} /> Diario del Paciente
-                                                            </span>
-                                                        )}
+                                                <div className={`bg-white rounded-2xl border shadow-sm p-4 md:p-6 ${isPsychEntry ? 'border-purple-100 ring-1 ring-purple-50' : 'border-slate-200'} relative overflow-hidden`}>
+                                                    <div className={`absolute inset-x-0 top-0 h-1 ${isPsychEntry ? 'bg-gradient-to-r from-purple-400 to-indigo-400' : 'bg-gradient-to-r from-indigo-400 to-sky-400'}`}></div>
+
+                                                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-4">
+                                                        <div className="flex items-center gap-2">
+                                                            <time className="text-base md:text-lg font-bold text-slate-800">{entry.date}</time>
+                                                            {timeLabel && (
+                                                                <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                                                                    {timeLabel}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                            {isPsychEntry ? (
+                                                                <span className="inline-flex items-center gap-1 text-[10px] text-purple-700 font-bold uppercase tracking-wider bg-purple-50 border border-purple-100 px-2 py-0.5 rounded-full">
+                                                                    <Stethoscope size={10} /> Nota Clínica
+                                                                </span>
+                                                            ) : (
+                                                                <span className="inline-flex items-center gap-1 text-[10px] text-indigo-600 font-bold uppercase tracking-wider bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">
+                                                                    <Calendar size={10} /> Diario del Paciente
+                                                                </span>
+                                                            )}
+                                                            {!isPsychEntry && (
+                                                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${entry.sentimentScore >= 7 ? 'bg-green-50 text-green-700 border-green-200' : entry.sentimentScore >= 4 ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+                                                                    {entry.sentimentScore}/10
+                                                                </span>
+                                                            )}
+                                                            {hasAttachments && (
+                                                                <span className="text-[10px] font-bold text-slate-600 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">
+                                                                    Adjuntos
+                                                                </span>
+                                                            )}
+                                                            {!isEditing && (
+                                                                <button onClick={() => handleEditClick(entry)} className="text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-1 rounded-full hover:bg-indigo-100 transition-colors">
+                                                                    {isPsychEntry ? 'Editar' : 'Añadir Nota'}
+                                                                </button>
+                                                            )}
+                                                        </div>
                                                     </div>
-                                                    
-                                                    <div className="flex flex-col items-end gap-1">
-                                                        {timeLabel && (
-                                                            <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
-                                                                {timeLabel}
-                                                            </span>
-                                                        )}
-                                                        {!isPsychEntry && (
-                                                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${entry.sentimentScore >= 7 ? 'bg-green-50 text-green-700 border-green-200' : entry.sentimentScore >= 4 ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
-                                                                {entry.sentimentScore}/10
-                                                            </span>
-                                                        )}
-                                                        {!isEditing && (
-                                                            <button onClick={() => handleEditClick(entry)} className="text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-1 rounded-full hover:bg-indigo-100 transition-colors">
-                                                                {isPsychEntry ? 'Editar' : 'Añadir Nota'}
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                </div>
-
-                                                <div className="flex flex-wrap items-center gap-2 mb-3">
-                                                    {hasAttachments && (
-                                                        <span className="text-[10px] font-bold text-slate-600 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">
-                                                            Adjuntos
-                                                        </span>
-                                                    )}
-                                                    {isPsychEntry ? (
-                                                        <span className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-100 px-2 py-0.5 rounded-full">
-                                                            Entrada clínica
-                                                        </span>
-                                                    ) : (
-                                                        <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">
-                                                            Entrada paciente
-                                                        </span>
-                                                    )}
-                                                </div>
 
                                                 {/* Patient Summary */}
                                                 {!isPsychEntry && (
@@ -706,10 +674,11 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                                         )}
                                                     </div>
                                                 )}
+                                                </div>
                                             </div>
-                                        </div>
-                                    );
-                                })}
+                                        );
+                                    })}
+                                </div>
                             </div>
                         )}
                     </div>
