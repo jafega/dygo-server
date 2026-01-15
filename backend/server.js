@@ -29,7 +29,25 @@ const SUPABASE_REST_ONLY = String(process.env.SUPABASE_REST_ONLY || '').toLowerC
 
 
 // --- MIDDLEWARE ---
-app.use(cors());
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  'https://dygo.vercel.app',
+  'https://dygo-frontend.vercel.app'
+].filter(Boolean);
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (!allowedOrigins.length || allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Id', 'X-UserId']
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '50mb' })); // Reemplaza a body-parser
 
 // --- ACCESO A "BASE DE DATOS" (db.json o SQLite opcional) ---
