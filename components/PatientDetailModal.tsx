@@ -91,6 +91,9 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   };
 
   const filteredEntries = getFilteredEntries();
+    const avgSentiment = filteredEntries.length > 0
+            ? filteredEntries.reduce((acc, curr) => acc + (curr.sentimentScore || 0), 0) / filteredEntries.length
+            : 0;
 
     const psychEntriesCount = entries.filter(e => e.createdBy === 'PSYCHOLOGIST').length;
     const patientEntriesCount = entries.filter(e => e.createdBy !== 'PSYCHOLOGIST').length;
@@ -768,8 +771,8 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                             <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between md:block">
                                 <div>
                                     <h4 className="text-xs md:text-sm font-bold text-slate-400 uppercase tracking-wide mb-1 md:mb-2">Promedio Ánimo</h4>
-                                    <p className={`text-3xl md:text-4xl font-bold ${patient.averageSentiment >= 7 ? 'text-green-500' : patient.averageSentiment >= 4 ? 'text-yellow-500' : 'text-red-500'}`}>
-                                        {patient.averageSentiment}<span className="text-sm md:text-lg text-slate-300">/10</span>
+                                    <p className={`text-3xl md:text-4xl font-bold ${avgSentiment >= 7 ? 'text-green-500' : avgSentiment >= 4 ? 'text-yellow-500' : 'text-red-500'}`}>
+                                        {avgSentiment.toFixed(1)}<span className="text-sm md:text-lg text-slate-300">/10</span>
                                     </p>
                                 </div>
                                 <div className="md:hidden bg-indigo-50 p-2 rounded-full text-indigo-500"><Activity size={20} /></div>

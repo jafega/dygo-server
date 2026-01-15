@@ -8,3 +8,12 @@ body {
   background: #f8fafc;
   margin: 0;
 }
+
+/* Avoid focus/selection highlight on charts */
+.recharts-wrapper,
+.recharts-wrapper *,
+.recharts-surface {
+  outline: none !important;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
