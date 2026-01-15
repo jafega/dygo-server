@@ -69,14 +69,18 @@ if (USE_POSTGRES) {
     const { Pool } = await import('pg');
     const isServerless = !!(process.env.VERCEL || process.env.VERCEL_ENV);
     let connectionString = process.env.DATABASE_URL;
-    if (connectionString && String(process.env.SUPABASE_SSL || '').toLowerCase() === 'true') {
+    if (connectionString) {
       try {
         const url = new URL(connectionString);
+        const isSupabaseHost = url.hostname.endsWith('.supabase.com');
         // Remove ssl query params so pg doesn't override ssl config
         url.searchParams.delete('sslmode');
         url.searchParams.delete('sslrootcert');
         url.searchParams.delete('pgbouncer');
         url.searchParams.delete('ssl');
+        if (isSupabaseHost) {
+          url.searchParams.delete('sslmode');
+        }
         connectionString = url.toString();
       } catch (e) {
         // ignore parse errors and keep original
@@ -108,7 +112,7 @@ if (USE_POSTGRES) {
 
     // Supabase and many managed Postgres instances require SSL. Detect common indicators and set ssl config.
     // - If `DATABASE_URL` contains `sslmode=require` or user sets SUPABASE_SSL=true, enable ssl with relaxed verification.
-    if ((process.env.DATABASE_URL && process.env.DATABASE_URL.includes('sslmode=require')) || process.env.SUPABASE_SSL === 'true') {
+    if (process.env.SUPABASE_SSL === 'true' || (connectionString && connectionString.includes('.supabase.com'))) {
       poolConfig.ssl = { rejectUnauthorized: false };
       console.log('ℹ️ Enabling SSL for Postgres connection (rejectUnauthorized: false)');
     }
@@ -1029,6 +1033,11 @@ app.get('/api/health', (_req, res) => {
         }
       })();
       return res.json({ ok: true, persistence: 'postgres', env: envStatus });
+    }
+
+    // If Postgres is configured but not connected, avoid filesystem writes on serverless
+    if (USE_POSTGRES || process.env.VERCEL || process.env.VERCEL_ENV) {
+      return res.status(500).json({ ok: false, error: 'Postgres not connected', env: envStatus });
     }
 
     // json fallback: try writing and rolling back by creating a temp file
