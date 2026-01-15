@@ -1,3 +1,9 @@
-# Ignore extra API route files; keep only the catch-all
-api/**
-!api/[...path].js
+# Ignore extra API route folders (keep api/[...path].js)
+api/admin/**
+api/auth/**
+api/entries/**
+api/goals/**
+api/settings/**
+api/stripe/**
+api/supabase/**
+api/users/**
