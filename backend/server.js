@@ -309,6 +309,21 @@ async function loadSupabaseCache() {
   return { users, entries, goals, invitations, settings };
 }
 
+async function readSupabaseTable(table) {
+  if (!supabaseAdmin) return null;
+  const { data, error } = await supabaseAdmin.from(table).select('id,data');
+  if (error) throw error;
+  return (data || []).map(row => ({ id: row.id, ...(row.data || {}) }));
+}
+
+async function readSupabaseRowById(table, id) {
+  if (!supabaseAdmin) return null;
+  const { data, error } = await supabaseAdmin.from(table).select('id,data').eq('id', id).limit(1);
+  if (error) throw error;
+  if (!data || data.length === 0) return null;
+  return { id: data[0].id, ...(data[0].data || {}) };
+}
+
 async function saveSupabaseDb(data, prevCache = null) {
   if (!supabaseAdmin) return;
 
@@ -621,7 +636,7 @@ app.post('/api/supabase-auth', handleSupabaseAuth);
 app.post('/api/auth/supabase', handleSupabaseAuth);
 
 // Login
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body || {};
 
@@ -629,8 +644,14 @@ app.post('/api/auth/login', (req, res) => {
       return res.status(400).json({ error: 'Email y contraseña son obligatorios' });
     }
 
-    const db = getDb();
-    const user = db.users.find((u) => u.email === email && u.password === password);
+    let user = null;
+    if (supabaseAdmin) {
+      const users = await readSupabaseTable('users');
+      user = (users || []).find((u) => u.email === email && u.password === password);
+    } else {
+      const db = getDb();
+      user = db.users.find((u) => u.email === email && u.password === password);
+    }
 
     if (!user) {
       return res.status(401).json({ error: 'Credenciales inválidas' });
@@ -1014,51 +1035,89 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
 
 
 // --- RUTAS DE USUARIOS ---
-app.get('/api/users/:id', (req, res) => {
-  const db = getDb();
-  const user = db.users.find((u) => u.id === req.params.id);
+app.get('/api/users/:id', async (req, res) => {
+  try {
+    let user = null;
+    if (supabaseAdmin) {
+      user = await readSupabaseRowById('users', req.params.id);
+    } else {
+      const db = getDb();
+      user = db.users.find((u) => u.id === req.params.id);
+    }
 
-  if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
-
-  // Recompute premium status if needed
-  if (user.premiumUntil && Number(user.premiumUntil) < Date.now()) {
-    user.isPremium = false;
-    user.premiumUntil = undefined;
-    saveDb(db);
-  }
-
-  res.json(user);
-});
-
-app.get('/api/users', (req, res) => {
-  const db = getDb();
-  const id = req.query.id || req.query.userId;
-
-  if (id) {
-    const user = db.users.find((u) => u.id === id);
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
 
+    // Recompute premium status if needed (do not persist here)
     if (user.premiumUntil && Number(user.premiumUntil) < Date.now()) {
       user.isPremium = false;
       user.premiumUntil = undefined;
-      saveDb(db);
     }
 
-    return res.json(user);
+    res.json(user);
+  } catch (err) {
+    console.error('Error in /api/users/:id', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
+});
 
-  // Normalize premium flags
-  let changed = false;
-  db.users.forEach(u => {
-    if (u.premiumUntil && Number(u.premiumUntil) < Date.now()) {
-      u.isPremium = false;
-      u.premiumUntil = undefined;
-      changed = true;
+app.get('/api/users', async (req, res) => {
+  try {
+    const id = req.query.id || req.query.userId;
+
+    if (supabaseAdmin) {
+      if (id) {
+        const user = await readSupabaseRowById('users', String(id));
+        if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+        if (user.premiumUntil && Number(user.premiumUntil) < Date.now()) {
+          user.isPremium = false;
+          user.premiumUntil = undefined;
+        }
+
+        return res.json(user);
+      }
+
+      const users = (await readSupabaseTable('users')) || [];
+      const normalized = users.map(u => {
+        if (u.premiumUntil && Number(u.premiumUntil) < Date.now()) {
+          return { ...u, isPremium: false, premiumUntil: undefined };
+        }
+        return u;
+      });
+      return res.json(normalized);
     }
-  });
-  if (changed) saveDb(db);
 
-  res.json(db.users);
+    const db = getDb();
+
+    if (id) {
+      const user = db.users.find((u) => u.id === id);
+      if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+      if (user.premiumUntil && Number(user.premiumUntil) < Date.now()) {
+        user.isPremium = false;
+        user.premiumUntil = undefined;
+        saveDb(db);
+      }
+
+      return res.json(user);
+    }
+
+    // Normalize premium flags
+    let changed = false;
+    db.users.forEach(u => {
+      if (u.premiumUntil && Number(u.premiumUntil) < Date.now()) {
+        u.isPremium = false;
+        u.premiumUntil = undefined;
+        changed = true;
+      }
+    });
+    if (changed) saveDb(db);
+
+    res.json(db.users);
+  } catch (err) {
+    console.error('Error in /api/users', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
 });
 
 app.put('/api/users/:id', (req, res) => {
@@ -1087,15 +1146,29 @@ app.put('/api/users', (req, res) => {
 });
 
 // --- RUTAS DE ENTRADAS (ENTRIES) ---
-app.get('/api/entries', (req, res) => {
-  const { userId } = req.query;
-  const db = getDb();
+app.get('/api/entries', async (req, res) => {
+  try {
+    const { userId } = req.query;
 
-  const entries = userId
-    ? db.entries.filter((e) => String(e.userId) === String(userId))
-    : db.entries;
+    if (supabaseAdmin) {
+      const entries = (await readSupabaseTable('entries')) || [];
+      const filtered = userId
+        ? entries.filter((e) => String(e.userId) === String(userId))
+        : entries;
+      return res.json(filtered);
+    }
 
-  res.json(entries);
+    const db = getDb();
+
+    const entries = userId
+      ? db.entries.filter((e) => String(e.userId) === String(userId))
+      : db.entries;
+
+    res.json(entries);
+  } catch (err) {
+    console.error('Error in /api/entries', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
 });
 
 app.post('/api/entries', (req, res) => {
