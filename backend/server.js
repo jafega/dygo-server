@@ -76,10 +76,13 @@ if (USE_POSTGRES) {
         // Remove ssl query params so pg doesn't override ssl config
         url.searchParams.delete('sslmode');
         url.searchParams.delete('sslrootcert');
-        url.searchParams.delete('pgbouncer');
         url.searchParams.delete('ssl');
         if (isSupabaseHost) {
           url.searchParams.delete('sslmode');
+        }
+        // If using Supabase pooler, enable pgbouncer mode to avoid prepared statements
+        if (String(process.env.SUPABASE_PGBOUNCER || '').toLowerCase() === 'true') {
+          url.searchParams.set('pgbouncer', 'true');
         }
         connectionString = url.toString();
       } catch (e) {
