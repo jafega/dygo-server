@@ -149,15 +149,17 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
           psychologistNote: internalNote,
           psychologistFeedback: feedback
       };
-      
-      try {
-        await updateEntry(updated);
-        setEntries(prev => prev.map(e => e.id === entry.id ? updated : e));
-      } catch (err) {
-        console.error('Error saving notes', err);
-      } finally {
-        setEditingEntryId(null);
-      }
+            const prevEntries = entries;
+
+            setEntries(prev => prev.map(e => e.id === entry.id ? updated : e));
+            setEditingEntryId(null);
+
+            try {
+                await updateEntry(updated);
+            } catch (err) {
+                console.error('Error saving notes', err);
+                setEntries(prevEntries);
+            }
   };
 
   const handleCreateEntry = async () => {
@@ -175,6 +177,9 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
           psychologistFeedback: feedback,
           createdBy: 'PSYCHOLOGIST'
       };
+            const prevEntries = entries;
+            setEntries([newEntry, ...entries]);
+            setIsCreating(false);
 
       try {
         await saveEntry(newEntry);
@@ -182,8 +187,9 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
         setEntries(e);
       } catch (err) {
         console.error('Error creating entry', err);
+                setEntries(prevEntries);
       } finally {
-        setIsCreating(false);
+                setIsCreating(false);
       }
   };
 
@@ -498,7 +504,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                 </div>
                             </div>
                         ) : (
-                            <div className="space-y-6 md:space-y-8 relative max-w-5xl mx-auto pl-12 md:pl-0">
+                            <div className="space-y-6 md:space-y-10 relative max-w-5xl mx-auto pl-12 md:pl-0">
                                 {/* Vertical Line: Left on mobile, Center on Desktop */}
                                 <div className="absolute top-0 bottom-0 left-5 md:left-1/2 md:-ml-px w-0.5 bg-gradient-to-b from-transparent via-slate-200 to-transparent -ml-12 md:-ml-px"></div>
 
@@ -507,6 +513,8 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                     const pFeed = normalizeNote(entry.psychologistFeedback);
                                     const isEditing = editingEntryId === entry.id;
                                     const isPsychEntry = entry.createdBy === 'PSYCHOLOGIST';
+                                    const timeLabel = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+                                    const hasAttachments = (pNote.attachments?.length || 0) + (pFeed.attachments?.length || 0) > 0;
 
                                     return (
                                         <div key={entry.id} className="relative flex flex-col md:flex-row items-start md:items-center justify-between group">
@@ -516,17 +524,21 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                                 flex items-center justify-center w-10 h-10 md:w-16 md:h-16 rounded-full border-4 border-slate-50 shadow-md shrink-0 z-10 
                                                 absolute left-[-2.5rem] top-0 md:static md:top-auto md:left-auto
                                                 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2
-                                                ${isPsychEntry ? 'bg-purple-100 text-purple-600' : 'bg-indigo-100 text-indigo-600'}
+                                                ${isPsychEntry ? 'bg-purple-100 text-purple-600 ring-4 ring-purple-50' : 'bg-indigo-100 text-indigo-600 ring-4 ring-indigo-50'}
                                             `}>
                                                 {isPsychEntry ? <Stethoscope className="w-5 h-5 md:w-6 md:h-6" /> : <Calendar className="w-5 h-5 md:w-6 md:h-6 font-bold" />}
                                             </div>
+
+                                            {/* Connector (desktop) */}
+                                            <div className={`hidden md:block absolute top-8 md:top-1/2 md:-translate-y-1/2 h-px w-10 ${isPsychEntry ? 'bg-purple-100' : 'bg-indigo-100'} md:group-odd:right-1/2 md:group-even:left-1/2`}></div>
                                             
                                             {/* Content Card */}
                                             <div className={`
-                                                w-full md:w-[calc(50%-4rem)] p-4 md:p-6 bg-white/95 rounded-2xl border shadow-sm transition-all hover:shadow-lg 
+                                                w-full md:w-[calc(50%-4rem)] p-4 md:p-6 bg-white/95 rounded-2xl border shadow-sm transition-all hover:shadow-lg relative overflow-hidden
                                                 ${isPsychEntry ? 'border-purple-100 ring-1 ring-purple-50' : 'border-slate-200'}
                                                 md:group-odd:mr-auto md:group-even:ml-auto backdrop-blur
                                             `}>
+                                                <div className={`absolute inset-x-0 top-0 h-1 ${isPsychEntry ? 'bg-gradient-to-r from-purple-400 to-indigo-400' : 'bg-gradient-to-r from-indigo-400 to-sky-400'}`}></div>
                                                 
                                                 {/* Entry Header */}
                                                 <div className="flex justify-between items-start mb-3 pb-3 border-b border-slate-100">
@@ -544,6 +556,11 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                                     </div>
                                                     
                                                     <div className="flex flex-col items-end gap-1">
+                                                        {timeLabel && (
+                                                            <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                                                                {timeLabel}
+                                                            </span>
+                                                        )}
                                                         {!isPsychEntry && (
                                                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${entry.sentimentScore >= 7 ? 'bg-green-50 text-green-700 border-green-200' : entry.sentimentScore >= 4 ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
                                                                 {entry.sentimentScore}/10
@@ -555,6 +572,23 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                                             </button>
                                                         )}
                                                     </div>
+                                                </div>
+
+                                                <div className="flex flex-wrap items-center gap-2 mb-3">
+                                                    {hasAttachments && (
+                                                        <span className="text-[10px] font-bold text-slate-600 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">
+                                                            Adjuntos
+                                                        </span>
+                                                    )}
+                                                    {isPsychEntry ? (
+                                                        <span className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-100 px-2 py-0.5 rounded-full">
+                                                            Entrada clínica
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">
+                                                            Entrada paciente
+                                                        </span>
+                                                    )}
                                                 </div>
 
                                                 {/* Patient Summary */}
