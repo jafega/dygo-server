@@ -91,9 +91,16 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   };
 
   const filteredEntries = getFilteredEntries();
-    const avgSentiment = filteredEntries.length > 0
-            ? filteredEntries.reduce((acc, curr) => acc + (curr.sentimentScore || 0), 0) / filteredEntries.length
-            : 0;
+      const patientDiaryEntries = filteredEntries.filter(e => {
+          if (e.createdBy === 'PSYCHOLOGIST') return false;
+          const hasTranscript = Boolean(e.transcript && e.transcript.trim().length > 0);
+          const hasNonClinicalEmotion = Array.isArray(e.emotions) ? e.emotions.some(em => em !== 'Clínico') : false;
+          return hasTranscript || hasNonClinicalEmotion;
+      });
+
+      const avgSentiment = patientDiaryEntries.length > 0
+          ? patientDiaryEntries.reduce((acc, curr) => acc + (curr.sentimentScore || 0), 0) / patientDiaryEntries.length
+          : 0;
 
     const psychEntriesCount = entries.filter(e => e.createdBy === 'PSYCHOLOGIST').length;
     const patientEntriesCount = entries.filter(e => e.createdBy !== 'PSYCHOLOGIST').length;
@@ -507,9 +514,9 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                 </div>
                             </div>
                         ) : (
-                            <div className="space-y-6 md:space-y-10 relative max-w-5xl mx-auto pl-12 md:pl-0">
-                                {/* Vertical Line: Left on mobile, Center on Desktop */}
-                                <div className="absolute top-0 bottom-0 left-5 md:left-1/2 md:-ml-px w-0.5 bg-gradient-to-b from-transparent via-slate-200 to-transparent -ml-12 md:-ml-px"></div>
+                            <div className="space-y-6 md:space-y-8 relative max-w-4xl mx-auto pl-12 md:pl-12">
+                                {/* Vertical Line: Left */}
+                                <div className="absolute top-0 bottom-0 left-5 w-0.5 bg-gradient-to-b from-transparent via-slate-200 to-transparent -ml-12"></div>
 
                                 {entries.map((entry) => {
                                     const pNote = normalizeNote(entry.psychologistNote);
@@ -520,26 +527,25 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                     const hasAttachments = (pNote.attachments?.length || 0) + (pFeed.attachments?.length || 0) > 0;
 
                                     return (
-                                        <div key={entry.id} className="relative flex flex-col md:flex-row items-start md:items-center justify-between group">
+                                        <div key={entry.id} className="relative flex flex-col items-start justify-between group">
                                             
                                             {/* Central Dot */}
                                             <div className={`
-                                                flex items-center justify-center w-10 h-10 md:w-16 md:h-16 rounded-full border-4 border-slate-50 shadow-md shrink-0 z-10 
-                                                absolute left-[-2.5rem] top-0 md:static md:top-auto md:left-auto
-                                                md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2
+                                                flex items-center justify-center w-10 h-10 md:w-12 md:h-12 rounded-full border-4 border-slate-50 shadow-md shrink-0 z-10 
+                                                absolute left-[-2.5rem] top-0
                                                 ${isPsychEntry ? 'bg-purple-100 text-purple-600 ring-4 ring-purple-50' : 'bg-indigo-100 text-indigo-600 ring-4 ring-indigo-50'}
                                             `}>
                                                 {isPsychEntry ? <Stethoscope className="w-5 h-5 md:w-6 md:h-6" /> : <Calendar className="w-5 h-5 md:w-6 md:h-6 font-bold" />}
                                             </div>
 
-                                            {/* Connector (desktop) */}
-                                            <div className={`hidden md:block absolute top-8 md:top-1/2 md:-translate-y-1/2 h-px w-10 ${isPsychEntry ? 'bg-purple-100' : 'bg-indigo-100'} md:group-odd:right-1/2 md:group-even:left-1/2`}></div>
+                                            {/* Connector */}
+                                            <div className={`absolute top-5 left-[-0.25rem] h-px w-6 ${isPsychEntry ? 'bg-purple-100' : 'bg-indigo-100'}`}></div>
                                             
                                             {/* Content Card */}
                                             <div className={`
-                                                w-full md:w-[calc(50%-4rem)] p-4 md:p-6 bg-white/95 rounded-2xl border shadow-sm transition-all hover:shadow-lg relative overflow-hidden
+                                                w-full p-4 md:p-6 bg-white/95 rounded-2xl border shadow-sm transition-all hover:shadow-lg relative overflow-hidden
                                                 ${isPsychEntry ? 'border-purple-100 ring-1 ring-purple-50' : 'border-slate-200'}
-                                                md:group-odd:mr-auto md:group-even:ml-auto backdrop-blur
+                                                backdrop-blur
                                             `}>
                                                 <div className={`absolute inset-x-0 top-0 h-1 ${isPsychEntry ? 'bg-gradient-to-r from-purple-400 to-indigo-400' : 'bg-gradient-to-r from-indigo-400 to-sky-400'}`}></div>
                                                 
