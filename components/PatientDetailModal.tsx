@@ -514,7 +514,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                 </div>
                             </div>
                         ) : (
-                            <div className="space-y-6 md:space-y-8 relative max-w-4xl mx-auto">
+                            <div className="space-y-6 md:space-y-8 relative w-full">
                                 {/* Vertical Line: Left */}
                                 <div className="absolute top-0 bottom-0 left-5 w-0.5 bg-gradient-to-b from-transparent via-slate-200 to-transparent"></div>
 
@@ -527,7 +527,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                     const hasAttachments = (pNote.attachments?.length || 0) + (pFeed.attachments?.length || 0) > 0;
 
                                     return (
-                                        <div key={entry.id} className="relative group">
+                                        <div key={entry.id} className="relative group pl-12">
                                             
                                             {/* Central Dot */}
                                             <div className={`
@@ -543,7 +543,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                             
                                             {/* Content Card */}
                                             <div className={`
-                                                w-full ml-12 p-4 md:p-6 bg-white/95 rounded-2xl border shadow-sm transition-all hover:shadow-lg relative overflow-hidden
+                                                w-full p-4 md:p-6 bg-white/95 rounded-2xl border shadow-sm transition-all hover:shadow-lg relative overflow-hidden
                                                 ${isPsychEntry ? 'border-purple-100 ring-1 ring-purple-50' : 'border-slate-200'}
                                                 backdrop-blur
                                             `}>
