@@ -91,6 +91,10 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
 
   const filteredEntries = getFilteredEntries();
 
+    const psychEntriesCount = entries.filter(e => e.createdBy === 'PSYCHOLOGIST').length;
+    const patientEntriesCount = entries.filter(e => e.createdBy !== 'PSYCHOLOGIST').length;
+    const lastUpdateDate = entries.length > 0 ? entries[0].date : '—';
+
   // --- GOAL HANDLERS ---
   const handleAddGoal = (desc: string) => {
       const newGoal: Goal = {
@@ -335,6 +339,49 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                 <div className="flex h-full flex-col md:flex-row">
                     {/* Left: Timeline Feed */}
                     <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-20 md:pb-8">
+
+                        {/* Timeline Summary */}
+                        <div className="mb-6 md:mb-8">
+                            <div className="bg-gradient-to-br from-indigo-50 via-white to-purple-50 border border-indigo-100 rounded-2xl p-4 md:p-6 shadow-sm">
+                                <div className="flex items-start justify-between gap-3 mb-4">
+                                    <div>
+                                        <h3 className="text-base md:text-lg font-bold text-slate-800 flex items-center gap-2">
+                                            <FileText size={18} className="text-indigo-500" />
+                                            Historial Clínico
+                                        </h3>
+                                        <p className="text-xs md:text-sm text-slate-500 mt-1">
+                                            Última actualización: <span className="font-semibold text-slate-700">{lastUpdateDate}</span>
+                                        </p>
+                                    </div>
+                                    <div className="hidden md:flex items-center gap-2 text-[10px] font-semibold text-indigo-600 bg-white border border-indigo-100 px-2 py-1 rounded-full">
+                                        Vista Psicólogo
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                    <div className="bg-white/80 border border-slate-100 rounded-xl p-3 flex items-center justify-between">
+                                        <div>
+                                            <p className="text-[10px] uppercase tracking-wide text-slate-400 font-bold">Total Entradas</p>
+                                            <p className="text-2xl font-bold text-slate-800">{entries.length}</p>
+                                        </div>
+                                        <div className="bg-indigo-50 text-indigo-600 p-2 rounded-full"><FileText size={16} /></div>
+                                    </div>
+                                    <div className="bg-white/80 border border-slate-100 rounded-xl p-3 flex items-center justify-between">
+                                        <div>
+                                            <p className="text-[10px] uppercase tracking-wide text-slate-400 font-bold">Notas Clínicas</p>
+                                            <p className="text-2xl font-bold text-slate-800">{psychEntriesCount}</p>
+                                        </div>
+                                        <div className="bg-purple-50 text-purple-600 p-2 rounded-full"><Stethoscope size={16} /></div>
+                                    </div>
+                                    <div className="bg-white/80 border border-slate-100 rounded-xl p-3 flex items-center justify-between">
+                                        <div>
+                                            <p className="text-[10px] uppercase tracking-wide text-slate-400 font-bold">Registros Paciente</p>
+                                            <p className="text-2xl font-bold text-slate-800">{patientEntriesCount}</p>
+                                        </div>
+                                        <div className="bg-indigo-50 text-indigo-600 p-2 rounded-full"><Calendar size={16} /></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                         
                         {/* Creation Form */}
                         {isCreating && (
@@ -480,7 +527,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                                     
                                                     <div className="flex flex-col items-end gap-1">
                                                         {!isEditing && (
-                                                            <button onClick={() => handleEditClick(entry)} className="text-xs font-medium text-indigo-600 hover:text-indigo-800 hover:underline pt-1">
+                                                            <button onClick={() => handleEditClick(entry)} className="text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-1 rounded-full hover:bg-indigo-100 transition-colors">
                                                                 {isPsychEntry ? 'Editar' : 'Añadir Nota'}
                                                             </button>
                                                         )}
