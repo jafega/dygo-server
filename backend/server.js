@@ -960,10 +960,27 @@ app.post('/api/settings/:userId', (req, res) => {
 
 app.get('/api/health', (_req, res) => {
   try {
+    let dbInfo = { host: null, port: null, user: null, database: null };
+    try {
+      if (process.env.DATABASE_URL) {
+        const safeUrl = new URL(process.env.DATABASE_URL);
+        dbInfo = {
+          host: safeUrl.hostname || null,
+          port: safeUrl.port || null,
+          user: safeUrl.username || null,
+          database: safeUrl.pathname.replace('/', '') || null
+        };
+      }
+    } catch (e) {
+      // ignore parsing errors in health output
+    }
+
     const envStatus = {
       databaseUrlSet: !!process.env.DATABASE_URL,
       supabaseSsl: String(process.env.SUPABASE_SSL || '').toLowerCase() === 'true',
-      useSqlite: USE_SQLITE
+      useSqlite: USE_SQLITE,
+      pgPoolActive: !!pgPool,
+      dbInfo
     };
 
     if (sqliteDb) {
