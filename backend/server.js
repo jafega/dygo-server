@@ -21,6 +21,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3001;
 const DB_FILE = path.join(__dirname, 'db.json');
+const IS_SERVERLESS = !!(process.env.VERCEL || process.env.VERCEL_ENV);
 
 
 
@@ -67,7 +68,7 @@ if (USE_SQLITE) {
 if (USE_POSTGRES) {
   try {
     const { Pool } = await import('pg');
-    const isServerless = !!(process.env.VERCEL || process.env.VERCEL_ENV);
+    const isServerless = IS_SERVERLESS;
     const rawConnectionString = process.env.DATABASE_URL;
     let parsedUrl = null;
     let isSupabaseHost = false;
@@ -124,9 +125,10 @@ if (USE_POSTGRES) {
     // Supabase and many managed Postgres instances require SSL. Detect common indicators and set ssl config.
     // - If `DATABASE_URL` contains `sslmode=require` or user sets SUPABASE_SSL=true, enable ssl with relaxed verification.
     if (process.env.SUPABASE_SSL === 'true' || isSupabaseHost || isPoolerHost) {
+      const sslHost = poolConfig.host || (parsedUrl ? parsedUrl.hostname : undefined);
       poolConfig.ssl = {
         rejectUnauthorized: false,
-        checkServerIdentity: () => undefined
+        ...(sslHost ? { servername: sslHost } : {})
       };
       console.log('ℹ️ Enabling SSL for Postgres connection (rejectUnauthorized: false)');
     }
@@ -324,6 +326,11 @@ const saveDb = (data) => {
     } catch (e) {
       console.error('❌ Error guardando en SQLite:', e);
     }
+    return;
+  }
+
+  if (IS_SERVERLESS) {
+    console.warn('⚠️ Skipping db.json write on serverless read-only filesystem. Enable Postgres or SQLite for persistence.');
     return;
   }
 
