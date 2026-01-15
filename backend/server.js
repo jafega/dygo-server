@@ -32,14 +32,17 @@ const SUPABASE_REST_ONLY = String(process.env.SUPABASE_REST_ONLY || '').toLowerC
 const allowedOrigins = [
   process.env.FRONTEND_URL,
   'https://dygo.vercel.app',
-  'https://dygo-frontend.vercel.app'
+  'https://dygo-frontend.vercel.app',
+  'http://localhost:5173',
+  'http://localhost:3000'
 ].filter(Boolean);
 
 const corsOptions = {
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
-    if (!allowedOrigins.length || allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error('Not allowed by CORS'));
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    if (origin.endsWith('.vercel.app')) return callback(null, true);
+    return callback(null, true);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -280,32 +283,56 @@ async function loadSupabaseCache() {
   return { users, entries, goals, invitations, settings };
 }
 
-async function saveSupabaseDb(data) {
+async function saveSupabaseDb(data, prevCache = null) {
   if (!supabaseAdmin) return;
 
-  const chunk = (arr, size = 500) => {
+  const chunk = (arr, size = 200) => {
     const out = [];
     for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
     return out;
   };
 
-  const replaceTable = async (table, rows) => {
-    const { error: delError } = await supabaseAdmin.from(table).delete().neq('id', '');
-    if (delError) throw delError;
+  const upsertTable = async (table, rows) => {
     if (!rows.length) return;
     const chunks = chunk(rows);
     for (const c of chunks) {
-      const { error: insError } = await supabaseAdmin.from(table).insert(c);
-      if (insError) throw insError;
+      const { error: upsertError } = await supabaseAdmin.from(table).upsert(c, { onConflict: 'id' });
+      if (upsertError) throw upsertError;
     }
   };
 
-  await replaceTable('users', (data.users || []).map(u => ({ id: u.id, data: u })));
-  await replaceTable('entries', (data.entries || []).map(e => ({ id: e.id, data: e })));
-  await replaceTable('goals', (data.goals || []).map(g => ({ id: g.id, data: g })));
-  await replaceTable('invitations', (data.invitations || []).map(i => ({ id: i.id, data: i })));
+  const deleteMissing = async (table, prevIds, nextIds) => {
+    if (!prevIds || !prevIds.length) return;
+    const nextSet = new Set(nextIds || []);
+    const toDelete = prevIds.filter((id) => !nextSet.has(id));
+    if (!toDelete.length) return;
+    const chunks = chunk(toDelete, 200);
+    for (const c of chunks) {
+      const { error: delError } = await supabaseAdmin.from(table).delete().in('id', c);
+      if (delError) throw delError;
+    }
+  };
+
+  const usersRows = (data.users || []).map(u => ({ id: u.id, data: u }));
+  const entriesRows = (data.entries || []).map(e => ({ id: e.id, data: e }));
+  const goalsRows = (data.goals || []).map(g => ({ id: g.id, data: g }));
+  const invitationsRows = (data.invitations || []).map(i => ({ id: i.id, data: i }));
   const settings = data.settings || {};
-  await replaceTable('settings', Object.keys(settings).map(k => ({ id: k, data: settings[k] })));
+  const settingsRows = Object.keys(settings).map(k => ({ id: k, data: settings[k] }));
+
+  await upsertTable('users', usersRows);
+  await upsertTable('entries', entriesRows);
+  await upsertTable('goals', goalsRows);
+  await upsertTable('invitations', invitationsRows);
+  await upsertTable('settings', settingsRows);
+
+  if (prevCache) {
+    await deleteMissing('users', (prevCache.users || []).map(u => u.id), usersRows.map(r => r.id));
+    await deleteMissing('entries', (prevCache.entries || []).map(e => e.id), entriesRows.map(r => r.id));
+    await deleteMissing('goals', (prevCache.goals || []).map(g => g.id), goalsRows.map(r => r.id));
+    await deleteMissing('invitations', (prevCache.invitations || []).map(i => i.id), invitationsRows.map(r => r.id));
+    await deleteMissing('settings', Object.keys(prevCache.settings || {}), settingsRows.map(r => r.id));
+  }
 }
 
 const getDb = () => {
@@ -401,10 +428,11 @@ const saveDb = (data) => {
   }
 
   if (supabaseAdmin) {
+    const prevCache = supabaseDbCache;
     supabaseDbCache = data;
     (async () => {
       try {
-        await saveSupabaseDb(data);
+        await saveSupabaseDb(data, prevCache);
       } catch (err) {
         console.error('❌ Error guardando en Supabase REST:', err);
       }
@@ -988,13 +1016,15 @@ app.get('/api/users', (req, res) => {
   }
 
   // Normalize premium flags
+  let changed = false;
   db.users.forEach(u => {
     if (u.premiumUntil && Number(u.premiumUntil) < Date.now()) {
       u.isPremium = false;
       u.premiumUntil = undefined;
+      changed = true;
     }
   });
-  saveDb(db);
+  if (changed) saveDb(db);
 
   res.json(db.users);
 });
