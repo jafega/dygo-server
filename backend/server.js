@@ -69,6 +69,21 @@ if (USE_POSTGRES) {
     const { Pool } = await import('pg');
     const poolConfig = { connectionString: process.env.DATABASE_URL, max: 10 };
 
+    // Log safe connection info (no password) to debug Vercel env usage
+    try {
+      if (process.env.DATABASE_URL) {
+        const safeUrl = new URL(process.env.DATABASE_URL);
+        console.log('ℹ️ Postgres connection info', {
+          host: safeUrl.hostname,
+          port: safeUrl.port,
+          user: safeUrl.username,
+          database: safeUrl.pathname.replace('/', '')
+        });
+      }
+    } catch (e) {
+      console.warn('⚠️ Unable to parse DATABASE_URL for debug', e?.message || e);
+    }
+
     // Supabase and many managed Postgres instances require SSL. Detect common indicators and set ssl config.
     // - If `DATABASE_URL` contains `sslmode=require` or user sets SUPABASE_SSL=true, enable ssl with relaxed verification.
     if ((process.env.DATABASE_URL && process.env.DATABASE_URL.includes('sslmode=require')) || process.env.SUPABASE_SSL === 'true') {
