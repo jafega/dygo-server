@@ -26,6 +26,8 @@ const DygoLogo: React.FC<{ className?: string }> = ({ className = "w-8 h-8" }) =
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [viewState, setViewState] = useState<ViewState>(ViewState.AUTH);
+  const [showRolePrompt, setShowRolePrompt] = useState(false);
+  const [pendingRole, setPendingRole] = useState<'PATIENT' | 'PSYCHOLOGIST' | null>(null);
   
   const [psychViewMode, setPsychViewMode] = useState<'DASHBOARD' | 'PERSONAL'>('DASHBOARD');
 
@@ -53,6 +55,12 @@ const App: React.FC = () => {
         const user = await AuthService.getCurrentUser();
         if (user) {
             setCurrentUser(user);
+        const hasValidRole = user.role === 'PATIENT' || user.role === 'PSYCHOLOGIST';
+        if (!hasValidRole) {
+          setShowRolePrompt(true);
+          setIsLoadingData(false);
+          return;
+        }
             // If backend is available, try to migrate any local data for this user
             if (USE_BACKEND) {
                 try { await StorageService.migrateLocalToBackend(user.id); } catch (e) { console.warn('Migration skipped', e); }
@@ -88,6 +96,11 @@ const App: React.FC = () => {
       const user = await AuthService.getCurrentUser();
       if (user) {
           setCurrentUser(user);
+        const hasValidRole = user.role === 'PATIENT' || user.role === 'PSYCHOLOGIST';
+        if (!hasValidRole) {
+          setShowRolePrompt(true);
+          return;
+        }
           await loadUserData(user.id);
           await checkInvitations(user.email);
           setViewState(user.role === 'PSYCHOLOGIST' ? ViewState.PATIENTS : ViewState.CALENDAR);
@@ -108,7 +121,30 @@ const App: React.FC = () => {
 
   const handleUserUpdate = (updatedUser: User) => {
       setCurrentUser(updatedUser);
+      if (updatedUser.role === 'PSYCHOLOGIST') {
+        setViewState(ViewState.PATIENTS);
+        setPsychViewMode('DASHBOARD');
+      } else if (updatedUser.role === 'PATIENT') {
+        setViewState(ViewState.CALENDAR);
+      }
   };
+
+    const handleConfirmRole = async () => {
+      if (!currentUser || !pendingRole) return;
+      const updated = { ...currentUser, role: pendingRole } as User;
+      try {
+        await AuthService.updateUser(updated);
+        setCurrentUser(updated);
+        setShowRolePrompt(false);
+        setPendingRole(null);
+        await loadUserData(updated.id);
+        await checkInvitations(updated.email);
+        setViewState(updated.role === 'PSYCHOLOGIST' ? ViewState.PATIENTS : ViewState.CALENDAR);
+      } catch (err:any) {
+        console.error('Error updating role', err);
+        alert(err?.message || 'Error guardando el rol.');
+      }
+    };
 
   useEffect(() => {
     if (!settings.notificationsEnabled || !currentUser) return;
@@ -409,6 +445,39 @@ const personalGoals = safeGoals.filter(
   // Patient View
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 pb-20 md:pb-0">
+      {showRolePrompt && (
+        <div className="fixed inset-0 z-[9999] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-6">
+            <h2 className="text-xl font-bold text-slate-800">Elige tu perfil</h2>
+            <p className="text-sm text-slate-500 mt-1">Necesitamos saber cómo usarás dygo.</p>
+
+            <div className="mt-4 grid gap-3">
+              <button
+                onClick={() => setPendingRole('PATIENT')}
+                className={`w-full text-left p-4 rounded-xl border transition ${pendingRole === 'PATIENT' ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 hover:border-indigo-300'}`}
+              >
+                <div className="font-semibold text-slate-800">Soy cliente</div>
+                <div className="text-xs text-slate-500">Quiero escribir mi diario y seguir mis metas.</div>
+              </button>
+              <button
+                onClick={() => setPendingRole('PSYCHOLOGIST')}
+                className={`w-full text-left p-4 rounded-xl border transition ${pendingRole === 'PSYCHOLOGIST' ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 hover:border-indigo-300'}`}
+              >
+                <div className="font-semibold text-slate-800">Soy psicólogo/a</div>
+                <div className="text-xs text-slate-500">Quiero gestionar pacientes y ver su progreso.</div>
+              </button>
+            </div>
+
+            <button
+              onClick={handleConfirmRole}
+              disabled={!pendingRole}
+              className={`mt-4 w-full py-3 rounded-xl font-medium ${pendingRole ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-200 text-slate-500 cursor-not-allowed'}`}
+            >
+              Continuar
+            </button>
+          </div>
+        </div>
+      )}
       {isProcessing && (
         <div className="fixed inset-0 bg-white/80 z-[60] flex flex-col items-center justify-center backdrop-blur-sm">
            <div className="w-16 h-16 relative flex items-center justify-center mb-4">

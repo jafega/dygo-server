@@ -225,14 +225,25 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
 
                     <div className="space-y-4 pt-2">
                         <h3 className="text-xs font-bold uppercase text-slate-400">Notificaciones</h3>
-                        <div className="flex items-center justify-between rounded-xl border border-slate-100 bg-white p-3">
-                            <div>
-                                <div className="font-medium text-slate-700">Recordatorio diario</div>
-                                <div className="text-xs text-slate-500">Recibe un aviso para escribir tu diario.</div>
+                        <div className={`rounded-2xl border ${enabled ? 'border-indigo-200 bg-indigo-50/60' : 'border-slate-100 bg-white'} p-4 transition-colors`}
+                        >
+                            <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                    <div className="font-semibold text-slate-800">Recordatorio diario</div>
+                                    <div className="text-xs text-slate-500">Te avisaremos para mantener tu rutina de bienestar.</div>
+                                </div>
+                                <button onClick={() => setEnabled(!enabled)} className={`w-12 h-6 rounded-full transition-colors relative ${enabled ? 'bg-indigo-500' : 'bg-slate-300'}`}>
+                                    <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${enabled ? 'left-7' : 'left-1'}`}></div>
+                                </button>
                             </div>
-                            <button onClick={() => setEnabled(!enabled)} className={`w-12 h-6 rounded-full transition-colors relative ${enabled ? 'bg-indigo-500' : 'bg-slate-300'}`}><div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${enabled ? 'left-7' : 'left-1'}`}></div></button>
+                            {enabled && (
+                                <div className="mt-4 grid gap-2">
+                                    <label className="text-xs text-slate-500 flex items-center gap-2"><Clock size={14} /> Hora del recordatorio</label>
+                                    <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl" />
+                                    <div className="text-[11px] text-slate-400">Puedes cambiarla cuando quieras.</div>
+                                </div>
+                            )}
                         </div>
-                        {enabled && <div className="space-y-2"><label className="block text-sm text-slate-500 flex items-center gap-2"><Clock size={14} /> Hora</label><input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="w-full p-3 bg-slate-50 border rounded-xl" /></div>}
                     </div>
 
                     <div className="pt-4 border-t border-slate-100 space-y-4">
@@ -333,10 +344,35 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                             </div>
                         </div>
 
-                        <div className="space-y-2">
-                            <button onClick={handleSave} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium">Guardar Cambios</button>
-                            <button onClick={handleLogoutClick} className="w-full py-3 text-red-500 hover:bg-red-50 rounded-xl font-medium flex items-center justify-center gap-2"><LogOut size={16} /> Cerrar Sesión</button>
-                        </div>
+                                                {currentUser?.role !== 'PSYCHOLOGIST' && (
+                                                    <div className="bg-white border border-slate-100 rounded-2xl p-4">
+                                                        <h4 className="text-sm font-bold text-slate-800">¿Eres psicólogo/a?</h4>
+                                                        <p className="text-xs text-slate-500 mt-1">Convierte tu perfil para gestionar pacientes y ver su progreso.</p>
+                                                        <button
+                                                            onClick={async () => {
+                                                                if (!currentUser) return;
+                                                                if (!window.confirm('¿Quieres convertir tu perfil en psicólogo/a?')) return;
+                                                                try {
+                                                                    const updated = { ...currentUser, role: 'PSYCHOLOGIST' } as User;
+                                                                    await updateUser(updated);
+                                                                    setCurrentUser(updated);
+                                                                    if (onUserUpdate) onUserUpdate(updated);
+                                                                } catch (err:any) {
+                                                                    console.error('Error updating role', err);
+                                                                    alert(err?.message || 'Error actualizando el perfil.');
+                                                                }
+                                                            }}
+                                                            className="mt-3 w-full py-2.5 rounded-xl bg-slate-900 text-white hover:bg-slate-800"
+                                                        >
+                                                            Convertirme en psicólogo/a
+                                                        </button>
+                                                    </div>
+                                                )}
+
+                                                <div className="space-y-2">
+                                                        <button onClick={handleSave} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium">Guardar Cambios</button>
+                                                        <button onClick={handleLogoutClick} className="w-full py-3 text-red-500 hover:bg-red-50 rounded-xl font-medium flex items-center justify-center gap-2"><LogOut size={16} /> Cerrar Sesión</button>
+                                                </div>
                     </div>
                 </div>
             ) : (
