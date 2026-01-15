@@ -150,7 +150,7 @@ export const login = async (email: string, password: string): Promise<User> => {
 // Sign in with Supabase (exchange Supabase access token with backend)
 export const signInWithSupabase = async (accessToken: string): Promise<User> => {
     if (USE_BACKEND) {
-        const res = await fetch(`${API_URL}/supabase/auth`, {
+        const res = await fetch(`${API_URL}/supabase-auth`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ access_token: accessToken })
         });
         if (!res.ok) {
@@ -178,7 +178,7 @@ export const getCurrentUser = async (): Promise<User | null> => {
 export const getUserById = async (id: string): Promise<User | undefined> => {
   if (USE_BACKEND) {
       try {
-          const res = await fetch(`${API_URL}/users/${id}`);
+          const res = await fetch(`${API_URL}/users?id=${id}`);
           if (res.ok) return await res.json();
           throw new Error(`Server error: ${res.status}`);
       } catch(e) {
@@ -198,7 +198,7 @@ export const getUserByEmail = async (email: string): Promise<User | undefined> =
 export const updateUser = async (updatedUser: User) => {
     if (USE_BACKEND) {
         try {
-            const res = await fetch(`${API_URL}/users/${updatedUser.id}`, {
+            const res = await fetch(`${API_URL}/users?id=${updatedUser.id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(updatedUser)
@@ -245,7 +245,7 @@ export const changePassword = async (currentPassword: string, newPassword: strin
 // Demo reset endpoint (for forgot password button): calls backend /auth/reset-password-demo
 export const resetPasswordDemo = async (email: string, newPassword: string, secret?: string) => {
     if (USE_BACKEND) {
-        const res = await fetch(`${API_URL}/auth/reset-password-demo`, {
+        const res = await fetch(`${API_URL}/reset-password-demo`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, newPassword, secret })
         });
         if (!res.ok) {
@@ -270,7 +270,7 @@ export const adminResetUserPassword = async (targetEmail: string, newPassword: s
         const current = await getCurrentUser();
         const headers: Record<string,string> = { 'Content-Type': 'application/json' };
         if (current?.id) headers['x-user-id'] = current.id;
-        const res = await fetch(`${API_URL}/admin/reset-user-password`, {
+        const res = await fetch(`${API_URL}/admin-reset-user-password`, {
             method: 'POST', headers, body: JSON.stringify({ targetEmail, newPassword })
         });
         if (!res.ok) {
@@ -296,7 +296,7 @@ export const adminDeleteUser = async (targetEmail: string) => {
         const current = await getCurrentUser();
         const headers: Record<string,string> = { 'Content-Type': 'application/json' };
         if (current?.id) headers['x-user-id'] = current.id;
-        const res = await fetch(`${API_URL}/admin/delete-user`, {
+        const res = await fetch(`${API_URL}/admin-delete-user`, {
             method: 'DELETE', headers, body: JSON.stringify({ targetEmail })
         });
         if (!res.ok) {
@@ -373,7 +373,7 @@ export const createCheckoutSession = async () => {
     if (!current) throw new Error('No authenticated user');
     const headers: Record<string,string> = { 'Content-Type': 'application/json' };
     if (current?.id) headers['x-user-id'] = current.id;
-    const res = await fetch(`${API_URL}/api/stripe/create-checkout-session`, { method: 'POST', headers, body: JSON.stringify({}) });
+    const res = await fetch(`${API_URL}/stripe-create-checkout-session`, { method: 'POST', headers, body: JSON.stringify({}) });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || 'Error creating checkout session');
@@ -393,7 +393,7 @@ export const createBillingPortalSession = async () => {
     if (!current) throw new Error('No authenticated user');
     const headers: Record<string,string> = { 'Content-Type': 'application/json' };
     if (current?.id) headers['x-user-id'] = current.id;
-    const res = await fetch(`${API_URL}/api/stripe/create-portal-session`, { method: 'POST', headers, body: JSON.stringify({}) });
+    const res = await fetch(`${API_URL}/stripe-create-portal-session`, { method: 'POST', headers, body: JSON.stringify({}) });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || 'Error creating portal session');

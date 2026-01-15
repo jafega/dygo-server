@@ -555,8 +555,8 @@ const handleSupabaseAuth = async (req, res) => {
   }
 };
 
-// Primary endpoint (avoid /api/auth/* on Vercel routing)
-app.post('/api/supabase/auth', handleSupabaseAuth);
+// Primary endpoint (single-segment to avoid Vercel multi-segment routing issues)
+app.post('/api/supabase-auth', handleSupabaseAuth);
 // Legacy endpoint
 app.post('/api/auth/supabase', handleSupabaseAuth);
 
@@ -587,7 +587,7 @@ app.post('/api/auth/login', (req, res) => {
 // --- DEMO PASSWORD RESET (secure-ish) ---
 // Allows resetting a user's password by email. For production you MUST set PASSWORD_RESET_SECRET in the env,
 // otherwise this endpoint is only allowed when NODE_ENV !== 'production'.
-app.post('/api/auth/reset-password-demo', (req, res) => {
+const handleResetPasswordDemo = (req, res) => {
   try {
     const { email, newPassword, secret } = req.body || {};
     if (!email || !newPassword) return res.status(400).json({ error: 'email and newPassword are required' });
@@ -608,13 +608,16 @@ app.post('/api/auth/reset-password-demo', (req, res) => {
     console.log(`🔒 Password reset (demo) for ${user.email}`);
     return res.json({ success: true });
   } catch (err) {
-    console.error('Error in /api/auth/reset-password-demo', err);
+    console.error('Error in reset-password-demo', err);
     return res.status(500).json({ error: 'Internal server error' });
   }
-});
+};
+
+app.post('/api/auth/reset-password-demo', handleResetPasswordDemo);
+app.post('/api/reset-password-demo', handleResetPasswordDemo);
 
 // --- ADMIN: Reset any user's password (restricted to superadmin)
-app.post('/api/admin/reset-user-password', (req, res) => {
+const handleAdminResetUserPassword = (req, res) => {
   try {
     const requesterId = req.headers['x-user-id'] || req.headers['x-userid'] || req.body?.requesterId;
     if (!requesterId) return res.status(401).json({ error: 'Missing requester id in header x-user-id' });
@@ -638,13 +641,16 @@ app.post('/api/admin/reset-user-password', (req, res) => {
     console.log(`🔒 Admin ${requester.email} reset password for ${user.email}`);
     return res.json({ success: true });
   } catch (err) {
-    console.error('Error in /api/admin/reset-user-password', err);
+    console.error('Error in admin-reset-user-password', err);
     return res.status(500).json({ error: 'Internal server error' });
   }
-});
+};
+
+app.post('/api/admin/reset-user-password', handleAdminResetUserPassword);
+app.post('/api/admin-reset-user-password', handleAdminResetUserPassword);
 
 // --- ADMIN: Delete a user and all associated data (restricted to superadmin)
-app.delete('/api/admin/delete-user', (req, res) => {
+const handleAdminDeleteUser = (req, res) => {
   try {
     const requesterId = req.headers['x-user-id'] || req.headers['x-userid'] || req.body?.requesterId;
     if (!requesterId) return res.status(401).json({ error: 'Missing requester id in header x-user-id' });
@@ -696,13 +702,16 @@ app.delete('/api/admin/delete-user', (req, res) => {
     console.log(`🗑️ Admin ${requester.email} deleted user ${user.email} and associated data`);
     return res.json({ success: true });
   } catch (err) {
-    console.error('Error in /api/admin/delete-user', err);
+    console.error('Error in admin-delete-user', err);
     return res.status(500).json({ error: 'Internal server error' });
   }
-});
+};
+
+app.delete('/api/admin/delete-user', handleAdminDeleteUser);
+app.delete('/api/admin-delete-user', handleAdminDeleteUser);
 
 // --- ADMIN: Migrate JSON/SQLite data to Postgres/Supabase (dry-run & execute)
-app.post('/api/admin/migrate-to-postgres', async (req, res) => {
+const handleAdminMigrateToPostgres = async (req, res) => {
   try {
     const requesterId = req.headers['x-user-id'] || req.headers['x-userid'] || req.body?.requesterId;
     if (!requesterId) return res.status(401).json({ error: 'Missing requester id in header x-user-id' });
@@ -788,13 +797,16 @@ app.post('/api/admin/migrate-to-postgres', async (req, res) => {
 
     return res.json({ migrated: true, report, finalCounts });
   } catch (err) {
-    console.error('Error in /api/admin/migrate-to-postgres', err);
+    console.error('Error in admin-migrate-to-postgres', err);
     return res.status(500).json({ error: 'Migration failed', detail: String(err) });
   }
-});
+};
+
+app.post('/api/admin/migrate-to-postgres', handleAdminMigrateToPostgres);
+app.post('/api/admin-migrate-to-postgres', handleAdminMigrateToPostgres);
 
 // --- STRIPE: create checkout session and portal session ---
-app.post('/api/stripe/create-checkout-session', async (req, res) => {
+const handleCreateCheckoutSession = async (req, res) => {
   try {
     const requesterId = req.headers['x-user-id'] || req.headers['x-userid'];
     if (!requesterId) return res.status(401).json({ error: 'Missing requester id' });
@@ -841,9 +853,12 @@ app.post('/api/stripe/create-checkout-session', async (req, res) => {
     console.error('Error creating checkout session', err);
     return res.status(500).json({ error: 'Error creating checkout session' });
   }
-});
+};
 
-app.post('/api/stripe/create-portal-session', async (req, res) => {
+app.post('/api/stripe/create-checkout-session', handleCreateCheckoutSession);
+app.post('/api/stripe-create-checkout-session', handleCreateCheckoutSession);
+
+const handleCreatePortalSession = async (req, res) => {
   try {
     const requesterId = req.headers['x-user-id'] || req.headers['x-userid'];
     if (!requesterId) return res.status(401).json({ error: 'Missing requester id' });
@@ -862,7 +877,10 @@ app.post('/api/stripe/create-portal-session', async (req, res) => {
     console.error('Error creating portal session', err);
     return res.status(500).json({ error: 'Error creating portal session' });
   }
-});
+};
+
+app.post('/api/stripe/create-portal-session', handleCreatePortalSession);
+app.post('/api/stripe-create-portal-session', handleCreatePortalSession);
 
 // --- STRIPE: webhook to keep subscription status in sync ---
 // Use raw body for signature verification
@@ -952,8 +970,22 @@ app.get('/api/users/:id', (req, res) => {
   res.json(user);
 });
 
-app.get('/api/users', (_req, res) => {
+app.get('/api/users', (req, res) => {
   const db = getDb();
+  const id = req.query.id || req.query.userId;
+
+  if (id) {
+    const user = db.users.find((u) => u.id === id);
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    if (user.premiumUntil && Number(user.premiumUntil) < Date.now()) {
+      user.isPremium = false;
+      user.premiumUntil = undefined;
+      saveDb(db);
+    }
+
+    return res.json(user);
+  }
 
   // Normalize premium flags
   db.users.forEach(u => {
@@ -970,6 +1002,20 @@ app.get('/api/users', (_req, res) => {
 app.put('/api/users/:id', (req, res) => {
   const db = getDb();
   const idx = db.users.findIndex((u) => u.id === req.params.id);
+
+  if (idx === -1) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+  db.users[idx] = { ...db.users[idx], ...req.body };
+  saveDb(db);
+  res.json(db.users[idx]);
+});
+
+app.put('/api/users', (req, res) => {
+  const id = req.query.id || req.query.userId;
+  if (!id) return res.status(400).json({ error: 'Missing user id' });
+
+  const db = getDb();
+  const idx = db.users.findIndex((u) => u.id === id);
 
   if (idx === -1) return res.status(404).json({ error: 'Usuario no encontrado' });
 
@@ -1017,10 +1063,42 @@ app.put('/api/entries/:id', (req, res) => {
   res.json(db.entries[idx]);
 });
 
+app.put('/api/entries', (req, res) => {
+  const id = req.query.id;
+  if (!id) return res.status(400).json({ error: 'Missing entry id' });
+
+  const db = getDb();
+  const idx = db.entries.findIndex((e) => e.id === id);
+
+  if (idx === -1) {
+    return res.status(404).json({ error: 'Entrada no encontrada' });
+  }
+
+  db.entries[idx] = { ...db.entries[idx], ...req.body };
+  saveDb(db);
+  res.json(db.entries[idx]);
+});
+
 app.delete('/api/entries/:id', (req, res) => {
   const db = getDb();
   const before = db.entries.length;
   db.entries = db.entries.filter((e) => e.id !== req.params.id);
+
+  if (db.entries.length === before) {
+    return res.status(404).json({ error: 'Entrada no encontrada' });
+  }
+
+  saveDb(db);
+  res.json({ success: true });
+});
+
+app.delete('/api/entries', (req, res) => {
+  const id = req.query.id;
+  if (!id) return res.status(400).json({ error: 'Missing entry id' });
+
+  const db = getDb();
+  const before = db.entries.length;
+  db.entries = db.entries.filter((e) => e.id !== id);
 
   if (db.entries.length === before) {
     return res.status(404).json({ error: 'Entrada no encontrada' });
@@ -1046,7 +1124,7 @@ app.get('/api/goals', (req, res) => {
 
 
 // Sincronizar metas completas de un usuario
-app.post('/api/goals/sync', (req, res) => {
+const handleGoalsSync = (req, res) => {
   const { userId, goals } = req.body || {};
   if (!userId || !Array.isArray(goals)) {
     return res.status(400).json({ error: 'userId y goals son obligatorios' });
@@ -1058,7 +1136,10 @@ app.post('/api/goals/sync', (req, res) => {
   saveDb(db);
 
   res.json({ success: true });
-});
+};
+
+app.post('/api/goals/sync', handleGoalsSync);
+app.post('/api/goals-sync', handleGoalsSync);
 
 // --- RUTAS DE INVITACIONES ---
 app.get('/api/invitations', (_req, res) => {
@@ -1092,10 +1173,42 @@ app.put('/api/invitations/:id', (req, res) => {
   res.json(db.invitations[idx]);
 });
 
+app.put('/api/invitations', (req, res) => {
+  const id = req.query.id;
+  if (!id) return res.status(400).json({ error: 'Missing invitation id' });
+
+  const db = getDb();
+  const idx = db.invitations.findIndex((i) => i.id === id);
+
+  if (idx === -1) {
+    return res.status(404).json({ error: 'Invitación no encontrada' });
+  }
+
+  db.invitations[idx] = { ...db.invitations[idx], ...req.body };
+  saveDb(db);
+  res.json(db.invitations[idx]);
+});
+
 app.delete('/api/invitations/:id', (req, res) => {
   const db = getDb();
   const before = db.invitations.length;
   db.invitations = db.invitations.filter((i) => i.id !== req.params.id);
+
+  if (db.invitations.length === before) {
+    return res.status(404).json({ error: 'Invitación no encontrada' });
+  }
+
+  saveDb(db);
+  res.json({ success: true });
+});
+
+app.delete('/api/invitations', (req, res) => {
+  const id = req.query.id;
+  if (!id) return res.status(400).json({ error: 'Missing invitation id' });
+
+  const db = getDb();
+  const before = db.invitations.length;
+  db.invitations = db.invitations.filter((i) => i.id !== id);
 
   if (db.invitations.length === before) {
     return res.status(404).json({ error: 'Invitación no encontrada' });
@@ -1111,9 +1224,27 @@ app.get('/api/settings/:userId', (req, res) => {
   res.json(db.settings[req.params.userId] || {});
 });
 
+app.get('/api/settings', (req, res) => {
+  const userId = req.query.userId || req.query.id;
+  if (!userId) return res.status(400).json({ error: 'Missing userId' });
+
+  const db = getDb();
+  res.json(db.settings[userId] || {});
+});
+
 app.post('/api/settings/:userId', (req, res) => {
   const db = getDb();
   db.settings[req.params.userId] = req.body || {};
+  saveDb(db);
+  res.json({ success: true });
+});
+
+app.post('/api/settings', (req, res) => {
+  const userId = req.query.userId || req.query.id;
+  if (!userId) return res.status(400).json({ error: 'Missing userId' });
+
+  const db = getDb();
+  db.settings[userId] = req.body || {};
   saveDb(db);
   res.json({ success: true });
 });

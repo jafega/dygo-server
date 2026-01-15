@@ -1,0 +1,3 @@
+# Ignore extra API route files; keep only the catch-all
+api/**
+!api/[...path].js

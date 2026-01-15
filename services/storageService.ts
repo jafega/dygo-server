@@ -30,7 +30,7 @@ export const saveEntry = async (entry: JournalEntry): Promise<void> => {
       try {
           // If an ID exists try to update first, otherwise create
           if (entry.id) {
-              const res = await fetch(`${API_URL}/entries/${entry.id}`, {
+              const res = await fetch(`${API_URL}/entries?id=${entry.id}`, {
                   method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(entry)
               });
               if (res.ok) return;
@@ -55,7 +55,7 @@ export const saveEntry = async (entry: JournalEntry): Promise<void> => {
 export const updateEntry = async (updatedEntry: JournalEntry): Promise<void> => {
     if (USE_BACKEND) {
         try {
-            const res = await fetch(`${API_URL}/entries/${updatedEntry.id}`, {
+            const res = await fetch(`${API_URL}/entries?id=${updatedEntry.id}`, {
                 method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(updatedEntry)
             });
             if (!res.ok) throw new Error(`Error updating entry (${res.status})`);
@@ -71,7 +71,7 @@ export const updateEntry = async (updatedEntry: JournalEntry): Promise<void> => 
 export const deleteEntry = async (id: string): Promise<void> => {
     if (USE_BACKEND) {
         try {
-            const res = await fetch(`${API_URL}/entries/${id}`, { method: 'DELETE' });
+            const res = await fetch(`${API_URL}/entries?id=${id}`, { method: 'DELETE' });
             if (!res.ok) throw new Error(`Error deleting entry (${res.status})`);
             return;
         } catch (e) {
@@ -146,7 +146,7 @@ export const getGoalsForUser = async (userId: string): Promise<Goal[]> => {
 export const saveUserGoals = async (userId: string, userGoals: Goal[]) => {
     if (USE_BACKEND) {
         try {
-            const res = await fetch(`${API_URL}/goals/sync`, {
+            const res = await fetch(`${API_URL}/goals-sync`, {
                 method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ userId, goals: userGoals })
             });
             if (!res.ok) throw new Error(`Error syncing goals (${res.status})`);
@@ -163,7 +163,7 @@ export const getSettings = async (userId: string): Promise<UserSettings> => {
     const defaults: UserSettings = { notificationsEnabled: false, notificationTime: '20:00', language: 'es-ES', voice: 'Kore' };
     if (USE_BACKEND) {
         try {
-            const res = await fetch(`${API_URL}/settings/${userId}`);
+            const res = await fetch(`${API_URL}/settings?userId=${userId}`);
             if (res.ok) {
                 const data = await res.json();
                 return { ...defaults, ...data };
@@ -180,7 +180,7 @@ export const getSettings = async (userId: string): Promise<UserSettings> => {
 export const saveSettings = async (userId: string, settings: UserSettings): Promise<void> => {
     if (USE_BACKEND) {
         try {
-            const res = await fetch(`${API_URL}/settings/${userId}`, {
+            const res = await fetch(`${API_URL}/settings?userId=${userId}`, {
                 method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(settings)
             });
             if (!res.ok) throw new Error(`Error saving settings (${res.status})`);
@@ -264,7 +264,7 @@ export const acceptInvitation = async (invitationId: string, userId: string) => 
     if (USE_BACKEND) {
         inv.status = 'ACCEPTED';
         try {
-            const res = await fetch(`${API_URL}/invitations/${inv.id}`, { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(inv) });
+            const res = await fetch(`${API_URL}/invitations?id=${inv.id}`, { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(inv) });
             if (!res.ok) throw new Error(`Error accepting invitation (${res.status})`);
         } catch (e) {
             if (ALLOW_LOCAL_FALLBACK) { inv.status = 'ACCEPTED'; localStorage.setItem(INVITATIONS_KEY, JSON.stringify(invs)); console.warn('Accept invitation failed, saved locally', e); }
@@ -293,7 +293,7 @@ export const acceptInvitation = async (invitationId: string, userId: string) => 
 export const rejectInvitation = async (invitationId: string) => {
     if (USE_BACKEND) {
         try {
-            const res = await fetch(`${API_URL}/invitations/${invitationId}`, { method: 'DELETE' });
+            const res = await fetch(`${API_URL}/invitations?id=${invitationId}`, { method: 'DELETE' });
             if (!res.ok) throw new Error(`Error rejecting invitation (${res.status})`);
             return;
         } catch (e) { if (ALLOW_LOCAL_FALLBACK) { const invs = (await getInvitations()).filter(i => i.id !== invitationId); localStorage.setItem(INVITATIONS_KEY, JSON.stringify(invs)); console.warn('Reject invitation failed, updated locally', e); return; } else { throw e; } }
