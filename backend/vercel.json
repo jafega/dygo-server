@@ -1,9 +1,4 @@
 {
-  "functions": {
-    "api/[...path].js": {
-      "runtime": "@vercel/node@3"
-    }
-  },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/[...path].js" }
   ]
