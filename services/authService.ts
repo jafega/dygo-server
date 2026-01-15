@@ -150,7 +150,7 @@ export const login = async (email: string, password: string): Promise<User> => {
 // Sign in with Supabase (exchange Supabase access token with backend)
 export const signInWithSupabase = async (accessToken: string): Promise<User> => {
     if (USE_BACKEND) {
-        const res = await fetch(`${API_URL}/auth/supabase`, {
+        const res = await fetch(`${API_URL}/supabase/auth`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ access_token: accessToken })
         });
         if (!res.ok) {

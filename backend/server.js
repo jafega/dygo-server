@@ -495,7 +495,7 @@ app.post('/api/auth/register', (req, res) => {
 });
 
 // Supabase OAuth token exchange + user validation
-app.post('/api/auth/supabase', async (req, res) => {
+const handleSupabaseAuth = async (req, res) => {
   try {
     const { access_token } = req.body || {};
     if (!access_token) return res.status(400).json({ error: 'access_token is required' });
@@ -550,10 +550,15 @@ app.post('/api/auth/supabase', async (req, res) => {
 
     return res.json(user);
   } catch (err) {
-    console.error('Error in /api/auth/supabase', err);
-    return res.status(500).json({ error: 'Internal server error' });
+    console.error('Error in supabase auth handler', err);
+    return res.status(500).json({ error: 'Supabase auth failed' });
   }
-});
+};
+
+// Primary endpoint (avoid /api/auth/* on Vercel routing)
+app.post('/api/supabase/auth', handleSupabaseAuth);
+// Legacy endpoint
+app.post('/api/auth/supabase', handleSupabaseAuth);
 
 // Login
 app.post('/api/auth/login', (req, res) => {
