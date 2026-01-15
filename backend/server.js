@@ -1079,11 +1079,13 @@ if (USE_SQLITE) {
   }
 }
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log('\n🚀 SERVIDOR DYGO (ES MODULES) LISTO');
-  console.log(`📡 URL: http://localhost:${PORT}`);
-  console.log(`📂 DB: ${DB_FILE}\n`);
-});
+if (!process.env.VERCEL && !process.env.VERCEL_ENV) {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log('\n🚀 SERVIDOR DYGO (ES MODULES) LISTO');
+    console.log(`📡 URL: http://localhost:${PORT}`);
+    console.log(`📂 DB: ${DB_FILE}\n`);
+  });
+}
 
 // (Opcional) export para tests
 export default app;

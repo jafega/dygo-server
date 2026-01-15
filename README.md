@@ -83,19 +83,24 @@ Supabase (Postgres + Auth) quick guide:
 
 If you'd like, I can add a migration audit/CLI or integration tests for Supabase auth.
 
-Render-specific steps to enable SQLite persistence (works since you already have a mounted disk at `/var/data`):
 
-1. In Render dashboard, go to your Service > Environment / Variables and add:
-   - `USE_SQLITE=true`
-   - `SQLITE_DB_FILE=/var/data/database.sqlite`
-2. Make sure the service has the `/var/data` volume mounted as a persistent disk (Render: add a Persistent Disk and mount it at `/var/data`).
-3. Deploy/restart the service. On first run the server will create `database.sqlite` there and attempt to migrate data from `db.json` into the SQLite tables (if the sqlite store is empty).
+## Vercel Deployment
 
-Verify:
-- Call `GET https://<your-service>/api/dbinfo` — it will return JSON with `persistence: "sqlite"`, `sqliteFile`, and counts for users/entries/goals/invitations/settings.
-- Call `GET https://<your-service>/api/health` to ensure persistence is writable (returns 200 when ok).
-- Create a test entry via the API (`POST /api/entries`) and call `/api/dbinfo` again to verify the `entries` count increased.
-- Confirm data persists across redeploys/restarts.
+**Recommended: Deploy on Vercel (serverless, managed, supports Supabase/Postgres out of the box)**
 
-If you'd like, I can add an optional health-check endpoint that fails when persistence isn't writable (helpful for Render's health checks), or implement Postgres support instead for a managed DB. Which would you prefer?
+1. Connect your GitHub repository to Vercel and import the project.
+2. In the Vercel dashboard, go to your Project > Settings > Environment Variables and add:
+  - `DATABASE_URL` (your Supabase Postgres connection string)
+  - `SUPABASE_URL` (e.g. `https://<project>.supabase.co`)
+  - `SUPABASE_ANON_KEY` (frontend anon key)
+  - `SUPABASE_SERVICE_ROLE_KEY` (server role key, keep secret)
+  - `SUPABASE_SSL` (set to `true`)
+  - `USE_SQLITE` (set to `false`)
+  - Any other required variables (Stripe, Google, etc.)
+3. Deploy your project. Vercel will build and deploy automatically.
+4. After deployment, verify your API endpoints (e.g. `/api/health`, `/api/dbinfo`) are working and persistence is set to `postgres`.
+
+**Note:** Vercel serverless functions are stateless. All data must be stored in Supabase/Postgres. Do not use local file storage (db.json, SQLite) in production on Vercel.
+
+If you need help with Vercel-specific configuration or want to migrate from Render, just ask!
 
