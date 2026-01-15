@@ -41,6 +41,25 @@ const PatientDashboard: React.FC = () => {
     loadData();
   }, []);
 
+    useEffect(() => {
+        const handleFocus = () => {
+            loadData();
+        };
+        const handleVisibility = () => {
+            if (document.visibilityState === 'visible') {
+                loadData();
+            }
+        };
+
+        window.addEventListener('focus', handleFocus);
+        document.addEventListener('visibilitychange', handleVisibility);
+
+        return () => {
+            window.removeEventListener('focus', handleFocus);
+            document.removeEventListener('visibilitychange', handleVisibility);
+        };
+    }, []);
+
   const openInviteModal = () => {
       setShowInvite(true);
       setInviteEmail('');
