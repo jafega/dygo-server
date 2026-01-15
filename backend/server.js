@@ -85,9 +85,7 @@ if (USE_POSTGRES) {
         if (isPoolerHost || String(process.env.SUPABASE_PGBOUNCER || '').toLowerCase() === 'true') {
           url.searchParams.set('pgbouncer', 'true');
         }
-        if (isSupabaseHost || isPoolerHost) {
-          url.searchParams.set('sslmode', 'require');
-        }
+        // Do not set sslmode here; rely on explicit ssl config below
         connectionString = url.toString();
       } catch (e) {
         // ignore parse errors and keep original
