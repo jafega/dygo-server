@@ -27,6 +27,8 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const SUPABASE_REST_ONLY = String(process.env.SUPABASE_REST_ONLY || '').toLowerCase() === 'true';
 const DISALLOW_LOCAL_PERSISTENCE = String(process.env.DISALLOW_LOCAL_PERSISTENCE || 'true').toLowerCase() === 'true';
 
+const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
+
 
 
 // --- MIDDLEWARE ---
@@ -276,6 +278,13 @@ if (!pgPool && SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
     console.log('✅ Supabase REST persistence enabled (service role)');
     supabaseDbCache = await loadSupabaseCache();
     console.log('ℹ️ Supabase data loaded into cache');
+    (async () => {
+      try {
+        await dedupeSupabaseUsers();
+      } catch (err) {
+        console.error('❌ Supabase dedupe failed', err);
+      }
+    })();
   } catch (err) {
     console.error('❌ Unable to enable Supabase REST persistence', err);
     supabaseAdmin = null;
@@ -285,11 +294,30 @@ if (!pgPool && SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
 
 let pgDbCache = null;
 
+function normalizeSupabaseRow(row) {
+  if (!row) return row;
+  const base = { ...row };
+  const data = base.data;
+  delete base.data;
+  if (data && typeof data === 'object') {
+    return { ...base, ...data };
+  }
+  return base;
+}
+
+function buildSupabaseRowFromEntity(originalRow, entity) {
+  const hasData = originalRow && Object.prototype.hasOwnProperty.call(originalRow, 'data');
+  if (hasData) {
+    return { id: originalRow.id || entity.id, data: entity };
+  }
+  return { ...entity, id: originalRow?.id || entity.id };
+}
+
 async function loadSupabaseCache() {
   if (!supabaseAdmin) return null;
 
   const readTable = async (table) => {
-    const { data, error } = await supabaseAdmin.from(table).select('id,data');
+    const { data, error } = await supabaseAdmin.from(table).select('*');
     if (error) throw error;
     return data || [];
   };
@@ -300,28 +328,114 @@ async function loadSupabaseCache() {
   const invitationsRows = await readTable('invitations');
   const settingsRows = await readTable('settings');
 
-  const users = usersRows.map(row => ({ id: row.id, ...row.data }));
-  const entries = entriesRows.map(row => ({ id: row.id, ...row.data }));
-  const goals = goalsRows.map(row => ({ id: row.id, ...row.data }));
-  const invitations = invitationsRows.map(row => ({ id: row.id, ...row.data }));
-  const settings = Object.fromEntries(settingsRows.map(row => [row.id, row.data]));
+  const users = usersRows.map(normalizeSupabaseRow);
+  const entries = entriesRows.map(normalizeSupabaseRow);
+  const goals = goalsRows.map(normalizeSupabaseRow);
+  const invitations = invitationsRows.map(normalizeSupabaseRow);
+  const settings = Object.fromEntries(settingsRows.map(row => [row.id, (row.data && typeof row.data === 'object') ? row.data : normalizeSupabaseRow(row)]));
 
   return { users, entries, goals, invitations, settings };
 }
 
 async function readSupabaseTable(table) {
   if (!supabaseAdmin) return null;
-  const { data, error } = await supabaseAdmin.from(table).select('id,data');
+  const { data, error } = await supabaseAdmin.from(table).select('*');
   if (error) throw error;
-  return (data || []).map(row => ({ id: row.id, ...(row.data || {}) }));
+  return (data || []).map(normalizeSupabaseRow);
 }
 
 async function readSupabaseRowById(table, id) {
   if (!supabaseAdmin) return null;
-  const { data, error } = await supabaseAdmin.from(table).select('id,data').eq('id', id).limit(1);
+  const { data, error } = await supabaseAdmin.from(table).select('*').eq('id', id).limit(1);
   if (error) throw error;
   if (!data || data.length === 0) return null;
-  return { id: data[0].id, ...(data[0].data || {}) };
+  return normalizeSupabaseRow(data[0]);
+}
+
+async function dedupeSupabaseUsers() {
+  if (!supabaseAdmin) return;
+  const { data, error } = await supabaseAdmin.from('users').select('*');
+  if (error) throw error;
+  const rows = data || [];
+  if (rows.length < 2) return;
+
+  const groups = new Map();
+  for (const row of rows) {
+    const user = normalizeSupabaseRow(row);
+    const email = normalizeEmail(user.email);
+    if (!email) continue;
+    if (!groups.has(email)) groups.set(email, []);
+    groups.get(email).push({ row, user });
+  }
+
+  const duplicateIds = new Map();
+  for (const [email, list] of groups.entries()) {
+    if (list.length <= 1) continue;
+
+    const scored = list.map((item) => {
+      const hasSupabaseId = item.user?.supabaseId ? 2 : 0;
+      const isPsych = String(item.user?.role || '').toUpperCase() === 'PSYCHOLOGIST' || item.user?.isPsychologist ? 1 : 0;
+      const accessScore = Array.isArray(item.user?.accessList) ? Math.min(item.user.accessList.length, 3) : 0;
+      return { ...item, score: hasSupabaseId * 10 + isPsych * 3 + accessScore };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+    const canonical = scored[0];
+    const others = scored.slice(1);
+
+    const merged = { ...canonical.user };
+    for (const o of others) {
+      if (!merged.name && o.user?.name) merged.name = o.user.name;
+      if (!merged.avatarUrl && o.user?.avatarUrl) merged.avatarUrl = o.user.avatarUrl;
+      if (!merged.googleId && o.user?.googleId) merged.googleId = o.user.googleId;
+      if (!merged.supabaseId && o.user?.supabaseId) merged.supabaseId = o.user.supabaseId;
+      if (o.user?.role && String(o.user.role).toUpperCase() === 'PSYCHOLOGIST') {
+        merged.role = 'PSYCHOLOGIST';
+        merged.isPsychologist = true;
+      }
+      const acc = new Set([...(merged.accessList || []), ...((o.user?.accessList) || [])]);
+      merged.accessList = Array.from(acc);
+    }
+
+    const updateRow = buildSupabaseRowFromEntity(canonical.row, merged);
+    await supabaseAdmin.from('users').upsert(updateRow, { onConflict: 'id' });
+
+    const otherIds = others.map(o => o.row.id).filter(Boolean);
+    if (otherIds.length) {
+      for (const id of otherIds) {
+        duplicateIds.set(id, canonical.row.id);
+      }
+      await supabaseAdmin.from('users').delete().in('id', otherIds);
+    }
+  }
+
+  if (duplicateIds.size > 0) {
+    try {
+      const { data: entriesRows, error: entriesError } = await supabaseAdmin.from('entries').select('*');
+      if (entriesError) throw entriesError;
+      const updates = [];
+      for (const row of entriesRows || []) {
+        const entry = normalizeSupabaseRow(row);
+        const canonicalId = duplicateIds.get(String(entry.userId || ''));
+        if (canonicalId) {
+          const updated = { ...entry, userId: canonicalId };
+          updates.push(buildSupabaseRowFromEntity(row, updated));
+        }
+      }
+      if (updates.length) {
+        const chunk = (arr, size = 200) => {
+          const out = [];
+          for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+          return out;
+        };
+        for (const c of chunk(updates, 200)) {
+          await supabaseAdmin.from('entries').upsert(c, { onConflict: 'id' });
+        }
+      }
+    } catch (e) {
+      console.error('❌ Failed updating entries after user dedupe', e);
+    }
+  }
 }
 
 async function saveSupabaseDb(data, prevCache = null) {
@@ -543,18 +657,22 @@ app.post('/api/auth/register', (req, res) => {
     }
 
     const db = getDb();
+    const normalizedEmail = normalizeEmail(email);
 
     // Verificar si existe el email
-    if (db.users.find((u) => u.email === email)) {
+    if (db.users.find((u) => normalizeEmail(u.email) === normalizedEmail)) {
       return res.status(400).json({ error: 'El email ya existe' });
     }
+
+    const normalizedRole = String(role || 'PATIENT').toUpperCase() === 'PSYCHOLOGIST' ? 'PSYCHOLOGIST' : 'PATIENT';
 
     const newUser = {
       id: crypto.randomUUID(), // requiere Node 16.14+ / 18+
       name,
-      email,
+      email: normalizedEmail,
       password, // OJO: en producción deberías hashearla
-      role: role || 'user',
+      role: normalizedRole,
+      isPsychologist: normalizedRole === 'PSYCHOLOGIST',
       accessList: []
     };
 
@@ -595,16 +713,17 @@ const handleSupabaseAuth = async (req, res) => {
     const db = getDb();
     let user = db.users.find(u => u.supabaseId && String(u.supabaseId) === String(supUser.id));
     if (!user) {
-      user = db.users.find(u => u.email && String(u.email).toLowerCase() === String(supUser.email).toLowerCase());
+      user = db.users.find(u => u.email && normalizeEmail(u.email) === normalizeEmail(supUser.email));
     }
 
     if (!user) {
       user = {
         id: crypto.randomUUID(),
         name: supUser.user_metadata?.full_name || supUser.email || 'Sin nombre',
-        email: supUser.email,
+        email: normalizeEmail(supUser.email),
         password: '',
         role: 'PATIENT',
+        isPsychologist: false,
         accessList: [],
         supabaseId: supUser.id
       };
@@ -617,6 +736,9 @@ const handleSupabaseAuth = async (req, res) => {
       // Ensure supabaseId is set
       if (!user.supabaseId) {
         user.supabaseId = supUser.id;
+      }
+      if (user.role) {
+        user.isPsychologist = String(user.role).toUpperCase() === 'PSYCHOLOGIST';
       }
       if (!db.settings) db.settings = {};
       if (!db.settings[user.id]) db.settings[user.id] = {};
@@ -644,13 +766,14 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(400).json({ error: 'Email y contraseña son obligatorios' });
     }
 
+    const normalizedEmail = String(email).trim().toLowerCase();
     let user = null;
     if (supabaseAdmin) {
       const users = await readSupabaseTable('users');
-      user = (users || []).find((u) => u.email === email && u.password === password);
+      user = (users || []).find((u) => String(u.email || '').trim().toLowerCase() === normalizedEmail && u.password === password);
     } else {
       const db = getDb();
-      user = db.users.find((u) => u.email === email && u.password === password);
+      user = db.users.find((u) => String(u.email || '').trim().toLowerCase() === normalizedEmail && u.password === password);
     }
 
     if (!user) {
@@ -1082,9 +1205,21 @@ app.get('/api/users', async (req, res) => {
         if (u.premiumUntil && Number(u.premiumUntil) < Date.now()) {
           return { ...u, isPremium: false, premiumUntil: undefined };
         }
+        if (u.role) {
+          return { ...u, isPsychologist: String(u.role).toUpperCase() === 'PSYCHOLOGIST' };
+        }
         return u;
       });
-      return res.json(normalized);
+      const unique = [];
+      const seen = new Set();
+      for (const u of normalized) {
+        const key = normalizeEmail(u.email);
+        if (!key) continue;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        unique.push(u);
+      }
+      return res.json(unique);
     }
 
     const db = getDb();
@@ -1126,7 +1261,16 @@ app.put('/api/users/:id', (req, res) => {
 
   if (idx === -1) return res.status(404).json({ error: 'Usuario no encontrado' });
 
-  db.users[idx] = { ...db.users[idx], ...req.body };
+  if (req.body?.email) {
+    const normalizedEmail = normalizeEmail(req.body.email);
+    const duplicate = db.users.find((u, i) => i !== idx && normalizeEmail(u.email) === normalizedEmail);
+    if (duplicate) return res.status(400).json({ error: 'Email ya en uso' });
+  }
+
+  const updated = { ...db.users[idx], ...req.body };
+  if (updated.email) updated.email = normalizeEmail(updated.email);
+  if (updated.role) updated.isPsychologist = String(updated.role).toUpperCase() === 'PSYCHOLOGIST';
+  db.users[idx] = updated;
   saveDb(db);
   res.json(db.users[idx]);
 });
@@ -1140,7 +1284,16 @@ app.put('/api/users', (req, res) => {
 
   if (idx === -1) return res.status(404).json({ error: 'Usuario no encontrado' });
 
-  db.users[idx] = { ...db.users[idx], ...req.body };
+  if (req.body?.email) {
+    const normalizedEmail = normalizeEmail(req.body.email);
+    const duplicate = db.users.find((u, i) => i !== idx && normalizeEmail(u.email) === normalizedEmail);
+    if (duplicate) return res.status(400).json({ error: 'Email ya en uso' });
+  }
+
+  const updated = { ...db.users[idx], ...req.body };
+  if (updated.email) updated.email = normalizeEmail(updated.email);
+  if (updated.role) updated.isPsychologist = String(updated.role).toUpperCase() === 'PSYCHOLOGIST';
+  db.users[idx] = updated;
   saveDb(db);
   res.json(db.users[idx]);
 });
@@ -1152,10 +1305,23 @@ app.get('/api/entries', async (req, res) => {
 
     if (supabaseAdmin) {
       const entries = (await readSupabaseTable('entries')) || [];
-      const filtered = userId
-        ? entries.filter((e) => String(e.userId) === String(userId))
-        : entries;
-      return res.json(filtered);
+      if (userId) {
+        const ids = new Set([String(userId)]);
+        try {
+          const user = await readSupabaseRowById('users', String(userId));
+          if (user?.supabaseId) ids.add(String(user.supabaseId));
+          if (user?.email) ids.add(String(user.email).trim().toLowerCase());
+        } catch (e) {
+          // ignore lookup errors
+        }
+        const filtered = entries.filter((e) => {
+          const uid = String(e.userId || '').trim();
+          const uemail = String(e.userEmail || e.email || '').trim().toLowerCase();
+          return ids.has(uid) || (uemail && ids.has(uemail));
+        });
+        return res.json(filtered);
+      }
+      return res.json(entries);
     }
 
     const db = getDb();

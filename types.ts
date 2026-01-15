@@ -6,6 +6,7 @@ export interface User {
   email: string;
   password?: string; // In a real app, this would be hashed
   role: UserRole;
+  isPsychologist?: boolean;
   avatarUrl?: string; // Profile picture (Base64)
   accessList: string[]; // For Patients: List of Psychologist IDs who can view data. For Psychs: List of Patient IDs.
   // Optional OAuth fields
