@@ -514,9 +514,9 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                 </div>
                             </div>
                         ) : (
-                            <div className="space-y-6 md:space-y-8 relative max-w-4xl mx-auto pl-12 md:pl-12">
+                            <div className="space-y-6 md:space-y-8 relative max-w-4xl mx-auto">
                                 {/* Vertical Line: Left */}
-                                <div className="absolute top-0 bottom-0 left-5 w-0.5 bg-gradient-to-b from-transparent via-slate-200 to-transparent -ml-12"></div>
+                                <div className="absolute top-0 bottom-0 left-5 w-0.5 bg-gradient-to-b from-transparent via-slate-200 to-transparent"></div>
 
                                 {entries.map((entry) => {
                                     const pNote = normalizeNote(entry.psychologistNote);
@@ -527,23 +527,23 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                     const hasAttachments = (pNote.attachments?.length || 0) + (pFeed.attachments?.length || 0) > 0;
 
                                     return (
-                                        <div key={entry.id} className="relative flex flex-col items-start justify-between group">
+                                        <div key={entry.id} className="relative group">
                                             
                                             {/* Central Dot */}
                                             <div className={`
                                                 flex items-center justify-center w-10 h-10 md:w-12 md:h-12 rounded-full border-4 border-slate-50 shadow-md shrink-0 z-10 
-                                                absolute left-[-2.5rem] top-0
+                                                absolute left-0 top-3
                                                 ${isPsychEntry ? 'bg-purple-100 text-purple-600 ring-4 ring-purple-50' : 'bg-indigo-100 text-indigo-600 ring-4 ring-indigo-50'}
                                             `}>
                                                 {isPsychEntry ? <Stethoscope className="w-5 h-5 md:w-6 md:h-6" /> : <Calendar className="w-5 h-5 md:w-6 md:h-6 font-bold" />}
                                             </div>
 
                                             {/* Connector */}
-                                            <div className={`absolute top-5 left-[-0.25rem] h-px w-6 ${isPsychEntry ? 'bg-purple-100' : 'bg-indigo-100'}`}></div>
+                                            <div className={`absolute top-9 left-9 h-px w-6 ${isPsychEntry ? 'bg-purple-100' : 'bg-indigo-100'}`}></div>
                                             
                                             {/* Content Card */}
                                             <div className={`
-                                                w-full p-4 md:p-6 bg-white/95 rounded-2xl border shadow-sm transition-all hover:shadow-lg relative overflow-hidden
+                                                w-full ml-12 p-4 md:p-6 bg-white/95 rounded-2xl border shadow-sm transition-all hover:shadow-lg relative overflow-hidden
                                                 ${isPsychEntry ? 'border-purple-100 ring-1 ring-purple-50' : 'border-slate-200'}
                                                 backdrop-blur
                                             `}>

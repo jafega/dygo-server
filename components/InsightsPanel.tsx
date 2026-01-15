@@ -78,6 +78,12 @@ const InsightsPanel: React.FC<InsightsPanelProps> = ({ entries, mode = 'PERSONAL
 
   // Prep Chart Data
   const chartData = [...entries]
+    .filter(e => {
+      if (e.createdBy === 'PSYCHOLOGIST') return false;
+      const hasTranscript = Boolean(e.transcript && e.transcript.trim().length > 0);
+      const hasNonClinicalEmotion = Array.isArray(e.emotions) ? e.emotions.some(em => em !== 'Clínico') : false;
+      return hasTranscript || hasNonClinicalEmotion;
+    })
     .sort((a, b) => a.timestamp - b.timestamp)
     .slice(-14) // Last 14 entries
     .map(e => ({
