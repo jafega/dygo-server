@@ -73,6 +73,7 @@ if (USE_POSTGRES) {
       try {
         const url = new URL(connectionString);
         const isSupabaseHost = url.hostname.endsWith('.supabase.com');
+        const isPoolerHost = url.hostname.endsWith('.pooler.supabase.com') || url.port === '6543';
         // Remove ssl query params so pg doesn't override ssl config
         url.searchParams.delete('sslmode');
         url.searchParams.delete('sslrootcert');
@@ -81,8 +82,11 @@ if (USE_POSTGRES) {
           url.searchParams.delete('sslmode');
         }
         // If using Supabase pooler, enable pgbouncer mode to avoid prepared statements
-        if (String(process.env.SUPABASE_PGBOUNCER || '').toLowerCase() === 'true') {
+        if (isPoolerHost || String(process.env.SUPABASE_PGBOUNCER || '').toLowerCase() === 'true') {
           url.searchParams.set('pgbouncer', 'true');
+        }
+        if (isSupabaseHost || isPoolerHost) {
+          url.searchParams.set('sslmode', 'require');
         }
         connectionString = url.toString();
       } catch (e) {
@@ -95,7 +99,8 @@ if (USE_POSTGRES) {
       max: Number(process.env.PG_POOL_MAX || (isServerless ? 1 : 10)),
       idleTimeoutMillis: Number(process.env.PG_IDLE_TIMEOUT || 30000),
       connectionTimeoutMillis: Number(process.env.PG_CONN_TIMEOUT || 20000),
-      keepAlive: true
+      keepAlive: true,
+      allowExitOnIdle: true
     };
 
     // Log safe connection info (no password) to debug Vercel env usage
