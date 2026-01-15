@@ -91,7 +91,7 @@ if (USE_POSTGRES) {
       connectionString,
       max: Number(process.env.PG_POOL_MAX || (isServerless ? 1 : 10)),
       idleTimeoutMillis: Number(process.env.PG_IDLE_TIMEOUT || 30000),
-      connectionTimeoutMillis: Number(process.env.PG_CONN_TIMEOUT || 10000),
+      connectionTimeoutMillis: Number(process.env.PG_CONN_TIMEOUT || 20000),
       keepAlive: true
     };
 
@@ -113,7 +113,10 @@ if (USE_POSTGRES) {
     // Supabase and many managed Postgres instances require SSL. Detect common indicators and set ssl config.
     // - If `DATABASE_URL` contains `sslmode=require` or user sets SUPABASE_SSL=true, enable ssl with relaxed verification.
     if (process.env.SUPABASE_SSL === 'true' || (connectionString && connectionString.includes('.supabase.com'))) {
-      poolConfig.ssl = { rejectUnauthorized: false };
+      poolConfig.ssl = {
+        rejectUnauthorized: false,
+        checkServerIdentity: () => undefined
+      };
       console.log('ℹ️ Enabling SSL for Postgres connection (rejectUnauthorized: false)');
     }
 
