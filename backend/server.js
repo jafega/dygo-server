@@ -67,7 +67,29 @@ if (USE_SQLITE) {
 if (USE_POSTGRES) {
   try {
     const { Pool } = await import('pg');
-    const poolConfig = { connectionString: process.env.DATABASE_URL, max: 10 };
+    const isServerless = !!(process.env.VERCEL || process.env.VERCEL_ENV);
+    let connectionString = process.env.DATABASE_URL;
+    if (connectionString && String(process.env.SUPABASE_SSL || '').toLowerCase() === 'true') {
+      try {
+        const url = new URL(connectionString);
+        // Remove ssl query params so pg doesn't override ssl config
+        url.searchParams.delete('sslmode');
+        url.searchParams.delete('sslrootcert');
+        url.searchParams.delete('pgbouncer');
+        url.searchParams.delete('ssl');
+        connectionString = url.toString();
+      } catch (e) {
+        // ignore parse errors and keep original
+      }
+    }
+
+    const poolConfig = {
+      connectionString,
+      max: Number(process.env.PG_POOL_MAX || (isServerless ? 1 : 10)),
+      idleTimeoutMillis: Number(process.env.PG_IDLE_TIMEOUT || 30000),
+      connectionTimeoutMillis: Number(process.env.PG_CONN_TIMEOUT || 10000),
+      keepAlive: true
+    };
 
     // Log safe connection info (no password) to debug Vercel env usage
     try {
