@@ -68,38 +68,43 @@ if (USE_POSTGRES) {
   try {
     const { Pool } = await import('pg');
     const isServerless = !!(process.env.VERCEL || process.env.VERCEL_ENV);
-    let connectionString = process.env.DATABASE_URL;
-    if (connectionString) {
+    const rawConnectionString = process.env.DATABASE_URL;
+    let parsedUrl = null;
+    let isSupabaseHost = false;
+    let isPoolerHost = false;
+
+    if (rawConnectionString) {
       try {
-        const url = new URL(connectionString);
-        const isSupabaseHost = url.hostname.endsWith('.supabase.com');
-        const isPoolerHost = url.hostname.endsWith('.pooler.supabase.com') || url.port === '6543';
-        // Remove ssl query params so pg doesn't override ssl config
-        url.searchParams.delete('sslmode');
-        url.searchParams.delete('sslrootcert');
-        url.searchParams.delete('ssl');
-        if (isSupabaseHost) {
-          url.searchParams.delete('sslmode');
-        }
-        // If using Supabase pooler, enable pgbouncer mode to avoid prepared statements
-        if (isPoolerHost || String(process.env.SUPABASE_PGBOUNCER || '').toLowerCase() === 'true') {
-          url.searchParams.set('pgbouncer', 'true');
-        }
-        // Do not set sslmode here; rely on explicit ssl config below
-        connectionString = url.toString();
+        parsedUrl = new URL(rawConnectionString);
+        isSupabaseHost = parsedUrl.hostname.endsWith('.supabase.com');
+        isPoolerHost = parsedUrl.hostname.endsWith('.pooler.supabase.com') || parsedUrl.port === '6543';
       } catch (e) {
-        // ignore parse errors and keep original
+        parsedUrl = null;
       }
     }
 
     const poolConfig = {
-      connectionString,
       max: Number(process.env.PG_POOL_MAX || (isServerless ? 1 : 10)),
       idleTimeoutMillis: Number(process.env.PG_IDLE_TIMEOUT || 30000),
       connectionTimeoutMillis: Number(process.env.PG_CONN_TIMEOUT || 20000),
       keepAlive: true,
       allowExitOnIdle: true
     };
+
+    if (parsedUrl) {
+      poolConfig.host = parsedUrl.hostname;
+      poolConfig.port = Number(parsedUrl.port || 5432);
+      poolConfig.user = decodeURIComponent(parsedUrl.username || '');
+      poolConfig.password = decodeURIComponent(parsedUrl.password || '');
+      poolConfig.database = parsedUrl.pathname.replace('/', '');
+    } else if (rawConnectionString) {
+      poolConfig.connectionString = rawConnectionString;
+    }
+
+    // If using Supabase pooler, enable pgbouncer mode to avoid prepared statements
+    if (isPoolerHost || String(process.env.SUPABASE_PGBOUNCER || '').toLowerCase() === 'true') {
+      poolConfig.pgbouncer = true;
+    }
 
     // Log safe connection info (no password) to debug Vercel env usage
     try {
@@ -118,7 +123,7 @@ if (USE_POSTGRES) {
 
     // Supabase and many managed Postgres instances require SSL. Detect common indicators and set ssl config.
     // - If `DATABASE_URL` contains `sslmode=require` or user sets SUPABASE_SSL=true, enable ssl with relaxed verification.
-    if (process.env.SUPABASE_SSL === 'true' || (connectionString && connectionString.includes('.supabase.com'))) {
+    if (process.env.SUPABASE_SSL === 'true' || isSupabaseHost || isPoolerHost) {
       poolConfig.ssl = {
         rejectUnauthorized: false,
         checkServerIdentity: () => undefined
