@@ -570,6 +570,98 @@ app.delete('/api/admin/delete-user', (req, res) => {
   }
 });
 
+// --- ADMIN: Migrate JSON/SQLite data to Postgres/Supabase (dry-run & execute)
+app.post('/api/admin/migrate-to-postgres', async (req, res) => {
+  try {
+    const requesterId = req.headers['x-user-id'] || req.headers['x-userid'] || req.body?.requesterId;
+    if (!requesterId) return res.status(401).json({ error: 'Missing requester id in header x-user-id' });
+
+    const db = getDb();
+    const requester = db.users.find(u => u.id === String(requesterId));
+    if (!requester) return res.status(403).json({ error: 'Requester not found or unauthorized' });
+    if (String(requester.email).toLowerCase() !== 'garryjavi@gmail.com') return res.status(403).json({ error: 'Forbidden' });
+
+    if (!pgPool) return res.status(400).json({ error: 'Postgres is not configured on this server' });
+
+    const { dryRun } = req.body || {};
+
+    // Read source data (prefer sqlite if present)
+    let source = null;
+    if (sqliteDb) {
+      const read = (table) => sqliteDb.prepare('SELECT id, data FROM store WHERE table_name = ?').all(table).map(r => ({ id: r.id, data: JSON.parse(r.data) }));
+      const users = read('users');
+      const entries = read('entries');
+      const goals = read('goals');
+      const invitations = read('invitations');
+      const settings = read('settings');
+      source = { users, entries, goals, invitations, settings };
+    } else if (fs.existsSync(DB_FILE)) {
+      const content = fs.readFileSync(DB_FILE, 'utf-8');
+      const parsed = content && content.trim() ? JSON.parse(content) : createInitialDb();
+      const users = (parsed.users || []).map(u => ({ id: u.id, data: u }));
+      const entries = (parsed.entries || []).map(e => ({ id: e.id, data: e }));
+      const goals = (parsed.goals || []).map(g => ({ id: g.id, data: g }));
+      const invitations = (parsed.invitations || []).map(i => ({ id: i.id, data: i }));
+      const settings = Object.keys(parsed.settings || {}).map(k => ({ id: k, data: parsed.settings[k] }));
+      source = { users, entries, goals, invitations, settings };
+    } else {
+      return res.status(400).json({ error: 'No source data found (no sqlite and db.json missing)' });
+    }
+
+    // Helper to get existing ids from Postgres
+    const existingIds = {};
+    const tables = ['users','entries','goals','invitations','settings'];
+    for (const t of tables) {
+      const r = await pgPool.query(`SELECT id FROM ${t}`);
+      existingIds[t] = new Set(r.rows.map(row => String(row.id)));
+    }
+
+    // Build report
+    const report = {};
+    for (const t of tables) {
+      const src = source[t] || [];
+      const total = src.length;
+      const already = src.filter(s => existingIds[t].has(String(s.id))).length;
+      const toInsert = src.filter(s => !existingIds[t].has(String(s.id))).length;
+      report[t] = { total, already, toInsert };
+    }
+
+    if (dryRun) return res.json({ dryRun: true, report });
+
+    // Execute insertion within transaction
+    const client = await pgPool.connect();
+    try {
+      await client.query('BEGIN');
+      const insert = async (table, id, obj) => client.query(`INSERT INTO ${table} (id, data) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [id, obj]);
+
+      for (const u of (source.users || [])) await insert('users', u.id, u.data);
+      for (const e of (source.entries || [])) await insert('entries', e.id, e.data);
+      for (const g of (source.goals || [])) await insert('goals', g.id, g.data);
+      for (const i of (source.invitations || [])) await insert('invitations', i.id, i.data);
+      for (const s of (source.settings || [])) await insert('settings', s.id, s.data);
+
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    // Return final counts from Postgres
+    const finalCounts = {};
+    for (const t of tables) {
+      const r = await pgPool.query(`SELECT COUNT(*) as c FROM ${t}`);
+      finalCounts[t] = parseInt(r.rows[0].c, 10);
+    }
+
+    return res.json({ migrated: true, report, finalCounts });
+  } catch (err) {
+    console.error('Error in /api/admin/migrate-to-postgres', err);
+    return res.status(500).json({ error: 'Migration failed', detail: String(err) });
+  }
+});
+
 // --- STRIPE: create checkout session and portal session ---
 app.post('/api/stripe/create-checkout-session', async (req, res) => {
   try {
