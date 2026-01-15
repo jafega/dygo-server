@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import { JournalEntry } from '../types';
-import { ChevronLeft, ChevronRight, Layers, Plus, Calendar as CalendarIcon, LayoutGrid, Clock, Smile } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Layers, Plus, Calendar as CalendarIcon, LayoutGrid, Clock } from 'lucide-react';
 
 interface CalendarViewProps {
   entries: JournalEntry[];
   onSelectDate: (date: string) => void;
 }
 
-type ViewMode = 'MONTH' | 'WEEK';
+type ViewMode = 'MONTH' | 'WEEK' | 'LIST';
 
 const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -27,8 +27,10 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate }) =>
     const newDate = new Date(currentDate);
     if (viewMode === 'MONTH') {
       newDate.setMonth(newDate.getMonth() - 1);
-    } else {
+    } else if (viewMode === 'WEEK') {
       newDate.setDate(newDate.getDate() - 7);
+    } else {
+      return;
     }
     setCurrentDate(newDate);
   };
@@ -37,8 +39,10 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate }) =>
     const newDate = new Date(currentDate);
     if (viewMode === 'MONTH') {
       newDate.setMonth(newDate.getMonth() + 1);
-    } else {
+    } else if (viewMode === 'WEEK') {
       newDate.setDate(newDate.getDate() + 7);
+    } else {
+      return;
     }
     setCurrentDate(newDate);
   };
@@ -62,7 +66,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate }) =>
       for (let i = 1; i <= daysInMonth; i++) {
         daysToRender.push({ day: i, date: new Date(year, month, i), isCurrentMonth: true });
       }
-  } else {
+  } else if (viewMode === 'WEEK') {
       // WEEK VIEW logic
       // Find the Sunday of the current week based on currentDate
       const dayOfWeek = currentDate.getDay(); // 0 (Sun) to 6 (Sat)
@@ -87,20 +91,24 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate }) =>
     return entries.filter(e => e.date === dateStr).sort((a, b) => b.timestamp - a.timestamp);
   };
 
-  const getHeaderText = () => {
+    const getHeaderText = () => {
       if (viewMode === 'MONTH') {
-          return `${monthNames[month]} ${year}`;
-      } else {
-          // Week header: "12 - 18 Enero"
-          const first = daysToRender[0].date;
-          const last = daysToRender[6].date;
-          const m1 = monthNames[first.getMonth()];
-          const m2 = monthNames[last.getMonth()];
-          
-          if (m1 === m2) return `${first.getDate()} - ${last.getDate()} ${m1}`;
-          return `${first.getDate()} ${m1.substring(0,3)} - ${last.getDate()} ${m2.substring(0,3)}`;
+        return `${monthNames[month]} ${year}`;
       }
-  };
+      if (viewMode === 'WEEK') {
+        // Week header: "12 - 18 Enero"
+        const first = daysToRender[0].date;
+        const last = daysToRender[6].date;
+        const m1 = monthNames[first.getMonth()];
+        const m2 = monthNames[last.getMonth()];
+          
+        if (m1 === m2) return `${first.getDate()} - ${last.getDate()} ${m1}`;
+        return `${first.getDate()} ${m1.substring(0,3)} - ${last.getDate()} ${m2.substring(0,3)}`;
+      }
+      return 'Entradas';
+    };
+
+    const listEntries = [...entries].sort((a, b) => b.timestamp - a.timestamp);
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 md:p-6 transition-all duration-300">
@@ -110,9 +118,9 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate }) =>
         
         {/* Title & Arrows */}
         <div className="flex items-center justify-between w-full sm:w-auto gap-4">
-            <button onClick={handlePrev} className="p-2 hover:bg-slate-100 rounded-full text-slate-600 transition-colors"><ChevronLeft size={20}/></button>
-            <h2 className="text-lg md:text-xl font-bold text-slate-800 w-32 md:w-48 text-center capitalize">{getHeaderText()}</h2>
-            <button onClick={handleNext} className="p-2 hover:bg-slate-100 rounded-full text-slate-600 transition-colors"><ChevronRight size={20}/></button>
+          <button onClick={handlePrev} disabled={viewMode === 'LIST'} className={`p-2 rounded-full text-slate-600 transition-colors ${viewMode === 'LIST' ? 'opacity-40 cursor-not-allowed' : 'hover:bg-slate-100'}`}><ChevronLeft size={20}/></button>
+          <h2 className="text-lg md:text-xl font-bold text-slate-800 w-32 md:w-48 text-center capitalize">{getHeaderText()}</h2>
+          <button onClick={handleNext} disabled={viewMode === 'LIST'} className={`p-2 rounded-full text-slate-600 transition-colors ${viewMode === 'LIST' ? 'opacity-40 cursor-not-allowed' : 'hover:bg-slate-100'}`}><ChevronRight size={20}/></button>
         </div>
 
         {/* View Toggle */}
@@ -129,6 +137,12 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate }) =>
             >
                 <CalendarIcon size={14} /> Mes
             </button>
+          <button 
+            onClick={() => setViewMode('LIST')}
+            className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${viewMode === 'LIST' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            <LayoutGrid size={14} /> Lista
+          </button>
         </div>
       </div>
 
@@ -142,6 +156,44 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate }) =>
       )}
 
       {/* Content Container */}
+      {viewMode === 'LIST' ? (
+        <div className="flex flex-col gap-3">
+          {listEntries.length === 0 ? (
+            <div className="text-center py-10 text-slate-400">Aún no hay entradas.</div>
+          ) : (
+            listEntries.map((entry) => {
+              const entryDate = new Date(entry.timestamp);
+              const dateStr = entry.date;
+              return (
+                <button
+                  key={entry.id}
+                  onClick={() => onSelectDate(dateStr)}
+                  className="w-full text-left bg-white border border-slate-200 rounded-2xl p-4 hover:shadow-md transition-shadow"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-semibold text-slate-800">
+                      {entryDate.toLocaleDateString()}
+                    </div>
+                    <div className="text-xs text-slate-400 flex items-center gap-1">
+                      <Clock size={12} /> {entryDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                  </div>
+                  <p className="mt-2 text-sm text-slate-600 line-clamp-3">{entry.summary}</p>
+                  {entry.emotions?.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {entry.emotions.slice(0, 5).map((em) => (
+                        <span key={em} className="text-[10px] px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded border border-indigo-100 font-medium">
+                          {em}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </button>
+              );
+            })
+          )}
+        </div>
+      ) : (
       <div className={viewMode === 'MONTH' ? "grid grid-cols-7 gap-1 md:gap-2" : "flex flex-col gap-3"}>
         {daysToRender.map((item, i) => {
           
@@ -281,6 +333,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate }) =>
           );
         })}
       </div>
+      )}
     </div>
   );
 };

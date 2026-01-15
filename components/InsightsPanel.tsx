@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { JournalEntry } from '../types';
 import { generateWeeklyInsights, generateClinicalSummary } from '../services/genaiService';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -14,22 +14,59 @@ const InsightsPanel: React.FC<InsightsPanelProps> = ({ entries, mode = 'PERSONAL
   const [insight, setInsight] = useState<string>('');
   const [loading, setLoading] = useState(false);
 
+  const latestEntry = useMemo(() => {
+    if (!entries.length) return null;
+    return [...entries].sort((a, b) => b.timestamp - a.timestamp)[0];
+  }, [entries]);
+
+  const getCacheKeys = () => {
+    const userId = latestEntry?.userId || 'unknown';
+    const modeKey = mode.toLowerCase();
+    return {
+      idKey: `dygo_insight_last_entry_${modeKey}_${userId}`,
+      textKey: `dygo_insight_text_${modeKey}_${userId}`
+    };
+  };
+
   useEffect(() => {
     const fetchInsights = async () => {
-      if (entries.length === 0) return;
+      if (!latestEntry || entries.length === 0) return;
+
+      const { idKey, textKey } = getCacheKeys();
+      let cachedId: string | null = null;
+      let cachedText: string | null = null;
+      try {
+        cachedId = localStorage.getItem(idKey);
+        cachedText = localStorage.getItem(textKey);
+      } catch (_) {
+        // ignore storage errors
+      }
+
+      if (cachedText && !insight) {
+        setInsight(cachedText);
+      }
+
+      if (latestEntry.id && cachedId === latestEntry.id) return;
+
       setLoading(true);
       try {
         // Take last 7 entries for analysis
-        const recent = [...entries].sort((a,b) => b.timestamp - a.timestamp).slice(0, 7);
-        
+        const recent = [...entries].sort((a, b) => b.timestamp - a.timestamp).slice(0, 7);
+
         let text = '';
         if (mode === 'CLINICAL') {
-            text = await generateClinicalSummary(recent);
+          text = await generateClinicalSummary(recent);
         } else {
-            text = await generateWeeklyInsights(recent);
+          text = await generateWeeklyInsights(recent);
         }
-        
+
         setInsight(text);
+        try {
+          if (latestEntry.id) localStorage.setItem(idKey, latestEntry.id);
+          localStorage.setItem(textKey, text);
+        } catch (_) {
+          // ignore storage errors
+        }
       } catch (e) {
         console.error(e);
       } finally {
@@ -37,7 +74,7 @@ const InsightsPanel: React.FC<InsightsPanelProps> = ({ entries, mode = 'PERSONAL
       }
     };
     fetchInsights();
-  }, [entries, mode]);
+  }, [entries, mode, latestEntry, insight]);
 
   // Prep Chart Data
   const chartData = [...entries]
