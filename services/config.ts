@@ -2,7 +2,7 @@
 // If true, the app attempts to talk to localhost:3001. 
 // If the fetch fails, it might fallback or error depending on implementation.
 // Set this to true to use the "Real Backend".
-export const API_URL =  (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api';
+export const API_URL =  (import.meta as any).env?.VITE_API_URL || '/api';
 
 // Google OAuth client id (set in .env.local as VITE_GOOGLE_CLIENT_ID for the frontend)
 export const GOOGLE_CLIENT_ID = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID || '';
