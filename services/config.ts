@@ -2,7 +2,17 @@
 // If true, the app attempts to talk to localhost:3001. 
 // If the fetch fails, it might fallback or error depending on implementation.
 // Set this to true to use the "Real Backend".
-export const API_URL =  (import.meta as any).env?.VITE_API_URL || '/api';
+const ENV_API_URL = (import.meta as any).env?.VITE_API_URL as string | undefined;
+const getDefaultApiUrl = () => {
+	if (typeof window === 'undefined') return '/api';
+	const host = window.location.hostname;
+	// If frontend is on Vercel without API proxy, default to the known backend.
+	if (host.endsWith('.vercel.app') && !host.includes('dygo-server')) {
+		return 'https://dygo-server.vercel.app/api';
+	}
+	return '/api';
+};
+export const API_URL = ENV_API_URL || getDefaultApiUrl();
 
 // Simple check to see if we should try using backend.
 // In production this should be true. For development you can allow a local fallback

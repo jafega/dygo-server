@@ -24,6 +24,7 @@ const DB_FILE = path.join(__dirname, 'db.json');
 const IS_SERVERLESS = !!(process.env.VERCEL || process.env.VERCEL_ENV);
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const SUPABASE_REST_ONLY = String(process.env.SUPABASE_REST_ONLY || '').toLowerCase() === 'true';
 
 
 
@@ -48,7 +49,7 @@ let sqliteDb = null;
 let pgPool = null;
 let supabaseAdmin = null;
 let supabaseDbCache = null;
-const USE_POSTGRES = !!process.env.DATABASE_URL;
+const USE_POSTGRES = !!process.env.DATABASE_URL && !SUPABASE_REST_ONLY;
 
 if (USE_SQLITE) {
   try {
@@ -1117,6 +1118,7 @@ app.get('/api/health', (_req, res) => {
       useSqlite: USE_SQLITE,
       pgPoolActive: !!pgPool,
       supabaseRestActive: !!supabaseAdmin,
+      supabaseRestOnly: SUPABASE_REST_ONLY,
       dbInfo
     };
 
