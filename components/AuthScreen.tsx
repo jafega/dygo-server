@@ -25,23 +25,9 @@ interface AuthScreenProps {
 }
 
 const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
-  const [isLogin, setIsLogin] = useState(true);
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [role, setRole] = useState<UserRole>('PATIENT');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [serverStatus, setServerStatus] = useState<'checking' | 'online' | 'offline'>('checking');
-
-  // Forgot password demo UI
-  const [showForgotDemo, setShowForgotDemo] = useState(false);
-  const [forgotEmailInput, setForgotEmailInput] = useState('');
-  const [forgotNewPassword, setForgotNewPassword] = useState('');
-  const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
-  const [forgotSecret, setForgotSecret] = useState('');
-  const [forgotStatus, setForgotStatus] = useState<'idle'|'success'|'error'>('idle');
-  const [forgotMsg, setForgotMsg] = useState('');
 
 
 
@@ -113,26 +99,22 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
 
   }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setIsLoading(true);
-
-    try {
-      if (isLogin) {
-        await AuthService.login(email, password);
-      } else {
-        if (!name || !email || !password) {
-            throw new Error("Todos los campos son obligatorios");
+    const handleSupabaseGoogle = async () => {
+        try {
+            setIsLoading(true);
+            const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            const { data, error } = await supabase.auth.signInWithOAuth({
+                provider: 'google',
+                options: { redirectTo: `${window.location.origin}/?supabase_auth=1` }
+            });
+            if (error) throw error;
+            if (data?.url) window.location.href = data.url;
+        } catch (err: any) {
+            setError(err?.message || 'Error iniciando OAuth');
+        } finally {
+            setIsLoading(false);
         }
-        await AuthService.register(name, email, password, role);
-      }
-      onAuthSuccess();
-    } catch (err: any) {
-      setError(err.message || "Error de autenticación");
-      setIsLoading(false);
-    }
-  };
+    };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-slate-100 flex items-center justify-center p-4 relative">
@@ -164,7 +146,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         {/* Form */}
         <div className="p-8">
             <h2 className="text-xl font-bold text-slate-800 mb-6 text-center">
-                {isLogin ? 'Bienvenido de nuevo' : 'Crea tu cuenta'}
+                Inicia sesión con Google
             </h2>
 
             {serverStatus === 'offline' && (
@@ -237,106 +219,25 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                                         await AuthService.resetPasswordDemo(forgotEmailInput, forgotNewPassword, forgotSecret || undefined);
                                         setForgotStatus('success'); setForgotMsg('Contraseña restablecida. Ahora puedes iniciar sesión.');
                                         setShowForgotDemo(false);
-                                        setEmail(forgotEmailInput); setPassword(forgotNewPassword);
-                                    } catch (err: any) {
-                                        setForgotStatus('error'); setForgotMsg(err?.message || 'Error restableciendo contraseña');
-                                    }
-                                }} className="px-4 py-2 rounded bg-amber-600 text-white text-sm">Restablecer</button>
-                                <div className={`text-sm ${forgotStatus === 'success' ? 'text-green-700' : 'text-red-700'}`}>{forgotMsg}</div>
-                            </div>
-                        </div>
-                    </div>
-                )}
+                                        {/* Supabase OAuth button (Google) */}
+                                        {SUPABASE_URL && SUPABASE_ANON_KEY && (
+                                            <div className="mb-2 flex justify-center">
+                                                <button
+                                                    onClick={handleSupabaseGoogle}
+                                                    disabled={isLoading}
+                                                    className="w-full max-w-xs bg-white text-slate-700 rounded-xl px-4 py-3 shadow-sm hover:shadow-md flex items-center justify-center gap-3 border border-slate-200 disabled:opacity-60"
+                                                >
+                                                    <svg className="w-5 h-5" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+                                                        <path fill="#EA4335" d="M24 9.5c3.09 0 5.84 1.19 7.99 3.15l5.95-5.95C34.5 3.6 29.6 1.5 24 1.5 14.64 1.5 6.54 6.8 2.74 14.4l6.94 5.39C11.46 13.4 17.2 9.5 24 9.5z"/>
+                                                        <path fill="#4285F4" d="M46.5 24.5c0-1.64-.15-3.21-.43-4.74H24v9.02h12.62c-.54 2.92-2.19 5.4-4.66 7.08l7.19 5.55C43.53 37.7 46.5 31.6 46.5 24.5z"/>
+                                                        <path fill="#FBBC05" d="M9.68 28.79a14.96 14.96 0 0 1-.78-4.79c0-1.66.29-3.26.78-4.79l-6.94-5.39A23.97 23.97 0 0 0 0 24c0 3.86.93 7.51 2.74 10.58l6.94-5.79z"/>
+                                                        <path fill="#34A853" d="M24 46.5c5.6 0 10.5-1.85 14.0-5.02l-7.19-5.55c-2.0 1.35-4.55 2.14-6.81 2.14-6.8 0-12.54-3.9-15.32-9.57l-6.94 5.79C6.54 41.2 14.64 46.5 24 46.5z"/>
+                                                    </svg>
+                                                    <span className="text-sm font-medium">Continuar con Google</span>
+                                                </button>
+                                            </div>
+                                        )}
 
-                {!isLogin && (
-                    <div className="relative">
-                        <User className="absolute left-3 top-3.5 text-slate-400 w-5 h-5" />
-                        <input 
-                            type="text" 
-                            placeholder="Nombre completo"
-                            className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800 transition-all"
-                            value={name}
-                            onChange={(e) => setName(e.target.value)}
-                            disabled={isLoading}
-                        />
-                    </div>
-                )}
-                
-                <div className="relative">
-                    <Mail className="absolute left-3 top-3.5 text-slate-400 w-5 h-5" />
-                    <input 
-                        type="email" 
-                        placeholder="Correo electrónico"
-                        className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800 transition-all"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        disabled={isLoading}
-                    />
-                </div>
-
-                <div className="relative">
-                    <Lock className="absolute left-3 top-3.5 text-slate-400 w-5 h-5" />
-                    <input 
-                        type="password" 
-                        placeholder="Contraseña"
-                        className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800 transition-all"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        disabled={isLoading}
-                    />
-                </div>
-
-
-
-
-
-                {!isLogin && (
-                    <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl">
-                        <button
-                            type="button"
-                            onClick={() => setRole('PATIENT')}
-                            className={`py-2 text-sm font-medium rounded-lg transition-all ${role === 'PATIENT' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500'}`}
-                        >
-                            Soy Persona
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setRole('PSYCHOLOGIST')}
-                            className={`py-2 text-sm font-medium rounded-lg transition-all ${role === 'PSYCHOLOGIST' ? 'bg-white shadow-sm text-purple-600' : 'text-slate-500'}`}
-                        >
-                            Soy Psicólogo
-                        </button>
-                    </div>
-                )}
-
-                <button 
-                    type="submit"
-                    disabled={isLoading}
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-indigo-200 flex items-center justify-center gap-2 mt-4"
-                >
-                    {isLoading ? (
-                        <><Loader2 className="animate-spin" size={20} /> Procesando...</>
-                    ) : (
-                        <>{isLogin ? 'Entrar en dygo' : 'Unirse a dygo'} <ArrowRight size={18} /></>
-                    )}
-                </button>
-            </form>
-
-            <div className="mt-6 text-center">
-                <p className="text-slate-500 text-sm">
-                    {isLogin ? '¿No tienes cuenta?' : '¿Ya tienes cuenta?'}
-                    <button 
-                        onClick={() => { setIsLogin(!isLogin); setError(''); }}
-                        className="ml-2 text-indigo-600 font-semibold hover:underline"
-                    >
-                        {isLogin ? 'Regístrate' : 'Inicia Sesión'}
-                    </button>
-                </p>
-            </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-export default AuthScreen;
+                                        {!SUPABASE_URL || !SUPABASE_ANON_KEY ? (
+                                            <p className="text-xs text-red-600 text-center">Falta configurar Supabase en el frontend.</p>
+                                        ) : null}
