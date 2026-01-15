@@ -22,6 +22,8 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const DB_FILE = path.join(__dirname, 'db.json');
 const IS_SERVERLESS = !!(process.env.VERCEL || process.env.VERCEL_ENV);
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 
 
@@ -44,6 +46,8 @@ const USE_SQLITE = String(process.env.USE_SQLITE || '').toLowerCase() === 'true'
 const SQLITE_DB_FILE = process.env.SQLITE_DB_FILE || path.join(__dirname, 'database.sqlite');
 let sqliteDb = null;
 let pgPool = null;
+let supabaseAdmin = null;
+let supabaseDbCache = null;
 const USE_POSTGRES = !!process.env.DATABASE_URL;
 
 if (USE_SQLITE) {
@@ -215,12 +219,85 @@ if (USE_POSTGRES) {
   }
 }
 
+if (!pgPool && SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+  try {
+    const { createClient } = await import('@supabase/supabase-js');
+    supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false }
+    });
+    console.log('✅ Supabase REST persistence enabled (service role)');
+    supabaseDbCache = await loadSupabaseCache();
+    console.log('ℹ️ Supabase data loaded into cache');
+  } catch (err) {
+    console.error('❌ Unable to enable Supabase REST persistence', err);
+    supabaseAdmin = null;
+    supabaseDbCache = null;
+  }
+}
+
 let pgDbCache = null;
+
+async function loadSupabaseCache() {
+  if (!supabaseAdmin) return null;
+
+  const readTable = async (table) => {
+    const { data, error } = await supabaseAdmin.from(table).select('id,data');
+    if (error) throw error;
+    return data || [];
+  };
+
+  const usersRows = await readTable('users');
+  const entriesRows = await readTable('entries');
+  const goalsRows = await readTable('goals');
+  const invitationsRows = await readTable('invitations');
+  const settingsRows = await readTable('settings');
+
+  const users = usersRows.map(row => ({ id: row.id, ...row.data }));
+  const entries = entriesRows.map(row => ({ id: row.id, ...row.data }));
+  const goals = goalsRows.map(row => ({ id: row.id, ...row.data }));
+  const invitations = invitationsRows.map(row => ({ id: row.id, ...row.data }));
+  const settings = Object.fromEntries(settingsRows.map(row => [row.id, row.data]));
+
+  return { users, entries, goals, invitations, settings };
+}
+
+async function saveSupabaseDb(data) {
+  if (!supabaseAdmin) return;
+
+  const chunk = (arr, size = 500) => {
+    const out = [];
+    for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+    return out;
+  };
+
+  const replaceTable = async (table, rows) => {
+    const { error: delError } = await supabaseAdmin.from(table).delete().neq('id', '');
+    if (delError) throw delError;
+    if (!rows.length) return;
+    const chunks = chunk(rows);
+    for (const c of chunks) {
+      const { error: insError } = await supabaseAdmin.from(table).insert(c);
+      if (insError) throw insError;
+    }
+  };
+
+  await replaceTable('users', (data.users || []).map(u => ({ id: u.id, data: u })));
+  await replaceTable('entries', (data.entries || []).map(e => ({ id: e.id, data: e })));
+  await replaceTable('goals', (data.goals || []).map(g => ({ id: g.id, data: g })));
+  await replaceTable('invitations', (data.invitations || []).map(i => ({ id: i.id, data: i })));
+  const settings = data.settings || {};
+  await replaceTable('settings', Object.keys(settings).map(k => ({ id: k, data: settings[k] })));
+}
 
 const getDb = () => {
   // Postgres: return in-memory cache (keeps handler sync)
   if (pgPool && pgDbCache) {
     return pgDbCache;
+  }
+
+  // Supabase REST fallback: return in-memory cache
+  if (supabaseAdmin && supabaseDbCache) {
+    return supabaseDbCache;
   }
 
   if (sqliteDb) {
@@ -301,6 +378,18 @@ const saveDb = (data) => {
       }
     })();
 
+    return;
+  }
+
+  if (supabaseAdmin) {
+    supabaseDbCache = data;
+    (async () => {
+      try {
+        await saveSupabaseDb(data);
+      } catch (err) {
+        console.error('❌ Error guardando en Supabase REST:', err);
+      }
+    })();
     return;
   }
 
@@ -1027,6 +1116,7 @@ app.get('/api/health', (_req, res) => {
       supabaseSsl: String(process.env.SUPABASE_SSL || '').toLowerCase() === 'true',
       useSqlite: USE_SQLITE,
       pgPoolActive: !!pgPool,
+      supabaseRestActive: !!supabaseAdmin,
       dbInfo
     };
 
@@ -1054,6 +1144,10 @@ app.get('/api/health', (_req, res) => {
         }
       })();
       return res.json({ ok: true, persistence: 'postgres', env: envStatus });
+    }
+
+    if (supabaseAdmin && supabaseDbCache) {
+      return res.json({ ok: true, persistence: 'supabase-rest', env: envStatus });
     }
 
     // If Postgres is configured but not connected, avoid filesystem writes on serverless
@@ -1102,6 +1196,20 @@ app.get('/api/dbinfo', async (_req, res) => {
       return res.json({ persistence: 'postgres', counts: { users, entries, goals, invitations, settings } });
     }
 
+    if (supabaseAdmin && supabaseDbCache) {
+      const db = supabaseDbCache;
+      return res.json({
+        persistence: 'supabase-rest',
+        counts: {
+          users: (db.users || []).length,
+          entries: (db.entries || []).length,
+          goals: (db.goals || []).length,
+          invitations: (db.invitations || []).length,
+          settings: Object.keys(db.settings || {}).length
+        }
+      });
+    }
+
     // json fallback
     const db = getDb();
     return res.json({ persistence: 'json', dbFile: DB_FILE, counts: { users: (db.users||[]).length, entries: (db.entries||[]).length, goals: (db.goals||[]).length, invitations: (db.invitations||[]).length, settings: Object.keys(db.settings||{}).length } });
@@ -1117,7 +1225,7 @@ app.get('/', (_req, res) => {
 
 // --- INICIO DEL SERVIDOR ---
 // Warn in production if persistence is likely ephemeral
-if (process.env.NODE_ENV === 'production' && !USE_SQLITE) {
+if (process.env.NODE_ENV === 'production' && !USE_SQLITE && !pgPool && !supabaseAdmin) {
   console.warn('⚠️ Running in production without SQLite. Data written to local db.json may be lost on platforms with ephemeral filesystems. Consider enabling SQLite or using a managed DB.');
 }
 if (USE_SQLITE) {
