@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import * as AuthService from '../services/authService';
 import { Loader2, Server, WifiOff, CheckCircle } from 'lucide-react';
-import { SUPABASE_URL, SUPABASE_ANON_KEY, API_URL } from '../services/config';
+import { SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_REDIRECT_URL, API_URL } from '../services/config';
 import { createClient } from '@supabase/supabase-js';
 
 // Custom Dygo Logo Component for Auth
@@ -87,9 +87,10 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         try {
             setIsLoading(true);
             const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            const redirectTo = SUPABASE_REDIRECT_URL || `${window.location.origin}/?supabase_auth=1`;
             const { data, error } = await supabase.auth.signInWithOAuth({
                 provider: 'google',
-                options: { redirectTo: `${window.location.origin}/?supabase_auth=1` }
+                options: { redirectTo }
             });
             if (error) throw error;
             if (data?.url) window.location.href = data.url;

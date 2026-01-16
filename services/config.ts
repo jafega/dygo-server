@@ -26,3 +26,4 @@ export const ALLOW_LOCAL_FALLBACK = false;
 // Supabase client env (frontend)
 export const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || '';
 export const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
+export const SUPABASE_REDIRECT_URL = (import.meta as any).env?.VITE_SUPABASE_REDIRECT_URL || '';
