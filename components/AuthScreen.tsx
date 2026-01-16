@@ -87,7 +87,10 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         try {
             setIsLoading(true);
             const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-            const redirectTo = SUPABASE_REDIRECT_URL || `${window.location.origin}/?supabase_auth=1`;
+            const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+            const redirectTo = isLocalhost
+                ? 'http://localhost:3000/?supabase_auth=1'
+                : (SUPABASE_REDIRECT_URL || `${window.location.origin}/?supabase_auth=1`);
             const { data, error } = await supabase.auth.signInWithOAuth({
                 provider: 'google',
                 options: { redirectTo }
