@@ -678,7 +678,7 @@ const latestDiaryEntry = [...safeEntries]
               <div className="space-y-6 animate-in fade-in">
                 <div className="bg-white rounded-2xl border border-slate-100 p-5 md:p-6 shadow-sm">
                   <div className="flex items-center justify-between gap-2 mb-3">
-                    <h3 className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                    <h3 className="text-base md:text-lg font-semibold text-slate-800 flex items-center gap-2">
                       <Calendar size={16} className="text-indigo-500" /> Última entrada del diario
                     </h3>
                     {latestDiaryEntry && (
@@ -713,7 +713,9 @@ const latestDiaryEntry = [...safeEntries]
                 <div className="bg-white rounded-2xl border border-slate-100 p-5 md:p-6 shadow-sm">
                   <div className="flex items-center justify-between gap-3 mb-4">
                     <div>
-                      <h2 className="text-lg md:text-xl font-bold text-slate-800">Resumen personal</h2>
+                      <h2 className="text-base md:text-lg font-semibold text-slate-800 flex items-center gap-2">
+                        <LayoutDashboard size={18} className="text-indigo-500" /> Resumen personal
+                      </h2>
                       <p className="text-xs text-slate-500">Tu evolución y recomendaciones</p>
                     </div>
                     <span className="text-[10px] font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">Últimos 14 días</span>

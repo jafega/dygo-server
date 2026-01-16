@@ -130,43 +130,11 @@ const InsightsPanel: React.FC<InsightsPanelProps> = ({ entries, mode = 'PERSONAL
 
   return (
     <div className="space-y-6">
-      {/* AI Analysis Section */}
-      <div className={`p-6 rounded-2xl border relative overflow-hidden ${isClinical ? 'bg-slate-50 border-slate-200' : 'bg-gradient-to-br from-indigo-50 to-purple-50 border-indigo-100'}`}>
-        {!isClinical && (
-            <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-indigo-200 rounded-full blur-2xl opacity-50"></div>
-        )}
-        
-        <h3 className={`text-lg font-semibold mb-3 flex items-center gap-2 relative z-10 ${isClinical ? 'text-slate-800' : 'text-indigo-900'}`}>
-            {isClinical ? (
-                <>
-                    <Activity className="w-5 h-5 text-blue-600" />
-                    Resumen Clínico (IA)
-                </>
-            ) : (
-                <>
-                    <Heart className="w-5 h-5 text-rose-500" />
-                    Consejo de Bienestar
-                </>
-            )}
-        </h3>
-        
-        <div className={`relative z-10 leading-relaxed text-sm md:text-base ${isClinical ? 'text-slate-700' : 'text-indigo-800'}`}>
-          {loading ? (
-             <div className="flex items-center gap-2 animate-pulse">
-                <div className={`w-2 h-2 rounded-full ${isClinical ? 'bg-slate-400' : 'bg-indigo-400'}`}></div>
-                <span>{isClinical ? "Generando resumen clínico..." : "Analizando tus días..."}</span>
-             </div>
-          ) : (
-             <p>{insight}</p>
-          )}
-        </div>
-      </div>
-
       {/* Chart Section - Conditionally Rendered */}
       {!hideChart && (
           <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-100">
             <div className="flex items-center justify-between gap-3 mb-4">
-              <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+                <h3 className="text-base md:text-lg font-semibold text-slate-800 flex items-center gap-2">
                   <TrendingUp className="w-5 h-5 text-indigo-500"/>
                   {isClinical ? "Evolución Anímica (Últimos 14 días)" : "Tu Ánimo Reciente"}
               </h3>
@@ -208,10 +176,42 @@ const InsightsPanel: React.FC<InsightsPanelProps> = ({ entries, mode = 'PERSONAL
           </div>
       )}
 
+          {/* AI Analysis Section */}
+          <div className={`p-6 rounded-2xl border relative overflow-hidden ${isClinical ? 'bg-slate-50 border-slate-200' : 'bg-gradient-to-br from-indigo-50 to-purple-50 border-indigo-100'}`}>
+          {!isClinical && (
+            <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-indigo-200 rounded-full blur-2xl opacity-50"></div>
+          )}
+        
+          <h3 className={`text-base md:text-lg font-semibold mb-3 flex items-center gap-2 relative z-10 ${isClinical ? 'text-slate-800' : 'text-indigo-900'}`}>
+            {isClinical ? (
+              <>
+                <Activity className="w-5 h-5 text-blue-600" />
+                Resumen Clínico (IA)
+              </>
+            ) : (
+              <>
+                <Heart className="w-5 h-5 text-rose-500" />
+                Consejo de Bienestar
+              </>
+            )}
+          </h3>
+        
+          <div className={`relative z-10 leading-relaxed text-sm md:text-base ${isClinical ? 'text-slate-700' : 'text-indigo-800'}`}>
+            {loading ? (
+             <div className="flex items-center gap-2 animate-pulse">
+              <div className={`w-2 h-2 rounded-full ${isClinical ? 'bg-slate-400' : 'bg-indigo-400'}`}></div>
+              <span>{isClinical ? "Generando resumen clínico..." : "Analizando tus días..."}</span>
+             </div>
+            ) : (
+             <p>{insight}</p>
+            )}
+          </div>
+          </div>
+
       {!hideChart && !isClinical && (
         <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-100">
           <div className="flex items-center justify-between gap-3 mb-4">
-            <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+            <h3 className="text-base md:text-lg font-semibold text-slate-800 flex items-center gap-2">
               <Sparkles className="w-5 h-5 text-purple-500" /> Emociones más frecuentes (14 días)
             </h3>
             <span className="text-[10px] font-semibold text-purple-600 bg-purple-50 border border-purple-100 px-2 py-0.5 rounded-full">Top 10</span>
