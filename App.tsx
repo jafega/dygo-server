@@ -173,18 +173,44 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!settings.notificationsEnabled || !currentUser) return;
-    const checkTime = () => {
+    const checkTime = async () => {
       const now = new Date();
       const currentHm = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
       if (currentHm === settings.notificationTime && now.getSeconds() < 10) {
         if (Notification.permission === 'granted') {
-           new Notification("dygo", { body: "Es momento de conectar contigo. ¿Qué tal tu día?" });
+           const targetUrl = `${window.location.origin}/?start=voice`;
+           if ('serviceWorker' in navigator) {
+             const reg = await navigator.serviceWorker.getRegistration();
+             if (reg) {
+               reg.showNotification('dygo', {
+                 body: 'Es momento de conectar contigo. ¿Qué tal tu día?',
+                 data: { url: targetUrl }
+               });
+               return;
+             }
+           }
+           const n = new Notification('dygo', { body: 'Es momento de conectar contigo. ¿Qué tal tu día?', data: { url: targetUrl } as any });
+           n.onclick = () => {
+             window.location.href = targetUrl;
+           };
         }
       }
     };
     const interval = setInterval(checkTime, 10000);
     return () => clearInterval(interval);
   }, [settings, currentUser]);
+
+  useEffect(() => {
+    if (!currentUser || currentUser.role !== 'PATIENT') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('start') !== 'voice') return;
+    setSelectedDate(null);
+    setActiveTab('calendar');
+    setViewState(ViewState.VOICE_SESSION);
+    const url = new URL(window.location.href);
+    url.searchParams.delete('start');
+    window.history.replaceState({}, '', url.toString());
+  }, [currentUser]);
 
   useEffect(() => {
       if (!currentUser) return;
