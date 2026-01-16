@@ -46,7 +46,7 @@ const App: React.FC = () => {
   const [sessionDate, setSessionDate] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
-  const [activeTab, setActiveTab] = useState<'calendar' | 'insights' | 'goals' | 'feedback'>('calendar');
+  const [activeTab, setActiveTab] = useState<'calendar' | 'insights' | 'goals' | 'feedback'>('insights');
   const [showSettings, setShowSettings] = useState(false);
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReport | null>(null);
   const [hasPendingInvites, setHasPendingInvites] = useState(false);
