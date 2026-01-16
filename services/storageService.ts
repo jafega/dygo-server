@@ -15,11 +15,14 @@ export const getEntriesForUser = async (userId: string): Promise<JournalEntry[]>
           if (res.ok) return (await res.json()).sort((a: any, b: any) => b.timestamp - a.timestamp);
           throw new Error(`Server error: ${res.status}`);
       } catch (e) {
-          if (ALLOW_LOCAL_FALLBACK) { console.warn("Backend fail, using local fallback", e); }
-          else throw new Error('No se puede conectar con el servidor. Asegúrate de ejecutar `node server.js`.');
+                    if (ALLOW_LOCAL_FALLBACK) { console.warn("Backend fail, using local fallback", e); }
+                    else throw new Error('No se puede conectar con el servidor. Asegúrate de ejecutar `node server.js`.');
       }
   }
-  // Local Fallback
+  if (USE_BACKEND) {
+      throw new Error('Persistencia local deshabilitada. El backend debe estar disponible.');
+  }
+    // Local Fallback (solo si USE_BACKEND es false)
   const stored = localStorage.getItem(ENTRIES_KEY);
   const all: JournalEntry[] = stored ? JSON.parse(stored) : [];
   return all.filter(e => e.userId === userId).sort((a, b) => b.timestamp - a.timestamp);
@@ -34,8 +37,6 @@ export const saveEntry = async (entry: JournalEntry): Promise<void> => {
                   method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(entry)
               });
               if (res.ok) return;
-              // If update failed with 404, try POST
-              if (res.status !== 404) throw new Error(`Error saving entry (${res.status})`);
           }
           const createRes = await fetch(`${API_URL}/entries`, {
               method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(entry)
@@ -43,6 +44,10 @@ export const saveEntry = async (entry: JournalEntry): Promise<void> => {
           if (!createRes.ok) throw new Error(`Error creating entry (${createRes.status})`);
           return;
       } catch(e) { if (ALLOW_LOCAL_FALLBACK) { console.warn("Backend fail, saved locally", e); } else { throw e; } }
+  }
+
+  if (USE_BACKEND) {
+      throw new Error('Persistencia local deshabilitada. El backend debe estar disponible.');
   }
 
   const entries = JSON.parse(localStorage.getItem(ENTRIES_KEY) || '[]');
@@ -88,6 +93,9 @@ export const deleteEntry = async (id: string): Promise<void> => {
             else { throw e; }
         }
     }
+    if (USE_BACKEND) {
+        throw new Error('Persistencia local deshabilitada. El backend debe estar disponible.');
+    }
     const entries = JSON.parse(localStorage.getItem(ENTRIES_KEY) || '[]');
     localStorage.setItem(ENTRIES_KEY, JSON.stringify(entries.filter((e:any) => e.id !== id)));
 };
@@ -99,7 +107,7 @@ export const getLastDaysEntries = async (userId: string, days: number): Promise<
 
 // Migrate localStorage data to backend for a user (called at init when backend is available)
 export const migrateLocalToBackend = async (userId: string) => {
-    if (!USE_BACKEND) return;
+    if (!USE_BACKEND || !ALLOW_LOCAL_FALLBACK) return;
     try {
         // Entries
         const localEntries = JSON.parse(localStorage.getItem(ENTRIES_KEY) || '[]') as JournalEntry[];
@@ -148,6 +156,9 @@ export const getGoalsForUser = async (userId: string): Promise<Goal[]> => {
             else { throw new Error('No se puede conectar con el servidor para obtener goals.'); }
         }
     }
+    if (USE_BACKEND) {
+        throw new Error('Persistencia local deshabilitada. El backend debe estar disponible.');
+    }
     const all = JSON.parse(localStorage.getItem(GOALS_KEY) || '[]');
     return all.filter((g:any) => g.userId === userId);
 };
@@ -161,6 +172,9 @@ export const saveUserGoals = async (userId: string, userGoals: Goal[]) => {
             if (!res.ok) throw new Error(`Error syncing goals (${res.status})`);
             return;
         } catch(e) { if (ALLOW_LOCAL_FALLBACK) { console.warn('Save goals failed, storing locally', e); } else { throw e; } }
+    }
+    if (USE_BACKEND) {
+        throw new Error('Persistencia local deshabilitada. El backend debe estar disponible.');
     }
     const all = JSON.parse(localStorage.getItem(GOALS_KEY) || '[]');
     const other = all.filter((g:any) => g.userId !== userId);
@@ -182,6 +196,9 @@ export const getSettings = async (userId: string): Promise<UserSettings> => {
             if (ALLOW_LOCAL_FALLBACK) { console.warn('Fetch settings failed, using local fallback', e); } else { throw new Error('No se puede conectar con el servidor para obtener settings.'); }
         }
     }
+    if (USE_BACKEND) {
+        throw new Error('Persistencia local deshabilitada. El backend debe estar disponible.');
+    }
     const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
     return { ...defaults, ...(all[userId] || {}) };
 };
@@ -195,6 +212,9 @@ export const saveSettings = async (userId: string, settings: UserSettings): Prom
             if (!res.ok) throw new Error(`Error saving settings (${res.status})`);
             return;
         } catch(e) { if (ALLOW_LOCAL_FALLBACK) { console.warn('Save settings failed, storing locally', e); } else { throw e; } }
+    }
+    if (USE_BACKEND) {
+        throw new Error('Persistencia local deshabilitada. El backend debe estar disponible.');
     }
     const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
     all[userId] = settings;
@@ -211,6 +231,9 @@ const getInvitations = async (): Promise<Invitation[]> => {
         } catch(e) {
             if (ALLOW_LOCAL_FALLBACK) { console.warn('Fetch invitations failed, using local fallback', e); } else { throw new Error('No se puede conectar con el servidor para obtener invitaciones.'); }
         }
+    }
+    if (USE_BACKEND) {
+        throw new Error('Persistencia local deshabilitada. El backend debe estar disponible.');
     }
     return JSON.parse(localStorage.getItem(INVITATIONS_KEY) || '[]');
 };
@@ -250,6 +273,9 @@ export const sendInvitation = async (fromPsychId: string, fromName: string, toEm
             if (ALLOW_LOCAL_FALLBACK) { invs.push(newInv); localStorage.setItem(INVITATIONS_KEY, JSON.stringify(invs)); console.warn('Create invitation failed, saved locally', e); return; }
             throw e;
         }
+    }
+    if (USE_BACKEND) {
+        throw new Error('Persistencia local deshabilitada. El backend debe estar disponible.');
     }
     invs.push(newInv);
     localStorage.setItem(INVITATIONS_KEY, JSON.stringify(invs));
@@ -306,6 +332,9 @@ export const rejectInvitation = async (invitationId: string) => {
             if (!res.ok) throw new Error(`Error rejecting invitation (${res.status})`);
             return;
         } catch (e) { if (ALLOW_LOCAL_FALLBACK) { const invs = (await getInvitations()).filter(i => i.id !== invitationId); localStorage.setItem(INVITATIONS_KEY, JSON.stringify(invs)); console.warn('Reject invitation failed, updated locally', e); return; } else { throw e; } }
+    }
+    if (USE_BACKEND) {
+        throw new Error('Persistencia local deshabilitada. El backend debe estar disponible.');
     }
     const invs = (await getInvitations()).filter(i => i.id !== invitationId);
     localStorage.setItem(INVITATIONS_KEY, JSON.stringify(invs));

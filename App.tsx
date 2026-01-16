@@ -43,18 +43,35 @@ const App: React.FC = () => {
   
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
+  const [selectedEntryMode, setSelectedEntryMode] = useState<'day' | 'single'>('day');
   const [sessionDate, setSessionDate] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
-  const [activeTab, setActiveTab] = useState<'calendar' | 'insights' | 'goals' | 'feedback'>('insights');
+  const [activeTab, setActiveTab] = useState<'calendar' | 'insights' | 'feedback' | 'sessions'>('insights');
   const [showSettings, setShowSettings] = useState(false);
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReport | null>(null);
   const [hasPendingInvites, setHasPendingInvites] = useState(false);
+
+  const getFeedbackText = (entry: JournalEntry) => {
+    if (typeof entry.psychologistFeedback === 'string') return entry.psychologistFeedback;
+    if (entry.psychologistFeedback?.text) return entry.psychologistFeedback.text;
+    if (entry.psychologistEntryType === 'FEEDBACK') {
+      const summaryText = (entry.summary || '').trim();
+      if (summaryText) return summaryText;
+    }
+    return '';
+  };
 
   const isFeedbackUnread = (entry: JournalEntry) => {
     if (!entry.psychologistFeedbackUpdatedAt) return false;
     const readAt = entry.psychologistFeedbackReadAt || 0;
     return readAt < entry.psychologistFeedbackUpdatedAt;
+  };
+
+  const hasFeedbackContent = (entry: JournalEntry) => {
+    const textHas = getFeedbackText(entry).trim().length > 0;
+    const attHas = Array.isArray(entry.psychologistFeedback?.attachments) && entry.psychologistFeedback?.attachments.length > 0;
+    return Boolean(textHas || attHas);
   };
 
   useEffect(() => {
@@ -232,14 +249,7 @@ const App: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    if (!currentUser || currentUser.role !== 'PATIENT') return;
-    const unread = entries
-      .filter(e => e.psychologistFeedback && (typeof e.psychologistFeedback === 'string' ? e.psychologistFeedback.trim().length > 0 : e.psychologistFeedback.text?.trim().length > 0))
-      .filter(isFeedbackUnread);
-    if (activeTab !== 'feedback') return;
-    markFeedbackAsRead(unread);
-  }, [activeTab, currentUser, entries]);
+  // Note: feedback is marked as read when the user opens the entry detail.
 
   useEffect(() => {
     if (!currentUser || currentUser.role !== 'PATIENT') return;
@@ -251,7 +261,7 @@ const App: React.FC = () => {
     const notifiedMap = raw ? JSON.parse(raw) as Record<string, number> : {};
 
     const newlyUpdated = entries
-      .filter(e => e.psychologistFeedback && (typeof e.psychologistFeedback === 'string' ? e.psychologistFeedback.trim().length > 0 : e.psychologistFeedback.text?.trim().length > 0))
+      .filter(hasFeedbackContent)
       .filter(entry => {
         const updatedAt = entry.psychologistFeedbackUpdatedAt || 0;
         if (!updatedAt) return false;
@@ -276,14 +286,15 @@ const App: React.FC = () => {
     if (!selectedEntryId) return;
     const entry = entries.find(e => e.id === selectedEntryId);
     if (!entry) return;
-    const hasFeedback = entry.psychologistFeedback && (typeof entry.psychologistFeedback === 'string' ? entry.psychologistFeedback.trim().length > 0 : entry.psychologistFeedback.text?.trim().length > 0);
+    const hasFeedback = hasFeedbackContent(entry);
     if (!hasFeedback) return;
     if (!isFeedbackUnread(entry)) return;
     markFeedbackAsRead([entry]);
   }, [selectedEntryId, entries, currentUser]);
 
-  const handleStartSession = (dateStr?: string) => {
-    setSessionDate(dateStr || null);
+  const handleStartSession = (dateStr?: string | React.MouseEvent) => {
+    const safeDate = typeof dateStr === 'string' ? dateStr : null;
+    setSessionDate(safeDate);
     setSelectedDate(null);
     setViewState(ViewState.VOICE_SESSION);
   };
@@ -452,11 +463,9 @@ const dayEntries = selectedDate
   ? safeEntries.filter(e => e.date === selectedDate)
   : [];
 
-const selectedEntry = selectedEntryId
-  ? safeEntries.find(e => e.id === selectedEntryId)
-  : null;
-
-const entriesForModal = selectedEntry ? [selectedEntry] : dayEntries;
+const entriesForModal = selectedEntryMode === 'single' && selectedEntryId
+  ? (safeEntries.find(e => e.id === selectedEntryId) ? [safeEntries.find(e => e.id === selectedEntryId)!] : [])
+  : dayEntries;
 
 const safeGoals = Array.isArray(goals) ? goals : [];
 
@@ -469,7 +478,19 @@ const personalGoals = safeGoals.filter(
 );
 
 const feedbackEntries = [...safeEntries]
-  .filter(e => e.psychologistFeedback && (typeof e.psychologistFeedback === 'string' ? e.psychologistFeedback.trim().length > 0 : e.psychologistFeedback.text?.trim().length > 0))
+  .filter(e => hasFeedbackContent(e) || e.psychologistEntryType === 'FEEDBACK')
+  .sort((a, b) => b.timestamp - a.timestamp);
+
+const isSessionEntry = (entry: JournalEntry) => {
+  if (entry.psychologistEntryType === 'SESSION') return true;
+  if (entry.createdBy === 'PSYCHOLOGIST') {
+    return Boolean(entry.transcript && entry.transcript.trim().length > 0);
+  }
+  return false;
+};
+
+const sessionEntries = [...safeEntries]
+  .filter(isSessionEntry)
   .sort((a, b) => b.timestamp - a.timestamp);
 
 const latestDiaryEntry = [...safeEntries]
@@ -477,7 +498,26 @@ const latestDiaryEntry = [...safeEntries]
   .filter(e => e.transcript && e.transcript.trim().length > 0)
   .sort((a, b) => b.timestamp - a.timestamp)[0];
 
+const latestSessionEntry = [...safeEntries]
+  .filter(e => e.createdBy === 'PSYCHOLOGIST')
+  .filter(e => e.psychologistEntryType === 'SESSION')
+  .sort((a, b) => b.timestamp - a.timestamp)[0];
+
+const todayStr = (() => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+})();
+
+const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.date === todayStr);
+
   const unreadFeedbackCount = feedbackEntries.filter(isFeedbackUnread).length;
+
+  const diaryEntries = safeEntries.filter(e => e.createdBy !== 'PSYCHOLOGIST' && typeof e.sentimentScore === 'number');
+  const averageSentiment = diaryEntries.length > 0
+    ? (diaryEntries.reduce((acc, curr) => acc + (curr.sentimentScore || 0), 0) / diaryEntries.length)
+    : null;
+  const totalEntriesCount = diaryEntries.length;
+  const totalSessionsCount = sessionEntries.length;
 
   
   const ProfileCircle = ({ onClick, className }: { onClick: () => void, className?: string }) => (
@@ -645,7 +685,7 @@ const latestDiaryEntry = [...safeEntries]
                     <ArrowLeftRight size={16} /> <span>Volver a Pacientes</span>
                 </button>
              )}
-            <button onClick={handleStartSession} className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-full font-medium flex items-center justify-center gap-2 transition-all shadow-lg hover:shadow-indigo-500/30 flex-1 md:flex-none">
+            <button onClick={() => handleStartSession()} className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-full font-medium flex items-center justify-center gap-2 transition-all shadow-lg hover:shadow-indigo-500/30 flex-1 md:flex-none">
                <Mic size={20} /> <span className="hidden md:inline">Grabar entrada</span><span className="md:hidden">Grabar</span>
             </button>
              <div className="hidden md:block"><ProfileCircle onClick={handleOpenSettings} /></div>
@@ -671,8 +711,8 @@ const latestDiaryEntry = [...safeEntries]
                 </span>
                 Feedback
               </button>
-              <button onClick={() => setActiveTab('goals')} className={`flex-1 py-2 px-3 text-sm font-medium rounded-lg transition-all flex items-center justify-center gap-2 whitespace-nowrap ${activeTab === 'goals' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:text-slate-700'}`}>
-                <Target size={16} /> Metas
+              <button onClick={() => setActiveTab('sessions')} className={`flex-1 py-2 px-3 text-sm font-medium rounded-lg transition-all flex items-center justify-center gap-2 whitespace-nowrap ${activeTab === 'sessions' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:text-slate-700'}`}>
+                <Stethoscope size={16} /> Sesiones
               </button>
             </div>
 
@@ -680,8 +720,8 @@ const latestDiaryEntry = [...safeEntries]
               <div className="space-y-8 animate-in fade-in">
                 <CalendarView 
                   entries={entries} 
-                  onSelectDate={(date) => { setSelectedDate(date); setSelectedEntryId(null); }}
-                  onSelectEntry={(entry) => { setSelectedDate(entry.date); setSelectedEntryId(entry.id); }}
+                  onSelectDate={(date) => { setSelectedDate(date); setSelectedEntryId(null); setSelectedEntryMode('day'); }}
+                  onSelectEntry={(entry) => { setSelectedDate(entry.date); setSelectedEntryId(entry.id); setSelectedEntryMode('day'); }}
                 />
                 {assignedGoals.length > 0 && (
                   <div className="bg-purple-50 rounded-2xl border border-purple-100 p-1">
@@ -702,6 +742,38 @@ const latestDiaryEntry = [...safeEntries]
 
             {activeTab === 'insights' && (
               <div className="space-y-6 animate-in fade-in">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
+                    <div className="text-[10px] uppercase tracking-wide text-slate-400 font-bold">Entradas</div>
+                    <div className="text-2xl font-bold text-slate-800 mt-2">{totalEntriesCount}</div>
+                  </div>
+                  <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
+                    <div className="text-[10px] uppercase tracking-wide text-slate-400 font-bold">Ánimo medio</div>
+                    <div className="text-2xl font-bold text-slate-800 mt-2">
+                      {averageSentiment !== null ? averageSentiment.toFixed(1) : '—'}
+                      {averageSentiment !== null && <span className="text-sm text-slate-400 ml-1">/10</span>}
+                    </div>
+                  </div>
+                  <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
+                    <div className="text-[10px] uppercase tracking-wide text-slate-400 font-bold">Sesiones</div>
+                    <div className="text-2xl font-bold text-slate-800 mt-2">{totalSessionsCount}</div>
+                  </div>
+                  <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
+                    <div className="text-[10px] uppercase tracking-wide text-slate-400 font-bold">Feedback pendiente</div>
+                    <div className="text-2xl font-bold text-slate-800 mt-2">{unreadFeedbackCount}</div>
+                  </div>
+                </div>
+                {!hasTodayEntry && (
+                  <button
+                    onClick={() => handleStartSession()}
+                    className="w-full py-4 rounded-2xl bg-indigo-600 text-white font-semibold text-sm md:text-base shadow-md hover:bg-indigo-700 transition-colors"
+                  >
+                    ¿Qué tal estás hoy?
+                  </button>
+                )}
+                <div className="bg-white rounded-2xl border border-slate-100 p-5 md:p-6 shadow-sm">
+                  <GoalsPanel goals={personalGoals} onAddGoal={handleAddGoal} onToggleGoal={handleToggleGoal} onDeleteGoal={handleDeleteGoal} />
+                </div>
                 <div className="bg-white rounded-2xl border border-slate-100 p-5 md:p-6 shadow-sm">
                   <div className="flex items-center justify-between gap-2 mb-3">
                     <h3 className="text-base md:text-lg font-semibold text-slate-800 flex items-center gap-2">
@@ -736,6 +808,33 @@ const latestDiaryEntry = [...safeEntries]
                   )}
                 </div>
 
+                {latestSessionEntry && (
+                  <div className="bg-white rounded-2xl border border-slate-100 p-5 md:p-6 shadow-sm">
+                    <div className="flex items-center justify-between gap-2 mb-3">
+                      <h3 className="text-base md:text-lg font-semibold text-slate-800 flex items-center gap-2">
+                        <Stethoscope size={16} className="text-purple-500" /> Última sesión clínica
+                      </h3>
+                      <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">
+                        {new Date(latestSessionEntry.timestamp).toLocaleDateString()}
+                      </span>
+                    </div>
+                    <div className="space-y-3">
+                      <div className="text-xs text-slate-500">
+                        {new Date(latestSessionEntry.timestamp).toLocaleString()}
+                      </div>
+                      <p className="text-sm text-slate-700 leading-relaxed line-clamp-4">
+                        {latestSessionEntry.summary}
+                      </p>
+                      <button
+                        onClick={() => { setSelectedDate(latestSessionEntry.date); setSelectedEntryId(latestSessionEntry.id); setSelectedEntryMode('single'); }}
+                        className="text-[11px] font-semibold text-purple-700 bg-purple-50 border border-purple-100 px-2.5 py-1 rounded-full hover:bg-purple-100 transition-colors w-fit"
+                      >
+                        Ver detalle
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <div className="bg-white rounded-2xl border border-slate-100 p-5 md:p-6 shadow-sm">
                   <div className="flex items-center justify-between gap-3 mb-4">
                     <div>
@@ -752,29 +851,48 @@ const latestDiaryEntry = [...safeEntries]
                 <button onClick={handleGenerateReport} className="w-full py-4 bg-gradient-to-r from-purple-500 to-indigo-500 text-white rounded-2xl shadow-md hover:shadow-lg transition-all font-semibold flex items-center justify-center gap-2">
                   <BookOpen size={20} /> Ver Reporte Semanal
                 </button>
+
               </div>
             )}
 
             {activeTab === 'feedback' && (
               <div className="animate-in fade-in">
                 <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
-                  <h3 className="text-sm font-bold text-slate-700 mb-3">Feedback del psicólogo</h3>
+                  <h3 className="text-sm font-bold text-slate-700 mb-3">Feedback</h3>
                   {feedbackEntries.length === 0 ? (
                     <p className="text-sm text-slate-500">Aún no hay feedback.</p>
                   ) : (
                     <div className="space-y-3 max-h-[520px] overflow-y-auto">
                       {feedbackEntries.map(entry => {
-                        const feedbackText = typeof entry.psychologistFeedback === 'string'
-                          ? entry.psychologistFeedback
-                          : entry.psychologistFeedback?.text || '';
+                        const feedbackText = getFeedbackText(entry) || (entry.psychologistEntryType === 'FEEDBACK' ? 'Feedback del especialista.' : '');
                         const timeLabel = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
                         const hasDiaryRef = entry.transcript && entry.transcript.trim().length > 0;
+                        const isUnread = isFeedbackUnread(entry);
                         return (
                           <div key={entry.id} className="p-3 rounded-xl border border-indigo-100 bg-indigo-50/40">
-                            <div className="flex items-center justify-between gap-2 mb-1">
-                              <div className="text-[11px] text-slate-500">{entry.date}{timeLabel ? ` • ${timeLabel}` : ''}</div>
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                              <div className="flex flex-col gap-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">
+                                    Feedback
+                                  </span>
+                                  {isUnread && (
+                                    <span className="text-[10px] font-semibold text-red-700 bg-red-50 border border-red-100 px-2 py-0.5 rounded-full">
+                                      No leído
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[11px] text-slate-500">{entry.date}{timeLabel ? ` • ${timeLabel}` : ''}</div>
+                              </div>
                               <button
-                                onClick={() => { setSelectedDate(entry.date); setSelectedEntryId(entry.id); }}
+                                onClick={() => {
+                                  if (isFeedbackUnread(entry)) {
+                                    markFeedbackAsRead([entry]);
+                                  }
+                                  setSelectedDate(entry.date);
+                                  setSelectedEntryId(entry.id);
+                                  setSelectedEntryMode('single');
+                                }}
                                 className="text-[11px] font-semibold text-indigo-700 bg-white border border-indigo-100 px-2 py-0.5 rounded-full hover:bg-indigo-50"
                               >
                                 Ver detalle
@@ -793,9 +911,97 @@ const latestDiaryEntry = [...safeEntries]
               </div>
             )}
 
-            {activeTab === 'goals' && (
+            {activeTab === 'sessions' && (
               <div className="animate-in fade-in">
-                <GoalsPanel goals={personalGoals} onAddGoal={handleAddGoal} onToggleGoal={handleToggleGoal} onDeleteGoal={handleDeleteGoal} />
+                <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
+                  <h3 className="text-sm font-bold text-slate-700 mb-3">Sesiones clínicas</h3>
+                  {sessionEntries.length === 0 ? (
+                    <p className="text-sm text-slate-500">Aún no hay sesiones clínicas.</p>
+                  ) : (
+                    <div className="space-y-3 max-h-[520px] overflow-y-auto">
+                      {sessionEntries.map(entry => {
+                        const timeLabel = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+                        const sessionFeedbackText = typeof entry.psychologistFeedback === 'string'
+                          ? entry.psychologistFeedback
+                          : entry.psychologistFeedback?.text || '';
+                        const summaryText = (entry.summary || '').trim();
+                        const emotions = Array.isArray(entry.emotions) ? entry.emotions : [];
+                        const sentimentScore = typeof entry.sentimentScore === 'number' ? entry.sentimentScore : null;
+                        const hasTranscript = Boolean(entry.transcript && entry.transcript.trim().length > 0);
+                        const hasFeedback = sessionFeedbackText.trim().length > 0;
+                        const hasAdvice = Boolean(entry.advice && entry.advice.trim().length > 0);
+                        const isUnread = isFeedbackUnread(entry);
+                        return (
+                          <div key={entry.id} className="p-4 rounded-2xl border border-purple-100 bg-purple-50/40">
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                              <div className="flex flex-col gap-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-semibold text-purple-700 bg-purple-50 border border-purple-100 px-2 py-0.5 rounded-full">
+                                    Sesión clínica
+                                  </span>
+                                  {isUnread && (
+                                    <span className="text-[10px] font-semibold text-red-700 bg-red-50 border border-red-100 px-2 py-0.5 rounded-full">
+                                      No leído
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[11px] text-slate-500">{entry.date}{timeLabel ? ` • ${timeLabel}` : ''}</div>
+                              </div>
+                              <button
+                                onClick={() => {
+                                  if (isFeedbackUnread(entry)) {
+                                    markFeedbackAsRead([entry]);
+                                  }
+                                  setSelectedDate(entry.date);
+                                  setSelectedEntryId(entry.id);
+                                  setSelectedEntryMode('single');
+                                }}
+                                className="text-[11px] font-semibold text-purple-700 bg-white border border-purple-100 px-2 py-0.5 rounded-full hover:bg-purple-50"
+                              >
+                                Ver detalle
+                              </button>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1.5 mb-3">
+                              {sentimentScore !== null && (
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${sentimentScore >= 7 ? 'bg-green-50 text-green-700 border-green-200' : sentimentScore >= 4 ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+                                  {sentimentScore}/10
+                                </span>
+                              )}
+                              {hasTranscript && (
+                                <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">
+                                  Transcript
+                                </span>
+                              )}
+                              {emotions.slice(0, 6).map((em, idx) => (
+                                <span key={`${em}-${idx}`} className="text-[10px] bg-white text-slate-600 px-2 py-0.5 rounded-full border border-slate-200 font-semibold">
+                                  {em}
+                                </span>
+                              ))}
+                            </div>
+                            {summaryText && (
+                              <div className="bg-white/80 border border-slate-100 rounded-xl p-3 mb-3">
+                                <h4 className="text-[10px] font-bold uppercase text-slate-400 mb-1">Resumen de la sesión</h4>
+                                <p className="text-sm text-slate-800 leading-relaxed">{summaryText}</p>
+                              </div>
+                            )}
+                            {hasFeedback && (
+                              <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3 mb-3">
+                                <h4 className="text-[10px] font-bold uppercase text-indigo-700 mb-1">Feedback del psicólogo</h4>
+                                <p className="text-sm text-slate-800 leading-relaxed">{sessionFeedbackText}</p>
+                              </div>
+                            )}
+                            {hasAdvice && (
+                              <div className="bg-purple-50 border border-purple-100 rounded-xl p-3">
+                                <h4 className="text-[10px] font-bold uppercase text-purple-700 mb-1">Meta terapéutica</h4>
+                                <p className="text-sm text-slate-800 leading-relaxed">{entry.advice}</p>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
         </div>
@@ -806,7 +1012,7 @@ const latestDiaryEntry = [...safeEntries]
         <EntryModal 
           entries={entriesForModal} 
           dateStr={selectedDate} 
-          onClose={() => { setSelectedDate(null); setSelectedEntryId(null); }}
+          onClose={() => { setSelectedDate(null); setSelectedEntryId(null); setSelectedEntryMode('day'); }}
           onStartSession={(dateStr) => handleStartSession(dateStr)} 
           onDeleteEntry={handleDeleteEntry} 
           onUpdateEntry={handleUpdateEntry} 

@@ -56,6 +56,7 @@ const InsightsPanel: React.FC<InsightsPanelProps> = ({ entries, mode = 'PERSONAL
         let text = '';
         if (mode === 'CLINICAL') {
           text = await generateClinicalSummary(recent);
+          text = text.replace(/^"?Resumen de Estado:?"?\s*/i, '');
         } else {
           text = await generateWeeklyInsights(recent);
         }

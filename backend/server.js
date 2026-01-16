@@ -313,6 +313,16 @@ function buildSupabaseRowFromEntity(originalRow, entity) {
   return { ...entity, id: originalRow?.id || entity.id };
 }
 
+async function trySupabaseUpsert(table, payloads) {
+  let lastError = null;
+  for (const payload of payloads) {
+    const { error } = await supabaseAdmin.from(table).upsert(payload, { onConflict: 'id' });
+    if (!error) return;
+    lastError = error;
+  }
+  if (lastError) throw lastError;
+}
+
 async function loadSupabaseCache() {
   if (!supabaseAdmin) return null;
 
@@ -1338,7 +1348,6 @@ app.get('/api/entries', async (req, res) => {
 });
 
 app.post('/api/entries', (req, res) => {
-  const db = getDb();
   const entry = req.body;
 
   // Si no viene id, generamos uno
@@ -1346,12 +1355,71 @@ app.post('/api/entries', (req, res) => {
     entry.id = crypto.randomUUID();
   }
 
+  if (supabaseAdmin) {
+    (async () => {
+      try {
+        let sampleRow = null;
+        const { data: sample, error: sampleErr } = await supabaseAdmin.from('entries').select('*').limit(1);
+        if (!sampleErr && Array.isArray(sample) && sample.length > 0) sampleRow = sample[0];
+
+        const payloads = sampleRow
+          ? [buildSupabaseRowFromEntity(sampleRow, entry), { ...entry, id: entry.id }]
+          : [{ id: entry.id, data: entry }, { ...entry, id: entry.id }];
+
+        await trySupabaseUpsert('entries', payloads);
+
+        if (supabaseDbCache?.entries) {
+          const idx = supabaseDbCache.entries.findIndex(e => e.id === entry.id);
+          if (idx >= 0) supabaseDbCache.entries[idx] = entry;
+          else supabaseDbCache.entries.unshift(entry);
+        }
+        return res.json(entry);
+      } catch (err) {
+        console.error('Error saving entry (supabase)', err);
+        return res.status(500).json({ error: 'Error saving entry' });
+      }
+    })();
+    return;
+  }
+
+  const db = getDb();
   db.entries.push(entry);
   saveDb(db);
   res.json(entry);
 });
 
 app.put('/api/entries/:id', (req, res) => {
+  if (supabaseAdmin) {
+    (async () => {
+      try {
+        const id = req.params.id;
+        const { data: existingRows, error: selectErr } = await supabaseAdmin.from('entries').select('*').eq('id', id).limit(1);
+        if (selectErr) throw selectErr;
+
+        const existingRow = (existingRows && existingRows[0]) ? existingRows[0] : null;
+        const existing = existingRow ? normalizeSupabaseRow(existingRow) : null;
+        const updated = { ...(existing || {}), ...req.body, id };
+        const payloads = existingRow
+          ? [buildSupabaseRowFromEntity(existingRow, updated), { ...updated, id }]
+          : [{ id, data: updated }, { ...updated, id }];
+
+        await trySupabaseUpsert('entries', payloads);
+
+        if (supabaseDbCache?.entries) {
+          const idx = supabaseDbCache.entries.findIndex(e => e.id === id);
+          if (idx >= 0) supabaseDbCache.entries[idx] = updated;
+          else supabaseDbCache.entries.unshift(updated);
+        }
+
+        return res.json(updated);
+      } catch (err) {
+        console.error('Error updating entry (supabase)', err);
+        return res.status(500).json({ error: 'Error updating entry' });
+      }
+    })();
+    return;
+  }
+
   const db = getDb();
   const idx = db.entries.findIndex((e) => e.id === req.params.id);
 
@@ -1367,6 +1435,36 @@ app.put('/api/entries/:id', (req, res) => {
 app.put('/api/entries', (req, res) => {
   const id = req.query.id;
   if (!id) return res.status(400).json({ error: 'Missing entry id' });
+
+  if (supabaseAdmin) {
+    (async () => {
+      try {
+        const { data: existingRows, error: selectErr } = await supabaseAdmin.from('entries').select('*').eq('id', id).limit(1);
+        if (selectErr) throw selectErr;
+
+        const existingRow = (existingRows && existingRows[0]) ? existingRows[0] : null;
+        const existing = existingRow ? normalizeSupabaseRow(existingRow) : null;
+        const updated = { ...(existing || {}), ...req.body, id };
+        const payloads = existingRow
+          ? [buildSupabaseRowFromEntity(existingRow, updated), { ...updated, id }]
+          : [{ id, data: updated }, { ...updated, id }];
+
+        await trySupabaseUpsert('entries', payloads);
+
+        if (supabaseDbCache?.entries) {
+          const idx = supabaseDbCache.entries.findIndex(e => e.id === id);
+          if (idx >= 0) supabaseDbCache.entries[idx] = updated;
+          else supabaseDbCache.entries.unshift(updated);
+        }
+
+        return res.json(updated);
+      } catch (err) {
+        console.error('Error updating entry (supabase)', err);
+        return res.status(500).json({ error: 'Error updating entry' });
+      }
+    })();
+    return;
+  }
 
   const db = getDb();
   const idx = db.entries.findIndex((e) => e.id === id);

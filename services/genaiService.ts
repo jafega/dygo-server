@@ -12,6 +12,11 @@ interface AnalysisResult {
   advice: string;
 }
 
+interface ClinicalSessionResult {
+  sessionSummary: string;
+  sessionGoal: string;
+}
+
 // Helper to extract text from feedback union type
 const getFeedbackText = (feedback?: string | { text: string }): string => {
     if (!feedback) return '';
@@ -64,7 +69,6 @@ export async function analyzeJournalEntry(transcript: string, date: string, user
   throw new Error("Falta la API key de Gemini");
 }
 
-
   const response = await ai.models.generateContent({
     model: "gemini-2.5-flash",
     contents: prompt,
@@ -112,6 +116,51 @@ export async function analyzeJournalEntry(transcript: string, date: string, user
     emotions: flatEmotions,
     structuredEmotions: safeStructuredEmotions,
     advice: result.advice || "Reflexiona sobre lo vivido hoy."
+  };
+}
+
+// New: Analyze a clinical session transcript (summary + therapeutic goal)
+export async function analyzeClinicalSession(transcript: string, date: string): Promise<ClinicalSessionResult> {
+  if (!ai) {
+    throw new Error("Falta la API key de Gemini");
+  }
+
+  const prompt = `
+    Analiza la siguiente transcripción de una sesión clínica del día ${date}.
+
+    OBJETIVO:
+    1) Resumen clínico breve (3-5 frases) en tercera persona.
+    2) Meta terapéutica clara y concreta (1 frase) para la próxima sesión.
+
+    REGLAS:
+    - Tono profesional, objetivo y conciso.
+    - No uses clichés ni autoayuda superficial.
+    - No incluyas datos sensibles; si aparecen, generaliza.
+
+    Transcripción:
+    "${transcript}"
+  `;
+
+  const response = await ai.models.generateContent({
+    model: "gemini-2.5-flash",
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          sessionSummary: { type: Type.STRING },
+          sessionGoal: { type: Type.STRING }
+        },
+        required: ["sessionSummary", "sessionGoal"]
+      }
+    }
+  });
+
+  const result: ClinicalSessionResult = JSON.parse(response.text || "{}");
+  return {
+    sessionSummary: result.sessionSummary || "Resumen no disponible.",
+    sessionGoal: result.sessionGoal || "Definir una meta terapéutica concreta para la próxima sesión."
   };
 }
 
@@ -179,7 +228,8 @@ export async function generateClinicalSummary(entries: JournalEntry[]): Promise<
     contents: prompt,
   });
 
-  return response.text || "No se pudo generar el resumen clínico.";
+  const raw = response.text || "No se pudo generar el resumen clínico.";
+  return raw.replace(/^"?Resumen de Estado:?"?\s*/i, '');
 }
 
 // New: Structured Weekly Report

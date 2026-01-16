@@ -30,7 +30,7 @@ export interface Invitation {
 
 export interface Attachment {
   id: string;
-  type: 'IMAGE' | 'DOCUMENT';
+  type: 'IMAGE' | 'DOCUMENT' | 'AUDIO' | 'VIDEO';
   url: string; // Base64 string for local demo
   name: string;
 }
@@ -66,6 +66,9 @@ export interface JournalEntry {
   psychologistFeedback?: string | ClinicalNoteContent;
   psychologistFeedbackUpdatedAt?: number;
   psychologistFeedbackReadAt?: number;
+
+  // Type of psychologist-created entry (for visibility/labeling)
+  psychologistEntryType?: 'NOTE' | 'FEEDBACK' | 'SESSION';
   
   // New field to identify if entry was created manually by psychologist
   createdBy?: 'USER' | 'PSYCHOLOGIST';

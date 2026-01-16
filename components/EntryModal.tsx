@@ -95,6 +95,9 @@ const EntryCard: React.FC<{
     const [editSummary, setEditSummary] = useState(entry.summary);
     
     const isPsychEntry = entry.createdBy === 'PSYCHOLOGIST';
+    const isSession = entry.psychologistEntryType === 'SESSION';
+    const psychEntryLabel = isSession ? 'Sesión Clínica' : entry.psychologistEntryType === 'FEEDBACK' ? 'Feedback Clínico' : 'Nota Clínica';
+    const [showTranscript, setShowTranscript] = useState(false);
 
     // Sync state if props change (e.g., after a save or external update)
     useEffect(() => {
@@ -110,18 +113,20 @@ const EntryCard: React.FC<{
         return new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
     };
 
-    // Helper to get structured feedback
-    const getFeedback = (): ClinicalNoteContent | null => {
-        if (!entry.psychologistFeedback) return null;
-        if (typeof entry.psychologistFeedback === 'string') return { text: entry.psychologistFeedback, attachments: [] };
-        return entry.psychologistFeedback;
+    const normalizeNote = (note?: string | ClinicalNoteContent | null): ClinicalNoteContent | null => {
+        if (!note) return null;
+        if (typeof note === 'string') return { text: note, attachments: [] };
+        return note;
     };
 
-    const feedback = getFeedback();
-
-    if (isPsychEntry && !(feedback && (feedback.text || feedback.attachments.length > 0))) {
-        return null;
-    }
+    const feedback = normalizeNote(entry.psychologistFeedback);
+    const internalNote = normalizeNote(entry.psychologistNote);
+    const fallbackPsychText = (entry.summary || '').trim();
+    const referenceLabel = entry.createdBy === 'PSYCHOLOGIST'
+        ? (entry.psychologistEntryType === 'SESSION'
+            ? 'Relacionado: sesión clínica'
+            : (entry.transcript && entry.transcript.trim().length > 0 ? 'Relacionado: entrada de diario' : ''))
+        : '';
 
     return (
         <div className={`rounded-xl shadow-sm border overflow-hidden ${isPsychEntry ? 'bg-purple-50/50 border-purple-100' : 'bg-white border-slate-200'}`}>
@@ -129,19 +134,29 @@ const EntryCard: React.FC<{
             <div className="px-4 py-3 bg-white/50 border-b border-slate-100 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
                 <div className="flex items-center gap-3">
                     <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${isPsychEntry ? 'bg-purple-100 text-purple-600' : 'bg-indigo-100 text-indigo-600'}`}>
-                         {isPsychEntry ? <Stethoscope size={12}/> : `#${index}`}
+                        {isPsychEntry ? <Stethoscope size={12}/> : `#${index}`}
                     </span>
                     <span className="text-xs text-slate-500 font-mono">{formatTime(entry.timestamp)}</span>
+                    {isPsychEntry && (
+                        <span className="text-[10px] font-semibold text-purple-700 bg-purple-50 border border-purple-100 px-2 py-0.5 rounded-full">
+                            {psychEntryLabel}
+                        </span>
+                    )}
                     {!isPsychEntry && (
                         <div className="flex gap-1">
-                            {entry.emotions.map(e => (
-                                <span key={e} className="px-2 py-0.5 bg-slate-100 border border-slate-200 rounded-full text-[10px] text-slate-600 font-medium">
+                            {entry.emotions.map((e, idx) => (
+                                <span key={`${e}-${idx}`} className="px-2 py-0.5 bg-slate-100 border border-slate-200 rounded-full text-[10px] text-slate-600 font-medium">
                                     {e}
                                 </span>
                             ))}
                         </div>
                     )}
                 </div>
+                {referenceLabel && (
+                    <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">
+                        {referenceLabel}
+                    </span>
+                )}
                 
                 {/* Only allow deleting user diary entries, editing user entries text */}
                 <div className="flex gap-2 sm:justify-end">
@@ -196,6 +211,41 @@ const EntryCard: React.FC<{
                      </div>
                  )}
 
+                 {/* Clinical Session Summary + Transcript (Psych Session) */}
+                                 {isPsychEntry && isSession && (
+                     <div>
+                         <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">
+                             <MessageSquare size={14} /> Resumen de la sesión (IA)
+                         </h4>
+                         <p className="text-slate-700 leading-relaxed text-sm">{entry.summary}</p>
+                                                 <div className="mt-3 flex flex-wrap items-center gap-2">
+                                                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${entry.sentimentScore >= 7 ? 'bg-green-50 text-green-700 border-green-200' : entry.sentimentScore >= 4 ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+                                                         {entry.sentimentScore}/10
+                                                     </span>
+                                                     {entry.emotions?.length > 0 && entry.emotions.slice(0, 6).map(em => (
+                                                         <span key={em} className="text-[10px] bg-white text-slate-600 px-2 py-0.5 rounded-full border border-slate-200 font-semibold">
+                                                             {em}
+                                                         </span>
+                                                     ))}
+                                                 </div>
+                         {entry.transcript && entry.transcript.trim().length > 0 && (
+                             <div className="mt-3">
+                                 <button
+                                     onClick={() => setShowTranscript(prev => !prev)}
+                                     className="text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-1 rounded-full hover:bg-indigo-100 transition-colors"
+                                 >
+                                     {showTranscript ? 'Ocultar transcript' : 'Ver transcript completo'}
+                                 </button>
+                                 {showTranscript && (
+                                     <div className="mt-2 p-3 rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-700 whitespace-pre-wrap max-h-64 overflow-y-auto">
+                                         {entry.transcript}
+                                     </div>
+                                 )}
+                             </div>
+                         )}
+                     </div>
+                 )}
+
                  {/* Advice (Only show for User Entries) */}
                  {!isPsychEntry && (
                      <div className="bg-amber-50/50 p-3 rounded-lg border border-amber-100/50">
@@ -209,7 +259,7 @@ const EntryCard: React.FC<{
                  )}
 
                  {/* Psychologist Feedback (hide internal notes from patient) */}
-                 {(feedback && (feedback.text || feedback.attachments.length > 0)) && (
+                 {!isPsychEntry && (feedback && (feedback.text || feedback.attachments.length > 0)) && (
                     <div className="bg-white p-4 rounded-xl border border-indigo-100 shadow-sm">
                         <h4 className="text-xs font-bold text-indigo-700 uppercase tracking-wider mb-2 flex items-center gap-2">
                             <MessageCircle size={14} /> Feedback del especialista
@@ -225,28 +275,73 @@ const EntryCard: React.FC<{
                         {feedback.attachments.length > 0 && (
                             <div className="grid grid-cols-4 sm:grid-cols-5 gap-2 mt-2 pt-2 border-t border-indigo-50">
                                 {feedback.attachments.map(att => (
-                                    <a 
-                                        key={att.id} 
-                                        href={att.url} 
-                                        download={att.name}
-                                        className="group relative aspect-square bg-slate-50 rounded-lg border border-indigo-100 overflow-hidden flex flex-col items-center justify-center hover:shadow-md transition-all"
-                                    >
-                                        {att.type === 'IMAGE' ? (
-                                            <img src={att.url} alt="adjunto" className="w-full h-full object-cover" />
-                                        ) : (
-                                            <div className="flex flex-col items-center justify-center p-1 text-center">
-                                                <FileText size={20} className="text-indigo-400 mb-1" />
-                                                <span className="text-[8px] text-slate-500 line-clamp-2 w-full leading-tight">{att.name}</span>
-                                            </div>
-                                        )}
-                                        <div className="absolute inset-0 bg-indigo-900/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                                            <Download className="text-white w-5 h-5" />
+                                    att.type === 'AUDIO' ? (
+                                        <div key={att.id} className="group relative aspect-square bg-slate-50 rounded-lg border border-indigo-100 overflow-hidden flex flex-col items-center justify-center p-1">
+                                            <audio controls src={att.url} className="w-full" />
+                                            <a href={att.url} download={att.name} className="text-[9px] text-indigo-600 mt-1">Descargar</a>
                                         </div>
-                                    </a>
+                                    ) : att.type === 'VIDEO' ? (
+                                        <div key={att.id} className="group relative aspect-square bg-slate-50 rounded-lg border border-indigo-100 overflow-hidden flex flex-col items-center justify-center p-1">
+                                            <video controls src={att.url} className="w-full" />
+                                            <a href={att.url} download={att.name} className="text-[9px] text-indigo-600 mt-1">Descargar</a>
+                                        </div>
+                                    ) : (
+                                        <a 
+                                            key={att.id} 
+                                            href={att.url} 
+                                            download={att.name}
+                                            className="group relative aspect-square bg-slate-50 rounded-lg border border-indigo-100 overflow-hidden flex flex-col items-center justify-center hover:shadow-md transition-all"
+                                        >
+                                            {att.type === 'IMAGE' ? (
+                                                <img src={att.url} alt="adjunto" className="w-full h-full object-cover" />
+                                            ) : (
+                                                <div className="flex flex-col items-center justify-center p-1 text-center">
+                                                    <FileText size={20} className="text-indigo-400 mb-1" />
+                                                    <span className="text-[8px] text-slate-500 line-clamp-2 w-full leading-tight">{att.name}</span>
+                                                </div>
+                                            )}
+                                            <div className="absolute inset-0 bg-indigo-900/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                                <Download className="text-white w-5 h-5" />
+                                            </div>
+                                        </a>
+                                    )
                                 ))}
                             </div>
                         )}
                     </div>
+                 )}
+
+                 {isPsychEntry && !isSession && (
+                     <div className="space-y-3">
+                         {(internalNote?.text || (internalNote?.attachments?.length || 0) > 0) && (
+                             <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
+                                 <h4 className="text-[10px] font-bold uppercase text-amber-700 mb-1 flex items-center gap-1">
+                                     <FileText size={11} /> Nota interna
+                                 </h4>
+                                 {internalNote?.text && (
+                                     <p className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">{internalNote.text}</p>
+                                 )}
+                             </div>
+                         )}
+
+                         {(feedback?.text || (feedback?.attachments?.length || 0) > 0) && (
+                             <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3">
+                                 <h4 className="text-[10px] font-bold uppercase text-indigo-700 mb-1 flex items-center gap-1">
+                                     <MessageCircle size={11} /> Feedback
+                                 </h4>
+                                 {feedback?.text && (
+                                     <p className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">{feedback.text}</p>
+                                 )}
+                             </div>
+                         )}
+
+                         {!internalNote?.text && !feedback?.text && fallbackPsychText && (
+                             <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                                 <h4 className="text-[10px] font-bold uppercase text-slate-400 mb-1">Detalle</h4>
+                                 <p className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">{fallbackPsychText}</p>
+                             </div>
+                         )}
+                     </div>
                  )}
 
                  {/* Stats Bar (Only for User Entries) */}

@@ -92,6 +92,15 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
     return entries.filter(e => e.date === dateStr).sort((a, b) => b.timestamp - a.timestamp);
   };
 
+  const getEntryLabel = (entry: JournalEntry) => {
+    if (entry.createdBy === 'PSYCHOLOGIST') {
+      if (entry.psychologistEntryType === 'SESSION') return 'Sesión';
+      if (entry.psychologistEntryType === 'FEEDBACK') return 'Feedback';
+      return 'Nota interna';
+    }
+    return 'Diario';
+  };
+
     const getHeaderText = () => {
       if (viewMode === 'MONTH') {
         return `${monthNames[month]} ${year}`;
@@ -109,7 +118,9 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
       return 'Entradas';
     };
 
-    const listEntries = [...entries].sort((a, b) => b.timestamp - a.timestamp);
+    const listEntries = [...entries]
+      .filter(e => e.createdBy !== 'PSYCHOLOGIST' || e.psychologistEntryType === 'SESSION')
+      .sort((a, b) => b.timestamp - a.timestamp);
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 md:p-6 transition-all duration-300">
@@ -179,16 +190,30 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
                       <Clock size={12} /> {entryDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </div>
                   </div>
+                  <div className="mt-2">
+                    {entry.createdBy === 'PSYCHOLOGIST' && entry.psychologistEntryType === 'SESSION' ? (
+                      <span className="text-[10px] font-semibold text-purple-700 bg-purple-50 border border-purple-100 px-2 py-0.5 rounded-full">
+                        Sesión clínica
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">
+                        Diario
+                      </span>
+                    )}
+                  </div>
                   <p className="mt-2 text-sm text-slate-600 line-clamp-3">{entry.summary}</p>
-                  {entry.emotions?.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-1.5">
-                      {entry.emotions.slice(0, 5).map((em) => (
-                        <span key={em} className="text-[10px] px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded border border-indigo-100 font-medium">
-                          {em}
-                        </span>
-                      ))}
-                    </div>
-                  )}
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {typeof entry.sentimentScore === 'number' && (
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${entry.sentimentScore >= 7 ? 'bg-green-50 text-green-700 border-green-200' : entry.sentimentScore >= 4 ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+                        {entry.sentimentScore}/10
+                      </span>
+                    )}
+                    {entry.emotions?.length > 0 && entry.emotions.slice(0, 5).map((em) => (
+                      <span key={em} className="text-[10px] px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded border border-indigo-100 font-medium">
+                        {em}
+                      </span>
+                    ))}
+                  </div>
                 </button>
               );
             })
@@ -216,7 +241,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
             avgScore = dayEntries.reduce((acc, curr) => acc + curr.sentimentScore, 0) / dayEntries.length;
           }
 
-          const latestEntry = dayEntries.length > 0 ? dayEntries[0] : null;
+          const previewEntries = dayEntries.slice(0, 3);
 
           // --- WEEK VIEW RENDER (Horizontal Cards) ---
           if (viewMode === 'WEEK') {
@@ -243,32 +268,28 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
                       </div>
 
                       {/* Right: Content */}
-                      <div className="flex-1 p-3 sm:p-4 flex flex-col justify-center">
-                          {latestEntry ? (
-                              <>
-                                  <div className="flex items-center gap-2 mb-2">
-                                      <span className="text-xs text-slate-400 flex items-center gap-1">
-                                          <Clock size={12} /> {new Date(latestEntry.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                                      </span>
-                                      {dayEntries.length > 1 && (
-                                          <span className="text-[10px] font-bold px-1.5 py-0.5 bg-slate-100 rounded text-slate-500">
-                                              +{dayEntries.length - 1} más
-                                          </span>
-                                      )}
+                        <div className="flex-1 p-3 sm:p-4 flex flex-col justify-center">
+                          {previewEntries.length > 0 ? (
+                            <div className="space-y-2">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-slate-400 flex items-center gap-1">
+                                  <Clock size={12} /> {new Date(previewEntries[0].timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                </span>
+                                {dayEntries.length > previewEntries.length && (
+                                  <span className="text-[10px] font-bold px-1.5 py-0.5 bg-slate-100 rounded text-slate-500">
+                                    +{dayEntries.length - previewEntries.length} más
+                                  </span>
+                                )}
+                              </div>
+                              <div className="space-y-1">
+                                {previewEntries.map((entry, idx) => (
+                                  <div key={`${entry.id}-${idx}`} className="text-xs text-slate-700 line-clamp-1">
+                                    <span className="text-[10px] font-semibold text-slate-500 mr-1">{getEntryLabel(entry)}:</span>
+                                    {entry.summary}
                                   </div>
-                                  <p className="text-sm text-slate-700 line-clamp-2 md:line-clamp-3 leading-relaxed">
-                                      {latestEntry.summary}
-                                  </p>
-                                  {latestEntry.emotions.length > 0 && (
-                                      <div className="flex flex-wrap gap-1.5 mt-3">
-                                          {latestEntry.emotions.slice(0, 4).map(em => (
-                                              <span key={em} className="text-[10px] px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded border border-indigo-100 font-medium">
-                                                  {em}
-                                              </span>
-                                          ))}
-                                      </div>
-                                  )}
-                              </>
+                                ))}
+                              </div>
+                            </div>
                           ) : (
                               <div className="h-full flex items-center text-slate-300 text-sm italic">
                                   {isToday ? (
@@ -312,11 +333,14 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
               
               {/* Content: Summary */}
               <div className="flex-1 p-1.5 md:p-2 pt-0 flex flex-col">
-                  {latestEntry ? (
+                  {dayEntries.length > 0 ? (
                     <div className="flex flex-col gap-1 items-start h-full overflow-hidden">
-                      <p className="text-[9px] md:text-xs text-slate-600 leading-tight w-full text-left line-clamp-3">
-                        {latestEntry.summary}
-                      </p>
+                      {dayEntries.slice(0, 2).map((entry, idx) => (
+                        <div key={`${entry.id}-${idx}`} className="text-[9px] md:text-xs text-slate-600 leading-tight w-full text-left line-clamp-2">
+                          <span className="font-semibold text-slate-500 mr-1">{getEntryLabel(entry)}:</span>
+                          {entry.summary}
+                        </div>
+                      ))}
                     </div>
                   ) : (
                       <div className="flex-1"></div>

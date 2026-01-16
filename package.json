@@ -13,16 +13,18 @@
   },
   "dependencies": {
     "@google/genai": "^1.33.0",
+    "@supabase/supabase-js": "^2.30.0",
     "body-parser": "^2.2.1",
     "cors": "^2.8.5",
     "dotenv": "^16.0.0",
     "express": "^5.2.1",
     "lucide-react": "^0.561.0",
+    "mammoth": "^1.6.0",
+    "pdfjs-dist": "^4.2.67",
     "pg": "^8.10.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "recharts": "^3.6.0",
-    "@supabase/supabase-js": "^2.30.0",
     "stripe": "^11.0.0"
   },
   "devDependencies": {
@@ -32,7 +34,6 @@
     "autoprefixer": "^10.4.23",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.18",
-    "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }
 }

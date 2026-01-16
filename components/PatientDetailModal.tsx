@@ -1,14 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { PatientSummary, JournalEntry, ClinicalNoteContent, Attachment, Goal } from '../types';
 import { getEntriesForUser, updateEntry, saveEntry, deleteEntry, getGoalsForUser, saveUserGoals } from '../services/storageService';
+import { analyzeClinicalSession, analyzeJournalEntry } from '../services/genaiService';
 import InsightsPanel from './InsightsPanel';
 import GoalsPanel from './GoalsPanel';
+import SessionRecorder from './SessionRecorder';
+import mammoth from 'mammoth/mammoth.browser';
+import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min?url';
 import { 
     X, Mail, AlertTriangle, Calendar, FileText, MessageCircle, Save, Paperclip, 
     Image as ImageIcon, File, Trash2, Download, Plus, Stethoscope, 
-    BarChart2, List, Activity, TrendingUp, PieChart, ChevronLeft, CheckSquare, Filter
+    BarChart2, List, Activity, TrendingUp, PieChart, ChevronLeft, CheckSquare, Filter, Mic, Video
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, BarChart, Bar, Cell, LabelList } from 'recharts';
+
+GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 interface PatientDetailModalProps {
   patient: PatientSummary;
@@ -39,10 +46,20 @@ const feedbackChanged = (prev: ClinicalNoteContent, next: ClinicalNoteContent) =
     return JSON.stringify(prevNormalized) !== JSON.stringify(nextNormalized);
 };
 
+const isLegacySessionFeedback = (feedback: ClinicalNoteContent, summary: string) => {
+    const feedText = (feedback.text || '').trim();
+    const sumText = (summary || '').trim();
+    if (!feedText) return false;
+    if (feedText === sumText) return true;
+    const lower = feedText.toLowerCase();
+    return lower.includes('resumen de la sesión') || lower.includes('meta terapéutica');
+};
+
 const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClose }) => {
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
+    const [expandedTranscripts, setExpandedTranscripts] = useState<Set<string>>(new Set());
   
   // View State
   const [activeTab, setActiveTab] = useState<'TIMELINE' | 'ANALYTICS' | 'PLAN'>('TIMELINE');
@@ -58,13 +75,60 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   });
 
   // Edit/Create State
-  const [internalNote, setInternalNote] = useState<ClinicalNoteContent>({ text: '', attachments: [] });
-  const [feedback, setFeedback] = useState<ClinicalNoteContent>({ text: '', attachments: [] });
-    const [noteType, setNoteType] = useState<'INTERNAL' | 'FEEDBACK'>('INTERNAL');
+    const [internalNote, setInternalNote] = useState<ClinicalNoteContent>({ text: '', attachments: [] });
+    const [feedback, setFeedback] = useState<ClinicalNoteContent>({ text: '', attachments: [] });
+    const [sessionNote, setSessionNote] = useState<ClinicalNoteContent>({ text: '', attachments: [] });
+    const [sessionTranscript, setSessionTranscript] = useState('');
+    const [isSessionProcessing, setIsSessionProcessing] = useState(false);
+    const [showSessionRecorder, setShowSessionRecorder] = useState(false);
+    const [noteType, setNoteType] = useState<'INTERNAL' | 'FEEDBACK' | 'SESSION'>('INTERNAL');
   
   // Refs for file inputs
-  const internalFileInputRef = useRef<HTMLInputElement>(null);
-  const feedbackFileInputRef = useRef<HTMLInputElement>(null);
+    const internalFileInputRef = useRef<HTMLInputElement>(null);
+    const feedbackFileInputRef = useRef<HTMLInputElement>(null);
+    const sessionAudioInputRef = useRef<HTMLInputElement>(null);
+      const sessionVideoInputRef = useRef<HTMLInputElement>(null);
+    const sessionTranscriptFileInputRef = useRef<HTMLInputElement>(null);
+
+      const extractTranscriptFromFile = async (file: File): Promise<string> => {
+          const name = file.name.toLowerCase();
+
+          if (file.type.startsWith('text/') || name.endsWith('.txt') || name.endsWith('.md')) {
+              return (await file.text()).trim();
+          }
+
+          const buffer = await file.arrayBuffer();
+
+          if (name.endsWith('.docx') || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+              const result = await mammoth.extractRawText({ arrayBuffer: buffer });
+              return (result?.value || '').trim();
+          }
+
+          if (name.endsWith('.doc') || file.type === 'application/msword') {
+              try {
+                  const result = await mammoth.extractRawText({ arrayBuffer: buffer });
+                  return (result?.value || '').trim();
+              } catch {
+                  return '';
+              }
+          }
+
+          if (name.endsWith('.pdf') || file.type === 'application/pdf') {
+              const pdf = await getDocument({ data: buffer }).promise;
+              let text = '';
+              for (let i = 1; i <= pdf.numPages; i += 1) {
+                  const page = await pdf.getPage(i);
+                  const content = await page.getTextContent();
+                  const strings = (content.items as any[])
+                    .map(item => (item && typeof item.str === 'string' ? item.str : ''))
+                    .join(' ');
+                  text += `${strings}\n`;
+              }
+              return text.trim();
+          }
+
+          return '';
+      };
 
   useEffect(() => {
     let cancelled = false;
@@ -85,6 +149,28 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
     load();
     return () => { cancelled = true; };
   }, [patient.id]);
+
+        const mergeEntryList = (list: JournalEntry[], entry: JournalEntry) => {
+            const idx = list.findIndex(e => e.id === entry.id);
+            if (idx === -1) return [entry, ...list].sort((a, b) => b.timestamp - a.timestamp);
+
+            const existing = list[idx];
+            const merged: JournalEntry = {
+            ...entry,
+            ...existing,
+            psychologistNote: existing.psychologistNote ?? entry.psychologistNote,
+            psychologistFeedback: existing.psychologistFeedback ?? entry.psychologistFeedback,
+            psychologistFeedbackUpdatedAt: existing.psychologistFeedbackUpdatedAt ?? entry.psychologistFeedbackUpdatedAt,
+            psychologistFeedbackReadAt: existing.psychologistFeedbackReadAt ?? entry.psychologistFeedbackReadAt,
+            transcript: existing.transcript ?? entry.transcript,
+            summary: existing.summary ?? entry.summary,
+            advice: existing.advice ?? entry.advice
+            };
+
+            const next = [...list];
+            next[idx] = merged;
+            return next.sort((a, b) => b.timestamp - a.timestamp);
+        };
 
   // Filter entries based on role (Psych sees patient data) and TIME RANGE
   const getFilteredEntries = () => {
@@ -157,20 +243,83 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
       setEditingEntryId(entry.id);
       setIsCreating(false);
       setInternalNote(normalizeNote(entry.psychologistNote));
-      setFeedback(normalizeNote(entry.psychologistFeedback));
-      setNoteType('INTERNAL');
+      const nextFeedback = normalizeNote(entry.psychologistFeedback);
+      if (entry.psychologistEntryType === 'SESSION' && isLegacySessionFeedback(nextFeedback, entry.summary)) {
+          setFeedback({ text: '', attachments: [] });
+      } else {
+          setFeedback(nextFeedback);
+      }
+            if (entry.createdBy === 'PSYCHOLOGIST') {
+                if (entry.psychologistEntryType === 'SESSION') setNoteType('FEEDBACK');
+                else if (entry.psychologistEntryType === 'FEEDBACK') setNoteType('FEEDBACK');
+                else setNoteType('INTERNAL');
+            } else {
+                setNoteType('INTERNAL');
+            }
+  };
+
+  const toggleTranscript = (id: string) => {
+      setExpandedTranscripts(prev => {
+          const next = new Set(prev);
+          if (next.has(id)) next.delete(id);
+          else next.add(id);
+          return next;
+      });
   };
 
   const handleStartCreate = () => {
       setEditingEntryId(null);
       setInternalNote({ text: '', attachments: [] });
       setFeedback({ text: '', attachments: [] });
+      setSessionNote({ text: '', attachments: [] });
+      setSessionTranscript('');
       setNoteType('INTERNAL');
       setIsCreating(true);
       setActiveTab('TIMELINE'); // Switch back to timeline to show form
   };
 
   const handleSaveNotes = async (entry: JournalEntry) => {
+            if (entry.psychologistEntryType !== 'SESSION') {
+                const hasFeedback = hasFeedbackContent(feedback);
+                const internalText = (internalNote.text || '').trim();
+                const feedbackText = (feedback.text || '').trim();
+                const newPsychEntry: JournalEntry = {
+                    id: crypto.randomUUID(),
+                    userId: patient.id,
+                    date: entry.date,
+                    timestamp: Date.now(),
+                    transcript: '',
+                    summary: noteType === 'FEEDBACK'
+                        ? (feedbackText || 'Feedback del especialista')
+                        : (internalText || 'Nota interna del especialista'),
+                    sentimentScore: 5,
+                    emotions: ['Clínico'],
+                    advice: noteType === 'FEEDBACK'
+                        ? 'Revisa el feedback de tu especialista.'
+                        : 'Revisa las notas de tu especialista.',
+                    psychologistNote: internalNote,
+                    psychologistFeedback: noteType === 'FEEDBACK' ? feedback : undefined,
+                    psychologistFeedbackUpdatedAt: hasFeedback ? Date.now() : undefined,
+                    psychologistFeedbackReadAt: hasFeedback ? undefined : undefined,
+                    createdBy: 'PSYCHOLOGIST',
+                    psychologistEntryType: noteType === 'FEEDBACK' ? 'FEEDBACK' : 'NOTE'
+                };
+
+                const prevEntries = entries;
+                setEntries(prev => [newPsychEntry, ...prev]);
+                setEditingEntryId(null);
+
+                try {
+                    await saveEntry(newPsychEntry);
+                    const e = await getEntriesForUser(patient.id);
+                    setEntries(mergeEntryList(e, newPsychEntry));
+                } catch (err) {
+                    console.error('Error creating psych entry', err);
+                    setEntries(prevEntries);
+                }
+                return;
+            }
+
             const prevFeedback = normalizeNote(entry.psychologistFeedback);
             const nextFeedback = feedback;
             const hasFeedback = hasFeedbackContent(nextFeedback);
@@ -188,7 +337,12 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                     psychologistNote: internalNote,
                     psychologistFeedback: feedback,
                     psychologistFeedbackUpdatedAt: feedbackUpdatedAt,
-                    psychologistFeedbackReadAt: feedbackReadAt
+                    psychologistFeedbackReadAt: feedbackReadAt,
+                    psychologistEntryType: entry.psychologistEntryType === 'SESSION'
+                        ? 'SESSION'
+                        : entry.createdBy === 'PSYCHOLOGIST'
+                            ? (noteType === 'FEEDBACK' ? 'FEEDBACK' : 'NOTE')
+                            : entry.psychologistEntryType
             };
             const prevEntries = entries;
 
@@ -204,6 +358,67 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   };
 
   const handleCreateEntry = async () => {
+      if (noteType === 'SESSION') {
+          if (!sessionTranscript.trim()) {
+              alert('Añade un transcript para analizar la sesión.');
+              return;
+          }
+          setIsSessionProcessing(true);
+          try {
+              const [{ sessionSummary, sessionGoal }, diaryAnalysis] = await Promise.all([
+                  analyzeClinicalSession(sessionTranscript, newEntryDate),
+                  analyzeJournalEntry(sessionTranscript, newEntryDate, patient.id)
+              ]);
+              const hasSessionFeedback = hasFeedbackContent(feedback);
+              const sessionInternal: ClinicalNoteContent = {
+                  text: internalNote.text,
+                  attachments: [...(internalNote.attachments || []), ...(sessionNote.attachments || [])]
+              };
+              const newEntry: JournalEntry = {
+                  id: crypto.randomUUID(),
+                  userId: patient.id,
+                  date: newEntryDate,
+                  timestamp: Date.now(),
+                  transcript: sessionTranscript,
+                  summary: sessionSummary,
+                  sentimentScore: diaryAnalysis.sentimentScore || 5,
+                  emotions: diaryAnalysis.emotions || ['Sesión'],
+                  structuredEmotions: diaryAnalysis.structuredEmotions || [],
+                  advice: sessionGoal,
+                  psychologistNote: sessionInternal,
+                  psychologistFeedback: hasSessionFeedback ? feedback : undefined,
+                  psychologistFeedbackUpdatedAt: hasSessionFeedback ? Date.now() : undefined,
+                  psychologistFeedbackReadAt: hasSessionFeedback ? undefined : undefined,
+                  createdBy: 'PSYCHOLOGIST',
+                  psychologistEntryType: 'SESSION'
+              };
+
+              const prevEntries = entries;
+              setEntries([newEntry, ...entries]);
+              setIsCreating(false);
+
+              try {
+                  await saveEntry(newEntry);
+                  const e = await getEntriesForUser(patient.id);
+                  setEntries(mergeEntryList(e, newEntry));
+              } catch (err) {
+                  console.error('Error creating session entry', err);
+                  setEntries(prevEntries);
+                  alert('No se pudo guardar la sesión.');
+              } finally {
+                  setIsSessionProcessing(false);
+                  setInternalNote({ text: '', attachments: [] });
+                  setFeedback({ text: '', attachments: [] });
+                  setSessionNote({ text: '', attachments: [] });
+                  setSessionTranscript('');
+              }
+          } catch (err) {
+              console.error('Error analyzing session', err);
+              alert('No se pudo analizar la sesión. Verifica la API key.');
+              setIsSessionProcessing(false);
+          }
+          return;
+      }
       const hasFeedback = hasFeedbackContent(feedback);
       const newEntry: JournalEntry = {
           id: crypto.randomUUID(),
@@ -219,7 +434,8 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
           psychologistFeedback: feedback,
           psychologistFeedbackUpdatedAt: hasFeedback ? Date.now() : undefined,
           psychologistFeedbackReadAt: hasFeedback ? undefined : undefined,
-          createdBy: 'PSYCHOLOGIST'
+          createdBy: 'PSYCHOLOGIST',
+          psychologistEntryType: noteType === 'FEEDBACK' ? 'FEEDBACK' : 'NOTE'
       };
             const prevEntries = entries;
             setEntries([newEntry, ...entries]);
@@ -228,7 +444,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
       try {
         await saveEntry(newEntry);
         const e = await getEntriesForUser(patient.id);
-        setEntries(e);
+                setEntries(mergeEntryList(e, newEntry));
       } catch (err) {
         console.error('Error creating entry', err);
                 setEntries(prevEntries);
@@ -251,7 +467,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   };
 
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, target: 'INTERNAL' | 'FEEDBACK') => {
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, target: 'INTERNAL' | 'FEEDBACK') => {
       const file = e.target.files?.[0];
       if (!file) return;
 
@@ -260,7 +476,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
           const base64 = reader.result as string;
           const newAttachment: Attachment = {
               id: crypto.randomUUID(),
-              type: file.type.startsWith('image/') ? 'IMAGE' : 'DOCUMENT',
+              type: file.type.startsWith('image/') ? 'IMAGE' : file.type.startsWith('audio/') ? 'AUDIO' : file.type.startsWith('video/') ? 'VIDEO' : 'DOCUMENT',
               url: base64,
               name: file.name
           };
@@ -275,11 +491,82 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
       e.target.value = '';
   };
 
-  const removeAttachment = (id: string, target: 'INTERNAL' | 'FEEDBACK') => {
+  const handleSessionAudioUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onloadend = () => {
+          const base64 = reader.result as string;
+          const newAttachment: Attachment = {
+              id: crypto.randomUUID(),
+              type: 'AUDIO',
+              url: base64,
+              name: file.name
+          };
+          setSessionNote(prev => ({ ...prev, attachments: [...prev.attachments, newAttachment] }));
+      };
+      reader.readAsDataURL(file);
+      e.target.value = '';
+  };
+
+  const handleSessionVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onloadend = () => {
+          const base64 = reader.result as string;
+          const newAttachment: Attachment = {
+              id: crypto.randomUUID(),
+              type: 'VIDEO',
+              url: base64,
+              name: file.name
+          };
+          setSessionNote(prev => ({ ...prev, attachments: [...prev.attachments, newAttachment] }));
+      };
+      reader.readAsDataURL(file);
+      e.target.value = '';
+  };
+
+  const handleSessionTranscriptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      try {
+          const text = await extractTranscriptFromFile(file);
+          if (text) {
+              setSessionTranscript(prev => (prev ? `${prev}\n${text}` : text));
+          } else {
+              alert('No se pudo extraer texto del archivo. Puedes pegar el transcript manualmente.');
+          }
+      } catch (err) {
+          console.error('Transcript extraction failed', err);
+          alert('No se pudo leer el transcript.');
+      }
+
+      const reader = new FileReader();
+      reader.onloadend = () => {
+          const base64 = reader.result as string;
+          const newAttachment: Attachment = {
+              id: crypto.randomUUID(),
+              type: 'DOCUMENT',
+              url: base64,
+              name: file.name
+          };
+          setSessionNote(prev => ({ ...prev, attachments: [...prev.attachments, newAttachment] }));
+      };
+      reader.readAsDataURL(file);
+      e.target.value = '';
+  };
+
+  const removeAttachment = (id: string, target: 'INTERNAL' | 'FEEDBACK' | 'SESSION') => {
       if (target === 'INTERNAL') {
           setInternalNote(prev => ({ ...prev, attachments: prev.attachments.filter(a => a.id !== id) }));
-      } else {
+      } else if (target === 'FEEDBACK') {
           setFeedback(prev => ({ ...prev, attachments: prev.attachments.filter(a => a.id !== id) }));
+      } else {
+          setSessionNote(prev => ({ ...prev, attachments: prev.attachments.filter(a => a.id !== id) }));
       }
   };
 
@@ -368,7 +655,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                         className="bg-indigo-600 hover:bg-indigo-700 text-white p-2 md:px-4 md:py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors shadow-sm"
                         title="Nueva Nota"
                     >
-                        <Plus size={20} /> <span className="hidden md:inline">Nueva Nota</span>
+                        <Plus size={20} /> <span className="hidden md:inline">Nueva Entrada</span>
                     </button>
                     <button onClick={onClose} className="hidden md:block p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-500 hover:text-red-500">
                         <X size={28} />
@@ -479,6 +766,12 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                         >
                                             <MessageCircle size={12} /> Feedback Paciente
                                         </button>
+                                        <button
+                                            onClick={() => setNoteType('SESSION')}
+                                            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1 ${noteType === 'SESSION' ? 'bg-white text-purple-700 shadow-sm border border-purple-100' : 'text-slate-500 hover:text-slate-700'}`}
+                                        >
+                                            <Stethoscope size={12} /> Sesión
+                                        </button>
                                     </div>
 
                                     {noteType === 'INTERNAL' ? (
@@ -510,7 +803,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                                 </div>
                                             )}
                                         </div>
-                                    ) : (
+                                    ) : noteType === 'FEEDBACK' ? (
                                         <div>
                                             <div className="flex justify-between items-center mb-2">
                                                 <label className="text-xs font-bold text-indigo-700 uppercase tracking-wider flex items-center gap-1">
@@ -539,13 +832,111 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                                 </div>
                                             )}
                                         </div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <button onClick={() => sessionAudioInputRef.current?.click()} className="text-xs text-slate-500 hover:text-purple-700 flex items-center gap-1">
+                                                    <Mic size={12} /> Subir audio
+                                                </button>
+                                                <input type="file" ref={sessionAudioInputRef} className="hidden" onChange={handleSessionAudioUpload} accept="audio/*" />
+
+                                                <button onClick={() => sessionVideoInputRef.current?.click()} className="text-xs text-slate-500 hover:text-purple-700 flex items-center gap-1">
+                                                    <Video size={12} /> Subir video
+                                                </button>
+                                                <input type="file" ref={sessionVideoInputRef} className="hidden" onChange={handleSessionVideoUpload} accept="video/*" />
+
+                                                <button onClick={() => sessionTranscriptFileInputRef.current?.click()} className="text-xs text-slate-500 hover:text-purple-700 flex items-center gap-1">
+                                                    <FileText size={12} /> Subir transcript (.txt/.md/.doc/.docx/.pdf)
+                                                </button>
+                                                <input
+                                                    type="file"
+                                                    ref={sessionTranscriptFileInputRef}
+                                                    className="hidden"
+                                                    onChange={handleSessionTranscriptUpload}
+                                                    accept=".txt,.TXT,.md,.MD,.doc,.docx,.pdf,text/plain,text/markdown,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf,text/*"
+                                                />
+
+                                                <button onClick={() => setShowSessionRecorder(true)} className="text-xs text-slate-500 hover:text-purple-700 flex items-center gap-1">
+                                                    <Stethoscope size={12} /> Grabar sesión
+                                                </button>
+                                            </div>
+
+                                            <div>
+                                                <label className="text-xs font-bold text-purple-700 uppercase tracking-wider flex items-center gap-1">
+                                                    <MessageCircle size={12} /> Transcript de la sesión
+                                                </label>
+                                                <textarea
+                                                    className="mt-2 w-full p-3 text-sm border border-slate-300 rounded-lg bg-white text-slate-900 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none shadow-sm"
+                                                    rows={5}
+                                                    value={sessionTranscript}
+                                                    onChange={(e) => setSessionTranscript(e.target.value)}
+                                                    placeholder="Pega aquí el transcript de la sesión (necesario para el análisis de IA)..."
+                                                />
+                                            </div>
+
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                <div>
+                                                    <div className="flex justify-between items-center mb-1">
+                                                        <label className="text-xs font-bold text-amber-700 uppercase tracking-wider flex items-center gap-1">
+                                                            <FileText size={12} /> Nota Interna
+                                                        </label>
+                                                        <button onClick={() => internalFileInputRef.current?.click()} className="text-xs text-slate-500 hover:text-amber-700 flex items-center gap-1">
+                                                            <Paperclip size={12} /> Adjuntar
+                                                        </button>
+                                                        <input type="file" ref={internalFileInputRef} className="hidden" onChange={(e) => handleFileUpload(e, 'INTERNAL')} accept="image/*,application/pdf,audio/*,video/*" />
+                                                    </div>
+                                                    <textarea
+                                                        className="w-full p-3 text-sm border border-slate-300 rounded-lg bg-white text-slate-900 focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none shadow-sm"
+                                                        rows={3}
+                                                        value={internalNote.text}
+                                                        onChange={(e) => setInternalNote(prev => ({...prev, text: e.target.value}))}
+                                                        placeholder="Notas internas sobre la sesión..."
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <div className="flex justify-between items-center mb-1">
+                                                        <label className="text-xs font-bold text-indigo-700 uppercase tracking-wider flex items-center gap-1">
+                                                            <MessageCircle size={12} /> Feedback al paciente
+                                                        </label>
+                                                        <button onClick={() => feedbackFileInputRef.current?.click()} className="text-xs text-slate-500 hover:text-indigo-600 flex items-center gap-1">
+                                                            <Paperclip size={12} /> Adjuntar
+                                                        </button>
+                                                        <input type="file" ref={feedbackFileInputRef} className="hidden" onChange={(e) => handleFileUpload(e, 'FEEDBACK')} accept="image/*,application/pdf,audio/*,video/*" />
+                                                    </div>
+                                                    <textarea
+                                                        className="w-full p-3 text-sm border border-slate-300 rounded-lg bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none shadow-sm"
+                                                        rows={3}
+                                                        value={feedback.text}
+                                                        onChange={(e) => setFeedback(prev => ({...prev, text: e.target.value}))}
+                                                        placeholder="Feedback para el paciente..."
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            {sessionNote.attachments.length > 0 && (
+                                                <div className="flex gap-2 overflow-x-auto pb-1">
+                                                    {sessionNote.attachments.map(att => (
+                                                        <div key={att.id} className="relative group/att shrink-0 w-10 h-10">
+                                                            {att.type === 'IMAGE' ? (
+                                                                <img src={att.url} alt="att" className="w-full h-full rounded object-cover border border-slate-200" />
+                                                            ) : (
+                                                                <div className="w-full h-full rounded bg-slate-50 border border-slate-200 flex items-center justify-center text-[8px] text-slate-500">
+                                                                    {att.type === 'AUDIO' ? 'AUDIO' : 'DOC'}
+                                                                </div>
+                                                            )}
+                                                            <button onClick={() => removeAttachment(att.id, 'SESSION')} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5"><X size={8} /></button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
                                     )}
                                 </div>
 
                                 <div className="flex flex-col-reverse sm:flex-row justify-end gap-3 pt-4 border-t border-slate-100 mt-4">
                                     <button onClick={() => setIsCreating(false)} className="px-5 py-2.5 text-sm text-slate-600 hover:text-slate-800 font-medium bg-slate-100 rounded-lg">Cancelar</button>
-                                    <button onClick={handleCreateEntry} className="px-5 py-2.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center justify-center gap-2 shadow-md font-medium">
-                                        <Save size={18} /> Guardar Entrada
+                                    <button onClick={handleCreateEntry} disabled={isSessionProcessing} className={`px-5 py-2.5 text-sm rounded-lg flex items-center justify-center gap-2 shadow-md font-medium ${isSessionProcessing ? 'bg-slate-300 text-slate-600 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}>
+                                        <Save size={18} /> {isSessionProcessing ? 'Analizando...' : 'Guardar Entrada'}
                                     </button>
                                 </div>
                             </div>
@@ -571,8 +962,21 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                         const pFeed = normalizeNote(entry.psychologistFeedback);
                                         const isEditing = editingEntryId === entry.id;
                                         const isPsychEntry = entry.createdBy === 'PSYCHOLOGIST';
+                                        const psychEntryLabel = entry.psychologistEntryType === 'SESSION' ? 'Sesión Clínica' : 'Nota Clínica';
+                                        const isSession = entry.psychologistEntryType === 'SESSION';
                                         const timeLabel = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
                                         const hasAttachments = (pNote.attachments?.length || 0) + (pFeed.attachments?.length || 0) > 0;
+                                        const feedText = (pFeed.text || '').trim();
+                                        const summaryText = (entry.summary || '').trim();
+                                        const feedbackDisplayText = feedText || (entry.psychologistEntryType === 'FEEDBACK' ? summaryText : '');
+                                        const isLegacySessionFeedback = isSession && feedText && (
+                                            feedText === summaryText ||
+                                            feedText.toLowerCase().includes('resumen de la sesión') ||
+                                            feedText.toLowerCase().includes('meta terapéutica')
+                                        );
+                                        const showSessionFeedback = isSession
+                                            ? ((feedText && !isLegacySessionFeedback) || (pFeed.attachments?.length || 0) > 0)
+                                            : ((feedbackDisplayText.length > 0) || (pFeed.attachments?.length || 0) > 0);
 
                                         return (
                                             <div key={entry.id} className="relative pl-10">
@@ -593,14 +997,14 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                                         <div className="flex items-center gap-2 flex-wrap">
                                                             {isPsychEntry ? (
                                                                 <span className="inline-flex items-center gap-1 text-[10px] text-purple-700 font-bold uppercase tracking-wider bg-purple-50 border border-purple-100 px-2 py-0.5 rounded-full">
-                                                                    <Stethoscope size={10} /> Nota Clínica
+                                                                    <Stethoscope size={10} /> {psychEntryLabel}
                                                                 </span>
                                                             ) : (
                                                                 <span className="inline-flex items-center gap-1 text-[10px] text-indigo-600 font-bold uppercase tracking-wider bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">
                                                                     <Calendar size={10} /> Diario del Paciente
                                                                 </span>
                                                             )}
-                                                            {!isPsychEntry && (
+                                                            {(!isPsychEntry || entry.psychologistEntryType === 'SESSION') && (
                                                                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${entry.sentimentScore >= 7 ? 'bg-green-50 text-green-700 border-green-200' : entry.sentimentScore >= 4 ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
                                                                     {entry.sentimentScore}/10
                                                                 </span>
@@ -612,7 +1016,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                                             )}
                                                             {!isEditing && (
                                                                 <button onClick={() => handleEditClick(entry)} className="text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-1 rounded-full hover:bg-indigo-100 transition-colors">
-                                                                    {isPsychEntry ? 'Editar' : 'Añadir Nota'}
+                                                                    {isPsychEntry ? (isSession ? 'Añadir nota' : 'Editar') : 'Añadir Nota'}
                                                                 </button>
                                                             )}
                                                             {isPsychEntry && !isEditing && (
@@ -631,12 +1035,45 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                                             <p className="text-slate-700 text-sm md:text-base leading-relaxed">{entry.summary}</p>
                                                         </div>
                                                         <div className="mt-2 flex flex-wrap gap-1.5">
-                                                            {entry.emotions.map(em => (
-                                                                <span key={em} className="text-[10px] bg-white text-slate-600 px-2 py-0.5 rounded-full border border-slate-200 font-semibold shadow-[inset_0_1px_0_0_rgba(255,255,255,0.8)]">
+                                                            {entry.emotions.map((em, idx) => (
+                                                                <span key={`${em}-${idx}`} className="text-[10px] bg-white text-slate-600 px-2 py-0.5 rounded-full border border-slate-200 font-semibold shadow-[inset_0_1px_0_0_rgba(255,255,255,0.8)]">
                                                                     {em}
                                                                 </span>
                                                             ))}
                                                         </div>
+                                                    </div>
+                                                )}
+
+                                                {isPsychEntry && entry.psychologistEntryType === 'SESSION' && (
+                                                    <div className="mb-4">
+                                                        <div className="bg-slate-50 border border-slate-100 rounded-xl p-3">
+                                                            <h5 className="text-[10px] font-bold uppercase text-slate-400 mb-1">Resumen de la sesión (IA)</h5>
+                                                            <p className="text-slate-700 text-sm md:text-base leading-relaxed">{entry.summary}</p>
+                                                        </div>
+                                                        {entry.emotions?.length > 0 && (
+                                                            <div className="mt-2 flex flex-wrap gap-1.5">
+                                                                {entry.emotions.map((em, idx) => (
+                                                                    <span key={`${em}-${idx}`} className="text-[10px] bg-white text-slate-600 px-2 py-0.5 rounded-full border border-slate-200 font-semibold shadow-[inset_0_1px_0_0_rgba(255,255,255,0.8)]">
+                                                                        {em}
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                        {entry.transcript && entry.transcript.trim().length > 0 && (
+                                                            <div className="mt-3">
+                                                                <button
+                                                                    onClick={() => toggleTranscript(entry.id)}
+                                                                    className="text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-1 rounded-full hover:bg-indigo-100 transition-colors"
+                                                                >
+                                                                    {expandedTranscripts.has(entry.id) ? 'Ocultar transcript' : 'Ver transcript completo'}
+                                                                </button>
+                                                                {expandedTranscripts.has(entry.id) && (
+                                                                    <div className="mt-2 p-3 rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-700 whitespace-pre-wrap max-h-64 overflow-y-auto">
+                                                                        {entry.transcript}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 )}
 
@@ -680,8 +1117,8 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                                             </div>
                                                         ) : (
                                                             <div>
-                                                                <label className="text-xs font-bold text-indigo-700 uppercase tracking-wider flex items-center gap-1 mb-1">
-                                                                    <MessageCircle size={12} /> Feedback
+                                                                <label className="text-xs font-bold uppercase tracking-wider flex items-center gap-1 mb-1 text-indigo-700">
+                                                                    <MessageCircle size={12} /> {noteType === 'SESSION' ? 'Sesión' : 'Feedback'}
                                                                 </label>
                                                                 <textarea 
                                                                     className="w-full p-3 text-sm border border-slate-300 rounded-lg bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
@@ -694,7 +1131,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                                                         onClick={() => setFeedback({ text: '', attachments: [] })}
                                                                         className="mt-2 text-xs font-semibold text-red-600 hover:text-red-700"
                                                                     >
-                                                                        Borrar feedback
+                                                                        Borrar contenido
                                                                     </button>
                                                                 )}
                                                             </div>
@@ -726,13 +1163,13 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                                                 )}
                                                             </div>
                                                         )}
-                                                        {(pFeed.text || pFeed.attachments.length > 0) && (
-                                                            <div className={`rounded-xl p-3 border relative ${isPsychEntry ? 'bg-white border-indigo-100' : 'bg-indigo-50 border-indigo-100'}`}>
+                                                        {showSessionFeedback && (
+                                                            <div className="rounded-xl p-3 border relative bg-indigo-50 border-indigo-100">
                                                                 <h5 className="text-[10px] font-bold text-indigo-800 uppercase mb-1 flex items-center gap-1">
                                                                     <MessageCircle size={11} /> Feedback Paciente
                                                                 </h5>
-                                                                {pFeed.text && (
-                                                                    <p className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">{pFeed.text}</p>
+                                                                {feedbackDisplayText && (
+                                                                    <p className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">{feedbackDisplayText}</p>
                                                                 )}
                                                                 {pFeed.attachments.length > 0 && (
                                                                     <div className="mt-2 flex flex-wrap gap-2">
@@ -958,25 +1395,55 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                 </div>
             )}
         </div>
+        {showSessionRecorder && (
+            <SessionRecorder
+                onComplete={(transcript, audioAttachment) => {
+                    if (transcript) {
+                        setSessionTranscript(prev => (prev ? `${prev}\n${transcript}` : transcript));
+                    }
+                    if (audioAttachment) {
+                        setSessionNote(prev => ({ ...prev, attachments: [...prev.attachments, audioAttachment] }));
+                    }
+                    setShowSessionRecorder(false);
+                }}
+                onCancel={() => setShowSessionRecorder(false)}
+            />
+        )}
     </div>
   );
 };
 
 // Mini Component for Displaying Attachment Thumbnails
 const AttachmentThumb: React.FC<{ att: Attachment }> = ({ att }) => (
-    <a href={att.url} download={att.name} className="block group shrink-0 relative" title={att.name}>
-        {att.type === 'IMAGE' ? (
-            <img src={att.url} alt="adjunto" className="w-16 h-16 rounded-lg object-cover border border-slate-200 hover:border-indigo-400 transition-colors" />
-        ) : (
-            <div className="w-16 h-16 rounded-lg bg-white border border-slate-200 flex flex-col items-center justify-center hover:border-indigo-400 transition-colors">
-                <FileText size={20} className="text-slate-400" />
-                <span className="text-[8px] text-slate-500 mt-1 max-w-full truncate px-1">{att.name}</span>
+    att.type === 'AUDIO' ? (
+        <div className="block group shrink-0 relative" title={att.name}>
+            <div className="w-16 h-16 rounded-lg bg-white border border-slate-200 flex flex-col items-center justify-center hover:border-indigo-400 transition-colors p-1">
+                <audio controls src={att.url} className="w-full" />
             </div>
-        )}
-        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 rounded-lg flex items-center justify-center transition-opacity text-white">
-            <Download size={16} />
+            <a href={att.url} download={att.name} className="block text-[9px] text-indigo-600 mt-1 text-center">Descargar</a>
         </div>
-    </a>
+    ) : att.type === 'VIDEO' ? (
+        <div className="block group shrink-0 relative" title={att.name}>
+            <div className="w-16 h-16 rounded-lg bg-white border border-slate-200 flex flex-col items-center justify-center hover:border-indigo-400 transition-colors p-1">
+                <video controls src={att.url} className="w-full" />
+            </div>
+            <a href={att.url} download={att.name} className="block text-[9px] text-indigo-600 mt-1 text-center">Descargar</a>
+        </div>
+    ) : (
+        <a href={att.url} download={att.name} className="block group shrink-0 relative" title={att.name}>
+            {att.type === 'IMAGE' ? (
+                <img src={att.url} alt="adjunto" className="w-16 h-16 rounded-lg object-cover border border-slate-200 hover:border-indigo-400 transition-colors" />
+            ) : (
+                <div className="w-16 h-16 rounded-lg bg-white border border-slate-200 flex flex-col items-center justify-center hover:border-indigo-400 transition-colors">
+                    <FileText size={20} className="text-slate-400" />
+                    <span className="text-[8px] text-slate-500 mt-1 max-w-full truncate px-1">{att.name}</span>
+                </div>
+            )}
+            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 rounded-lg flex items-center justify-center transition-opacity text-white">
+                <Download size={16} />
+            </div>
+        </a>
+    )
 );
 
 export default PatientDetailModal;
