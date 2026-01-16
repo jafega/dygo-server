@@ -5,11 +5,12 @@ import { ChevronLeft, ChevronRight, Layers, Plus, Calendar as CalendarIcon, Layo
 interface CalendarViewProps {
   entries: JournalEntry[];
   onSelectDate: (date: string) => void;
+  onSelectEntry?: (entry: JournalEntry) => void;
 }
 
 type ViewMode = 'MONTH' | 'WEEK' | 'LIST';
 
-const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate }) => {
+const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSelectEntry }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<ViewMode>('MONTH');
 
@@ -167,7 +168,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate }) =>
               return (
                 <button
                   key={entry.id}
-                  onClick={() => onSelectDate(dateStr)}
+                  onClick={() => (onSelectEntry ? onSelectEntry(entry) : onSelectDate(dateStr))}
                   className="w-full text-left bg-white border border-slate-200 rounded-2xl p-4 hover:shadow-md transition-shadow"
                 >
                   <div className="flex items-center justify-between gap-3">

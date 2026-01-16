@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { PatientSummary, JournalEntry, ClinicalNoteContent, Attachment, Goal } from '../types';
-import { getEntriesForUser, updateEntry, saveEntry, getGoalsForUser, saveUserGoals } from '../services/storageService';
+import { getEntriesForUser, updateEntry, saveEntry, deleteEntry, getGoalsForUser, saveUserGoals } from '../services/storageService';
 import InsightsPanel from './InsightsPanel';
 import GoalsPanel from './GoalsPanel';
 import { 
@@ -198,6 +198,18 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                 setEntries(prevEntries);
       } finally {
                 setIsCreating(false);
+      }
+  };
+
+  const handleDeletePsychEntry = async (entryId: string) => {
+      if (!window.confirm('¿Eliminar esta entrada clínica?')) return;
+      const prev = entries;
+      setEntries(prev.filter(e => e.id !== entryId));
+      try {
+          await deleteEntry(entryId);
+      } catch (err) {
+          console.error('Error deleting entry', err);
+          setEntries(prev);
       }
   };
 
@@ -565,6 +577,11 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                                                     {isPsychEntry ? 'Editar' : 'Añadir Nota'}
                                                                 </button>
                                                             )}
+                                                            {isPsychEntry && !isEditing && (
+                                                                <button onClick={() => handleDeletePsychEntry(entry.id)} className="text-xs font-semibold text-red-600 bg-red-50 border border-red-100 px-2.5 py-1 rounded-full hover:bg-red-100 transition-colors">
+                                                                    Eliminar
+                                                                </button>
+                                                            )}
                                                         </div>
                                                     </div>
 
@@ -614,6 +631,14 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                                                     value={internalNote.text}
                                                                     onChange={(e) => setInternalNote(prev => ({...prev, text: e.target.value}))}
                                                                 />
+                                                                {(internalNote.text || internalNote.attachments.length > 0) && (
+                                                                    <button
+                                                                        onClick={() => setInternalNote({ text: '', attachments: [] })}
+                                                                        className="mt-2 text-xs font-semibold text-red-600 hover:text-red-700"
+                                                                    >
+                                                                        Borrar nota interna
+                                                                    </button>
+                                                                )}
                                                             </div>
                                                         ) : (
                                                             <div>
@@ -626,6 +651,14 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                                                     value={feedback.text}
                                                                     onChange={(e) => setFeedback(prev => ({...prev, text: e.target.value}))}
                                                                 />
+                                                                {(feedback.text || feedback.attachments.length > 0) && (
+                                                                    <button
+                                                                        onClick={() => setFeedback({ text: '', attachments: [] })}
+                                                                        className="mt-2 text-xs font-semibold text-red-600 hover:text-red-700"
+                                                                    >
+                                                                        Borrar feedback
+                                                                    </button>
+                                                                )}
                                                             </div>
                                                         )}
 

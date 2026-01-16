@@ -41,6 +41,7 @@ const App: React.FC = () => {
   });
   
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [activeTab, setActiveTab] = useState<'insights' | 'goals'>('insights');
@@ -347,6 +348,12 @@ const dayEntries = selectedDate
   ? safeEntries.filter(e => e.date === selectedDate)
   : [];
 
+const selectedEntry = selectedEntryId
+  ? safeEntries.find(e => e.id === selectedEntryId)
+  : null;
+
+const entriesForModal = selectedEntry ? [selectedEntry] : dayEntries;
+
 const safeGoals = Array.isArray(goals) ? goals : [];
 
 const assignedGoals = safeGoals.filter(
@@ -532,7 +539,11 @@ const personalGoals = safeGoals.filter(
 
         <div className="grid md:grid-cols-3 gap-8">
             <div className="md:col-span-2 space-y-8">
-               <CalendarView entries={entries} onSelectDate={setSelectedDate} />
+              <CalendarView 
+                entries={entries} 
+                onSelectDate={(date) => { setSelectedDate(date); setSelectedEntryId(null); }}
+                onSelectEntry={(entry) => { setSelectedDate(entry.date); setSelectedEntryId(entry.id); }}
+              />
                {assignedGoals.length > 0 && (
                    <div className="bg-purple-50 rounded-2xl border border-purple-100 p-1">
                         <div className="px-4 py-3 flex items-center gap-2 border-b border-purple-100/50">
@@ -574,7 +585,16 @@ const personalGoals = safeGoals.filter(
       </div>
 
       {viewState === ViewState.VOICE_SESSION && <VoiceSession key={Date.now()} onSessionEnd={handleSessionEnd} onCancel={() => setViewState(ViewState.CALENDAR)} settings={settings} />}
-      {selectedDate && <EntryModal entries={dayEntries} dateStr={selectedDate} onClose={() => setSelectedDate(null)} onStartSession={handleStartSession} onDeleteEntry={handleDeleteEntry} onUpdateEntry={handleUpdateEntry} />}
+      {selectedDate && (
+        <EntryModal 
+          entries={entriesForModal} 
+          dateStr={selectedDate} 
+          onClose={() => { setSelectedDate(null); setSelectedEntryId(null); }}
+          onStartSession={handleStartSession} 
+          onDeleteEntry={handleDeleteEntry} 
+          onUpdateEntry={handleUpdateEntry} 
+        />
+      )}
       {weeklyReport && <WeeklyReportModal report={weeklyReport} onClose={() => setWeeklyReport(null)} />}
       {showSettings && currentUser && <SettingsModal settings={settings} onSave={handleSaveSettings} onClose={() => { setShowSettings(false); if(currentUser) checkInvitations(currentUser.email); }} onLogout={handleLogout} onUserUpdate={handleUserUpdate} />}
     </div>

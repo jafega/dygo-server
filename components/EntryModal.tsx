@@ -122,7 +122,7 @@ const EntryCard: React.FC<{
     return (
         <div className={`rounded-xl shadow-sm border overflow-hidden ${isPsychEntry ? 'bg-purple-50/50 border-purple-100' : 'bg-white border-slate-200'}`}>
             {/* Entry Header */}
-            <div className="px-4 py-3 bg-white/50 border-b border-slate-100 flex justify-between items-center">
+            <div className="px-4 py-3 bg-white/50 border-b border-slate-100 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
                 <div className="flex items-center gap-3">
                     <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${isPsychEntry ? 'bg-purple-100 text-purple-600' : 'bg-indigo-100 text-indigo-600'}`}>
                          {isPsychEntry ? <Stethoscope size={12}/> : `#${index}`}
@@ -139,30 +139,34 @@ const EntryCard: React.FC<{
                     )}
                 </div>
                 
-                {/* Only allow deleting psych entries, editing user entries text */}
-                <div className="flex gap-2">
+                {/* Only allow deleting user diary entries, editing user entries text */}
+                <div className="flex gap-2 sm:justify-end">
                     {!isPsychEntry && (
                         isEditing ? (
-                            <button onClick={handleSave} className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="Guardar">
+                            <button onClick={handleSave} className="px-3 py-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors text-xs font-semibold flex items-center gap-1" title="Guardar">
                                 <Save size={16} />
+                                <span className="sm:hidden">Guardar</span>
                             </button>
                         ) : (
-                            <button onClick={() => setIsEditing(true)} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Editar texto">
+                            <button onClick={() => setIsEditing(true)} className="px-3 py-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors text-xs font-semibold flex items-center gap-1" title="Editar texto">
                                 <Edit2 size={16} />
+                                <span className="sm:hidden">Editar</span>
                             </button>
                         )
                     )}
                     
-                    {/* Allow deletion of any entry */}
-                    <button 
-                        onClick={() => {
-                            if(window.confirm('¿Estás seguro de que quieres eliminar esta entrada?')) onDelete();
-                        }} 
-                        className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" 
-                        title="Eliminar"
-                    >
-                        <Trash2 size={16} />
-                    </button>
+                    {!isPsychEntry && (
+                        <button 
+                            onClick={() => {
+                                if(window.confirm('¿Estás seguro de que quieres eliminar esta entrada?')) onDelete();
+                            }} 
+                            className="px-3 py-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors text-xs font-semibold flex items-center gap-1" 
+                            title="Eliminar"
+                        >
+                            <Trash2 size={16} />
+                            <span className="sm:hidden">Eliminar</span>
+                        </button>
+                    )}
                 </div>
             </div>
 
