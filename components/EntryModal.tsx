@@ -6,7 +6,7 @@ interface EntryModalProps {
   entries: JournalEntry[];
   dateStr: string;
   onClose: () => void;
-  onStartSession: () => void;
+    onStartSession: (dateStr: string) => void;
   onDeleteEntry: (id: string) => void;
   onUpdateEntry: (entry: JournalEntry) => void;
 }
@@ -14,7 +14,7 @@ interface EntryModalProps {
 const EntryModal: React.FC<EntryModalProps> = ({ entries, dateStr, onClose, onStartSession, onDeleteEntry, onUpdateEntry }) => {
   const now = new Date();
   const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  const isToday = dateStr === todayStr;
+    const isPastOrToday = dateStr <= todayStr;
 
   if (entries.length === 0) {
     return (
@@ -27,15 +27,15 @@ const EntryModal: React.FC<EntryModalProps> = ({ entries, dateStr, onClose, onSt
            <h3 className="text-xl font-semibold text-slate-800 mb-2">Sin entradas</h3>
            <p className="text-slate-500 mb-6">No hay grabaciones para el día {dateStr}.</p>
            
-           {isToday ? (
+                     {isPastOrToday ? (
               <button 
-                onClick={() => { onClose(); onStartSession(); }}
+                                onClick={() => { onClose(); onStartSession(dateStr); }}
                 className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium transition-colors"
               >
                 Empezar nueva grabación
               </button>
            ) : (
-             <p className="text-xs text-slate-400">Solo puedes añadir entradas al día actual.</p>
+                         <p className="text-xs text-slate-400">Solo puedes añadir entradas a días anteriores o el día actual.</p>
            )}
         </div>
       </div>
@@ -53,9 +53,9 @@ const EntryModal: React.FC<EntryModalProps> = ({ entries, dateStr, onClose, onSt
                  <p className="text-indigo-200 text-sm mt-1">{entries.length} {entries.length === 1 ? 'entrada' : 'entradas'}</p>
              </div>
              <div className="flex items-center gap-3">
-                 {isToday && (
+                      {isPastOrToday && (
                      <button 
-                        onClick={() => { onClose(); onStartSession(); }}
+                                onClick={() => { onClose(); onStartSession(dateStr); }}
                         className="bg-white/20 hover:bg-white/30 text-white text-sm px-3 py-1.5 rounded-lg transition-colors"
                      >
                         + Nueva
@@ -119,6 +119,10 @@ const EntryCard: React.FC<{
 
     const feedback = getFeedback();
 
+    if (isPsychEntry && !(feedback && (feedback.text || feedback.attachments.length > 0))) {
+        return null;
+    }
+
     return (
         <div className={`rounded-xl shadow-sm border overflow-hidden ${isPsychEntry ? 'bg-purple-50/50 border-purple-100' : 'bg-white border-slate-200'}`}>
             {/* Entry Header */}
@@ -154,7 +158,7 @@ const EntryCard: React.FC<{
                             </button>
                         )
                     )}
-                    
+
                     {!isPsychEntry && (
                         <button 
                             onClick={() => {
@@ -204,12 +208,11 @@ const EntryCard: React.FC<{
                      </div>
                  )}
 
-                 {/* Psychologist Feedback */}
+                 {/* Psychologist Feedback (hide internal notes from patient) */}
                  {(feedback && (feedback.text || feedback.attachments.length > 0)) && (
                     <div className="bg-white p-4 rounded-xl border border-indigo-100 shadow-sm">
                         <h4 className="text-xs font-bold text-indigo-700 uppercase tracking-wider mb-2 flex items-center gap-2">
-                            {isPsychEntry ? <Stethoscope size={14}/> : <MessageCircle size={14} />} 
-                            {isPsychEntry ? 'Nota de Sesión Clínica' : 'Nota de tu Especialista'}
+                            <MessageCircle size={14} /> Feedback del especialista
                         </h4>
                         
                         {feedback.text && (

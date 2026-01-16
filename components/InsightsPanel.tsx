@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { JournalEntry } from '../types';
 import { generateWeeklyInsights, generateClinicalSummary } from '../services/genaiService';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 import { Sparkles, TrendingUp, Heart, Activity } from 'lucide-react';
 
 interface InsightsPanelProps {
@@ -91,6 +91,28 @@ const InsightsPanel: React.FC<InsightsPanelProps> = ({ entries, mode = 'PERSONAL
       score: e.sentimentScore
     }));
 
+  const emotionChartData = useMemo(() => {
+    const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
+    const relevant = entries.filter(e => {
+      if (e.createdBy === 'PSYCHOLOGIST') return false;
+      if (typeof e.timestamp === 'number') return e.timestamp >= cutoff;
+      return true;
+    });
+
+    const counts = new Map<string, number>();
+    relevant.forEach(e => {
+      (e.emotions || []).forEach(em => {
+        if (!em || em === 'Clínico') return;
+        counts.set(em, (counts.get(em) || 0) + 1);
+      });
+    });
+
+    return [...counts.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+  }, [entries]);
+
   if (entries.length === 0) {
     return (
       <div className="p-8 text-center text-slate-500 bg-white rounded-2xl border border-slate-100">
@@ -108,6 +130,38 @@ const InsightsPanel: React.FC<InsightsPanelProps> = ({ entries, mode = 'PERSONAL
 
   return (
     <div className="space-y-6">
+      {/* AI Analysis Section */}
+      <div className={`p-6 rounded-2xl border relative overflow-hidden ${isClinical ? 'bg-slate-50 border-slate-200' : 'bg-gradient-to-br from-indigo-50 to-purple-50 border-indigo-100'}`}>
+        {!isClinical && (
+            <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-indigo-200 rounded-full blur-2xl opacity-50"></div>
+        )}
+        
+        <h3 className={`text-lg font-semibold mb-3 flex items-center gap-2 relative z-10 ${isClinical ? 'text-slate-800' : 'text-indigo-900'}`}>
+            {isClinical ? (
+                <>
+                    <Activity className="w-5 h-5 text-blue-600" />
+                    Resumen Clínico (IA)
+                </>
+            ) : (
+                <>
+                    <Heart className="w-5 h-5 text-rose-500" />
+                    Consejo de Bienestar
+                </>
+            )}
+        </h3>
+        
+        <div className={`relative z-10 leading-relaxed text-sm md:text-base ${isClinical ? 'text-slate-700' : 'text-indigo-800'}`}>
+          {loading ? (
+             <div className="flex items-center gap-2 animate-pulse">
+                <div className={`w-2 h-2 rounded-full ${isClinical ? 'bg-slate-400' : 'bg-indigo-400'}`}></div>
+                <span>{isClinical ? "Generando resumen clínico..." : "Analizando tus días..."}</span>
+             </div>
+          ) : (
+             <p>{insight}</p>
+          )}
+        </div>
+      </div>
+
       {/* Chart Section - Conditionally Rendered */}
       {!hideChart && (
           <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-100">
@@ -154,37 +208,36 @@ const InsightsPanel: React.FC<InsightsPanelProps> = ({ entries, mode = 'PERSONAL
           </div>
       )}
 
-      {/* AI Analysis Section */}
-      <div className={`p-6 rounded-2xl border relative overflow-hidden ${isClinical ? 'bg-slate-50 border-slate-200' : 'bg-gradient-to-br from-indigo-50 to-purple-50 border-indigo-100'}`}>
-        {!isClinical && (
-            <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-indigo-200 rounded-full blur-2xl opacity-50"></div>
-        )}
-        
-        <h3 className={`text-lg font-semibold mb-3 flex items-center gap-2 relative z-10 ${isClinical ? 'text-slate-800' : 'text-indigo-900'}`}>
-            {isClinical ? (
-                <>
-                    <Activity className="w-5 h-5 text-blue-600" />
-                    Resumen Clínico (IA)
-                </>
-            ) : (
-                <>
-                    <Heart className="w-5 h-5 text-rose-500" />
-                    Consejo de Bienestar
-                </>
-            )}
-        </h3>
-        
-        <div className={`relative z-10 leading-relaxed text-sm md:text-base ${isClinical ? 'text-slate-700' : 'text-indigo-800'}`}>
-          {loading ? (
-             <div className="flex items-center gap-2 animate-pulse">
-                <div className={`w-2 h-2 rounded-full ${isClinical ? 'bg-slate-400' : 'bg-indigo-400'}`}></div>
-                <span>{isClinical ? "Generando resumen clínico..." : "Analizando tus días..."}</span>
-             </div>
+      {!hideChart && !isClinical && (
+        <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-100">
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-purple-500" /> Emociones más frecuentes (14 días)
+            </h3>
+            <span className="text-[10px] font-semibold text-purple-600 bg-purple-50 border border-purple-100 px-2 py-0.5 rounded-full">Top 10</span>
+          </div>
+          {emotionChartData.length === 0 ? (
+            <div className="text-sm text-slate-500">Aún no hay emociones registradas.</div>
           ) : (
-             <p>{insight}</p>
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={emotionChartData} layout="vertical" margin={{ top: 8, right: 12, left: 12, bottom: 8 }}>
+                  <CartesianGrid strokeDasharray="6 6" horizontal={false} stroke="#e5e7eb" />
+                  <XAxis type="number" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                  <YAxis dataKey="name" type="category" width={110} tick={{ fontSize: 10, fill: '#475569' }} axisLine={false} tickLine={false} />
+                  <Tooltip
+                    contentStyle={{ borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.08)' }}
+                    itemStyle={{ color: '#7c3aed', fontSize: '12px', fontWeight: 600 }}
+                    labelStyle={{ fontSize: '11px', color: '#64748b' }}
+                    formatter={(value: number) => [value, 'Ocurrencias']}
+                  />
+                  <Bar dataKey="count" fill="#a78bfa" radius={[8, 8, 8, 8]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           )}
         </div>
-      </div>
+      )}
     </div>
   );
 };

@@ -21,6 +21,23 @@ const normalizeNote = (note?: string | ClinicalNoteContent): ClinicalNoteContent
     if (typeof note === 'string') return { text: note, attachments: [] };
     return note;
 };
+const hasFeedbackContent = (note: ClinicalNoteContent) => {
+    const textHas = (note.text || '').trim().length > 0;
+    const attHas = Array.isArray(note.attachments) && note.attachments.length > 0;
+    return textHas || attHas;
+};
+
+const feedbackChanged = (prev: ClinicalNoteContent, next: ClinicalNoteContent) => {
+    const prevNormalized = {
+        text: (prev.text || '').trim(),
+        attachments: (prev.attachments || []).map(a => ({ id: a.id, url: a.url, name: a.name, type: a.type }))
+    };
+    const nextNormalized = {
+        text: (next.text || '').trim(),
+        attachments: (next.attachments || []).map(a => ({ id: a.id, url: a.url, name: a.name, type: a.type }))
+    };
+    return JSON.stringify(prevNormalized) !== JSON.stringify(nextNormalized);
+};
 
 const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClose }) => {
   const [entries, setEntries] = useState<JournalEntry[]>([]);
@@ -100,6 +117,8 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
           ? patientDiaryEntries.reduce((acc, curr) => acc + (curr.sentimentScore || 0), 0) / patientDiaryEntries.length
           : 0;
 
+      const latestDiaryEntry = [...patientDiaryEntries].sort((a, b) => b.timestamp - a.timestamp)[0];
+
     const psychEntriesCount = entries.filter(e => e.createdBy === 'PSYCHOLOGIST').length;
     const patientEntriesCount = entries.filter(e => e.createdBy !== 'PSYCHOLOGIST').length;
     const lastUpdateDate = entries.length > 0 ? entries[0].date : '—';
@@ -152,11 +171,25 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   };
 
   const handleSaveNotes = async (entry: JournalEntry) => {
-      const updated: JournalEntry = {
-          ...entry,
-          psychologistNote: internalNote,
-          psychologistFeedback: feedback
-      };
+            const prevFeedback = normalizeNote(entry.psychologistFeedback);
+            const nextFeedback = feedback;
+            const hasFeedback = hasFeedbackContent(nextFeedback);
+            const prevHasFeedback = hasFeedbackContent(prevFeedback);
+            const didChangeFeedback = feedbackChanged(prevFeedback, nextFeedback);
+            const feedbackUpdatedAt = hasFeedback
+                ? (didChangeFeedback || !prevHasFeedback ? Date.now() : entry.psychologistFeedbackUpdatedAt)
+                : undefined;
+            const feedbackReadAt = hasFeedback
+                ? (didChangeFeedback || !prevHasFeedback ? undefined : entry.psychologistFeedbackReadAt)
+                : undefined;
+
+            const updated: JournalEntry = {
+                    ...entry,
+                    psychologistNote: internalNote,
+                    psychologistFeedback: feedback,
+                    psychologistFeedbackUpdatedAt: feedbackUpdatedAt,
+                    psychologistFeedbackReadAt: feedbackReadAt
+            };
             const prevEntries = entries;
 
             setEntries(prev => prev.map(e => e.id === entry.id ? updated : e));
@@ -171,6 +204,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   };
 
   const handleCreateEntry = async () => {
+      const hasFeedback = hasFeedbackContent(feedback);
       const newEntry: JournalEntry = {
           id: crypto.randomUUID(),
           userId: patient.id,
@@ -183,6 +217,8 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
           advice: 'Revisa las notas de tu especialista.',
           psychologistNote: internalNote,
           psychologistFeedback: feedback,
+          psychologistFeedbackUpdatedAt: hasFeedback ? Date.now() : undefined,
+          psychologistFeedbackReadAt: hasFeedback ? undefined : undefined,
           createdBy: 'PSYCHOLOGIST'
       };
             const prevEntries = entries;
@@ -209,9 +245,11 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
           await deleteEntry(entryId);
       } catch (err) {
           console.error('Error deleting entry', err);
+          alert('No se pudo eliminar la entrada.');
           setEntries(prev);
       }
   };
+
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, target: 'INTERNAL' | 'FEEDBACK') => {
       const file = e.target.files?.[0];
@@ -722,6 +760,26 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                              <Activity className="text-indigo-500" /> Resumen Global
                         </h3>
                         <InsightsPanel entries={filteredEntries} mode="CLINICAL" hideChart={true} />
+                        <div className="mt-6 bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                            <h4 className="text-xs font-bold uppercase text-slate-400 mb-2">Última entrada del diario</h4>
+                            {latestDiaryEntry ? (
+                                <div className="space-y-2">
+                                    <div className="text-xs text-slate-500">{new Date(latestDiaryEntry.timestamp).toLocaleString()}</div>
+                                    <p className="text-sm text-slate-700 leading-relaxed line-clamp-4">{latestDiaryEntry.summary}</p>
+                                    {latestDiaryEntry.emotions?.length > 0 && (
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {latestDiaryEntry.emotions.slice(0, 6).map(em => (
+                                                <span key={em} className="text-[10px] px-2 py-0.5 bg-white text-slate-600 rounded border border-slate-200 font-semibold">
+                                                    {em}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="text-sm text-slate-400 italic">Sin entradas recientes.</div>
+                            )}
+                        </div>
                     </div>
                 </div>
             ) : activeTab === 'PLAN' ? (

@@ -72,7 +72,16 @@ export const deleteEntry = async (id: string): Promise<void> => {
     if (USE_BACKEND) {
         try {
             const res = await fetch(`${API_URL}/entries?id=${id}`, { method: 'DELETE' });
-            if (!res.ok) throw new Error(`Error deleting entry (${res.status})`);
+            if (!res.ok) {
+                let details = '';
+                try {
+                    const data = await res.json();
+                    details = data?.error ? `: ${data.error}` : '';
+                } catch (_) {
+                    // ignore
+                }
+                throw new Error(`Error deleting entry (${res.status})${details}`);
+            }
             return;
         } catch (e) {
             if (ALLOW_LOCAL_FALLBACK) { console.warn('Delete entry failed, removing locally.', e); }
@@ -160,7 +169,7 @@ export const saveUserGoals = async (userId: string, userGoals: Goal[]) => {
 
 // --- Settings ---
 export const getSettings = async (userId: string): Promise<UserSettings> => {
-    const defaults: UserSettings = { notificationsEnabled: false, notificationTime: '20:00', language: 'es-ES', voice: 'Kore' };
+    const defaults: UserSettings = { notificationsEnabled: false, feedbackNotificationsEnabled: true, notificationTime: '20:00', language: 'es-ES', voice: 'Kore' };
     if (USE_BACKEND) {
         try {
             const res = await fetch(`${API_URL}/settings?userId=${userId}`);

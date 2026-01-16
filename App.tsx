@@ -14,7 +14,7 @@ import SettingsModal from './components/SettingsModal';
 import PatientDashboard from './components/PatientDashboard';
 import AuthScreen from './components/AuthScreen';
 import SuperAdmin from './components/SuperAdmin';
-import { Mic, LayoutDashboard, Target, BookOpen, User as UserIcon, Stethoscope, ArrowLeftRight, CheckSquare, Loader2 } from 'lucide-react';
+import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle } from 'lucide-react';
 
 // Custom Dygo Logo Component
 const DygoLogo: React.FC<{ className?: string }> = ({ className = "w-8 h-8" }) => (
@@ -35,6 +35,7 @@ const App: React.FC = () => {
   const [goals, setGoals] = useState<Goal[]>([]);
   const [settings, setSettings] = useState<UserSettings>({ 
     notificationsEnabled: false, 
+    feedbackNotificationsEnabled: true,
     notificationTime: '20:00',
     language: 'es-ES',
     voice: 'Kore' 
@@ -42,12 +43,19 @@ const App: React.FC = () => {
   
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
+  const [sessionDate, setSessionDate] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
-  const [activeTab, setActiveTab] = useState<'insights' | 'goals'>('insights');
+  const [activeTab, setActiveTab] = useState<'calendar' | 'insights' | 'goals' | 'feedback'>('calendar');
   const [showSettings, setShowSettings] = useState(false);
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReport | null>(null);
   const [hasPendingInvites, setHasPendingInvites] = useState(false);
+
+  const isFeedbackUnread = (entry: JournalEntry) => {
+    if (!entry.psychologistFeedbackUpdatedAt) return false;
+    const readAt = entry.psychologistFeedbackReadAt || 0;
+    return readAt < entry.psychologistFeedbackUpdatedAt;
+  };
 
   useEffect(() => {
     const init = async () => {
@@ -186,7 +194,70 @@ const App: React.FC = () => {
       return () => clearInterval(interval);
   }, [currentUser]);
 
-  const handleStartSession = () => {
+  const markFeedbackAsRead = async (entriesToMark: JournalEntry[]) => {
+    if (entriesToMark.length === 0) return;
+    const now = Date.now();
+    const ids = new Set(entriesToMark.map(e => e.id));
+    setEntries(prev => prev.map(e => ids.has(e.id) ? { ...e, psychologistFeedbackReadAt: now } : e));
+    try {
+      await Promise.all(entriesToMark.map(e => StorageService.updateEntry({ ...e, psychologistFeedbackReadAt: now })));
+    } catch (err) {
+      console.warn('No se pudo marcar feedback como leído.', err);
+    }
+  };
+
+  useEffect(() => {
+    if (!currentUser || currentUser.role !== 'PATIENT') return;
+    const unread = entries
+      .filter(e => e.psychologistFeedback && (typeof e.psychologistFeedback === 'string' ? e.psychologistFeedback.trim().length > 0 : e.psychologistFeedback.text?.trim().length > 0))
+      .filter(isFeedbackUnread);
+    if (activeTab !== 'feedback') return;
+    markFeedbackAsRead(unread);
+  }, [activeTab, currentUser, entries]);
+
+  useEffect(() => {
+    if (!currentUser || currentUser.role !== 'PATIENT') return;
+    if (!settings.feedbackNotificationsEnabled) return;
+    if (Notification.permission !== 'granted') return;
+
+    const storageKey = `dygo_feedback_notified_${currentUser.id}`;
+    const raw = localStorage.getItem(storageKey);
+    const notifiedMap = raw ? JSON.parse(raw) as Record<string, number> : {};
+
+    const newlyUpdated = entries
+      .filter(e => e.psychologistFeedback && (typeof e.psychologistFeedback === 'string' ? e.psychologistFeedback.trim().length > 0 : e.psychologistFeedback.text?.trim().length > 0))
+      .filter(entry => {
+        const updatedAt = entry.psychologistFeedbackUpdatedAt || 0;
+        if (!updatedAt) return false;
+        const lastNotified = notifiedMap[entry.id] || 0;
+        return updatedAt > lastNotified && isFeedbackUnread(entry);
+      });
+
+    if (newlyUpdated.length === 0) return;
+
+    newlyUpdated.forEach(entry => {
+      new Notification('Nuevo feedback del psicólogo', { body: 'Tienes un nuevo feedback disponible.' });
+      if (entry.psychologistFeedbackUpdatedAt) {
+        notifiedMap[entry.id] = entry.psychologistFeedbackUpdatedAt;
+      }
+    });
+
+    localStorage.setItem(storageKey, JSON.stringify(notifiedMap));
+  }, [currentUser, settings.feedbackNotificationsEnabled, entries]);
+
+  useEffect(() => {
+    if (!currentUser || currentUser.role !== 'PATIENT') return;
+    if (!selectedEntryId) return;
+    const entry = entries.find(e => e.id === selectedEntryId);
+    if (!entry) return;
+    const hasFeedback = entry.psychologistFeedback && (typeof entry.psychologistFeedback === 'string' ? entry.psychologistFeedback.trim().length > 0 : entry.psychologistFeedback.text?.trim().length > 0);
+    if (!hasFeedback) return;
+    if (!isFeedbackUnread(entry)) return;
+    markFeedbackAsRead([entry]);
+  }, [selectedEntryId, entries, currentUser]);
+
+  const handleStartSession = (dateStr?: string) => {
+    setSessionDate(dateStr || null);
     setSelectedDate(null);
     setViewState(ViewState.VOICE_SESSION);
   };
@@ -206,9 +277,10 @@ const App: React.FC = () => {
     try {
       const now = new Date();
       const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const targetDate = sessionDate || today;
       
       const [newEntry, updatedGoals] = await Promise.all([
-        analyzeJournalEntry(transcript, today, currentUser.id),
+        analyzeJournalEntry(transcript, targetDate, currentUser.id),
         analyzeGoalsProgress(transcript, goals.filter(g => !g.completed))
       ]);
       
@@ -236,7 +308,8 @@ const App: React.FC = () => {
         alert(err?.message || 'Error guardando las metas. Comprueba la conexión con el servidor.');
       }
       
-      setSelectedDate(today);
+      setSelectedDate(targetDate);
+      setSessionDate(null);
     } catch (error) {
       console.error(error);
       alert("Hubo un error guardando tu diario.");
@@ -298,9 +371,14 @@ const App: React.FC = () => {
 
   const handleDeleteEntry = async (id: string) => {
     if (!currentUser) return;
-    await StorageService.deleteEntry(id);
-    const updated = await StorageService.getEntriesForUser(currentUser.id);
-    setEntries(updated);
+    try {
+      await StorageService.deleteEntry(id);
+      const updated = await StorageService.getEntriesForUser(currentUser.id);
+      setEntries(updated);
+    } catch (err:any) {
+      console.error('Error deleting entry', err);
+      alert(err?.message || 'No se pudo eliminar la entrada.');
+    }
   };
 
   const handleUpdateEntry = async (entry: JournalEntry) => {
@@ -363,6 +441,17 @@ const assignedGoals = safeGoals.filter(
 const personalGoals = safeGoals.filter(
   g => g.createdBy !== 'PSYCHOLOGIST'
 );
+
+const feedbackEntries = [...safeEntries]
+  .filter(e => e.psychologistFeedback && (typeof e.psychologistFeedback === 'string' ? e.psychologistFeedback.trim().length > 0 : e.psychologistFeedback.text?.trim().length > 0))
+  .sort((a, b) => b.timestamp - a.timestamp);
+
+const latestDiaryEntry = [...safeEntries]
+  .filter(e => e.createdBy !== 'PSYCHOLOGIST')
+  .filter(e => e.transcript && e.transcript.trim().length > 0)
+  .sort((a, b) => b.timestamp - a.timestamp)[0];
+
+  const unreadFeedbackCount = feedbackEntries.filter(isFeedbackUnread).length;
 
   
   const ProfileCircle = ({ onClick, className }: { onClick: () => void, className?: string }) => (
@@ -537,50 +626,150 @@ const personalGoals = safeGoals.filter(
           </div>
         </header>
 
-        <div className="grid md:grid-cols-3 gap-8">
-            <div className="md:col-span-2 space-y-8">
-              <CalendarView 
-                entries={entries} 
-                onSelectDate={(date) => { setSelectedDate(date); setSelectedEntryId(null); }}
-                onSelectEntry={(entry) => { setSelectedDate(entry.date); setSelectedEntryId(entry.id); }}
-              />
-               {assignedGoals.length > 0 && (
-                   <div className="bg-purple-50 rounded-2xl border border-purple-100 p-1">
-                        <div className="px-4 py-3 flex items-center gap-2 border-b border-purple-100/50">
-                            <CheckSquare className="text-purple-600" size={18} />
-                            <h3 className="font-bold text-purple-800 text-sm uppercase tracking-wide">Plan</h3>
-                        </div>
-                        <div className="p-2">
-                             <GoalsPanel 
-                                title="" goals={assignedGoals} onAddGoal={() => {}} onToggleGoal={handleToggleGoal} onDeleteGoal={() => {}} 
-                                readOnly={true} showAdd={false}
-                             />
-                        </div>
-                   </div>
-               )}
+        <div className="space-y-6">
+            <div className="bg-white p-1 rounded-xl shadow-sm border border-slate-100 flex overflow-x-auto">
+              <button onClick={() => setActiveTab('insights')} className={`flex-1 py-2 px-3 text-sm font-medium rounded-lg transition-all flex items-center justify-center gap-2 whitespace-nowrap ${activeTab === 'insights' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:text-slate-700'}`}>
+                <LayoutDashboard size={16} /> Resumen
+              </button>
+              <button onClick={() => setActiveTab('calendar')} className={`flex-1 py-2 px-3 text-sm font-medium rounded-lg transition-all flex items-center justify-center gap-2 whitespace-nowrap ${activeTab === 'calendar' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:text-slate-700'}`}>
+                <Calendar size={16} /> Calendario
+              </button>
+              <button onClick={() => setActiveTab('feedback')} className={`flex-1 py-2 px-3 text-sm font-medium rounded-lg transition-all flex items-center justify-center gap-2 whitespace-nowrap ${activeTab === 'feedback' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:text-slate-700'}`}>
+                <span className="relative inline-flex items-center">
+                  <MessageCircle size={16} />
+                  {unreadFeedbackCount > 0 && (
+                    <span className="absolute -top-2 -right-2 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                      {unreadFeedbackCount > 99 ? '99+' : unreadFeedbackCount}
+                    </span>
+                  )}
+                </span>
+                Feedback
+              </button>
+              <button onClick={() => setActiveTab('goals')} className={`flex-1 py-2 px-3 text-sm font-medium rounded-lg transition-all flex items-center justify-center gap-2 whitespace-nowrap ${activeTab === 'goals' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:text-slate-700'}`}>
+                <Target size={16} /> Metas
+              </button>
             </div>
-            <div className="md:col-span-1 flex flex-col gap-6">
-               <div className="bg-white p-1 rounded-xl shadow-sm border border-slate-100 flex overflow-x-auto">
-                  <button onClick={() => setActiveTab('insights')} className={`flex-1 py-2 px-3 text-sm font-medium rounded-lg transition-all flex items-center justify-center gap-2 whitespace-nowrap ${activeTab === 'insights' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:text-slate-700'}`}>
-                    <LayoutDashboard size={16} /> Resumen
-                  </button>
-                  <button onClick={() => setActiveTab('goals')} className={`flex-1 py-2 px-3 text-sm font-medium rounded-lg transition-all flex items-center justify-center gap-2 whitespace-nowrap ${activeTab === 'goals' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:text-slate-700'}`}>
-                    <Target size={16} /> Metas
-                  </button>
-               </div>
-               {activeTab === 'insights' ? (
-                 <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
-                    <InsightsPanel entries={entries} />
-                    <button onClick={handleGenerateReport} className="w-full py-4 bg-gradient-to-r from-purple-500 to-indigo-500 text-white rounded-2xl shadow-md hover:shadow-lg transition-all font-semibold flex items-center justify-center gap-2">
-                      <BookOpen size={20} /> Ver Reporte Semanal
-                    </button>
-                 </div>
-               ) : (
-                 <div className="animate-in fade-in slide-in-from-right-4 duration-300">
-                    <GoalsPanel goals={personalGoals} onAddGoal={handleAddGoal} onToggleGoal={handleToggleGoal} onDeleteGoal={handleDeleteGoal} />
-                 </div>
-               )}
-            </div>
+
+            {activeTab === 'calendar' && (
+              <div className="space-y-8 animate-in fade-in">
+                <CalendarView 
+                  entries={entries} 
+                  onSelectDate={(date) => { setSelectedDate(date); setSelectedEntryId(null); }}
+                  onSelectEntry={(entry) => { setSelectedDate(entry.date); setSelectedEntryId(entry.id); }}
+                />
+                {assignedGoals.length > 0 && (
+                  <div className="bg-purple-50 rounded-2xl border border-purple-100 p-1">
+                      <div className="px-4 py-3 flex items-center gap-2 border-b border-purple-100/50">
+                          <CheckSquare className="text-purple-600" size={18} />
+                          <h3 className="font-bold text-purple-800 text-sm uppercase tracking-wide">Plan</h3>
+                      </div>
+                      <div className="p-2">
+                           <GoalsPanel 
+                              title="" goals={assignedGoals} onAddGoal={() => {}} onToggleGoal={handleToggleGoal} onDeleteGoal={() => {}} 
+                              readOnly={true} showAdd={false}
+                           />
+                      </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'insights' && (
+              <div className="space-y-6 animate-in fade-in">
+                <div className="bg-white rounded-2xl border border-slate-100 p-5 md:p-6 shadow-sm">
+                  <div className="flex items-center justify-between gap-2 mb-3">
+                    <h3 className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                      <Calendar size={16} className="text-indigo-500" /> Última entrada del diario
+                    </h3>
+                    {latestDiaryEntry && (
+                      <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">
+                        {new Date(latestDiaryEntry.timestamp).toLocaleDateString()}
+                      </span>
+                    )}
+                  </div>
+                  {latestDiaryEntry ? (
+                    <div className="space-y-3">
+                      <div className="text-xs text-slate-500">
+                        {new Date(latestDiaryEntry.timestamp).toLocaleString()}
+                      </div>
+                      <p className="text-sm text-slate-700 leading-relaxed line-clamp-4">
+                        {latestDiaryEntry.summary}
+                      </p>
+                      {latestDiaryEntry.emotions?.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {latestDiaryEntry.emotions.slice(0, 6).map(em => (
+                            <span key={em} className="text-[10px] px-2 py-0.5 bg-slate-50 text-slate-600 rounded-full border border-slate-200 font-semibold">
+                              {em}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-slate-500">Aún no hay entradas de diario.</div>
+                  )}
+                </div>
+
+                <div className="bg-white rounded-2xl border border-slate-100 p-5 md:p-6 shadow-sm">
+                  <div className="flex items-center justify-between gap-3 mb-4">
+                    <div>
+                      <h2 className="text-lg md:text-xl font-bold text-slate-800">Resumen personal</h2>
+                      <p className="text-xs text-slate-500">Tu evolución y recomendaciones</p>
+                    </div>
+                    <span className="text-[10px] font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">Últimos 14 días</span>
+                  </div>
+                  <InsightsPanel entries={entries} />
+                </div>
+
+                <button onClick={handleGenerateReport} className="w-full py-4 bg-gradient-to-r from-purple-500 to-indigo-500 text-white rounded-2xl shadow-md hover:shadow-lg transition-all font-semibold flex items-center justify-center gap-2">
+                  <BookOpen size={20} /> Ver Reporte Semanal
+                </button>
+              </div>
+            )}
+
+            {activeTab === 'feedback' && (
+              <div className="animate-in fade-in">
+                <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
+                  <h3 className="text-sm font-bold text-slate-700 mb-3">Feedback del psicólogo</h3>
+                  {feedbackEntries.length === 0 ? (
+                    <p className="text-sm text-slate-500">Aún no hay feedback.</p>
+                  ) : (
+                    <div className="space-y-3 max-h-[520px] overflow-y-auto">
+                      {feedbackEntries.map(entry => {
+                        const feedbackText = typeof entry.psychologistFeedback === 'string'
+                          ? entry.psychologistFeedback
+                          : entry.psychologistFeedback?.text || '';
+                        const timeLabel = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+                        const hasDiaryRef = entry.transcript && entry.transcript.trim().length > 0;
+                        return (
+                          <div key={entry.id} className="p-3 rounded-xl border border-indigo-100 bg-indigo-50/40">
+                            <div className="flex items-center justify-between gap-2 mb-1">
+                              <div className="text-[11px] text-slate-500">{entry.date}{timeLabel ? ` • ${timeLabel}` : ''}</div>
+                              <button
+                                onClick={() => { setSelectedDate(entry.date); setSelectedEntryId(entry.id); }}
+                                className="text-[11px] font-semibold text-indigo-700 bg-white border border-indigo-100 px-2 py-0.5 rounded-full hover:bg-indigo-50"
+                              >
+                                Ver detalle
+                              </button>
+                            </div>
+                            {hasDiaryRef && (
+                              <div className="text-[10px] text-slate-500 mb-2">Referencia: entrada de diario</div>
+                            )}
+                            <p className="text-sm text-slate-800 leading-relaxed">{feedbackText}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'goals' && (
+              <div className="animate-in fade-in">
+                <GoalsPanel goals={personalGoals} onAddGoal={handleAddGoal} onToggleGoal={handleToggleGoal} onDeleteGoal={handleDeleteGoal} />
+              </div>
+            )}
         </div>
       </div>
 
@@ -590,7 +779,7 @@ const personalGoals = safeGoals.filter(
           entries={entriesForModal} 
           dateStr={selectedDate} 
           onClose={() => { setSelectedDate(null); setSelectedEntryId(null); }}
-          onStartSession={handleStartSession} 
+          onStartSession={(dateStr) => handleStartSession(dateStr)} 
           onDeleteEntry={handleDeleteEntry} 
           onUpdateEntry={handleUpdateEntry} 
         />

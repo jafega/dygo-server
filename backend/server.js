@@ -1381,6 +1381,23 @@ app.put('/api/entries', (req, res) => {
 });
 
 app.delete('/api/entries/:id', (req, res) => {
+  if (supabaseAdmin) {
+    (async () => {
+      try {
+        const { error } = await supabaseAdmin.from('entries').delete().eq('id', req.params.id);
+        if (error) throw error;
+        if (supabaseDbCache?.entries) {
+          supabaseDbCache.entries = supabaseDbCache.entries.filter(e => e.id !== req.params.id);
+        }
+        return res.json({ success: true });
+      } catch (err) {
+        console.error('Error deleting entry (supabase)', err);
+        return res.status(500).json({ error: 'Error deleting entry' });
+      }
+    })();
+    return;
+  }
+
   const db = getDb();
   const before = db.entries.length;
   db.entries = db.entries.filter((e) => e.id !== req.params.id);
@@ -1396,6 +1413,23 @@ app.delete('/api/entries/:id', (req, res) => {
 app.delete('/api/entries', (req, res) => {
   const id = req.query.id;
   if (!id) return res.status(400).json({ error: 'Missing entry id' });
+
+  if (supabaseAdmin) {
+    (async () => {
+      try {
+        const { error } = await supabaseAdmin.from('entries').delete().eq('id', id);
+        if (error) throw error;
+        if (supabaseDbCache?.entries) {
+          supabaseDbCache.entries = supabaseDbCache.entries.filter(e => e.id !== id);
+        }
+        return res.json({ success: true });
+      } catch (err) {
+        console.error('Error deleting entry (supabase)', err);
+        return res.status(500).json({ error: 'Error deleting entry' });
+      }
+    })();
+    return;
+  }
 
   const db = getDb();
   const before = db.entries.length;

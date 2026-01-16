@@ -64,6 +64,8 @@ export interface JournalEntry {
   // Union type string | ClinicalNoteContent allows backward compatibility
   psychologistNote?: string | ClinicalNoteContent; 
   psychologistFeedback?: string | ClinicalNoteContent;
+  psychologistFeedbackUpdatedAt?: number;
+  psychologistFeedbackReadAt?: number;
   
   // New field to identify if entry was created manually by psychologist
   createdBy?: 'USER' | 'PSYCHOLOGIST';
@@ -81,6 +83,7 @@ export interface Goal {
 
 export interface UserSettings {
   notificationsEnabled: boolean;
+  feedbackNotificationsEnabled?: boolean;
   notificationTime: string;
   language: string; // 'es-ES' | 'en-US'
   voice: string;    // 'Kore' | 'Puck' | 'Charon' | 'Fenrir' | 'Aoede'

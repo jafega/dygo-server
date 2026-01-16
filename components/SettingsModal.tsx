@@ -15,6 +15,7 @@ interface SettingsModalProps {
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose, onLogout, onUserUpdate }) => {
   const [enabled, setEnabled] = useState(settings.notificationsEnabled);
+    const [feedbackEnabled, setFeedbackEnabled] = useState(settings.feedbackNotificationsEnabled ?? true);
   const [time, setTime] = useState(settings.notificationTime);
   const [language, setLanguage] = useState(settings.language || 'es-ES');
   const [voice, setVoice] = useState(settings.voice || 'Kore');
@@ -69,10 +70,15 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
   }, []);
 
   const handleSave = () => {
-    const newSettings: UserSettings = { notificationsEnabled: enabled, notificationTime: time, language, voice };
-    if (enabled && Notification.permission !== 'granted') {
+    const newSettings: UserSettings = { notificationsEnabled: enabled, feedbackNotificationsEnabled: feedbackEnabled, notificationTime: time, language, voice };
+    if ((enabled || feedbackEnabled) && Notification.permission !== 'granted') {
         Notification.requestPermission().then(permission => {
-            onSave({ ...newSettings, notificationsEnabled: permission === 'granted' });
+            const granted = permission === 'granted';
+            onSave({
+                ...newSettings,
+                notificationsEnabled: enabled && granted,
+                feedbackNotificationsEnabled: feedbackEnabled && granted
+            });
             onClose();
         });
     } else {
@@ -244,6 +250,20 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                                 </div>
                             )}
                         </div>
+                        {currentUser?.role === 'PATIENT' && (
+                            <div className={`rounded-2xl border ${feedbackEnabled ? 'border-indigo-200 bg-indigo-50/60' : 'border-slate-100 bg-white'} p-4 transition-colors`}
+                            >
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                        <div className="font-semibold text-slate-800">Feedback del psicólogo</div>
+                                        <div className="text-xs text-slate-500">Te avisaremos cuando tengas nuevo feedback.</div>
+                                    </div>
+                                    <button onClick={() => setFeedbackEnabled(!feedbackEnabled)} className={`w-12 h-6 rounded-full transition-colors relative ${feedbackEnabled ? 'bg-indigo-500' : 'bg-slate-300'}`}>
+                                        <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${feedbackEnabled ? 'left-7' : 'left-1'}`}></div>
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     <div className="pt-4 border-t border-slate-100 space-y-4">
