@@ -835,17 +835,17 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                     ) : (
                                         <div className="space-y-3">
                                             <div className="flex flex-wrap items-center gap-2">
-                                                <button onClick={() => sessionAudioInputRef.current?.click()} className="text-xs text-slate-500 hover:text-purple-700 flex items-center gap-1">
+                                                <button type="button" onClick={() => sessionAudioInputRef.current?.click()} className="text-xs text-slate-500 hover:text-purple-700 flex items-center gap-1">
                                                     <Mic size={12} /> Subir audio
                                                 </button>
                                                 <input type="file" ref={sessionAudioInputRef} className="hidden" onChange={handleSessionAudioUpload} accept="audio/*" />
 
-                                                <button onClick={() => sessionVideoInputRef.current?.click()} className="text-xs text-slate-500 hover:text-purple-700 flex items-center gap-1">
+                                                <button type="button" onClick={() => sessionVideoInputRef.current?.click()} className="text-xs text-slate-500 hover:text-purple-700 flex items-center gap-1">
                                                     <Video size={12} /> Subir video
                                                 </button>
                                                 <input type="file" ref={sessionVideoInputRef} className="hidden" onChange={handleSessionVideoUpload} accept="video/*" />
 
-                                                <button onClick={() => sessionTranscriptFileInputRef.current?.click()} className="text-xs text-slate-500 hover:text-purple-700 flex items-center gap-1">
+                                                <button type="button" onClick={() => sessionTranscriptFileInputRef.current?.click()} className="text-xs text-slate-500 hover:text-purple-700 flex items-center gap-1">
                                                     <FileText size={12} /> Subir transcript (.txt/.md/.doc/.docx/.pdf)
                                                 </button>
                                                 <input
