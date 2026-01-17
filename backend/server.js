@@ -89,7 +89,8 @@ const createInitialDb = () => ({
   invitations: [],
   settings: {},
   sessions: [],
-  invoices: []
+  invoices: [],
+  psychologistProfiles: {}
 });
 
 // If you want durable persistence across restarts on platforms like Render, set USE_SQLITE=true
@@ -359,6 +360,7 @@ async function loadSupabaseCache() {
   const settingsRows = await readTable('settings');
   const sessionsRows = await readTable('sessions');
   const invoicesRows = await readTable('invoices');
+  const profilesRows = await readTable('psychologist_profiles');
 
   const users = usersRows.map(normalizeSupabaseRow);
   const entries = entriesRows.map(normalizeSupabaseRow);
@@ -367,8 +369,9 @@ async function loadSupabaseCache() {
   const sessions = sessionsRows.map(normalizeSupabaseRow);
   const invoices = invoicesRows.map(normalizeSupabaseRow);
   const settings = Object.fromEntries(settingsRows.map(row => [row.id, (row.data && typeof row.data === 'object') ? row.data : normalizeSupabaseRow(row)]));
+  const psychologistProfiles = Object.fromEntries(profilesRows.map(row => [row.id, (row.data && typeof row.data === 'object') ? row.data : normalizeSupabaseRow(row)]));
 
-  return { users, entries, goals, invitations, settings, sessions, invoices };
+  return { users, entries, goals, invitations, settings, sessions, invoices, psychologistProfiles };
 }
 
 async function readSupabaseTable(table) {
@@ -510,6 +513,8 @@ async function saveSupabaseDb(data, prevCache = null) {
   const settingsRows = Object.keys(settings).map(k => ({ id: k, data: settings[k] }));
   const sessionsRows = (data.sessions || []).map(s => ({ id: s.id, data: s }));
   const invoicesRows = (data.invoices || []).map(inv => ({ id: inv.id, data: inv }));
+  const profiles = data.psychologistProfiles || {};
+  const profilesRows = Object.keys(profiles).map(k => ({ id: k, data: profiles[k] }));
 
   await upsertTable('users', usersRows);
   await upsertTable('entries', entriesRows);
@@ -518,6 +523,7 @@ async function saveSupabaseDb(data, prevCache = null) {
   await upsertTable('settings', settingsRows);
   await upsertTable('sessions', sessionsRows);
   await upsertTable('invoices', invoicesRows);
+  await upsertTable('psychologist_profiles', profilesRows);
 
   if (prevCache) {
     await deleteMissing('users', (prevCache.users || []).map(u => u.id), usersRows.map(r => r.id));
@@ -527,6 +533,7 @@ async function saveSupabaseDb(data, prevCache = null) {
     await deleteMissing('settings', Object.keys(prevCache.settings || {}), settingsRows.map(r => r.id));
     await deleteMissing('sessions', (prevCache.sessions || []).map(s => s.id), sessionsRows.map(r => r.id));
     await deleteMissing('invoices', (prevCache.invoices || []).map(inv => inv.id), invoicesRows.map(r => r.id));
+    await deleteMissing('psychologist_profiles', Object.keys(prevCache.psychologistProfiles || {}), profilesRows.map(r => r.id));
   }
 }
 
@@ -2436,17 +2443,38 @@ app.post('/api/sessions', (req, res) => {
   res.json(session);
 });
 
-app.post('/api/sessions/availability', (req, res) => {
-  const { slots, psychologistId } = req.body;
-  const db = getDb();
-  if (!db.sessions) db.sessions = [];
-  
-  slots.forEach(slot => {
-    db.sessions.push({ ...slot, psychologistId });
-  });
-  
-  saveDb(db);
-  res.json({ success: true, count: slots.length });
+app.post('/api/sessions/availability', async (req, res) => {
+  try {
+    const { slots, psychologistId } = req.body;
+    console.log('📅 Creating availability slots:', { slotsCount: slots?.length, psychologistId });
+    
+    if (!slots || !Array.isArray(slots) || slots.length === 0) {
+      console.error('❌ Invalid slots data:', slots);
+      return res.status(400).json({ error: 'Se requiere un array de slots válido' });
+    }
+    
+    if (!psychologistId) {
+      console.error('❌ Missing psychologistId');
+      return res.status(400).json({ error: 'Se requiere el ID del psicólogo' });
+    }
+    
+    const db = getDb();
+    if (!db.sessions) db.sessions = [];
+    
+    const newSlots = [];
+    slots.forEach(slot => {
+      const newSlot = { ...slot, psychologistId };
+      db.sessions.push(newSlot);
+      newSlots.push(newSlot);
+    });
+    
+    await saveDb(db);
+    console.log('✅ Availability slots created successfully:', newSlots.length);
+    res.json({ success: true, count: slots.length, slots: newSlots });
+  } catch (error) {
+    console.error('❌ Error creating availability slots:', error);
+    res.status(500).json({ error: 'Error al crear espacios disponibles: ' + error.message });
+  }
 });
 
 app.patch('/api/sessions/:id', (req, res) => {
