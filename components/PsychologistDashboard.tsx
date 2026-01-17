@@ -13,6 +13,17 @@ interface Session {
   endTime: string;
   status: 'scheduled' | 'completed' | 'cancelled' | 'available';
   type: 'in-person' | 'online' | 'home-visit';
+  price?: number;
+}
+
+interface Invoice {
+  id: string;
+  patientId: string;
+  psychologistId: string;
+  amount: number;
+  status: string;
+  date: string;
+  created_at: string;
 }
 
 interface PsychologistDashboardProps {
@@ -22,7 +33,19 @@ interface PsychologistDashboardProps {
 const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psychologistId }) => {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [patients, setPatients] = useState<any[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  
+  // Date range state - default to last 30 days
+  const [dateRange, setDateRange] = useState<{ start: string; end: string }>(() => {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(start.getDate() - 30);
+    return {
+      start: start.toISOString().split('T')[0],
+      end: end.toISOString().split('T')[0]
+    };
+  });
 
   useEffect(() => {
     loadData();
@@ -44,6 +67,13 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
         const patientsData = await patientsResponse.json();
         setPatients(patientsData);
       }
+
+      // Load invoices
+      const invoicesResponse = await fetch(`${API_URL}/invoices?psychologistId=${psychologistId}`);
+      if (invoicesResponse.ok) {
+        const invoicesData = await invoicesResponse.json();
+        setInvoices(invoicesData);
+      }
     } catch (error) {
       console.error('Error loading dashboard data:', error);
     }
@@ -53,6 +83,16 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
   // Calculate metrics
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+
+  // Filter sessions by date range
+  const rangeStart = new Date(dateRange.start);
+  const rangeEnd = new Date(dateRange.end);
+  rangeEnd.setHours(23, 59, 59, 999);
+
+  const sessionsInRange = sessions.filter(s => {
+    const sessionDate = new Date(s.date);
+    return sessionDate >= rangeStart && sessionDate <= rangeEnd;
+  });
 
   const currentMonth = today.getMonth();
   const currentYear = today.getFullYear();
@@ -72,11 +112,20 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
   const cancelledSessions = sessions.filter(s => s.status === 'cancelled');
   const availableSessions = sessions.filter(s => s.status === 'available');
 
+  // Stats for selected date range
+  const rangeScheduled = sessionsInRange.filter(s => s.status === 'scheduled').length;
+  const rangeCompleted = sessionsInRange.filter(s => s.status === 'completed').length;
+  const rangeCancelled = sessionsInRange.filter(s => s.status === 'cancelled').length;
+
   const thisMonthScheduled = thisMonthSessions.filter(s => s.status === 'scheduled').length;
   const thisMonthCompleted = thisMonthSessions.filter(s => s.status === 'completed').length;
   const thisMonthCancelled = thisMonthSessions.filter(s => s.status === 'cancelled').length;
 
-  // Calculate completion rate
+  // Calculate completion rate for range
+  const rangeTotalFinished = rangeCompleted + rangeCancelled;
+  const rangeCompletionRate = rangeTotalFinished > 0 ? Math.round((rangeCompleted / rangeTotalFinished) * 100) : 0;
+
+  // Calculate completion rate for month
   const totalFinished = thisMonthCompleted + thisMonthCancelled;
   const completionRate = totalFinished > 0 ? Math.round((thisMonthCompleted / totalFinished) * 100) : 0;
 
@@ -101,6 +150,42 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
   );
   const activePatients = activePatientsSet.size;
 
+  // Financial metrics
+  const paidInvoices = invoices.filter(inv => inv.status === 'paid');
+  const totalRevenue = paidInvoices.reduce((sum, inv) => sum + inv.amount, 0);
+  
+  // Monthly revenue breakdown - last 12 months
+  const monthlyRevenue: { [key: string]: number } = {};
+  const last12Months: string[] = [];
+  
+  for (let i = 11; i >= 0; i--) {
+    const date = new Date();
+    date.setMonth(date.getMonth() - i);
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    const label = date.toLocaleDateString('es-ES', { month: 'short', year: '2-digit' });
+    last12Months.push(label);
+    monthlyRevenue[key] = 0;
+  }
+  
+  paidInvoices.forEach(invoice => {
+    const invoiceDate = new Date(invoice.date || invoice.created_at);
+    const key = `${invoiceDate.getFullYear()}-${String(invoiceDate.getMonth() + 1).padStart(2, '0')}`;
+    if (monthlyRevenue.hasOwnProperty(key)) {
+      monthlyRevenue[key] += invoice.amount;
+    }
+  });
+
+  const revenueValues = Object.values(monthlyRevenue);
+  const maxRevenue = Math.max(...revenueValues, 1);
+  
+  // Revenue in selected date range
+  const revenueInRange = paidInvoices
+    .filter(inv => {
+      const invDate = new Date(inv.date || inv.created_at);
+      return invDate >= rangeStart && invDate <= rangeEnd;
+    })
+    .reduce((sum, inv) => sum + inv.amount, 0);
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -117,62 +202,220 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
         <p className="text-purple-100">Resumen completo de tu actividad</p>
       </div>
 
+      {/* Date Range Selector */}
+      <div className="bg-white rounded-xl border border-slate-200 p-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+          <div className="flex items-center gap-2">
+            <Calendar className="text-slate-600" size={20} />
+            <span className="text-sm font-semibold text-slate-700">Rango de fechas para estadísticas:</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <input
+              type="date"
+              value={dateRange.start}
+              onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
+              className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+            />
+            <span className="text-slate-500">—</span>
+            <input
+              type="date"
+              value={dateRange.end}
+              onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
+              className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+            />
+            <button
+              onClick={() => {
+                const end = new Date();
+                const start = new Date();
+                start.setDate(start.getDate() - 30);
+                setDateRange({
+                  start: start.toISOString().split('T')[0],
+                  end: end.toISOString().split('T')[0]
+                });
+              }}
+              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm rounded-lg transition-colors"
+            >
+              Últimos 30 días
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Financial Overview */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Total Revenue */}
+        <div className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl p-4 text-white shadow-lg">
+          <div className="flex items-center justify-between mb-2">
+            <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
+              <DollarSign size={20} />
+            </div>
+            <span className="text-xs font-semibold bg-white/20 px-2 py-1 rounded-full backdrop-blur-sm">
+              Total
+            </span>
+          </div>
+          <div className="text-2xl font-bold mb-1">{totalRevenue.toFixed(2)}€</div>
+          <div className="text-xs text-green-100">Facturación Total</div>
+        </div>
+
+        {/* Revenue in Range */}
+        <div className="bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl p-4 text-white shadow-lg">
+          <div className="flex items-center justify-between mb-2">
+            <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
+              <TrendingUp size={20} />
+            </div>
+            <span className="text-xs font-semibold bg-white/20 px-2 py-1 rounded-full backdrop-blur-sm">
+              Rango
+            </span>
+          </div>
+          <div className="text-2xl font-bold mb-1">{revenueInRange.toFixed(2)}€</div>
+          <div className="text-xs text-blue-100">Facturado en Período</div>
+        </div>
+
+        {/* Paid Invoices */}
+        <div className="bg-gradient-to-br from-purple-500 to-pink-600 rounded-xl p-4 text-white shadow-lg">
+          <div className="flex items-center justify-between mb-2">
+            <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
+              <CheckCircle size={20} />
+            </div>
+            <span className="text-xs font-semibold bg-white/20 px-2 py-1 rounded-full backdrop-blur-sm">
+              Pagadas
+            </span>
+          </div>
+          <div className="text-2xl font-bold mb-1">{paidInvoices.length}</div>
+          <div className="text-xs text-purple-100">Facturas Cobradas</div>
+        </div>
+      </div>
+
+      {/* Monthly Revenue Chart */}
+      <div className="bg-white rounded-xl border border-slate-200 p-4">
+        <div className="flex items-center gap-2 mb-4">
+          <div className="p-2 bg-green-100 rounded-lg">
+            <BarChart3 className="text-green-600" size={18} />
+          </div>
+          <h2 className="text-lg font-bold text-slate-900">Facturación Mensual (Últimos 12 Meses)</h2>
+        </div>
+        
+        {/* Vertical Bar Chart */}
+        <div className="relative h-72 px-2">
+          {/* Grid lines */}
+          <div className="absolute inset-0 flex flex-col justify-between pointer-events-none" style={{ paddingBottom: '32px' }}>
+            {[0, 1, 2, 3, 4].map(i => (
+              <div key={i} className="border-t border-slate-100" />
+            ))}
+          </div>
+          
+          {/* Bars container */}
+          <div className="relative h-full flex items-end justify-between gap-1" style={{ paddingBottom: '32px' }}>
+            {last12Months.map((month, idx) => {
+              const key = Object.keys(monthlyRevenue)[idx];
+              const value = monthlyRevenue[key];
+              const percentage = (value / maxRevenue) * 100;
+              
+              return (
+                <div key={key} className="flex-1 flex flex-col items-center justify-end group relative" style={{ minWidth: '0' }}>
+                  {/* Bar */}
+                  <div className="w-full flex flex-col items-center justify-end" style={{ height: '240px' }}>
+                    {/* Tooltip on hover */}
+                    {value > 0 && (
+                      <div className="absolute -top-8 bg-slate-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
+                        {value.toFixed(2)}€
+                      </div>
+                    )}
+                    
+                    <div 
+                      className="w-full bg-gradient-to-t from-green-600 via-green-500 to-emerald-400 rounded-t-lg transition-all duration-500 hover:opacity-90 cursor-pointer shadow-sm"
+                      style={{ 
+                        height: `${Math.max(percentage, 2)}%`,
+                        minHeight: value > 0 ? '8px' : '0'
+                      }}
+                    />
+                  </div>
+                  
+                  {/* Month label */}
+                  <div className="absolute -bottom-7 w-full flex justify-center">
+                    <span className="text-[9px] font-medium text-slate-600 whitespace-nowrap">
+                      {month}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          
+          {/* Y-axis line */}
+          <div className="absolute left-0 bottom-8 top-0 border-l-2 border-slate-200" />
+          {/* X-axis line */}
+          <div className="absolute left-0 right-0 border-b-2 border-slate-200" style={{ bottom: '32px' }} />
+        </div>
+        
+        {/* Legend/Summary */}
+        <div className="mt-8 pt-4 border-t border-slate-100 flex items-center justify-between text-xs">
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded bg-gradient-to-t from-green-600 to-emerald-400"></div>
+            <span className="text-slate-600">Ingresos mensuales</span>
+          </div>
+          <div className="text-slate-500">
+            Máximo: <span className="font-bold text-green-600">{maxRevenue.toFixed(0)}€</span>
+          </div>
+        </div>
+      </div>
+
       {/* Main Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Total Patients */}
-        <div className="bg-white rounded-xl border border-slate-200 p-6 hover:shadow-lg transition-shadow">
-          <div className="flex items-center justify-between mb-4">
-            <div className="p-3 bg-blue-100 rounded-lg">
-              <Users className="text-blue-600" size={24} />
+        <div className="bg-white rounded-xl border border-slate-200 p-4 hover:shadow-lg transition-shadow">
+          <div className="flex items-center justify-between mb-3">
+            <div className="p-2 bg-blue-100 rounded-lg">
+              <Users className="text-blue-600" size={20} />
             </div>
             <span className="text-xs font-semibold text-green-600 bg-green-100 px-2 py-1 rounded-full">
               {activePatients} activos
             </span>
           </div>
-          <div className="text-3xl font-bold text-slate-900">{patients.length}</div>
-          <div className="text-sm text-slate-500 mt-1">Pacientes Totales</div>
+          <div className="text-2xl font-bold text-slate-900">{patients.length}</div>
+          <div className="text-xs text-slate-500 mt-1">Pacientes Totales</div>
         </div>
 
         {/* Scheduled Sessions */}
-        <div className="bg-white rounded-xl border border-slate-200 p-6 hover:shadow-lg transition-shadow">
-          <div className="flex items-center justify-between mb-4">
-            <div className="p-3 bg-green-100 rounded-lg">
-              <Calendar className="text-green-600" size={24} />
+        <div className="bg-white rounded-xl border border-slate-200 p-4 hover:shadow-lg transition-shadow">
+          <div className="flex items-center justify-between mb-3">
+            <div className="p-2 bg-green-100 rounded-lg">
+              <Calendar className="text-green-600" size={20} />
             </div>
             <span className="text-xs font-semibold text-blue-600 bg-blue-100 px-2 py-1 rounded-full">
               +{sessionsNext7Days.length} próximos 7d
             </span>
           </div>
-          <div className="text-3xl font-bold text-slate-900">{scheduledSessions.length}</div>
-          <div className="text-sm text-slate-500 mt-1">Sesiones Programadas</div>
+          <div className="text-2xl font-bold text-slate-900">{scheduledSessions.length}</div>
+          <div className="text-xs text-slate-500 mt-1">Sesiones Programadas</div>
         </div>
 
         {/* Available Slots */}
-        <div className="bg-white rounded-xl border border-slate-200 p-6 hover:shadow-lg transition-shadow">
-          <div className="flex items-center justify-between mb-4">
-            <div className="p-3 bg-purple-100 rounded-lg">
-              <Clock className="text-purple-600" size={24} />
+        <div className="bg-white rounded-xl border border-slate-200 p-4 hover:shadow-lg transition-shadow">
+          <div className="flex items-center justify-between mb-3">
+            <div className="p-2 bg-purple-100 rounded-lg">
+              <Clock className="text-purple-600" size={20} />
             </div>
             <span className="text-xs font-semibold text-purple-600 bg-purple-100 px-2 py-1 rounded-full">
               Disponibles
             </span>
           </div>
-          <div className="text-3xl font-bold text-slate-900">{availableSessions.length}</div>
-          <div className="text-sm text-slate-500 mt-1">Espacios Libres</div>
+          <div className="text-2xl font-bold text-slate-900">{availableSessions.length}</div>
+          <div className="text-xs text-slate-500 mt-1">Espacios Libres</div>
         </div>
 
         {/* Completion Rate */}
-        <div className="bg-white rounded-xl border border-slate-200 p-6 hover:shadow-lg transition-shadow">
-          <div className="flex items-center justify-between mb-4">
-            <div className="p-3 bg-amber-100 rounded-lg">
-              <Target className="text-amber-600" size={24} />
+        <div className="bg-white rounded-xl border border-slate-200 p-4 hover:shadow-lg transition-shadow">
+          <div className="flex items-center justify-between mb-3">
+            <div className="p-2 bg-amber-100 rounded-lg">
+              <Target className="text-amber-600" size={20} />
             </div>
             <span className="text-xs font-semibold text-amber-600 bg-amber-100 px-2 py-1 rounded-full">
               Este mes
             </span>
           </div>
-          <div className="text-3xl font-bold text-slate-900">{completionRate}%</div>
-          <div className="text-sm text-slate-500 mt-1">Tasa de Asistencia</div>
+          <div className="text-2xl font-bold text-slate-900">{completionRate}%</div>
+          <div className="text-xs text-slate-500 mt-1">Tasa de Asistencia</div>
         </div>
       </div>
 
@@ -180,28 +423,39 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
       <div className="bg-white rounded-xl border border-slate-200 p-6">
         <div className="flex items-center gap-3 mb-6">
           <div className="p-2 bg-indigo-100 rounded-lg">
-            <BarChart3 className="text-indigo-600" size={20} />
+            <Activity className="text-indigo-600" size={20} />
           </div>
-          <h2 className="text-xl font-bold text-slate-900">Estadísticas del Mes</h2>
+          <h2 className="text-xl font-bold text-slate-900">Estadísticas del Período Seleccionado</h2>
+          <span className="text-sm text-slate-500">
+            ({new Date(dateRange.start).toLocaleDateString('es-ES')} - {new Date(dateRange.end).toLocaleDateString('es-ES')})
+          </span>
         </div>
         
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="text-center p-4 bg-green-50 rounded-xl border border-green-200">
             <CheckCircle className="text-green-600 mx-auto mb-2" size={32} />
-            <div className="text-3xl font-bold text-green-700">{thisMonthCompleted}</div>
+            <div className="text-3xl font-bold text-green-700">{rangeCompleted}</div>
             <div className="text-sm text-green-600 font-medium mt-1">Completadas</div>
           </div>
 
           <div className="text-center p-4 bg-blue-50 rounded-xl border border-blue-200">
             <Activity className="text-blue-600 mx-auto mb-2" size={32} />
-            <div className="text-3xl font-bold text-blue-700">{thisMonthScheduled}</div>
+            <div className="text-3xl font-bold text-blue-700">{rangeScheduled}</div>
             <div className="text-sm text-blue-600 font-medium mt-1">Programadas</div>
           </div>
 
           <div className="text-center p-4 bg-red-50 rounded-xl border border-red-200">
             <XCircle className="text-red-600 mx-auto mb-2" size={32} />
-            <div className="text-3xl font-bold text-red-700">{thisMonthCancelled}</div>
+            <div className="text-3xl font-bold text-red-700">{rangeCancelled}</div>
             <div className="text-sm text-red-600 font-medium mt-1">Canceladas</div>
+          </div>
+        </div>
+        
+        {/* Completion Rate for Range */}
+        <div className="mt-6 p-4 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg border border-purple-200">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold text-slate-700">Tasa de Asistencia en Período</span>
+            <span className="text-2xl font-bold text-purple-700">{rangeCompletionRate}%</span>
           </div>
         </div>
       </div>
@@ -305,16 +559,16 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
         
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
           <div className="text-center">
-            <div className="text-2xl font-bold text-green-700">{completionRate}%</div>
-            <div className="text-xs text-slate-600 mt-1">Asistencia</div>
+            <div className="text-2xl font-bold text-green-700">{rangeCompletionRate}%</div>
+            <div className="text-xs text-slate-600 mt-1">Asistencia Período</div>
           </div>
           <div className="text-center">
             <div className="text-2xl font-bold text-blue-700">{activePatients}</div>
             <div className="text-xs text-slate-600 mt-1">Pacientes Activos</div>
           </div>
           <div className="text-center">
-            <div className="text-2xl font-bold text-purple-700">{thisMonthSessions.length}</div>
-            <div className="text-xs text-slate-600 mt-1">Sesiones Este Mes</div>
+            <div className="text-2xl font-bold text-purple-700">{sessionsInRange.length}</div>
+            <div className="text-xs text-slate-600 mt-1">Sesiones en Período</div>
           </div>
           <div className="text-center">
             <div className="text-2xl font-bold text-amber-700">{sessionsNext7Days.length}</div>

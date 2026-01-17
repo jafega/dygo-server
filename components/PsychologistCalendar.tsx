@@ -65,14 +65,13 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
   useEffect(() => {
     loadSessions();
     loadPatients();
-  }, [psychologistId, currentDate]);
+  }, [psychologistId]);
 
   const loadSessions = async () => {
     setIsLoading(true);
     try {
-      const year = currentDate.getFullYear();
-      const month = currentDate.getMonth() + 1;
-      const response = await fetch(`${API_URL}/sessions?psychologistId=${psychologistId}&year=${year}&month=${month}`);
+      // Para la vista de lista, cargar todas las sesiones sin filtrar por mes
+      const response = await fetch(`${API_URL}/sessions?psychologistId=${psychologistId}`);
       if (response.ok) {
         const data = await response.json();
         setSessions(data);
@@ -117,7 +116,10 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
   };
 
   const handlePreviousMonth = () => {
-    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1));\n  };\n\n  const handleNextMonth = () => {
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1));
+  };
+
+  const handleNextMonth = () => {
     setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1));
   };
 
@@ -693,78 +695,107 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
           </div>
         )}
 
-        {/* Week View */}
+        {/* Week View - Horizontal List Format */}
         {viewMode === 'WEEK' && (
-          <div className="p-4">
-            <div className="overflow-x-auto">
-              <div className="min-w-[900px]">
-                <div className="flex divide-x divide-slate-200 border border-slate-200 rounded-xl">
-                  {getWeekDays().map(date => {
-                    const dateStr = date.toISOString().split('T')[0];
-                    const daySessions = getSessionsForDate(dateStr);
-                    const isToday = new Date().toDateString() === date.toDateString();
-                    
-                    return (
-                      <div key={dateStr} className="flex-1 min-w-[180px] bg-white flex flex-col">
-                        <div className={`px-3 py-2 border-b text-center ${isToday ? 'bg-indigo-50 border-indigo-200' : 'bg-slate-50 border-slate-200'}`}>
-                          <div className="text-xs uppercase tracking-wide font-semibold text-slate-500">
-                            {weekDays[date.getDay()]}
-                          </div>
-                          <div className={`text-2xl font-bold ${isToday ? 'text-indigo-700' : 'text-slate-900'}`}>
-                            {date.getDate()}
-                          </div>
-                        </div>
-                        <div className="flex-1 px-3 py-2 space-y-2 max-h-[420px] overflow-y-auto">
-                          {daySessions.length === 0 ? (
-                            <div className="text-xs text-slate-400 text-center py-10">Sin sesiones</div>
-                          ) : (
-                            daySessions.map(session => (
-                              <div
-                                key={session.id}
-                                onClick={() => {
-                                  if (session.status === 'available') {
-                                    setSelectedSlot(session);
-                                    setShowAssignPatient(true);
-                                  } else {
-                                    setSelectedSession(session);
-                                  }
-                                }}
-                                className={`text-xs px-2 py-2 rounded-lg shadow-sm border cursor-pointer transition-colors ${
-                                  session.status === 'available'
-                                    ? 'bg-purple-50 border-purple-200 text-purple-700'
-                                    : session.status === 'scheduled'
-                                    ? 'bg-green-50 border-green-200 text-green-700'
-                                    : session.status === 'completed'
-                                    ? 'bg-slate-50 border-slate-200 text-slate-700'
-                                    : 'bg-red-50 border-red-200 text-red-700'
-                                }`}
-                              >
-                                <div className="flex items-center justify-between mb-1">
-                                  <span className="font-semibold text-[11px]">
-                                    {session.startTime} - {session.endTime}
-                                  </span>
-                                  {session.type === 'online' ? (
-                                    <Video size={12} className="text-indigo-500" />
-                                  ) : session.type === 'home-visit' ? (
-                                    <MapPin size={12} className="text-green-500" />
-                                  ) : (
-                                    <MapPin size={12} className="text-purple-500" />
-                                  )}
-                                </div>
-                                <div className="text-[11px] font-medium truncate">{session.patientName}</div>
-                                {session.notes && (
-                                  <div className="text-[10px] text-slate-500 mt-1 line-clamp-2">{session.notes}</div>
+          <div className="p-4 space-y-3">
+            {getWeekDays().map(date => {
+              const dateStr = date.toISOString().split('T')[0];
+              const daySessions = getSessionsForDate(dateStr);
+              const isToday = new Date().toDateString() === date.toDateString();
+              
+              return (
+                <div
+                  key={dateStr}
+                  className={`
+                    relative w-full flex flex-row items-stretch rounded-xl border transition-all min-h-[100px]
+                    ${isToday ? 'border-indigo-400 ring-1 ring-indigo-400 bg-indigo-50/20' : 'border-slate-200 bg-white'}
+                  `}
+                >
+                  {/* Left: Date Column */}
+                  <div className={`w-20 sm:w-24 shrink-0 flex flex-col items-center justify-center border-r p-2 ${isToday ? 'border-indigo-200 bg-indigo-50/50' : 'border-slate-100 bg-slate-50/50'}`}>
+                    <span className={`text-xs font-bold uppercase tracking-wide mb-1 ${isToday ? 'text-indigo-600' : 'text-slate-400'}`}>
+                      {weekDays[date.getDay()]}
+                    </span>
+                    <span className={`text-2xl sm:text-3xl font-bold ${isToday ? 'text-indigo-700' : 'text-slate-700'}`}>
+                      {date.getDate()}
+                    </span>
+                    {daySessions.length > 0 && (
+                      <div className="mt-2 text-xs font-semibold text-slate-500">
+                        {daySessions.length} sesión{daySessions.length !== 1 ? 'es' : ''}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Right: Sessions Content */}
+                  <div className="flex-1 p-3 sm:p-4 flex flex-col justify-center">
+                    {daySessions.length === 0 ? (
+                      <div className="h-full flex items-center text-slate-300 text-sm italic">
+                        Sin sesiones
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {daySessions.map(session => (
+                          <div
+                            key={session.id}
+                            onClick={() => {
+                              if (session.status === 'available') {
+                                setSelectedSlot(session);
+                                setShowAssignPatient(true);
+                              } else {
+                                setSelectedSession(session);
+                              }
+                            }}
+                            className={`px-3 py-2 rounded-lg cursor-pointer transition-all hover:shadow-md border ${
+                              session.status === 'available'
+                                ? 'bg-purple-50 border-purple-200 hover:bg-purple-100'
+                                : session.status === 'scheduled'
+                                ? 'bg-green-50 border-green-200 hover:bg-green-100'
+                                : session.status === 'completed'
+                                ? 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                                : 'bg-red-50 border-red-200 hover:bg-red-100'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 flex-1">
+                                <span className={`text-xs font-semibold ${
+                                  session.status === 'available' ? 'text-purple-700' :
+                                  session.status === 'scheduled' ? 'text-green-700' :
+                                  session.status === 'completed' ? 'text-slate-700' : 'text-red-700'
+                                }`}>
+                                  {session.startTime} - {session.endTime}
+                                </span>
+                                {session.type === 'online' ? (
+                                  <Video size={14} className="text-indigo-500" />
+                                ) : session.type === 'home-visit' ? (
+                                  <MapPin size={14} className="text-green-500" />
+                                ) : (
+                                  <MapPin size={14} className="text-purple-500" />
                                 )}
                               </div>
-                            ))
-                          )}
-                        </div>
+                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                session.status === 'available' ? 'bg-purple-100 text-purple-700' :
+                                session.status === 'scheduled' ? 'bg-green-100 text-green-700' :
+                                session.status === 'completed' ? 'bg-slate-100 text-slate-700' : 'bg-red-100 text-red-700'
+                              }`}>
+                                {session.status === 'available' ? 'Disponible' :
+                                 session.status === 'scheduled' ? 'Programada' :
+                                 session.status === 'completed' ? 'Completada' : 'Cancelada'}
+                              </span>
+                            </div>
+                            {session.patientName && (
+                              <div className="text-xs text-slate-700 mt-1 font-medium">{session.patientName}</div>
+                            )}
+                            {session.notes && (
+                              <div className="text-xs text-slate-500 mt-1 line-clamp-1">{session.notes}</div>
+                            )}
+                          </div>
+                        ))}
                       </div>
-                    );
-                  })}
+                    )}
+                  </div>
                 </div>
-              </div>
-            </div>
+              );
+            })}
           </div>
         )}
 

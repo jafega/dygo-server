@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { JournalEntry } from '../types';
-import { ChevronLeft, ChevronRight, Layers, Plus, Calendar as CalendarIcon, LayoutGrid } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Layers, Plus, Calendar as CalendarIcon, LayoutGrid, Clock } from 'lucide-react';
 
 interface CalendarViewProps {
   entries: JournalEntry[];
@@ -12,7 +12,7 @@ type ViewMode = 'MONTH' | 'WEEK' | 'LIST';
 
 const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSelectEntry }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [viewMode, setViewMode] = useState<ViewMode>('MONTH');
+  const [viewMode, setViewMode] = useState<ViewMode>('LIST');
 
   // Helpers
   const getDaysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
@@ -138,23 +138,23 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
 
         {/* View Toggle */}
         <div className="bg-slate-100 p-1 rounded-lg flex shrink-0">
-            <button 
-                onClick={() => setViewMode('WEEK')}
-                className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${viewMode === 'WEEK' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-            >
-                <Layers size={14} /> Semana
-            </button>
-            <button 
-                onClick={() => setViewMode('MONTH')}
-                className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${viewMode === 'MONTH' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-            >
-                <CalendarIcon size={14} /> Mes
-            </button>
           <button 
             onClick={() => setViewMode('LIST')}
             className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${viewMode === 'LIST' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
           >
             <LayoutGrid size={14} /> Lista
+          </button>
+          <button 
+            onClick={() => setViewMode('WEEK')}
+            className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${viewMode === 'WEEK' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            <Layers size={14} /> Semana
+          </button>
+          <button 
+            onClick={() => setViewMode('MONTH')}
+            className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${viewMode === 'MONTH' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            <CalendarIcon size={14} /> Calendario
           </button>
         </div>
       </div>

@@ -183,6 +183,17 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
     }
   };
 
+  const handleRevokeSentInvitation = async (invId: string) => {
+    try {
+      await rejectInvitation(invId);
+      setToast({ type: 'success', text: 'Solicitud revocada' });
+      await loadConnections();
+    } catch (err: any) {
+      console.error('Error revoking invitation', err);
+      setToast({ type: 'error', text: err?.message || 'No se pudo revocar la solicitud' });
+    }
+  };
+
   const filteredDirectory = useMemo(() => {
     const query = directorySearch.trim().toLowerCase();
     return allPsychologists.filter(psych => {
@@ -379,6 +390,31 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
                   </button>
                 </div>
               </div>
+
+              {sentInvitations.length > 0 && (
+                <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+                  <h4 className="text-sm font-bold text-slate-600 uppercase tracking-wide mb-4 flex items-center gap-2">
+                    <Mail size={14} /> Solicitudes pendientes enviadas
+                  </h4>
+                  <div className="space-y-3">
+                    {sentInvitations.map(inv => (
+                      <div key={inv.id} className="p-4 rounded-xl border border-slate-100 bg-slate-50 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">{inv.toUserEmail}</p>
+                          <p className="text-xs text-slate-500">Enviada por {inv.fromPsychologistName}</p>
+                        </div>
+                        <button 
+                          onClick={() => handleRevokeSentInvitation(inv.id)} 
+                          className="px-4 py-2 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-sm flex items-center gap-1"
+                        >
+                          <X size={14} />
+                          Revocar solicitud
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
                 <div className="flex items-center justify-between mb-4">
