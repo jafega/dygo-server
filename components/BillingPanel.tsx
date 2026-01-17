@@ -10,10 +10,11 @@ interface Invoice {
   amount: number;
   date: string;
   dueDate: string;
-  status: 'paid' | 'pending' | 'overdue';
+  status: 'paid' | 'pending' | 'overdue' | 'cancelled';
   stripePaymentLink?: string;
   description: string;
   items: InvoiceItem[];
+  cancelledAt?: string;
 }
 
 interface InvoiceItem {
@@ -177,6 +178,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
       case 'paid': return 'bg-green-100 text-green-700 border-green-200';
       case 'pending': return 'bg-yellow-100 text-yellow-700 border-yellow-200';
       case 'overdue': return 'bg-red-100 text-red-700 border-red-200';
+      case 'cancelled': return 'bg-slate-100 text-slate-700 border-slate-200';
       default: return 'bg-slate-100 text-slate-700 border-slate-200';
     }
   };
@@ -186,6 +188,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
       case 'paid': return <Check size={14} />;
       case 'pending': return <Clock size={14} />;
       case 'overdue': return <Clock size={14} />;
+      case 'cancelled': return <Trash2 size={14} />;
       default: return null;
     }
   };
@@ -195,8 +198,49 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
       case 'paid': return 'Pagada';
       case 'pending': return 'Pendiente';
       case 'overdue': return 'Vencida';
+      case 'cancelled': return 'Cancelada';
       default: return status;
     }
+  };
+
+  const handleUpdateStatus = async (invoiceId: string, newStatus: string) => {
+    try {
+      const response = await fetch(`${API_URL}/invoices/${invoiceId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      });
+
+      if (response.ok) {
+        await loadInvoices();
+        alert('Estado actualizado correctamente');
+      }
+    } catch (error) {
+      console.error('Error updating invoice status:', error);
+      alert('Error al actualizar el estado');
+    }
+  };
+
+  const handleCancelInvoice = async (invoiceId: string) => {
+    if (!confirm('¿Estás seguro de que quieres cancelar esta factura?')) return;
+
+    try {
+      const response = await fetch(`${API_URL}/invoices/${invoiceId}/cancel`, {
+        method: 'POST'
+      });
+
+      if (response.ok) {
+        await loadInvoices();
+        alert('Factura cancelada correctamente');
+      }
+    } catch (error) {
+      console.error('Error cancelling invoice:', error);
+      alert('Error al cancelar la factura');
+    }
+  };
+
+  const handleDownloadPDF = (invoiceId: string, invoiceNumber: string) => {
+    window.open(`${API_URL}/invoices/${invoiceId}/pdf`, '_blank');
   };
 
   return (
@@ -266,12 +310,12 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
                 </tr>
               ) : (
                 invoices.map((invoice) => (
-                  <tr key={invoice.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-4 py-3 text-sm font-medium text-slate-900">{invoice.invoiceNumber}</td>
-                    <td className="px-4 py-3 text-sm text-slate-700">{invoice.patientName}</td>
-                    <td className="px-4 py-3 text-sm text-slate-600">{new Date(invoice.date).toLocaleDateString()}</td>
-                    <td className="px-4 py-3 text-sm text-slate-600">{new Date(invoice.dueDate).toLocaleDateString()}</td>
-                    <td className="px-4 py-3 text-sm font-semibold text-slate-900 text-right">€{invoice.amount.toFixed(2)}</td>
+                  <tr key={invoice.id} className={`hover:bg-slate-50 transition-colors ${invoice.status === 'cancelled' ? 'opacity-60' : ''}`}>
+                    <td className={`px-4 py-3 text-sm font-medium text-slate-900 ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>{invoice.invoiceNumber}</td>
+                    <td className={`px-4 py-3 text-sm text-slate-700 ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>{invoice.patientName}</td>
+                    <td className={`px-4 py-3 text-sm text-slate-600 ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>{new Date(invoice.date).toLocaleDateString()}</td>
+                    <td className={`px-4 py-3 text-sm text-slate-600 ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>{new Date(invoice.dueDate).toLocaleDateString()}</td>
+                    <td className={`px-4 py-3 text-sm font-semibold text-slate-900 text-right ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>€{invoice.amount.toFixed(2)}</td>
                     <td className="px-4 py-3">
                       <div className="flex justify-center">
                         <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(invoice.status)}`}>
@@ -289,14 +333,30 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
                         >
                           <Eye size={16} />
                         </button>
-                        {invoice.status !== 'paid' && (
-                          <button
-                            onClick={() => handleGeneratePaymentLink(invoice.id)}
-                            className="p-1.5 text-slate-600 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-                            title="Generar link de pago"
-                          >
-                            <ExternalLink size={16} />
-                          </button>
+                        <button
+                          onClick={() => handleDownloadPDF(invoice.id, invoice.invoiceNumber)}
+                          className="p-1.5 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          title="Descargar PDF"
+                        >
+                          <Download size={16} />
+                        </button>
+                        {invoice.status !== 'paid' && invoice.status !== 'cancelled' && (
+                          <>
+                            <button
+                              onClick={() => handleGeneratePaymentLink(invoice.id)}
+                              className="p-1.5 text-slate-600 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                              title="Generar link de pago"
+                            >
+                              <ExternalLink size={16} />
+                            </button>
+                            <button
+                              onClick={() => handleCancelInvoice(invoice.id)}
+                              className="p-1.5 text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Cancelar factura"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </>
                         )}
                       </div>
                     </td>

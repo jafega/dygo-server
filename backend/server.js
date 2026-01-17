@@ -87,7 +87,9 @@ const createInitialDb = () => ({
   entries: [],
   goals: [],
   invitations: [],
-  settings: {}
+  settings: {},
+  sessions: [],
+  invoices: []
 });
 
 // If you want durable persistence across restarts on platforms like Render, set USE_SQLITE=true
@@ -195,6 +197,8 @@ if (USE_POSTGRES) {
     await pgPool.query(`CREATE TABLE IF NOT EXISTS goals (id TEXT PRIMARY KEY, data JSONB NOT NULL)`);
     await pgPool.query(`CREATE TABLE IF NOT EXISTS invitations (id TEXT PRIMARY KEY, data JSONB NOT NULL)`);
     await pgPool.query(`CREATE TABLE IF NOT EXISTS settings (id TEXT PRIMARY KEY, data JSONB NOT NULL)`);
+    await pgPool.query(`CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, data JSONB NOT NULL)`);
+    await pgPool.query(`CREATE TABLE IF NOT EXISTS invoices (id TEXT PRIMARY KEY, data JSONB NOT NULL)`);
 
     // If Postgres empty, try to migrate from sqlite or db.json
     const { rows } = await pgPool.query("SELECT COUNT(*) as c FROM entries");
@@ -216,6 +220,10 @@ if (USE_POSTGRES) {
           for (const i of invitations) await insert('invitations', i.id, JSON.parse(i.data));
           const settings = read('settings');
           for (const s of settings) await insert('settings', s.id, JSON.parse(s.data));
+          const sessions = read('sessions');
+          for (const sess of sessions) await insert('sessions', sess.id, JSON.parse(sess.data));
+          const invoices = read('invoices');
+          for (const inv of invoices) await insert('invoices', inv.id, JSON.parse(inv.data));
           console.log('✅ Migrated data from SQLite to Postgres');
         } catch (mErr) { console.error('❌ Failed migrating from sqlite to postgres', mErr); }
       } else if (fs.existsSync(DB_FILE)) {
@@ -238,6 +246,8 @@ if (USE_POSTGRES) {
             await insert('goals', parsed.goals);
             await insert('invitations', parsed.invitations);
             await insert('settings', parsed.settings, true);
+            await insert('sessions', parsed.sessions);
+            await insert('invoices', parsed.invoices);
             console.log('✅ Migrated db.json to Postgres');
           }
         } catch (mErr) { console.error('❌ Failed migrating db.json to postgres', mErr); }
@@ -258,7 +268,9 @@ if (USE_POSTGRES) {
       const invitations = await q('invitations');
       const settingsArr = await q('settings');
       const settings = Object.fromEntries(settingsArr.map(s => [s.id, s]));
-      pgDbCache = { users, entries, goals, invitations, settings };
+      const sessions = await q('sessions');
+      const invoices = await q('invoices');
+      pgDbCache = { users, entries, goals, invitations, settings, sessions, invoices };
       console.log('ℹ️ Postgres data loaded into cache');
     } catch (err) {
       console.error('❌ Failed populating pg cache', err);
@@ -327,9 +339,17 @@ async function loadSupabaseCache() {
   if (!supabaseAdmin) return null;
 
   const readTable = async (table) => {
-    const { data, error } = await supabaseAdmin.from(table).select('*');
-    if (error) throw error;
-    return data || [];
+    try {
+      const { data, error } = await supabaseAdmin.from(table).select('*');
+      if (error) {
+        console.warn(`⚠️ Could not load table '${table}':`, error.message);
+        return [];
+      }
+      return data || [];
+    } catch (err) {
+      console.warn(`⚠️ Error reading table '${table}':`, err.message);
+      return [];
+    }
   };
 
   const usersRows = await readTable('users');
@@ -337,14 +357,18 @@ async function loadSupabaseCache() {
   const goalsRows = await readTable('goals');
   const invitationsRows = await readTable('invitations');
   const settingsRows = await readTable('settings');
+  const sessionsRows = await readTable('sessions');
+  const invoicesRows = await readTable('invoices');
 
   const users = usersRows.map(normalizeSupabaseRow);
   const entries = entriesRows.map(normalizeSupabaseRow);
   const goals = goalsRows.map(normalizeSupabaseRow);
   const invitations = invitationsRows.map(normalizeSupabaseRow);
+  const sessions = sessionsRows.map(normalizeSupabaseRow);
+  const invoices = invoicesRows.map(normalizeSupabaseRow);
   const settings = Object.fromEntries(settingsRows.map(row => [row.id, (row.data && typeof row.data === 'object') ? row.data : normalizeSupabaseRow(row)]));
 
-  return { users, entries, goals, invitations, settings };
+  return { users, entries, goals, invitations, settings, sessions, invoices };
 }
 
 async function readSupabaseTable(table) {
@@ -484,12 +508,16 @@ async function saveSupabaseDb(data, prevCache = null) {
   const invitationsRows = (data.invitations || []).map(i => ({ id: i.id, data: i }));
   const settings = data.settings || {};
   const settingsRows = Object.keys(settings).map(k => ({ id: k, data: settings[k] }));
+  const sessionsRows = (data.sessions || []).map(s => ({ id: s.id, data: s }));
+  const invoicesRows = (data.invoices || []).map(inv => ({ id: inv.id, data: inv }));
 
   await upsertTable('users', usersRows);
   await upsertTable('entries', entriesRows);
   await upsertTable('goals', goalsRows);
   await upsertTable('invitations', invitationsRows);
   await upsertTable('settings', settingsRows);
+  await upsertTable('sessions', sessionsRows);
+  await upsertTable('invoices', invoicesRows);
 
   if (prevCache) {
     await deleteMissing('users', (prevCache.users || []).map(u => u.id), usersRows.map(r => r.id));
@@ -497,6 +525,8 @@ async function saveSupabaseDb(data, prevCache = null) {
     await deleteMissing('goals', (prevCache.goals || []).map(g => g.id), goalsRows.map(r => r.id));
     await deleteMissing('invitations', (prevCache.invitations || []).map(i => i.id), invitationsRows.map(r => r.id));
     await deleteMissing('settings', Object.keys(prevCache.settings || {}), settingsRows.map(r => r.id));
+    await deleteMissing('sessions', (prevCache.sessions || []).map(s => s.id), sessionsRows.map(r => r.id));
+    await deleteMissing('invoices', (prevCache.invoices || []).map(inv => inv.id), invoicesRows.map(r => r.id));
   }
 }
 
@@ -522,7 +552,9 @@ const getDb = () => {
     const invitations = read('invitations');
     const settingsArr = read('settings');
     const settings = Object.fromEntries(settingsArr.map((s) => [s.id, s]));
-    return { users, entries, goals, invitations, settings };
+    const sessions = read('sessions');
+    const invoices = read('invoices');
+    return { users, entries, goals, invitations, settings, sessions, invoices };
   }
 
   // 1. Si no existe, crearla
@@ -576,6 +608,8 @@ const saveDb = (data) => {
         await client.query('DELETE FROM goals');
         await client.query('DELETE FROM invitations');
         await client.query('DELETE FROM settings');
+        await client.query('DELETE FROM sessions');
+        await client.query('DELETE FROM invoices');
 
         const insert = async (table, id, obj) => client.query(`INSERT INTO ${table} (id, data) VALUES ($1,$2)`, [id, obj]);
 
@@ -585,6 +619,8 @@ const saveDb = (data) => {
         for (const i of (data.invitations || [])) await insert('invitations', i.id, i);
         const settings = data.settings || {};
         for (const k of Object.keys(settings)) await insert('settings', k, settings[k]);
+        for (const s of (data.sessions || [])) await insert('sessions', s.id, s);
+        for (const inv of (data.invoices || [])) await insert('invoices', inv.id, inv);
 
         await client.query('COMMIT');
       } catch (err) {
@@ -627,6 +663,8 @@ const saveDb = (data) => {
       (dbObj.invitations || []).forEach(i => insert.run({ table: 'invitations', id: i.id, data: JSON.stringify(i) }));
       const settings = dbObj.settings || {};
       Object.keys(settings).forEach(k => insert.run({ table: 'settings', id: k, data: JSON.stringify(settings[k]) }));
+      (dbObj.sessions || []).forEach(s => insert.run({ table: 'sessions', id: s.id, data: JSON.stringify(s) }));
+      (dbObj.invoices || []).forEach(inv => insert.run({ table: 'invoices', id: inv.id, data: JSON.stringify(inv) }));
     });
     try {
       tx(data);
@@ -1847,7 +1885,9 @@ app.get('/api/dbinfo', async (_req, res) => {
           entries: (db.entries || []).length,
           goals: (db.goals || []).length,
           invitations: (db.invitations || []).length,
-          settings: Object.keys(db.settings || {}).length
+          settings: Object.keys(db.settings || {}).length,
+          sessions: (db.sessions || []).length,
+          invoices: (db.invoices || []).length
         }
       });
     }
@@ -1901,6 +1941,420 @@ app.post('/api/invoices/payment-link', (req, res) => {
   saveDb(db);
   
   res.json({ paymentLink });
+});
+
+// Update invoice status
+app.patch('/api/invoices/:id', (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  
+  const db = getDb();
+  if (!db.invoices) db.invoices = [];
+  
+  const idx = db.invoices.findIndex(inv => inv.id === id);
+  if (idx === -1) return res.status(404).json({ error: 'Invoice not found' });
+  
+  db.invoices[idx] = { ...db.invoices[idx], ...req.body };
+  saveDb(db);
+  res.json(db.invoices[idx]);
+});
+
+// Cancel invoice
+app.post('/api/invoices/:id/cancel', (req, res) => {
+  const { id } = req.params;
+  
+  const db = getDb();
+  if (!db.invoices) db.invoices = [];
+  
+  const idx = db.invoices.findIndex(inv => inv.id === id);
+  if (idx === -1) return res.status(404).json({ error: 'Invoice not found' });
+  
+  db.invoices[idx].status = 'cancelled';
+  db.invoices[idx].cancelledAt = new Date().toISOString();
+  saveDb(db);
+  res.json(db.invoices[idx]);
+});
+
+// Generate PDF invoice
+app.get('/api/invoices/:id/pdf', (req, res) => {
+  const { id } = req.params;
+  
+  const db = getDb();
+  if (!db.invoices) db.invoices = [];
+  
+  const invoice = db.invoices.find(inv => inv.id === id);
+  if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+
+  // Obtener perfil del psicólogo para datos de la empresa
+  const psychProfile = (db.psychologistProfiles && db.psychologistProfiles[invoice.psychologistId]) || {
+    name: 'Psicólogo',
+    businessName: 'Servicios Profesionales de Psicología',
+    taxId: 'B-12345678',
+    address: 'Calle Principal, 123',
+    city: 'Madrid',
+    postalCode: '28001',
+    country: 'España',
+    phone: '+34 600 000 000',
+    email: 'contacto@psicologo.es'
+  };
+
+  // Calcular subtotal e IVA (21% en España)
+  const subtotal = invoice.amount / 1.21;
+  const iva = invoice.amount - subtotal;
+  
+  // Generate professional PDF HTML
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+      color: #333;
+      line-height: 1.6;
+      padding: 40px;
+      background: #fff;
+    }
+    .container { max-width: 800px; margin: 0 auto; }
+    
+    /* Header con logo y datos empresa */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 40px;
+      padding-bottom: 20px;
+      border-bottom: 3px solid #2563eb;
+    }
+    .company-info { flex: 1; }
+    .company-name { 
+      font-size: 24px; 
+      font-weight: bold; 
+      color: #2563eb;
+      margin-bottom: 10px;
+    }
+    .company-details { font-size: 13px; color: #666; line-height: 1.8; }
+    .invoice-title {
+      text-align: right;
+      flex: 1;
+    }
+    .invoice-title h1 { 
+      font-size: 32px; 
+      color: #1e40af;
+      margin-bottom: 5px;
+    }
+    .invoice-number { 
+      font-size: 16px; 
+      color: #666;
+      font-weight: normal;
+    }
+    
+    /* Información de factura y cliente */
+    .info-section {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 40px;
+      gap: 30px;
+    }
+    .info-box {
+      flex: 1;
+      background: #f8fafc;
+      padding: 20px;
+      border-radius: 8px;
+      border: 1px solid #e2e8f0;
+    }
+    .info-box h3 {
+      font-size: 14px;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+      font-weight: 600;
+    }
+    .info-row {
+      display: flex;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+    .info-label {
+      font-weight: 600;
+      min-width: 100px;
+      color: #475569;
+    }
+    .info-value { color: #1e293b; }
+    
+    /* Tabla de items */
+    .items-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 30px 0;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .items-table thead {
+      background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+      color: white;
+    }
+    .items-table th {
+      padding: 15px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .items-table th:last-child,
+    .items-table td:last-child {
+      text-align: right;
+    }
+    .items-table tbody tr {
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .items-table tbody tr:last-child {
+      border-bottom: none;
+    }
+    .items-table tbody tr:hover {
+      background: #f8fafc;
+    }
+    .items-table td {
+      padding: 15px;
+      font-size: 14px;
+    }
+    
+    /* Totales */
+    .totals-section {
+      margin-top: 30px;
+      display: flex;
+      justify-content: flex-end;
+    }
+    .totals-box {
+      min-width: 350px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .total-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 12px 20px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .total-row:last-child {
+      border-bottom: none;
+      background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+      color: white;
+      font-size: 18px;
+      font-weight: bold;
+      padding: 18px 20px;
+    }
+    .total-label { font-weight: 600; }
+    .total-value { font-weight: bold; }
+    
+    /* Badge de estado */
+    .status-badge {
+      display: inline-block;
+      padding: 6px 16px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .status-paid { background: #dcfce7; color: #166534; }
+    .status-pending { background: #fef3c7; color: #92400e; }
+    .status-overdue { background: #fee2e2; color: #991b1b; }
+    .status-cancelled { background: #fecaca; color: #7f1d1d; }
+    
+    /* Footer */
+    .footer {
+      margin-top: 60px;
+      padding-top: 20px;
+      border-top: 2px solid #e2e8f0;
+      text-align: center;
+      font-size: 12px;
+      color: #64748b;
+    }
+    .footer-title {
+      font-weight: 600;
+      color: #475569;
+      margin-bottom: 8px;
+    }
+    .payment-info {
+      background: #f1f5f9;
+      padding: 15px;
+      border-radius: 8px;
+      margin-top: 20px;
+      text-align: left;
+    }
+    .payment-info h4 {
+      color: #1e40af;
+      margin-bottom: 10px;
+      font-size: 14px;
+    }
+    
+    /* Estilos para facturas canceladas */
+    .cancelled .watermark {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) rotate(-45deg);
+      font-size: 120px;
+      color: rgba(220, 38, 38, 0.08);
+      z-index: -1;
+      font-weight: bold;
+      letter-spacing: 20px;
+    }
+    .cancelled-notice {
+      background: #fee2e2;
+      border: 2px solid #dc2626;
+      border-radius: 8px;
+      padding: 15px;
+      margin-top: 30px;
+      color: #991b1b;
+      font-weight: 600;
+      text-align: center;
+    }
+    .line-through { text-decoration: line-through; opacity: 0.6; }
+  </style>
+</head>
+<body>
+  <div class="container ${invoice.status === 'cancelled' ? 'cancelled' : ''}">
+    ${invoice.status === 'cancelled' ? '<div class="watermark">CANCELADA</div>' : ''}
+    
+    <!-- Header -->
+    <div class="header">
+      <div class="company-info">
+        <div class="company-name">${psychProfile.businessName || psychProfile.name}</div>
+        <div class="company-details">
+          ${psychProfile.taxId ? `<div>NIF/CIF: ${psychProfile.taxId}</div>` : ''}
+          ${psychProfile.address ? `<div>${psychProfile.address}</div>` : ''}
+          ${psychProfile.postalCode || psychProfile.city ? `<div>${psychProfile.postalCode} ${psychProfile.city}</div>` : ''}
+          ${psychProfile.country ? `<div>${psychProfile.country}</div>` : ''}
+          ${psychProfile.phone ? `<div>Tel: ${psychProfile.phone}</div>` : ''}
+          ${psychProfile.email ? `<div>Email: ${psychProfile.email}</div>` : ''}
+        </div>
+      </div>
+      <div class="invoice-title">
+        <h1>FACTURA</h1>
+        <div class="invoice-number">${invoice.invoiceNumber}</div>
+      </div>
+    </div>
+    
+    <!-- Información de factura y cliente -->
+    <div class="info-section">
+      <div class="info-box">
+        <h3>Datos de Facturación</h3>
+        <div class="info-row">
+          <span class="info-label">Fecha:</span>
+          <span class="info-value">${new Date(invoice.date).toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Vencimiento:</span>
+          <span class="info-value">${new Date(invoice.dueDate).toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Estado:</span>
+          <span class="status-badge status-${invoice.status}">${
+            invoice.status === 'paid' ? 'Pagada' : 
+            invoice.status === 'pending' ? 'Pendiente' : 
+            invoice.status === 'overdue' ? 'Vencida' : 
+            'Cancelada'
+          }</span>
+        </div>
+      </div>
+      
+      <div class="info-box">
+        <h3>Cliente</h3>
+        <div class="info-row">
+          <span class="info-label">Nombre:</span>
+          <span class="info-value">${invoice.patientName}</span>
+        </div>
+        ${invoice.description ? `
+        <div class="info-row">
+          <span class="info-label">Concepto:</span>
+          <span class="info-value">${invoice.description}</span>
+        </div>
+        ` : ''}
+      </div>
+    </div>
+    
+    <!-- Tabla de items -->
+    <table class="items-table">
+      <thead>
+        <tr>
+          <th>Descripción</th>
+          <th style="width: 100px; text-align: center;">Cantidad</th>
+          <th style="width: 120px;">Precio Unit.</th>
+          <th style="width: 120px;">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${(invoice.items || [{description: 'Servicio de psicología', quantity: 1, unitPrice: invoice.amount / 1.21}]).map(item => `
+          <tr ${invoice.status === 'cancelled' ? 'class="line-through"' : ''}>
+            <td>${item.description}</td>
+            <td style="text-align: center;">${item.quantity}</td>
+            <td>${(item.unitPrice).toFixed(2)} €</td>
+            <td>${(item.quantity * item.unitPrice).toFixed(2)} €</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+    
+    <!-- Totales -->
+    <div class="totals-section">
+      <div class="totals-box">
+        <div class="total-row">
+          <span class="total-label">Subtotal (Base imponible):</span>
+          <span class="total-value">${subtotal.toFixed(2)} €</span>
+        </div>
+        <div class="total-row">
+          <span class="total-label">IVA (21%):</span>
+          <span class="total-value">${iva.toFixed(2)} €</span>
+        </div>
+        <div class="total-row">
+          <span class="total-label">TOTAL:</span>
+          <span class="total-value">${invoice.amount.toFixed(2)} €</span>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Aviso de cancelación -->
+    ${invoice.status === 'cancelled' ? `
+      <div class="cancelled-notice">
+        ⚠️ Esta factura fue cancelada el ${new Date(invoice.cancelledAt || invoice.date).toLocaleDateString('es-ES')}
+      </div>
+    ` : ''}
+    
+    <!-- Footer -->
+    <div class="footer">
+      ${invoice.status !== 'cancelled' && invoice.status !== 'paid' ? `
+        <div class="payment-info">
+          <h4>Información de Pago</h4>
+          <div style="color: #475569;">
+            ${psychProfile.iban ? `<div>IBAN: ${psychProfile.iban}</div>` : ''}
+            <div style="margin-top: 8px;">Por favor, incluya el número de factura ${invoice.invoiceNumber} como referencia en su pago.</div>
+          </div>
+        </div>
+      ` : ''}
+      
+      <div style="margin-top: 30px;">
+        <div class="footer-title">Términos y Condiciones</div>
+        <div>Los servicios profesionales de psicología están exentos de retención de IRPF según la normativa vigente.</div>
+        <div>Esta factura es válida sin necesidad de firma según el Real Decreto 1496/2003.</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+  `;
+  
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Content-Disposition', `inline; filename="factura-${invoice.invoiceNumber}.html"`);
+  res.send(html);
 });
 
 // --- PSYCHOLOGIST PROFILE ---
