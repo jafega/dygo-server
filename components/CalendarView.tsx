@@ -1,22 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { JournalEntry } from '../types';
-import { ChevronLeft, ChevronRight, Layers, Plus, Calendar as CalendarIcon, LayoutGrid, Clock, Video, MapPin, User, X } from 'lucide-react';
-import { getCurrentUser } from '../services/authService';
-import { API_URL } from '../services/config';
-
-interface Session {
-  id: string;
-  patientId: string;
-  patientName: string;
-  psychologistId: string;
-  date: string;
-  startTime: string;
-  endTime: string;
-  type: 'in-person' | 'online';
-  status: 'scheduled' | 'completed' | 'cancelled' | 'available';
-  notes?: string;
-  meetLink?: string;
-}
+import { ChevronLeft, ChevronRight, Layers, Plus, Calendar as CalendarIcon, LayoutGrid } from 'lucide-react';
 
 interface CalendarViewProps {
   entries: JournalEntry[];
@@ -29,103 +13,6 @@ type ViewMode = 'MONTH' | 'WEEK' | 'LIST';
 const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSelectEntry }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<ViewMode>('MONTH');
-  const [patientSessions, setPatientSessions] = useState<Session[]>([]);
-  const [psychologistId, setPsychologistId] = useState<string | null>(null);
-  const [showAvailability, setShowAvailability] = useState(false);
-  const [availableSlots, setAvailableSlots] = useState<Session[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-
-  useEffect(() => {
-    const loadPatientData = async () => {
-      const user = await getCurrentUser();
-      console.log('[CalendarView] Current user:', user);
-      if (!user || user.role !== 'PATIENT') return;
-      
-      // Get assigned psychologist
-      console.log('[CalendarView] accessList:', user.accessList);
-      if (user.accessList && user.accessList.length > 0) {
-        console.log('[CalendarView] Setting psychologistId:', user.accessList[0]);
-        setPsychologistId(user.accessList[0]);
-        
-        // Load patient sessions
-        try {
-          const response = await fetch(`${API_URL}/sessions?patientId=${user.id}`);
-          console.log('[CalendarView] Patient sessions response:', response.status);
-          if (response.ok) {
-            const sessions = await response.json();
-            console.log('[CalendarView] Patient sessions loaded:', sessions.length);
-            setPatientSessions(sessions.filter((s: Session) => s.status === 'scheduled' || s.status === 'completed'));
-          }
-        } catch (err) {
-          console.error('Error loading patient sessions:', err);
-        }
-      } else {
-        console.warn('[CalendarView] ⚠️  El paciente no tiene psicólogo asignado en accessList');
-      }
-    };
-    
-    loadPatientData();
-  }, []);
-
-  const loadAvailability = async () => {
-    console.log('[CalendarView] loadAvailability called, psychologistId:', psychologistId);
-    if (!psychologistId) {
-      console.warn('[CalendarView] ⚠️  No hay psychologistId, no se puede cargar disponibilidad');
-      return;
-    }
-    
-    setIsLoading(true);
-    try {
-      const url = `${API_URL}/sessions?psychologistId=${psychologistId}`;
-      console.log('[CalendarView] Fetching availability from:', url);
-      const response = await fetch(url);
-      console.log('[CalendarView] Response status:', response.status);
-      if (response.ok) {
-        const sessions = await response.json();
-        console.log('[CalendarView] Total sessions received:', sessions.length);
-        const available = sessions.filter((s: Session) => s.status === 'available');
-        console.log('[CalendarView] Available sessions:', available.length);
-        setAvailableSlots(available);
-        setShowAvailability(true);
-      }
-    } catch (err) {
-      console.error('Error loading availability:', err);
-      alert('Error al cargar la disponibilidad');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const bookSession = async (slotId: string) => {
-    const user = await getCurrentUser();
-    if (!user) return;
-    
-    try {
-      const response = await fetch(`${API_URL}/sessions/${slotId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          status: 'scheduled',
-          patientId: user.id,
-          patientName: user.name
-        })
-      });
-      
-      if (response.ok) {
-        alert('¡Cita reservada exitosamente!');
-        setShowAvailability(false);
-        // Reload sessions
-        const sessionsResponse = await fetch(`${API_URL}/sessions?patientId=${user.id}`);
-        if (sessionsResponse.ok) {
-          const sessions = await sessionsResponse.json();
-          setPatientSessions(sessions.filter((s: Session) => s.status === 'scheduled' || s.status === 'completed'));
-        }
-      }
-    } catch (err) {
-      console.error('Error booking session:', err);
-      alert('Error al reservar la cita');
-    }
-  };
 
   // Helpers
   const getDaysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
@@ -238,73 +125,6 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
   return (
   <>
     <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 md:p-6 transition-all duration-300">
-      
-      {/* Patient Appointments Section */}
-      {psychologistId && (
-        <div className="mb-6 pb-6 border-b border-slate-200">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-bold text-slate-700 flex items-center gap-2">
-              <User size={16} /> Mis Citas con Psicólogo
-            </h3>
-            <button
-              onClick={loadAvailability}
-              disabled={isLoading}
-              className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-semibold rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
-            >
-              {isLoading ? 'Cargando...' : 'Ver Disponibilidad'}
-            </button>
-          </div>
-          
-          {patientSessions.length === 0 ? (
-            <div className="text-center py-4 text-slate-400 text-sm">
-              No tienes citas programadas. Haz clic en "Ver Disponibilidad" para reservar.
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {patientSessions.map(session => (
-                <div key={session.id} className="p-3 bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100 rounded-xl">
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      {session.type === 'online' ? (
-                        <Video size={14} className="text-indigo-600" />
-                      ) : (
-                        <MapPin size={14} className="text-purple-600" />
-                      )}
-                      <span className="text-xs font-semibold text-slate-700">
-                        {session.type === 'online' ? 'Online' : 'Presencial'}
-                      </span>
-                    </div>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                      session.status === 'scheduled' ? 'bg-green-100 text-green-700' :
-                      session.status === 'completed' ? 'bg-slate-100 text-slate-600' :
-                      'bg-red-100 text-red-700'
-                    }`}>
-                      {session.status === 'scheduled' ? 'Programada' :
-                       session.status === 'completed' ? 'Completada' : 'Cancelada'}
-                    </span>
-                  </div>
-                  <div className="text-sm font-bold text-slate-800">
-                    {new Date(session.date).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}
-                  </div>
-                  <div className="text-xs text-slate-600 mt-1">
-                    {session.startTime} - {session.endTime}
-                  </div>
-                  {session.meetLink && session.status === 'scheduled' && (
-                    <a
-                      href={session.meetLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-2 inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-700 font-semibold"
-                    >
-                      <Video size={12} /> Unirse a la videollamada
-                    </a>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Header Controls */}
       <div className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
@@ -541,74 +361,6 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
       </div>
       )}
     </div>
-
-    {/* Availability Modal */}
-    {showAvailability && (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold text-slate-800">Disponibilidad del Psicólogo</h2>
-            <button
-              onClick={() => setShowAvailability(false)}
-              className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
-            >
-              <X size={20} />
-            </button>
-          </div>
-
-          {availableSlots.length === 0 ? (
-            <div className="text-center py-10 text-slate-400">
-              No hay horarios disponibles en este momento.
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {availableSlots.map(slot => (
-                <div
-                  key={slot.id}
-                  className="p-4 border border-slate-200 rounded-xl hover:border-indigo-300 hover:bg-indigo-50/30 transition-all"
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="flex items-center gap-3 mb-2">
-                        <div className="text-sm font-bold text-slate-800">
-                          {new Date(slot.date).toLocaleDateString('es-ES', { 
-                            weekday: 'long', 
-                            day: 'numeric', 
-                            month: 'long', 
-                            year: 'numeric' 
-                          })}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {slot.type === 'online' ? (
-                            <span className="text-xs font-semibold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-full flex items-center gap-1">
-                              <Video size={12} /> Online
-                            </span>
-                          ) : (
-                            <span className="text-xs font-semibold text-purple-600 bg-purple-50 px-2 py-1 rounded-full flex items-center gap-1">
-                              <MapPin size={12} /> Presencial
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="text-sm text-slate-600 flex items-center gap-2">
-                        <Clock size={14} />
-                        {slot.startTime} - {slot.endTime}
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => bookSession(slot.id)}
-                      className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-colors"
-                    >
-                      Reservar
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    )}
   </>
   );
 };
