@@ -606,11 +606,12 @@ const getDb = () => {
   }
 };
 
-const saveDb = (data) => {
+const saveDb = (data, options = {}) => {
+  const { awaitPersistence = false } = options;
   // Keep in-memory cache in sync for Postgres, then persist in background
   if (pgPool) {
     pgDbCache = data;
-    (async () => {
+    const persistPromise = (async () => {
       let client;
       try {
         client = await pgPool.connect();
@@ -646,20 +647,20 @@ const saveDb = (data) => {
       }
     })();
 
-    return;
+    return awaitPersistence ? persistPromise : undefined;
   }
 
   if (supabaseAdmin) {
     const prevCache = supabaseDbCache;
     supabaseDbCache = data;
-    (async () => {
+    const persistPromise = (async () => {
       try {
         await saveSupabaseDb(data, prevCache);
       } catch (err) {
         console.error('❌ Error guardando en Supabase REST:', err);
       }
     })();
-    return;
+    return awaitPersistence ? persistPromise : undefined;
   }
 
   if (sqliteDb) {
@@ -686,12 +687,12 @@ const saveDb = (data) => {
     } catch (e) {
       console.error('❌ Error guardando en SQLite:', e);
     }
-    return;
+    return awaitPersistence ? Promise.resolve() : undefined;
   }
 
   if (IS_SERVERLESS) {
     console.warn('⚠️ Skipping db.json write on serverless read-only filesystem. Enable Postgres or SQLite for persistence.');
-    return;
+    return awaitPersistence ? Promise.resolve() : undefined;
   }
 
   try {
@@ -699,6 +700,7 @@ const saveDb = (data) => {
   } catch (error) {
     console.error('❌ Error guardando en db.json:', error);
   }
+  return awaitPersistence ? Promise.resolve() : undefined;
 };
 
 // --- LOGGING SENCILLO ---
@@ -1334,7 +1336,7 @@ app.get('/api/users', async (req, res) => {
   }
 });
 
-app.put('/api/users/:id', (req, res) => {
+app.put('/api/users/:id', async (req, res) => {
   const db = getDb();
   const idx = db.users.findIndex((u) => u.id === req.params.id);
 
@@ -1350,11 +1352,11 @@ app.put('/api/users/:id', (req, res) => {
   if (updated.email) updated.email = normalizeEmail(updated.email);
   if (updated.role) updated.isPsychologist = String(updated.role).toUpperCase() === 'PSYCHOLOGIST';
   db.users[idx] = updated;
-  saveDb(db);
+  await saveDb(db, { awaitPersistence: true });
   res.json(db.users[idx]);
 });
 
-app.put('/api/users', (req, res) => {
+app.put('/api/users', async (req, res) => {
   const id = req.query.id || req.query.userId;
   if (!id) return res.status(400).json({ error: 'Missing user id' });
 
@@ -1373,7 +1375,7 @@ app.put('/api/users', (req, res) => {
   if (updated.email) updated.email = normalizeEmail(updated.email);
   if (updated.role) updated.isPsychologist = String(updated.role).toUpperCase() === 'PSYCHOLOGIST';
   db.users[idx] = updated;
-  saveDb(db);
+  await saveDb(db, { awaitPersistence: true });
   res.json(db.users[idx]);
 });
 
@@ -2409,7 +2411,7 @@ app.get('/api/psychologist/:userId/profile', (req, res) => {
   res.json(profile);
 });
 
-app.put('/api/psychologist/:userId/profile', (req, res) => {
+app.put('/api/psychologist/:userId/profile', async (req, res) => {
   const { userId } = req.params;
   const db = getDb();
   if (!db.psychologistProfiles) db.psychologistProfiles = {};
@@ -2418,7 +2420,7 @@ app.put('/api/psychologist/:userId/profile', (req, res) => {
   console.log('[API] Profile data:', req.body);
   
   db.psychologistProfiles[userId] = req.body;
-  saveDb(db);
+  await saveDb(db, { awaitPersistence: true });
   
   console.log('[API] Profile saved successfully');
   res.json(req.body);
@@ -2453,17 +2455,27 @@ app.get('/api/sessions', (req, res) => {
       return date.getFullYear() === yearNum && date.getMonth() + 1 === monthNum;
     });
   }
+
+  const sessionsWithPatientPhone = sessions.map(session => {
+    if (!session.patientId) return session;
+    const patient = db.users ? db.users.find(u => u.id === session.patientId) : null;
+    const resolvedPhone = (patient?.phone || '').trim() || session.patientPhone;
+    if (resolvedPhone && resolvedPhone !== session.patientPhone) {
+      return { ...session, patientPhone: resolvedPhone };
+    }
+    return session;
+  });
   
-  res.json(sessions);
+  res.json(sessionsWithPatientPhone);
 });
 
-app.post('/api/sessions', (req, res) => {
+app.post('/api/sessions', async (req, res) => {
   const db = getDb();
   if (!db.sessions) db.sessions = [];
   
   const session = { ...req.body, id: req.body.id || Date.now().toString() };
   db.sessions.push(session);
-  saveDb(db);
+  await saveDb(db, { awaitPersistence: true });
   res.json(session);
 });
 
@@ -2492,7 +2504,7 @@ app.post('/api/sessions/availability', async (req, res) => {
       newSlots.push(newSlot);
     });
     
-    await saveDb(db);
+    await saveDb(db, { awaitPersistence: true });
     console.log('✅ Availability slots created successfully:', newSlots.length);
     res.json({ success: true, count: slots.length, slots: newSlots });
   } catch (error) {
@@ -2501,7 +2513,7 @@ app.post('/api/sessions/availability', async (req, res) => {
   }
 });
 
-app.patch('/api/sessions/:id', (req, res) => {
+app.patch('/api/sessions/:id', async (req, res) => {
   const { id } = req.params;
   const db = getDb();
   if (!db.sessions) db.sessions = [];
@@ -2510,6 +2522,13 @@ app.patch('/api/sessions/:id', (req, res) => {
   if (idx === -1) return res.status(404).json({ error: 'Session not found' });
   
   const updatedSession = { ...db.sessions[idx], ...req.body };
+
+  if (updatedSession.status === 'available') {
+    updatedSession.patientId = '';
+    updatedSession.patientName = 'Disponible';
+    updatedSession.patientPhone = '';
+    delete updatedSession.meetLink;
+  }
   
   // Auto-generate Google Meet link when session is booked and type is online
   if (updatedSession.status === 'scheduled' && 
@@ -2524,8 +2543,26 @@ app.patch('/api/sessions/:id', (req, res) => {
   }
   
   db.sessions[idx] = updatedSession;
-  saveDb(db);
+  await saveDb(db, { awaitPersistence: true });
   res.json(db.sessions[idx]);
+});
+
+app.delete('/api/sessions/:id', async (req, res) => {
+  const { id } = req.params;
+  const db = getDb();
+  if (!db.sessions) db.sessions = [];
+
+  const idx = db.sessions.findIndex(s => s.id === id);
+  if (idx === -1) return res.status(404).json({ error: 'Session not found' });
+
+  const session = db.sessions[idx];
+  if (session.status !== 'available') {
+    return res.status(400).json({ error: 'Solo se pueden eliminar espacios con estado Disponible' });
+  }
+
+  db.sessions.splice(idx, 1);
+  await saveDb(db, { awaitPersistence: true });
+  res.json({ success: true });
 });
 
 // --- PATIENTS LIST ---
@@ -2541,7 +2578,8 @@ app.get('/api/psychologist/:psychologistId/patients', (req, res) => {
       ).map(u => ({
         id: u.id,
         name: u.name,
-        email: u.email
+        email: u.email,
+        phone: u.phone || ''
       }))
     : [];
   

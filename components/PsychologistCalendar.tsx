@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar as CalendarIcon, Clock, Plus, X, Users, Video, MapPin, ChevronLeft, ChevronRight, LayoutGrid, List } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, Plus, X, Users, Video, MapPin, ChevronLeft, ChevronRight, MessageCircle, Trash2 } from 'lucide-react';
 import { API_URL } from '../services/config';
 
 interface Session {
   id: string;
   patientId: string;
   patientName: string;
+  patientPhone?: string;
   date: string;
   startTime: string;
   endTime: string;
@@ -20,6 +21,7 @@ interface PsychologistCalendarProps {
 }
 
 type ViewMode = 'MONTH' | 'WEEK' | 'LIST';
+type SessionStatusFilter = Session['status'] | 'ALL';
 
 const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologistId }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -35,6 +37,9 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
   const [selectedSlot, setSelectedSlot] = useState<Session | null>(null);
   const [selectedPatientId, setSelectedPatientId] = useState('');
   const [meetLink, setMeetLink] = useState('');
+  const [listStatusFilter, setListStatusFilter] = useState<SessionStatusFilter>('ALL');
+  const [listStartDate, setListStartDate] = useState('');
+  const [listEndDate, setListEndDate] = useState('');
   
   const [newSession, setNewSession] = useState({
     patientId: '',
@@ -137,6 +142,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
       id: Date.now().toString(),
       patientId: newSession.patientId,
       patientName: patient.name,
+      patientPhone: patient.phone || '',
       date: newSession.date,
       startTime: newSession.startTime,
       endTime: newSession.endTime,
@@ -261,6 +267,42 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
 
   const handleUpdateSessionStatus = async (sessionId: string, status: Session['status']) => {
     try {
+      // Si se está cancelando, preguntar si crear disponibilidad
+      if (status === 'cancelled') {
+        const session = sessions.find(s => s.id === sessionId);
+        if (session && session.status === 'scheduled') {
+          const createAvailability = window.confirm(
+            `¿Deseas crear un espacio disponible para ${session.date} de ${session.startTime} a ${session.endTime}?`
+          );
+          
+          if (createAvailability) {
+            // Crear nueva sesión disponible con los mismos datos
+            const newAvailableSlot = {
+              id: `${Date.now()}`,
+              patientId: '',
+              patientName: 'Disponible',
+              date: session.date,
+              startTime: session.startTime,
+              endTime: session.endTime,
+              type: session.type,
+              status: 'available' as const,
+              psychologistId
+            };
+            
+            // Crear la disponibilidad
+            const availabilityResponse = await fetch(`${API_URL}/sessions`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(newAvailableSlot)
+            });
+
+            if (!availabilityResponse.ok) {
+              console.warn('No se pudo recrear la disponibilidad para la sesión cancelada');
+            }
+          }
+        }
+      }
+      
       const response = await fetch(`${API_URL}/sessions/${sessionId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -270,10 +312,38 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
       if (response.ok) {
         await loadSessions();
         setSelectedSession(null);
+        if (status === 'cancelled') {
+          alert('Sesión cancelada correctamente');
+        }
       }
     } catch (error) {
       console.error('Error updating session:', error);
       alert('Error al actualizar la sesión');
+    }
+  };
+
+  const handleDeleteAvailability = async (sessionId: string) => {
+    const session = sessions.find(s => s.id === sessionId);
+    if (!session || session.status !== 'available') return;
+    const confirmed = window.confirm('¿Seguro que quieres eliminar esta disponibilidad?');
+    if (!confirmed) return;
+
+    try {
+      const response = await fetch(`${API_URL}/sessions/${sessionId}`, {
+        method: 'DELETE'
+      });
+
+      if (response.ok) {
+        await loadSessions();
+        if (selectedSlot?.id === sessionId) setSelectedSlot(null);
+        alert('Disponibilidad eliminada');
+      } else {
+        const data = await response.json().catch(() => ({}));
+        alert(data.error || 'No se pudo eliminar la disponibilidad');
+      }
+    } catch (error) {
+      console.error('Error deleting availability:', error);
+      alert('Error al eliminar la disponibilidad');
     }
   };
 
@@ -338,6 +408,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
           status: 'scheduled',
           patientId: patient.id,
           patientName: patient.name,
+          patientPhone: patient.phone || '',
           meetLink: finalMeetLink
         })
       });
@@ -387,6 +458,27 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
     });
   };
 
+  const sortedSessions = getSortedSessions();
+  const filteredListSessions = sortedSessions.filter(session => {
+    const matchesStatus = listStatusFilter === 'ALL' || session.status === listStatusFilter;
+    const matchesStart = !listStartDate || session.date >= listStartDate;
+    const matchesEnd = !listEndDate || session.date <= listEndDate;
+    return matchesStatus && matchesStart && matchesEnd;
+  });
+  const statusFilterOptions: { label: string; value: SessionStatusFilter }[] = [
+    { label: 'Todos los estados', value: 'ALL' },
+    { label: 'Disponibles', value: 'available' },
+    { label: 'Programadas', value: 'scheduled' },
+    { label: 'Completadas', value: 'completed' },
+    { label: 'Canceladas', value: 'cancelled' }
+  ];
+
+  const resetListFilters = () => {
+    setListStatusFilter('ALL');
+    setListStartDate('');
+    setListEndDate('');
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -414,6 +506,88 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
           </button>
         </div>
       </div>
+
+        {/* View controls & filters */}
+        <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-1 bg-slate-100 rounded-xl p-1">
+              <button
+                onClick={() => setViewMode('LIST')}
+                className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
+                  viewMode === 'LIST' ? 'bg-white shadow text-indigo-600' : 'text-slate-500 hover:text-slate-700'
+                }`}
+                aria-pressed={viewMode === 'LIST'}
+              >
+                Lista
+              </button>
+              <button
+                onClick={() => setViewMode('MONTH')}
+                className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
+                  viewMode === 'MONTH' ? 'bg-white shadow text-indigo-600' : 'text-slate-500 hover:text-slate-700'
+                }`}
+                aria-pressed={viewMode === 'MONTH'}
+              >
+                Mes
+              </button>
+              <button
+                onClick={() => setViewMode('WEEK')}
+                className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
+                  viewMode === 'WEEK' ? 'bg-white shadow text-indigo-600' : 'text-slate-500 hover:text-slate-700'
+                }`}
+                aria-pressed={viewMode === 'WEEK'}
+              >
+                Semana
+              </button>
+            </div>
+            <span className="text-xs uppercase font-semibold text-slate-500 tracking-wide">
+              Vista actual: {viewMode === 'LIST' ? 'Lista' : viewMode === 'MONTH' ? 'Mes' : 'Semana'}
+            </span>
+          </div>
+
+          {viewMode === 'LIST' && (
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="flex flex-col">
+                <label className="text-xs font-semibold text-slate-500 uppercase mb-1">Estado</label>
+                <select
+                  value={listStatusFilter}
+                  onChange={(event) => setListStatusFilter(event.target.value as SessionStatusFilter)}
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  {statusFilterOptions.map(option => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex flex-col">
+                <label className="text-xs font-semibold text-slate-500 uppercase mb-1">Desde</label>
+                <input
+                  type="date"
+                  value={listStartDate}
+                  onChange={(event) => setListStartDate(event.target.value)}
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div className="flex flex-col">
+                <label className="text-xs font-semibold text-slate-500 uppercase mb-1">Hasta</label>
+                <input
+                  type="date"
+                  value={listEndDate}
+                  onChange={(event) => setListEndDate(event.target.value)}
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={resetListFilters}
+                className="ml-auto text-sm font-semibold text-slate-600 hover:text-slate-900"
+              >
+                Limpiar filtros
+              </button>
+            </div>
+          )}
+        </div>
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -455,36 +629,6 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
           </button>
           <div className="flex items-center gap-3">
             <h3 className="text-lg font-semibold text-slate-900 capitalize">{monthName}</h3>
-            {/* View Mode Toggle */}
-            <div className="hidden sm:flex items-center gap-1 bg-slate-100 rounded-lg p-1">
-              <button
-                onClick={() => setViewMode('MONTH')}
-                className={`p-1.5 rounded transition-colors ${
-                  viewMode === 'MONTH' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'
-                }`}
-                title="Vista mensual"
-              >
-                <LayoutGrid size={16} />
-              </button>
-              <button
-                onClick={() => setViewMode('WEEK')}
-                className={`p-1.5 rounded transition-colors ${
-                  viewMode === 'WEEK' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'
-                }`}
-                title="Vista semanal"
-              >
-                <CalendarIcon size={16} />
-              </button>
-              <button
-                onClick={() => setViewMode('LIST')}
-                className={`p-1.5 rounded transition-colors ${
-                  viewMode === 'LIST' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'
-                }`}
-                title="Vista de lista"
-              >
-                <List size={16} />
-              </button>
-            </div>
           </div>
           <button
             onClick={handleNextMonth}
@@ -507,13 +651,14 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
             </div>
 
             {/* Calendar days */}
-            <div className="grid grid-cols-7 gap-2">{/* Empty cells for days before month starts */}
-            {Array.from({ length: startingDayOfWeek }).map((_, i) => (
-              <div key={`empty-${i}`} className="aspect-square" />
-            ))}
+            <div className="grid grid-cols-7 gap-2">
+              {/* Empty cells for days before month starts */}
+              {Array.from({ length: startingDayOfWeek }).map((_, i) => (
+                <div key={`empty-${i}`} className="aspect-square" />
+              ))}
             
-            {/* Days of the month */}
-            {Array.from({ length: daysInMonth }).map((_, i) => {
+              {/* Days of the month */}
+              {Array.from({ length: daysInMonth }).map((_, i) => {
               const day = i + 1;
               const dateStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
               const daySessions = getSessionsForDate(dateStr);
@@ -562,61 +707,81 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                 </div>
               );
             })}
+            </div>
           </div>
-        </div>
         )}
 
         {/* Week View */}
         {viewMode === 'WEEK' && (
           <div className="p-4">
-            <div className="grid grid-cols-7 gap-2">
-              {getWeekDays().map(date => {
-                const dateStr = date.toISOString().split('T')[0];
-                const daySessions = getSessionsForDate(dateStr);
-                const isToday = new Date().toDateString() === date.toDateString();
-                
-                return (
-                  <div key={dateStr} className="border border-slate-200 rounded-lg overflow-hidden">
-                    <div className={`p-2 text-center border-b ${isToday ? 'bg-indigo-100 border-indigo-300' : 'bg-slate-50 border-slate-200'}`}>
-                      <div className="text-xs text-slate-500">{weekDays[date.getDay()]}</div>
-                      <div className={`text-lg font-bold ${isToday ? 'text-indigo-700' : 'text-slate-900'}`}>
-                        {date.getDate()}
-                      </div>
-                    </div>
-                    <div className="p-2 space-y-1 min-h-[200px] max-h-[400px] overflow-y-auto">
-                      {daySessions.length === 0 ? (
-                        <div className="text-xs text-slate-400 text-center py-4">Sin sesiones</div>
-                      ) : (
-                        daySessions.map(session => (
-                          <div
-                            key={session.id}
-                            onClick={() => {
-                              if (session.status === 'available') {
-                                setSelectedSlot(session);
-                                setShowAssignPatient(true);
-                              } else {
-                                setSelectedSession(session);
-                              }
-                            }}
-                            className={`text-[10px] p-1.5 rounded cursor-pointer hover:opacity-80 ${
-                              session.status === 'available' 
-                                ? 'bg-purple-100 text-purple-700'
-                                : session.status === 'scheduled'
-                                ? 'bg-green-100 text-green-700'
-                                : session.status === 'completed'
-                                ? 'bg-slate-100 text-slate-700'
-                                : 'bg-red-100 text-red-700'
-                            }`}
-                          >
-                            <div className="font-semibold">{session.startTime}</div>
-                            <div className="truncate">{session.patientName}</div>
+            <div className="overflow-x-auto">
+              <div className="min-w-[900px]">
+                <div className="flex divide-x divide-slate-200 border border-slate-200 rounded-xl">
+                  {getWeekDays().map(date => {
+                    const dateStr = date.toISOString().split('T')[0];
+                    const daySessions = getSessionsForDate(dateStr);
+                    const isToday = new Date().toDateString() === date.toDateString();
+                    
+                    return (
+                      <div key={dateStr} className="flex-1 min-w-[180px] bg-white flex flex-col">
+                        <div className={`px-3 py-2 border-b text-center ${isToday ? 'bg-indigo-50 border-indigo-200' : 'bg-slate-50 border-slate-200'}`}>
+                          <div className="text-xs uppercase tracking-wide font-semibold text-slate-500">
+                            {weekDays[date.getDay()]}
                           </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+                          <div className={`text-2xl font-bold ${isToday ? 'text-indigo-700' : 'text-slate-900'}`}>
+                            {date.getDate()}
+                          </div>
+                        </div>
+                        <div className="flex-1 px-3 py-2 space-y-2 max-h-[420px] overflow-y-auto">
+                          {daySessions.length === 0 ? (
+                            <div className="text-xs text-slate-400 text-center py-10">Sin sesiones</div>
+                          ) : (
+                            daySessions.map(session => (
+                              <div
+                                key={session.id}
+                                onClick={() => {
+                                  if (session.status === 'available') {
+                                    setSelectedSlot(session);
+                                    setShowAssignPatient(true);
+                                  } else {
+                                    setSelectedSession(session);
+                                  }
+                                }}
+                                className={`text-xs px-2 py-2 rounded-lg shadow-sm border cursor-pointer transition-colors ${
+                                  session.status === 'available'
+                                    ? 'bg-purple-50 border-purple-200 text-purple-700'
+                                    : session.status === 'scheduled'
+                                    ? 'bg-green-50 border-green-200 text-green-700'
+                                    : session.status === 'completed'
+                                    ? 'bg-slate-50 border-slate-200 text-slate-700'
+                                    : 'bg-red-50 border-red-200 text-red-700'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="font-semibold text-[11px]">
+                                    {session.startTime} - {session.endTime}
+                                  </span>
+                                  {session.type === 'online' ? (
+                                    <Video size={12} className="text-indigo-500" />
+                                  ) : session.type === 'home-visit' ? (
+                                    <MapPin size={12} className="text-green-500" />
+                                  ) : (
+                                    <MapPin size={12} className="text-purple-500" />
+                                  )}
+                                </div>
+                                <div className="text-[11px] font-medium truncate">{session.patientName}</div>
+                                {session.notes && (
+                                  <div className="text-[10px] text-slate-500 mt-1 line-clamp-2">{session.notes}</div>
+                                )}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -624,64 +789,109 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
         {/* List View */}
         {viewMode === 'LIST' && (
           <div className="p-4 max-h-[600px] overflow-y-auto">
-            {getSortedSessions().length === 0 ? (
+            {filteredListSessions.length === 0 ? (
               <div className="text-center py-12 text-slate-400">
                 <CalendarIcon size={48} className="mx-auto mb-3" />
-                <p>No hay sesiones programadas</p>
+                <p>No hay sesiones que coincidan con los filtros seleccionados</p>
               </div>
             ) : (
               <div className="space-y-2">
-                {getSortedSessions().map(session => (
-                  <div
-                    key={session.id}
-                    onClick={() => {
-                      if (session.status === 'available') {
-                        setSelectedSlot(session);
-                        setShowAssignPatient(true);
-                      } else {
-                        setSelectedSession(session);
-                      }
-                    }}
-                    className="p-4 border border-slate-200 rounded-lg hover:border-indigo-300 hover:bg-slate-50 cursor-pointer transition-all"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-sm font-semibold text-slate-700">
-                            {new Date(session.date).toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })}
-                          </span>
-                          <span className="text-sm text-slate-500">
-                            {session.startTime} - {session.endTime}
-                          </span>
-                          {session.type === 'online' ? (
-                            <Video size={14} className="text-indigo-600" />
-                          ) : session.type === 'home-visit' ? (
-                            <MapPin size={14} className="text-green-600" />
-                          ) : (
-                            <MapPin size={14} className="text-purple-600" />
+                {filteredListSessions.map(session => {
+                  const patientInfo = patients.find(p => p.id === session.patientId);
+                  const readableDate = new Date(session.date).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
+                  const messageParts = [
+                    `Hola ${session.patientName || patientInfo?.name || ''}`.trim(),
+                    `tu sesión comenzará el ${readableDate} a las ${session.startTime}.`
+                  ];
+                  if (session.meetLink) {
+                    messageParts.push(`Enlace: ${session.meetLink}`);
+                  }
+                  const message = messageParts.join(' ').replace(/\s+/g, ' ').trim();
+                  const rawPhone = session.patientPhone || patientInfo?.phone || '';
+                  const normalizedPhone = rawPhone.replace(/[^0-9]/g, '');
+                  const whatsappBase = normalizedPhone ? `https://wa.me/${normalizedPhone}` : 'https://wa.me/';
+                  const whatsappUrl = `${whatsappBase}?text=${encodeURIComponent(message)}`;
+
+                  return (
+                    <div
+                      key={session.id}
+                      onClick={() => {
+                        if (session.status === 'available') {
+                          setSelectedSlot(session);
+                          setShowAssignPatient(true);
+                        } else {
+                          setSelectedSession(session);
+                        }
+                      }}
+                      className="p-4 border border-slate-200 rounded-lg hover:border-indigo-300 hover:bg-slate-50 cursor-pointer transition-all"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-sm font-semibold text-slate-700">
+                              {new Date(session.date).toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })}
+                            </span>
+                            <span className="text-sm text-slate-500">
+                              {session.startTime} - {session.endTime}
+                            </span>
+                            {session.type === 'online' ? (
+                              <Video size={14} className="text-indigo-600" />
+                            ) : session.type === 'home-visit' ? (
+                              <MapPin size={14} className="text-green-600" />
+                            ) : (
+                              <MapPin size={14} className="text-purple-600" />
+                            )}
+                          </div>
+                          <div className="text-base font-medium text-slate-900">{session.patientName}</div>
+                          {session.notes && (
+                            <div className="text-xs text-slate-500 mt-1">{session.notes}</div>
                           )}
                         </div>
-                        <div className="text-base font-medium text-slate-900">{session.patientName}</div>
-                        {session.notes && (
-                          <div className="text-xs text-slate-500 mt-1">{session.notes}</div>
-                        )}
+                        <div className="flex flex-col items-end gap-2">
+                          <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${
+                            session.status === 'available' 
+                              ? 'bg-purple-100 text-purple-700'
+                              : session.status === 'scheduled'
+                              ? 'bg-green-100 text-green-700'
+                              : session.status === 'completed'
+                              ? 'bg-slate-100 text-slate-700'
+                              : 'bg-red-100 text-red-700'
+                          }`}>
+                            {session.status === 'available' ? 'Disponible' : 
+                             session.status === 'scheduled' ? 'Programada' :
+                             session.status === 'completed' ? 'Completada' : 'Cancelada'}
+                          </span>
+                          {session.status === 'available' && (
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleDeleteAvailability(session.id);
+                              }}
+                              className="inline-flex items-center gap-1 px-3 py-1 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-full hover:bg-rose-100"
+                            >
+                              <Trash2 size={12} />
+                              Eliminar
+                            </button>
+                          )}
+                          {session.status === 'scheduled' && (
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                window.open(whatsappUrl, '_blank');
+                              }}
+                              className="inline-flex items-center gap-1 px-3 py-1 text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-full hover:bg-green-100"
+                            >
+                              <MessageCircle size={12} />
+                              WhatsApp
+                            </button>
+                          )}
+                        </div>
                       </div>
-                      <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${
-                        session.status === 'available' 
-                          ? 'bg-purple-100 text-purple-700'
-                          : session.status === 'scheduled'
-                          ? 'bg-green-100 text-green-700'
-                          : session.status === 'completed'
-                          ? 'bg-slate-100 text-slate-700'
-                          : 'bg-red-100 text-red-700'
-                      }`}>
-                        {session.status === 'available' ? 'Disponible' : 
-                         session.status === 'scheduled' ? 'Programada' :
-                         session.status === 'completed' ? 'Completada' : 'Cancelada'}
-                      </span>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -744,7 +954,8 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                             <div className="text-xs text-slate-500 mt-1">{session.notes}</div>
                           )}
                         </div>
-                        <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs px-2 py-1 rounded-full font-medium ${
                           session.status === 'available' 
                             ? 'bg-purple-100 text-purple-700'
                             : session.status === 'scheduled'
@@ -760,6 +971,20 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                            session.status === 'completed' ? 'Completada' :
                            session.status === 'cancelled' ? 'Cancelada' : 'Sesión'}
                         </span>
+                        {session.status === 'available' && (
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleDeleteAvailability(session.id);
+                            }}
+                            className="flex items-center gap-1 text-xs font-semibold text-rose-600 px-2 py-1 border border-rose-200 rounded-full hover:bg-rose-50"
+                          >
+                            <Trash2 size={12} />
+                            Eliminar
+                          </button>
+                        )}
+                        </div>
                       </div>
                     </div>
                   ))}

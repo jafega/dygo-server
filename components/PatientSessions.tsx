@@ -8,6 +8,7 @@ interface Session {
   patientId: string;
   patientName: string;
   psychologistId: string;
+  patientPhone?: string;
   date: string;
   startTime: string;
   endTime: string;
@@ -101,7 +102,8 @@ const PatientSessions: React.FC = () => {
         body: JSON.stringify({
           status: 'scheduled',
           patientId: user.id,
-          patientName: user.name
+          patientName: user.name,
+          patientPhone: user.phone || ''
         })
       });
 
