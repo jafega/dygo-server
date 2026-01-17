@@ -670,7 +670,9 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
         {/* Mobile Toggle Button */}
         <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="md:hidden fixed top-4 left-4 z-50 p-2 bg-white rounded-lg shadow-lg border border-slate-200 hover:bg-slate-50"
+          className={`md:hidden fixed top-4 z-50 p-2 bg-white rounded-lg shadow-lg border border-slate-200 hover:bg-slate-50 transition-all duration-300 ${
+            sidebarOpen ? 'right-4' : 'left-4'
+          }`}
         >
           {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
         </button>

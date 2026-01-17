@@ -44,7 +44,9 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
       {/* Mobile Toggle Button */}
       <button
         onClick={onToggle}
-        className="lg:hidden fixed top-4 left-4 z-50 p-2 bg-white rounded-lg shadow-lg border border-slate-200 hover:bg-slate-50"
+        className={`lg:hidden fixed top-4 z-50 p-2 bg-white rounded-lg shadow-lg border border-slate-200 hover:bg-slate-50 transition-all duration-300 ${
+          isOpen ? 'right-4' : 'left-4'
+        }`}
       >
         {isOpen ? <X size={20} /> : <Menu size={20} />}
       </button>

@@ -66,6 +66,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   const [activeTab, setActiveTab] = useState<'TIMELINE' | 'ANALYTICS' | 'PLAN' | 'INFO' | 'BILLING'>('TIMELINE');
   const [patientUser, setPatientUser] = useState<any>(null);
   const [entryFilter, setEntryFilter] = useState<'ALL' | 'DIARY' | 'INTERNAL' | 'SESSION' | 'FEEDBACK'>('ALL');
+  const [currentPsychologistId, setCurrentPsychologistId] = useState<string>('');
   
   // Analytics State
   const [analyticsRange, setAnalyticsRange] = useState<'WEEK' | 'MONTH' | 'YEAR'>('WEEK');
@@ -159,9 +160,14 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
         try {
           const response = await fetch(`/api/users?id=${patient.id}`);
           if (response.ok) {
-            const userData = await response.json();
-            if (!cancelled && userData) {
-              setPatientUser(userData);
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+              const userData = await response.json();
+              if (!cancelled && userData) {
+                setPatientUser(userData);
+              }
+            } else {
+              console.warn('Expected JSON but got:', contentType);
             }
           }
         } catch (err) {
