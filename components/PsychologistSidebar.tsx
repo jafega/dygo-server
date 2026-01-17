@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Users, FileText, User as UserIcon, Calendar, Menu, X, ArrowLeftRight, ShieldCheck, Link2, BarChart3 } from 'lucide-react';
 
 const DygoLogo: React.FC<{ className?: string }> = ({ className = "w-8 h-8" }) => (
@@ -41,13 +41,70 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
     { id: 'profile' as const, label: 'Mi Perfil Profesional', icon: UserIcon },
   ];
 
+  // State for draggable menu button position
+  const [menuButtonPos, setMenuButtonPos] = useState(() => {
+    const saved = localStorage.getItem('menuButtonPositionPro');
+    return saved ? JSON.parse(saved) : { top: 16, right: 16 };
+  });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+
+  // Save menu button position to localStorage
+  useEffect(() => {
+    localStorage.setItem('menuButtonPositionPro', JSON.stringify(menuButtonPos));
+  }, [menuButtonPos]);
+
   return (
     <>
-      {/* Mobile Toggle Button - Only when closed */}
+      {/* Mobile Toggle Button - Draggable */}
       {!isOpen && (
         <button
-          onClick={onToggle}
-          className="lg:hidden fixed top-4 right-4 z-50 w-12 h-12 bg-white rounded-full shadow-lg border border-slate-200 hover:bg-slate-50 transition-all duration-300 flex items-center justify-center"
+          onTouchStart={(e) => {
+            const touch = e.touches[0];
+            const rect = e.currentTarget.getBoundingClientRect();
+            setDragOffset({
+              x: touch.clientX - rect.left,
+              y: touch.clientY - rect.top
+            });
+            setIsDragging(true);
+          }}
+          onTouchMove={(e) => {
+            if (!isDragging) return;
+            e.preventDefault();
+            const touch = e.touches[0];
+            const newTop = touch.clientY - dragOffset.y;
+            const newLeft = touch.clientX - dragOffset.x;
+            
+            // Keep within bounds
+            const maxTop = window.innerHeight - 48;
+            const maxLeft = window.innerWidth - 48;
+            
+            setMenuButtonPos({
+              top: Math.max(16, Math.min(newTop, maxTop)),
+              left: Math.max(16, Math.min(newLeft, maxLeft)),
+              right: undefined
+            });
+          }}
+          onTouchEnd={() => {
+            if (isDragging) {
+              setIsDragging(false);
+            } else {
+              onToggle();
+            }
+          }}
+          onClick={(e) => {
+            if (!isDragging) {
+              onToggle();
+            }
+          }}
+          style={{
+            top: `${menuButtonPos.top}px`,
+            right: menuButtonPos.right !== undefined ? `${menuButtonPos.right}px` : undefined,
+            left: menuButtonPos.left !== undefined ? `${menuButtonPos.left}px` : undefined,
+            touchAction: 'none',
+            cursor: isDragging ? 'grabbing' : 'grab'
+          }}
+          className="lg:hidden fixed z-50 w-12 h-12 bg-white rounded-full shadow-lg border border-slate-200 hover:bg-slate-50 transition-all duration-300 flex items-center justify-center"
         >
           <DygoLogo className="w-7 h-7 text-indigo-600" />
         </button>

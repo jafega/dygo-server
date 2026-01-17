@@ -40,6 +40,19 @@ const App: React.FC = () => {
   const [psychViewMode, setPsychViewMode] = useState<'DASHBOARD' | 'PERSONAL'>('DASHBOARD');
   const [psychPanelView, setPsychPanelView] = useState<'patients' | 'billing' | 'profile' | 'calendar' | 'connections' | 'dashboard'>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  
+  // State for draggable menu button position
+  const [menuButtonPos, setMenuButtonPos] = useState(() => {
+    const saved = localStorage.getItem('menuButtonPosition');
+    return saved ? JSON.parse(saved) : { top: 16, right: 16 };
+  });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+
+  // Save menu button position to localStorage
+  useEffect(() => {
+    localStorage.setItem('menuButtonPosition', JSON.stringify(menuButtonPos));
+  }, [menuButtonPos]);
 
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
@@ -603,6 +616,18 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                
                {/* Main Content */}
                <div className="flex-1 overflow-y-auto px-4 md:px-8 py-4 md:py-6">
+                    {/* Mobile Header with page titles */}
+                    <header className="lg:hidden mb-4">
+                      <h1 className="text-2xl font-bold text-slate-900">
+                        {psychPanelView === 'dashboard' && 'Dashboard'}
+                        {psychPanelView === 'patients' && 'Pacientes'}
+                        {psychPanelView === 'billing' && 'Facturación'}
+                        {psychPanelView === 'profile' && 'Mi Perfil'}
+                        {psychPanelView === 'calendar' && 'Calendario'}
+                        {psychPanelView === 'connections' && 'Conexiones'}
+                      </h1>
+                    </header>
+
                     {psychPanelView === 'dashboard' && <PsychologistDashboard psychologistId={currentUser.id} />}
                     {psychPanelView === 'patients' && <PatientDashboard />}
                     {psychPanelView === 'billing' && <BillingPanel psychologistId={currentUser.id} />}
@@ -671,11 +696,55 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
       )}
 
       <div className="flex h-screen overflow-hidden bg-slate-50">
-        {/* Mobile Toggle Button - Only when closed */}
+        {/* Mobile Toggle Button - Draggable */}
         {!sidebarOpen && (
           <button
-            onClick={() => setSidebarOpen(true)}
-            className="md:hidden fixed top-4 right-4 z-50 w-12 h-12 bg-white rounded-full shadow-lg border border-slate-200 hover:bg-slate-50 transition-all duration-300 flex items-center justify-center"
+            onTouchStart={(e) => {
+              const touch = e.touches[0];
+              const rect = e.currentTarget.getBoundingClientRect();
+              setDragOffset({
+                x: touch.clientX - rect.left,
+                y: touch.clientY - rect.top
+              });
+              setIsDragging(true);
+            }}
+            onTouchMove={(e) => {
+              if (!isDragging) return;
+              e.preventDefault();
+              const touch = e.touches[0];
+              const newTop = touch.clientY - dragOffset.y;
+              const newLeft = touch.clientX - dragOffset.x;
+              
+              // Keep within bounds
+              const maxTop = window.innerHeight - 48;
+              const maxLeft = window.innerWidth - 48;
+              
+              setMenuButtonPos({
+                top: Math.max(16, Math.min(newTop, maxTop)),
+                left: Math.max(16, Math.min(newLeft, maxLeft)),
+                right: undefined
+              });
+            }}
+            onTouchEnd={() => {
+              if (isDragging) {
+                setIsDragging(false);
+              } else {
+                setSidebarOpen(true);
+              }
+            }}
+            onClick={(e) => {
+              if (!isDragging) {
+                setSidebarOpen(true);
+              }
+            }}
+            style={{
+              top: `${menuButtonPos.top}px`,
+              right: menuButtonPos.right !== undefined ? `${menuButtonPos.right}px` : undefined,
+              left: menuButtonPos.left !== undefined ? `${menuButtonPos.left}px` : undefined,
+              touchAction: 'none',
+              cursor: isDragging ? 'grabbing' : 'grab'
+            }}
+            className="md:hidden fixed z-50 w-12 h-12 bg-white rounded-full shadow-lg border border-slate-200 hover:bg-slate-50 transition-all duration-300 flex items-center justify-center"
           >
             <DygoLogo className="w-7 h-7 text-indigo-600" />
           </button>
@@ -820,10 +889,18 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
         </aside>
 
         {/* Main Content */}
-        <main className="flex-1 overflow-y-auto pt-14 md:pt-0">
+        <main className="flex-1 overflow-y-auto">
           <div className="max-w-5xl mx-auto p-4 md:p-8 space-y-6">
-            {/* Mobile Header - Hidden now since we have static header */}
-            <header className="hidden">
+            {/* Mobile Header - Now visible with page title */}
+            <header className="md:hidden">
+              <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
+                {activeTab === 'insights' && 'Resumen'}
+                {activeTab === 'feedback' && 'Feedback'}
+                {activeTab === 'sessions' && 'Sesiones'}
+                {activeTab === 'calendar' && 'Calendario'}
+                {activeTab === 'billing' && 'Facturación'}
+                {activeTab === 'connections' && 'Conexiones'}
+              </h1>
             </header>
 
             {/* Desktop Header */}
