@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { JournalEntry } from '../types';
 import { ChevronLeft, ChevronRight, Layers, Plus, Calendar as CalendarIcon, LayoutGrid, Clock, Video, MapPin, User, X } from 'lucide-react';
 import { getCurrentUser } from '../services/authService';
+import { API_URL } from '../services/config';
+import { formatDate, formatTime, formatDateWithWeekday } from '../services/dateUtils';
 
 interface Session {
   id: string;
@@ -45,7 +47,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
         
         // Load patient sessions
         try {
-          const response = await fetch(`/api/sessions?patientId=${user.id}`);
+          const response = await fetch(`${API_URL}/sessions?patientId=${user.id}`);
           if (response.ok) {
             const sessions = await response.json();
             setPatientSessions(sessions.filter((s: Session) => s.status === 'scheduled' || s.status === 'completed'));
@@ -64,7 +66,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
     
     setIsLoading(true);
     try {
-      const response = await fetch(`/api/sessions?psychologistId=${psychologistId}`);
+      const response = await fetch(`${API_URL}/sessions?psychologistId=${psychologistId}`);
       if (response.ok) {
         const sessions = await response.json();
         setAvailableSlots(sessions.filter((s: Session) => s.status === 'available'));
@@ -83,7 +85,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
     if (!user) return;
     
     try {
-      const response = await fetch(`/api/sessions/${slotId}`, {
+      const response = await fetch(`${API_URL}/sessions/${slotId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -97,7 +99,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
         alert('¡Cita reservada exitosamente!');
         setShowAvailability(false);
         // Reload sessions
-        const sessionsResponse = await fetch(`/api/sessions?patientId=${user.id}`);
+        const sessionsResponse = await fetch(`${API_URL}/sessions?patientId=${user.id}`);
         if (sessionsResponse.ok) {
           const sessions = await sessionsResponse.json();
           setPatientSessions(sessions.filter((s: Session) => s.status === 'scheduled' || s.status === 'completed'));
@@ -218,31 +220,17 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
       .sort((a, b) => b.timestamp - a.timestamp);
 
   return (
-  <>
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 md:p-6 transition-all duration-300">
+    <div className="relative">
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 md:p-6 transition-all duration-300">
       
       {/* Patient Appointments Section */}
-      {psychologistId && (
+      {psychologistId && patientSessions.length > 0 && (
         <div className="mb-6 pb-6 border-b border-slate-200">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-bold text-slate-700 flex items-center gap-2">
-              <User size={16} /> Mis Citas con Psicólogo
-            </h3>
-            <button
-              onClick={loadAvailability}
-              disabled={isLoading}
-              className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-semibold rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
-            >
-              {isLoading ? 'Cargando...' : 'Ver Disponibilidad'}
-            </button>
-          </div>
+          <h3 className="text-sm font-bold text-slate-700 flex items-center gap-2 mb-4">
+            <User size={16} /> Mis Próximas Citas
+          </h3>
           
-          {patientSessions.length === 0 ? (
-            <div className="text-center py-4 text-slate-400 text-sm">
-              No tienes citas programadas. Haz clic en "Ver Disponibilidad" para reservar.
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {patientSessions.map(session => (
                 <div key={session.id} className="p-3 bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100 rounded-xl">
                   <div className="flex items-start justify-between mb-2">
@@ -266,7 +254,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
                     </span>
                   </div>
                   <div className="text-sm font-bold text-slate-800">
-                    {new Date(session.date).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}
+                    {formatDateWithWeekday(session.date)}
                   </div>
                   <div className="text-xs text-slate-600 mt-1">
                     {session.startTime} - {session.endTime}
@@ -284,7 +272,6 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
                 </div>
               ))}
             </div>
-          )}
         </div>
       )}
 
@@ -298,8 +285,22 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
           <button onClick={handleNext} disabled={viewMode === 'LIST'} className={`p-2 rounded-full text-slate-600 transition-colors ${viewMode === 'LIST' ? 'opacity-40 cursor-not-allowed' : 'hover:bg-slate-100'}`}><ChevronRight size={20}/></button>
         </div>
 
-        {/* View Toggle */}
-        <div className="bg-slate-100 p-1 rounded-lg flex shrink-0">
+        {/* Right side: Book Appointment Button + View Toggle */}
+        <div className="flex items-center gap-3">
+          {/* Book Appointment Button for Patients */}
+          {psychologistId && (
+            <button
+              onClick={loadAvailability}
+              disabled={isLoading}
+              className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white text-sm font-bold rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all shadow-md hover:shadow-lg disabled:opacity-50 flex items-center gap-2"
+            >
+              <CalendarIcon size={16} />
+              {isLoading ? 'Cargando...' : 'Reservar Hora'}
+            </button>
+          )}
+
+          {/* View Toggle */}
+          <div className="bg-slate-100 p-1 rounded-lg flex shrink-0">
             <button 
                 onClick={() => setViewMode('WEEK')}
                 className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${viewMode === 'WEEK' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
@@ -347,10 +348,10 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="text-sm font-semibold text-slate-800">
-                      {entryDate.toLocaleDateString()}
+                      {formatDate(entryDate)}
                     </div>
                     <div className="text-xs text-slate-400 flex items-center gap-1">
-                      <Clock size={12} /> {entryDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      <Clock size={12} /> {formatTime(entryDate)}
                     </div>
                   </div>
                   <div className="mt-2">
@@ -383,7 +384,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
           )}
         </div>
       ) : (
-      <div className={viewMode === 'MONTH' ? "grid grid-cols-7 gap-1 md:gap-2" : "flex flex-col gap-3"}>
+        <div className={viewMode === 'MONTH' ? "grid grid-cols-7 gap-1 md:gap-2" : "flex flex-col gap-3"}>
         {daysToRender.map((item, i) => {
           
           // Blank days for Month View
@@ -436,7 +437,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
                             <div className="space-y-2">
                               <div className="flex items-center gap-2">
                                 <span className="text-xs text-slate-400 flex items-center gap-1">
-                                  <Clock size={12} /> {new Date(previewEntries[0].timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                  <Clock size={12} /> {formatTime(previewEntries[0].timestamp)}
                                 </span>
                                 {dayEntries.length > previewEntries.length && (
                                   <span className="text-[10px] font-bold px-1.5 py-0.5 bg-slate-100 rounded text-slate-500">
@@ -520,7 +521,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
             </div>
           );
         })}
-      </div>
+        </div>
       )}
     </div>
 
@@ -553,12 +554,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
                     <div>
                       <div className="flex items-center gap-3 mb-2">
                         <div className="text-sm font-bold text-slate-800">
-                          {new Date(slot.date).toLocaleDateString('es-ES', { 
-                            weekday: 'long', 
-                            day: 'numeric', 
-                            month: 'long', 
-                            year: 'numeric' 
-                          })}
+                          {formatDateWithWeekday(slot.date)}
                         </div>
                         <div className="flex items-center gap-2">
                           {slot.type === 'online' ? (
@@ -591,7 +587,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
         </div>
       </div>
     )}
-  </>
+  </div>
   );
 };
 

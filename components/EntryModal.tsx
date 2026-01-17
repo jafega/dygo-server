@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { JournalEntry, ClinicalNoteContent, Attachment } from '../types';
 import { X, Calendar, MessageSquare, Lightbulb, Trash2, Edit2, Save, MessageCircle, FileText, Download, Stethoscope } from 'lucide-react';
+import { formatTime } from '../services/dateUtils';
 
 interface EntryModalProps {
   entries: JournalEntry[];
@@ -109,8 +110,8 @@ const EntryCard: React.FC<{
         setIsEditing(false);
     };
 
-    const formatTime = (ts: number) => {
-        return new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    const getFormattedTime = (ts: number) => {
+        return formatTime(ts);
     };
 
     const normalizeNote = (note?: string | ClinicalNoteContent | null): ClinicalNoteContent | null => {
@@ -136,7 +137,7 @@ const EntryCard: React.FC<{
                     <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${isPsychEntry ? 'bg-purple-100 text-purple-600' : 'bg-indigo-100 text-indigo-600'}`}>
                         {isPsychEntry ? <Stethoscope size={12}/> : `#${index}`}
                     </span>
-                    <span className="text-xs text-slate-500 font-mono">{formatTime(entry.timestamp)}</span>
+                    <span className="text-xs text-slate-500 font-mono">{getFormattedTime(entry.timestamp)}</span>
                     {isPsychEntry && (
                         <span className="text-[10px] font-semibold text-purple-700 bg-purple-50 border border-purple-100 px-2 py-0.5 rounded-full">
                             {psychEntryLabel}

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FileText, Plus, DollarSign, Check, Clock, ExternalLink, Download, Eye, Edit, Trash2, Send } from 'lucide-react';
+import { formatDate } from '../services/dateUtils';
 
 interface Invoice {
   id: string;
@@ -268,8 +269,8 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
                   <tr key={invoice.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3 text-sm font-medium text-slate-900">{invoice.invoiceNumber}</td>
                     <td className="px-4 py-3 text-sm text-slate-700">{invoice.patientName}</td>
-                    <td className="px-4 py-3 text-sm text-slate-600">{new Date(invoice.date).toLocaleDateString()}</td>
-                    <td className="px-4 py-3 text-sm text-slate-600">{new Date(invoice.dueDate).toLocaleDateString()}</td>
+                    <td className="px-4 py-3 text-sm text-slate-600">{formatDate(invoice.date)}</td>
+                    <td className="px-4 py-3 text-sm text-slate-600">{formatDate(invoice.dueDate)}</td>
                     <td className="px-4 py-3 text-sm font-semibold text-slate-900 text-right">€{invoice.amount.toFixed(2)}</td>
                     <td className="px-4 py-3">
                       <div className="flex justify-center">
@@ -457,11 +458,11 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Fecha de emisión</div>
-                  <div className="text-sm text-slate-900">{new Date(selectedInvoice.date).toLocaleDateString()}</div>
+                  <div className="text-sm text-slate-900">{formatDate(selectedInvoice.date)}</div>
                 </div>
                 <div>
                   <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Fecha de vencimiento</div>
-                  <div className="text-sm text-slate-900">{new Date(selectedInvoice.dueDate).toLocaleDateString()}</div>
+                  <div className="text-sm text-slate-900">{formatDate(selectedInvoice.dueDate)}</div>
                 </div>
               </div>
 

@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar as CalendarIcon, Clock, Plus, X, Users, Video, MapPin, ChevronLeft, ChevronRight } from 'lucide-react';
+import { API_URL } from '../services/config';
+import { formatDate, formatMonthYear, formatDateWithWeekday } from '../services/dateUtils';
 
 interface Session {
   id: string;
@@ -57,7 +59,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
     try {
       const year = currentDate.getFullYear();
       const month = currentDate.getMonth() + 1;
-      const response = await fetch(`/api/sessions?psychologistId=${psychologistId}&year=${year}&month=${month}`);
+      const response = await fetch(`${API_URL}/sessions?psychologistId=${psychologistId}&year=${year}&month=${month}`);
       if (response.ok) {
         const data = await response.json();
         setSessions(data);
@@ -70,7 +72,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
 
   const loadPatients = async () => {
     try {
-      const response = await fetch(`/api/psychologist/${psychologistId}/patients`);
+      const response = await fetch(`${API_URL}/psychologist/${psychologistId}/patients`);
       if (response.ok) {
         const data = await response.json();
         setPatients(data);
@@ -132,7 +134,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
     };
 
     try {
-      const response = await fetch('/api/sessions', {
+      const response = await fetch(`${API_URL}/sessions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...session, psychologistId })
@@ -150,8 +152,25 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
   };
 
   const handleCreateAvailability = async () => {
-    if (!newAvailability.startDate || !newAvailability.endDate || !newAvailability.startTime || !newAvailability.endTime) {
-      alert('Por favor completa todos los campos requeridos');
+    // Detailed validation with specific error messages
+    if (!newAvailability.startDate) {
+      alert('Por favor selecciona la fecha de inicio');
+      return;
+    }
+    if (!newAvailability.endDate) {
+      alert('Por favor selecciona la fecha de fin');
+      return;
+    }
+    if (!newAvailability.startTime) {
+      alert('Por favor selecciona la hora de inicio');
+      return;
+    }
+    if (!newAvailability.endTime) {
+      alert('Por favor selecciona la hora de fin');
+      return;
+    }
+    if (newAvailability.daysOfWeek.length === 0) {
+      alert('Por favor selecciona al menos un día de la semana');
       return;
     }
 
@@ -200,18 +219,26 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
       return;
     }
 
+    console.log('Creating availability with slots:', allSlots);
+
     try {
-      const response = await fetch('/api/sessions/availability', {
+      const response = await fetch(`${API_URL}/sessions/availability`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ slots: allSlots, psychologistId })
       });
+
+      console.log('Response status:', response.status);
+      const data = await response.json();
+      console.log('Response data:', data);
 
       if (response.ok) {
         await loadSessions();
         setShowNewAvailability(false);
         resetNewAvailability();
         alert(`Se crearon ${allSlots.length} espacios disponibles exitosamente`);
+      } else {
+        alert(`Error al crear disponibilidad: ${data.error || 'Error desconocido'}`);
       }
     } catch (error) {
       console.error('Error creating availability:', error);
@@ -221,7 +248,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
 
   const handleUpdateSessionStatus = async (sessionId: string, status: Session['status']) => {
     try {
-      const response = await fetch(`/api/sessions/${sessionId}`, {
+      const response = await fetch(`${API_URL}/sessions/${sessionId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status })
@@ -270,7 +297,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
   };
 
   const { daysInMonth, startingDayOfWeek } = getDaysInMonth();
-  const monthName = currentDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+  const monthName = formatMonthYear(currentDate);
   const weekDays = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
   return (
@@ -425,7 +452,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
             <div className="p-6 border-b border-slate-200">
               <div className="flex items-center justify-between">
                 <h3 className="text-xl font-bold text-slate-900">
-                  {new Date(selectedDate).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}
+                  {formatDateWithWeekday(selectedDate)}
                 </h3>
                 <button
                   onClick={() => setSelectedDate('')}
@@ -515,7 +542,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Fecha</div>
-                  <div className="text-sm text-slate-900">{new Date(selectedSession.date).toLocaleDateString('es-ES')}</div>
+                  <div className="text-sm text-slate-900">{formatDate(selectedSession.date)}</div>
                 </div>
                 <div>
                   <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Hora</div>
