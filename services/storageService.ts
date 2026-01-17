@@ -89,8 +89,12 @@ const removeLocalRelationship = (psychologistId: string, patientId: string) => {
 };
 
 const ensureRelationship = async (psychologistId: string, patientId: string): Promise<CareRelationship> => {
+  if (!psychologistId || !patientId) {
+      throw new Error('psychologistId y patientId son obligatorios');
+  }
   if (USE_BACKEND) {
       try {
+          console.log('[ensureRelationship]', { psychologistId, patientId });
           const res = await fetch(`${API_URL}/relationships`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -117,7 +121,11 @@ const ensureRelationship = async (psychologistId: string, patientId: string): Pr
 };
 
 const removeRelationship = async (psychologistId: string, patientId: string): Promise<void> => {
+  if (!psychologistId || !patientId) {
+      throw new Error('psychologistId y patientId son obligatorios para eliminar relación');
+  }
   if (USE_BACKEND) {
+      console.log('[removeRelationship]', { psychologistId, patientId });
       const params = new URLSearchParams({ psychologistId, patientId });
       try {
           const res = await fetch(`${API_URL}/relationships?${params.toString()}`, { method: 'DELETE' });
@@ -512,14 +520,19 @@ export const rejectInvitation = async (invitationId: string) => {
 };
 
 export const linkPatientToPsychologist = async (patientId: string, psychId: string) => {
+     // Nota: patientId/psychId se refieren a la posición en esta relación específica,
+     // no al rol general del usuario. Un psicólogo puede ser paciente de otro.
      await ensureRelationship(psychId, patientId);
 };
 
 export const revokeAccess = async (patientId: string, psychId: string) => {
+    // Nota: patientId/psychId se refieren a la posición en esta relación específica,
+    // no al rol general del usuario. Un psicólogo puede ser paciente de otro.
     await removeRelationship(psychId, patientId);
 };
 
 export const getPatientsForPsychologist = async (psychId: string): Promise<PatientSummary[]> => {
+    console.log('[getPatientsForPsychologist]', { psychId });
     const psych = await AuthService.getUserById(psychId);
     if (!psych) return [];
 
@@ -547,10 +560,12 @@ export const getPatientsForPsychologist = async (psychId: string): Promise<Patie
     };
 
     const relationships = await fetchRelationships({ psychologistId: psychId });
+    console.log('[getPatientsForPsychologist] relationships:', relationships);
     const patientIds = relationships
         .map(rel => rel.patientId)
         .filter((id): id is string => Boolean(id));
     const uniquePatientIds = Array.from(new Set(patientIds));
+    console.log('[getPatientsForPsychologist] uniquePatientIds:', uniquePatientIds);
 
     const patientPromises = uniquePatientIds.map(async (pid) => {
         const p = await AuthService.getUserById(pid);
@@ -563,11 +578,14 @@ export const getPatientsForPsychologist = async (psychId: string): Promise<Patie
 
     patientsData.unshift(await processUser(psych, true));
 
+    console.log('[getPatientsForPsychologist] result:', patientsData.map(p => ({ id: p.id, name: p.name })));
     return patientsData;
 };
 
 export const getPsychologistsForPatient = async (patientId: string): Promise<User[]> => {
+    console.log('[getPsychologistsForPatient]', { patientId });
     const relationships = await fetchRelationships({ patientId });
+    console.log('[getPsychologistsForPatient] relationships:', relationships);
     if (relationships.length === 0) return [];
 
     const psychIds = Array.from(new Set(
@@ -575,8 +593,11 @@ export const getPsychologistsForPatient = async (patientId: string): Promise<Use
             .map(rel => rel.psychologistId)
             .filter((id): id is string => Boolean(id))
     ));
+    console.log('[getPsychologistsForPatient] psychIds:', psychIds);
     const psychs = await Promise.all(psychIds.map(id => AuthService.getUserById(id)));
-    return psychs.filter((u): u is User => Boolean(u));
+    const result = psychs.filter((u): u is User => Boolean(u));
+    console.log('[getPsychologistsForPatient] result:', result.map(u => ({ id: u.id, name: u.name })));
+    return result;
 };
 
 export const getAllPsychologists = async (): Promise<User[]> => {

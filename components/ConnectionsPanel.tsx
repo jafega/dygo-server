@@ -46,19 +46,23 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
     setIsLoading(true);
     setError('');
     try {
+      const basePromise = getPsychologistsForPatient(currentUser.id);
+
       if (currentUser.role === 'PATIENT') {
-        const [pending, connected] = await Promise.all([
-          getPendingInvitationsForEmail(currentUser.email),
-          getPsychologistsForPatient(currentUser.id)
+        const [connected, pending] = await Promise.all([
+          basePromise,
+          getPendingInvitationsForEmail(currentUser.email)
         ]);
-        setInvitations(pending);
         setMyPsychologists(connected);
+        setInvitations(pending);
         onPendingInvitesChange?.(pending.length > 0);
       } else {
-        const [sent, patients] = await Promise.all([
+        const [connected, sent, patients] = await Promise.all([
+          basePromise,
           getSentInvitationsForPsychologist(currentUser.id),
           getPatientsForPsychologist(currentUser.id)
         ]);
+        setMyPsychologists(connected);
         setSentInvitations(sent);
         setMyPatients(patients.filter(p => !p.isSelf));
       }
@@ -109,9 +113,16 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
 
   const handleRevoke = async (targetUserId: string) => {
     if (!currentUser) return;
+    if (!targetUserId) {
+      setToast({ type: 'error', text: 'ID de usuario objetivo no válido' });
+      return;
+    }
     if (!window.confirm('¿Revocar acceso?')) return;
     try {
-      await revokeAccess(currentUser.role === 'PATIENT' ? currentUser.id : targetUserId, currentUser.role === 'PATIENT' ? targetUserId : currentUser.id);
+      const patientId = currentUser.role === 'PATIENT' ? currentUser.id : targetUserId;
+      const psychId = currentUser.role === 'PATIENT' ? targetUserId : currentUser.id;
+      console.log('[handleRevoke]', { currentUserRole: currentUser.role, patientId, psychId, targetUserId });
+      await revokeAccess(patientId, psychId);
       setToast({ type: 'success', text: 'Acceso revocado' });
       await loadConnections();
     } catch (err: any) {
@@ -213,13 +224,13 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
           <Loader2 className="animate-spin text-indigo-600 mx-auto mb-2" />
           <p className="text-slate-500 text-sm">Cargando conexiones…</p>
         </div>
-      ) : currentUser.role === 'PATIENT' ? (
+      ) : (
         <div className="space-y-6">
           <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
-                <h3 className="text-lg font-semibold text-slate-900">Tu red de especialistas</h3>
-                <p className="text-sm text-slate-500">Invita o acepta a profesionales para que puedan acompañarte.</p>
+                <h3 className="text-lg font-semibold text-slate-900">Psicólogos con acceso a tu perfil</h3>
+                <p className="text-sm text-slate-500">Controla quién puede ver tu evolución y encuentra nuevos profesionales.</p>
               </div>
               <button
                 onClick={async () => {
@@ -231,7 +242,7 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
                 className="px-4 py-2 text-sm font-medium rounded-xl border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 flex items-center gap-2"
               >
                 <Search size={16} />
-                {showDirectory ? 'Cerrar directorio' : 'Buscar especialista'}
+                {showDirectory ? 'Cerrar directorio' : 'Buscar profesional'}
               </button>
             </div>
 
@@ -272,9 +283,35 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
                 </div>
               </div>
             )}
+
+            <div className="mt-6">
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-sm font-bold text-slate-600 uppercase tracking-wide flex items-center gap-2">
+                  <UserCheck size={14} /> Psicólogos conectados
+                </h4>
+                <span className="text-xs text-slate-400">{myPsychologists.length} activos</span>
+              </div>
+              {myPsychologists.length === 0 ? (
+                <p className="text-sm text-slate-500">Aún no has autorizado a ningún especialista.</p>
+              ) : (
+                <div className="space-y-3">
+                  {myPsychologists.map(psych => (
+                    <div key={psych.id} className="flex items-center justify-between border border-slate-100 rounded-xl p-4">
+                      <div>
+                        <p className="font-semibold text-slate-900">{psych.name}</p>
+                        <p className="text-xs text-slate-500">{psych.email}</p>
+                      </div>
+                      <button onClick={() => handleRevoke(psych.id)} className="text-xs text-slate-400 hover:text-red-500 flex items-center gap-1">
+                        <Trash2 size={14} /> Revocar
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
-          {invitations.length > 0 && (
+          {currentUser.role === 'PATIENT' && invitations.length > 0 && (
             <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
               <h4 className="text-sm font-bold text-slate-600 uppercase tracking-wide mb-4 flex items-center gap-2">
                 <Mail size={14} /> Invitaciones pendientes
@@ -296,106 +333,64 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
             </div>
           )}
 
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-              <h4 className="text-sm font-bold text-slate-600 uppercase tracking-wide flex items-center gap-2">
-                <UserCheck size={14} /> Profesionales conectados
-              </h4>
-              <span className="text-xs text-slate-400">{myPsychologists.length} activos</span>
-            </div>
-            {myPsychologists.length === 0 ? (
-              <p className="text-sm text-slate-500">Aún no has conectado con un especialista.</p>
-            ) : (
-              <div className="space-y-3">
-                {myPsychologists.map(psych => (
-                  <div key={psych.id} className="flex items-center justify-between border border-slate-100 rounded-xl p-4">
-                    <div>
-                      <p className="font-semibold text-slate-900">{psych.name}</p>
-                      <p className="text-xs text-slate-500">{psych.email}</p>
-                    </div>
-                    <button onClick={() => handleRevoke(psych.id)} className="text-xs text-slate-400 hover:text-red-500 flex items-center gap-1">
-                      <Trash2 size={14} /> Revocar
-                    </button>
-                  </div>
-                ))}
+          {currentUser.role === 'PSYCHOLOGIST' && (
+            <>
+              <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+                <div className="flex flex-col gap-2 mb-4">
+                  <h4 className="text-sm font-bold text-slate-600 uppercase tracking-wide flex items-center gap-2">
+                    <UserPlus size={14} /> Invitar pacientes
+                  </h4>
+                  <p className="text-sm text-slate-500">Comparte un acceso seguro para que tus pacientes te vinculen en dygo.</p>
+                </div>
+                <div className="flex flex-col gap-3 md:flex-row">
+                  <input
+                    type="email"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    placeholder="correo@paciente.com"
+                    className="flex-1 px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  />
+                  <button
+                    onClick={handleSendInvitation}
+                    disabled={isSendingInvite || !inviteEmail.trim()}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isSendingInvite ? (<Loader2 size={16} className="animate-spin" />) : (<UserPlus size={16} />)}
+                    {isSendingInvite ? 'Enviando…' : 'Enviar invitación'}
+                  </button>
+                </div>
               </div>
-            )}
-          </div>
-        </div>
-      ) : (
-        <div className="space-y-6">
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-            <div className="flex flex-col gap-2 mb-4">
-              <h4 className="text-sm font-bold text-slate-600 uppercase tracking-wide flex items-center gap-2">
-                <UserPlus size={14} /> Invitar paciente
-              </h4>
-              <p className="text-sm text-slate-500">Envía una solicitud a tus pacientes para acceder a su diario.</p>
-            </div>
-            <div className="flex flex-col gap-3 md:flex-row">
-              <input
-                type="email"
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-                placeholder="correo@paciente.com"
-                className="flex-1 px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-              />
-              <button
-                onClick={handleSendInvitation}
-                disabled={isSendingInvite || !inviteEmail.trim()}
-                className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isSendingInvite ? (<Loader2 size={16} className="animate-spin" />) : (<UserPlus size={16} />)}
-                {isSendingInvite ? 'Enviando…' : 'Enviar solicitud'}
-              </button>
-            </div>
-          </div>
 
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-            <h4 className="text-sm font-bold text-slate-600 uppercase tracking-wide mb-4 flex items-center gap-2">
-              <Mail size={14} /> Solicitudes enviadas
-            </h4>
-            {sentInvitations.length === 0 ? (
-              <p className="text-sm text-slate-500">Aún no has enviado solicitudes.</p>
-            ) : (
-              <div className="space-y-3">
-                {sentInvitations.map(inv => (
-                  <div key={inv.id} className="p-4 rounded-xl border border-slate-100 bg-slate-50 flex items-center justify-between">
-                    <div>
-                      <p className="font-semibold text-slate-900">{inv.toUserEmail}</p>
-                      <p className="text-xs text-slate-500">{new Date(inv.timestamp).toLocaleString()}</p>
-                    </div>
-                    <span className="px-3 py-1 text-xs font-semibold rounded-full bg-amber-50 text-amber-700 border border-amber-200">{inv.status}</span>
+              <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-600 uppercase tracking-wide flex items-center gap-2">
+                      <UserCheck size={14} /> Pacientes conectados
+                    </h4>
+                    <p className="text-xs text-slate-500">Solo tú puedes ver su diario y feedback.</p>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-              <h4 className="text-sm font-bold text-slate-600 uppercase tracking-wide flex items-center gap-2">
-                <UserCheck size={14} /> Pacientes conectados
-              </h4>
-              <span className="text-xs text-slate-400">{myPatients.length} activos</span>
-            </div>
-            {myPatients.length === 0 ? (
-              <p className="text-sm text-slate-500">Aún no tienes pacientes con acceso.</p>
-            ) : (
-              <div className="space-y-3">
-                {myPatients.map(patient => (
-                  <div key={patient.id} className="flex items-center justify-between border border-slate-100 rounded-xl p-4">
-                    <div>
-                      <p className="font-semibold text-slate-900">{patient.name}</p>
-                      <p className="text-xs text-slate-500">{patient.email}</p>
-                    </div>
-                    <button onClick={() => handleRevoke(patient.id)} className="text-xs text-slate-400 hover:text-red-500 flex items-center gap-1">
-                      <Trash2 size={14} /> Revocar
-                    </button>
+                  <span className="text-xs text-slate-400">{myPatients.length} activos</span>
+                </div>
+                {myPatients.length === 0 ? (
+                  <p className="text-sm text-slate-500">Aún no tienes pacientes con acceso.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {myPatients.map(patient => (
+                      <div key={patient.id} className="flex items-center justify-between border border-slate-100 rounded-xl p-4">
+                        <div>
+                          <p className="font-semibold text-slate-900">{patient.name}</p>
+                          <p className="text-xs text-slate-500">{patient.email}</p>
+                        </div>
+                        <button onClick={() => handleRevoke(patient.id)} className="text-xs text-slate-400 hover:text-red-500 flex items-center gap-1">
+                          <Trash2 size={14} /> Revocar
+                        </button>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                )}
               </div>
-            )}
-          </div>
+            </>
+          )}
         </div>
       )}
     </div>

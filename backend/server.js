@@ -26,6 +26,19 @@ const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const SUPABASE_REST_ONLY = String(process.env.SUPABASE_REST_ONLY || '').toLowerCase() === 'true';
 const DISALLOW_LOCAL_PERSISTENCE = String(process.env.DISALLOW_LOCAL_PERSISTENCE || 'true').toLowerCase() === 'true';
+const SUPABASE_SQL_ENDPOINT = SUPABASE_URL ? `${SUPABASE_URL.replace(/\/$/, '')}/rest/v1/rpc/exec_sql` : '';
+const SUPABASE_TABLES_TO_ENSURE = [
+  'users',
+  'entries',
+  'goals',
+  'invitations',
+  'settings',
+  'sessions',
+  'care_relationships',
+  'invoices',
+  'psychologist_profiles'
+];
+let supabaseTablesEnsured = false;
 
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
 
@@ -147,23 +160,30 @@ const ensureDbShape = (db) => {
   if (!Array.isArray(db.invoices)) db.invoices = [];
   if (!db.psychologistProfiles || typeof db.psychologistProfiles !== 'object') db.psychologistProfiles = {};
 
-  migrateLegacyAccessLists(db);
+  // migrateLegacyAccessLists(db); // DISABLED - use care_relationships table only
   return db;
 };
 
 const relationshipKey = (psychologistId, patientId) => `${psychologistId}:${patientId}`;
 
 const ensureCareRelationship = (db, psychologistId, patientId) => {
-  if (!psychologistId || !patientId) return null;
+  if (!psychologistId || !patientId) {
+    console.error('[ensureCareRelationship] ❌ Missing IDs', { psychologistId, patientId });
+    return null;
+  }
   if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
   const existing = db.careRelationships.find(rel => rel.psychologistId === psychologistId && rel.patientId === patientId);
-  if (existing) return existing;
+  if (existing) {
+    console.log('[ensureCareRelationship] ✓ Relación ya existe', { id: existing.id });
+    return existing;
+  }
   const rel = {
     id: crypto.randomUUID(),
     psychologistId,
     patientId,
     createdAt: Date.now()
   };
+  console.log('[ensureCareRelationship] ✓ Nueva relación creada', rel);
   db.careRelationships.push(rel);
   return rel;
 };
@@ -180,6 +200,62 @@ const removeCareRelationshipsForUser = (db, userId) => {
   const before = db.careRelationships.length;
   db.careRelationships = db.careRelationships.filter(rel => rel.psychologistId !== userId && rel.patientId !== userId);
   return before - db.careRelationships.length;
+};
+
+const buildSupabaseTableSql = (table) => `
+CREATE TABLE IF NOT EXISTS public.${table} (
+  id TEXT PRIMARY KEY,
+  data JSONB NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+`;
+
+const isMissingRelationError = (error) => {
+  if (!error) return false;
+  if (error.code && String(error.code).toUpperCase() === '42P01') return true;
+  const message = error.message || error.details || error.hint;
+  return typeof message === 'string' && /does not exist/i.test(message);
+};
+
+const executeSupabaseSql = async (sql) => {
+  if (!SUPABASE_SQL_ENDPOINT || !SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error('Supabase SQL endpoint no está configurado');
+  }
+
+  const response = await fetch(SUPABASE_SQL_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      Prefer: 'return=minimal'
+    },
+    body: JSON.stringify({ query: sql })
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => response.statusText);
+    throw new Error(text || `Supabase SQL error (${response.status})`);
+  }
+};
+
+const ensureSupabaseTablesExist = async (force = false) => {
+  if (!supabaseAdmin || !SUPABASE_SQL_ENDPOINT || !SUPABASE_SERVICE_ROLE_KEY) return;
+  if (supabaseTablesEnsured && !force) return;
+
+  for (const table of SUPABASE_TABLES_TO_ENSURE) {
+    try {
+      const { error } = await supabaseAdmin.from(table).select('id').limit(1);
+      if (error && isMissingRelationError(error)) {
+        await executeSupabaseSql(buildSupabaseTableSql(table));
+        console.log(`ℹ️ Tabla '${table}' creada automáticamente en Supabase`);
+      }
+    } catch (err) {
+      console.error(`❌ No se pudo asegurar la tabla '${table}' en Supabase`, err?.message || err);
+    }
+  }
+
+  supabaseTablesEnsured = true;
 };
 
 // If you want durable persistence across restarts on platforms like Render, set USE_SQLITE=true
@@ -387,6 +463,11 @@ if (!pgPool && SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
       auth: { persistSession: false }
     });
     console.log('✅ Supabase REST persistence enabled (service role)');
+    try {
+      await ensureSupabaseTablesExist();
+    } catch (schemaErr) {
+      console.error('❌ Error ensuring Supabase schema', schemaErr?.message || schemaErr);
+    }
     supabaseDbCache = ensureDbShape(await loadSupabaseCache());
     console.log('ℹ️ Supabase data loaded into cache');
     (async () => {
@@ -638,6 +719,20 @@ async function saveSupabaseDb(data, prevCache = null) {
   }
 }
 
+const persistSupabaseData = async (data, prevCache, allowRetry = true) => {
+  if (!supabaseAdmin) return;
+  try {
+    await saveSupabaseDb(data, prevCache);
+  } catch (err) {
+    if (allowRetry && isMissingRelationError(err)) {
+      console.warn('⚠️ Tabla faltante detectada en Supabase. Intentando crearla automáticamente…');
+      await ensureSupabaseTablesExist(true);
+      return persistSupabaseData(data, prevCache, false);
+    }
+    throw err;
+  }
+};
+
 const getDb = () => {
   if (DISALLOW_LOCAL_PERSISTENCE && !pgPool && !supabaseAdmin && !sqliteDb) {
     return ensureDbShape(createInitialDb());
@@ -753,14 +848,14 @@ const saveDb = (data, options = {}) => {
   if (supabaseAdmin) {
     const prevCache = supabaseDbCache;
     supabaseDbCache = data;
-    const persistPromise = (async () => {
-      try {
-        await saveSupabaseDb(data, prevCache);
-      } catch (err) {
-        console.error('❌ Error guardando en Supabase REST:', err);
-      }
-    })();
-    return awaitPersistence ? persistPromise : undefined;
+    const persistPromise = persistSupabaseData(data, prevCache);
+    if (awaitPersistence) {
+      return persistPromise;
+    }
+    persistPromise.catch((err) => {
+      console.error('❌ Error guardando en Supabase REST:', err?.message || err);
+    });
+    return undefined;
   }
 
   if (sqliteDb) {
@@ -1438,46 +1533,56 @@ app.get('/api/users', async (req, res) => {
 });
 
 app.put('/api/users/:id', async (req, res) => {
-  const db = getDb();
-  const idx = db.users.findIndex((u) => u.id === req.params.id);
+  try {
+    const db = getDb();
+    const idx = db.users.findIndex((u) => u.id === req.params.id);
 
-  if (idx === -1) return res.status(404).json({ error: 'Usuario no encontrado' });
+    if (idx === -1) return res.status(404).json({ error: 'Usuario no encontrado' });
 
-  if (req.body?.email) {
-    const normalizedEmail = normalizeEmail(req.body.email);
-    const duplicate = db.users.find((u, i) => i !== idx && normalizeEmail(u.email) === normalizedEmail);
-    if (duplicate) return res.status(400).json({ error: 'Email ya en uso' });
+    if (req.body?.email) {
+      const normalizedEmail = normalizeEmail(req.body.email);
+      const duplicate = db.users.find((u, i) => i !== idx && normalizeEmail(u.email) === normalizedEmail);
+      if (duplicate) return res.status(400).json({ error: 'Email ya en uso' });
+    }
+
+    const updated = { ...db.users[idx], ...req.body };
+    if (updated.email) updated.email = normalizeEmail(updated.email);
+    if (updated.role) updated.isPsychologist = String(updated.role).toUpperCase() === 'PSYCHOLOGIST';
+    db.users[idx] = updated;
+    await saveDb(db, { awaitPersistence: true });
+    return res.json(db.users[idx]);
+  } catch (err) {
+    console.error('Error in PUT /api/users/:id', err);
+    return res.status(500).json({ error: err?.message || 'Error actualizando el usuario' });
   }
-
-  const updated = { ...db.users[idx], ...req.body };
-  if (updated.email) updated.email = normalizeEmail(updated.email);
-  if (updated.role) updated.isPsychologist = String(updated.role).toUpperCase() === 'PSYCHOLOGIST';
-  db.users[idx] = updated;
-  await saveDb(db, { awaitPersistence: true });
-  res.json(db.users[idx]);
 });
 
 app.put('/api/users', async (req, res) => {
-  const id = req.query.id || req.query.userId;
-  if (!id) return res.status(400).json({ error: 'Missing user id' });
+  try {
+    const id = req.query.id || req.query.userId;
+    if (!id) return res.status(400).json({ error: 'Missing user id' });
 
-  const db = getDb();
-  const idx = db.users.findIndex((u) => u.id === id);
+    const db = getDb();
+    const idx = db.users.findIndex((u) => u.id === id);
 
-  if (idx === -1) return res.status(404).json({ error: 'Usuario no encontrado' });
+    if (idx === -1) return res.status(404).json({ error: 'Usuario no encontrado' });
 
-  if (req.body?.email) {
-    const normalizedEmail = normalizeEmail(req.body.email);
-    const duplicate = db.users.find((u, i) => i !== idx && normalizeEmail(u.email) === normalizedEmail);
-    if (duplicate) return res.status(400).json({ error: 'Email ya en uso' });
+    if (req.body?.email) {
+      const normalizedEmail = normalizeEmail(req.body.email);
+      const duplicate = db.users.find((u, i) => i !== idx && normalizeEmail(u.email) === normalizedEmail);
+      if (duplicate) return res.status(400).json({ error: 'Email ya en uso' });
+    }
+
+    const updated = { ...db.users[idx], ...req.body };
+    if (updated.email) updated.email = normalizeEmail(updated.email);
+    if (updated.role) updated.isPsychologist = String(updated.role).toUpperCase() === 'PSYCHOLOGIST';
+    db.users[idx] = updated;
+    await saveDb(db, { awaitPersistence: true });
+    return res.json(db.users[idx]);
+  } catch (err) {
+    console.error('Error in PUT /api/users', err);
+    return res.status(500).json({ error: err?.message || 'Error actualizando el usuario' });
   }
-
-  const updated = { ...db.users[idx], ...req.body };
-  if (updated.email) updated.email = normalizeEmail(updated.email);
-  if (updated.role) updated.isPsychologist = String(updated.role).toUpperCase() === 'PSYCHOLOGIST';
-  db.users[idx] = updated;
-  await saveDb(db, { awaitPersistence: true });
-  res.json(db.users[idx]);
 });
 
 // --- RUTAS DE ENTRADAS (ENTRIES) ---
@@ -2511,77 +2616,132 @@ app.get('/api/psychologist/:userId/profile', (req, res) => {
 });
 
 app.put('/api/psychologist/:userId/profile', async (req, res) => {
-  const { userId } = req.params;
-  const db = getDb();
-  if (!db.psychologistProfiles) db.psychologistProfiles = {};
-  
-  console.log('[API] Saving psychologist profile for:', userId);
-  console.log('[API] Profile data:', req.body);
-  
-  db.psychologistProfiles[userId] = req.body;
-  await saveDb(db, { awaitPersistence: true });
-  
-  console.log('[API] Profile saved successfully');
-  res.json(req.body);
+  try {
+    const { userId } = req.params;
+    const db = getDb();
+    if (!db.psychologistProfiles) db.psychologistProfiles = {};
+
+    console.log('[API] Saving psychologist profile for:', userId);
+    console.log('[API] Profile data:', req.body);
+
+    db.psychologistProfiles[userId] = req.body;
+    await saveDb(db, { awaitPersistence: true });
+
+    console.log('[API] Profile saved successfully');
+    return res.json(req.body);
+  } catch (err) {
+    console.error('❌ Error saving psychologist profile', err);
+    return res.status(500).json({ error: err?.message || 'No se pudo guardar el perfil profesional' });
+  }
 });
 
 // --- RELACIONES PACIENTE / PSICÓLOGO ---
 app.get('/api/relationships', (req, res) => {
   const { psychologistId, patientId } = req.query;
+  console.log('[GET /api/relationships] Request:', { psychologistId, patientId });
   if (!psychologistId && !patientId) {
     return res.status(400).json({ error: 'psychologistId o patientId requerido' });
   }
 
   const db = getDb();
+  console.log('[GET /api/relationships] Total careRelationships:', db.careRelationships?.length || 0);
   const relationships = (db.careRelationships || []).filter(rel => {
     if (!rel) return false;
     const matchesPsych = psychologistId ? rel.psychologistId === psychologistId : true;
     const matchesPatient = patientId ? rel.patientId === patientId : true;
     return matchesPsych && matchesPatient;
   });
+  console.log('[GET /api/relationships] Filtered result:', relationships);
 
   res.json(relationships);
 });
 
-app.post('/api/relationships', (req, res) => {
-  const { psychologistId, patientId } = req.body || {};
-  if (!psychologistId || !patientId) {
-    return res.status(400).json({ error: 'psychologistId y patientId son obligatorios' });
-  }
+app.post('/api/relationships', async (req, res) => {
+  try {
+    const { psychologistId, patientId } = req.body || {};
+    console.log('[POST /api/relationships] Request:', { psychologistId, patientId });
+    if (!psychologistId || !patientId) {
+      console.error('[POST /api/relationships] ❌ Missing required fields');
+      return res.status(400).json({ error: 'psychologistId y patientId son obligatorios' });
+    }
+    if (psychologistId === patientId) {
+      console.error('[POST /api/relationships] ❌ IDs iguales');
+      return res.status(400).json({ error: 'No puedes crear una relación contigo mismo' });
+    }
 
-  const db = getDb();
-  const relationship = ensureCareRelationship(db, psychologistId, patientId);
-  saveDb(db, { awaitPersistence: true });
-  res.json(relationship);
+    const db = getDb();
+    
+    // Validar que ambos usuarios existan
+    const psychUser = db.users.find(u => u.id === psychologistId);
+    const patientUser = db.users.find(u => u.id === patientId);
+    
+    if (!psychUser) {
+      console.error('[POST /api/relationships] ❌ psychologistId no existe');
+      return res.status(404).json({ error: 'El usuario (psicólogo) no existe' });
+    }
+    if (!patientUser) {
+      console.error('[POST /api/relationships] ❌ patientId no existe');
+      return res.status(404).json({ error: 'El usuario (paciente) no existe' });
+    }
+    
+    console.log('[POST /api/relationships] Creando relación:', {
+      psychologist: `${psychUser.name} (${psychUser.role})`,
+      patient: `${patientUser.name} (${patientUser.role})`
+    });
+    
+    const relationship = ensureCareRelationship(db, psychologistId, patientId);
+    if (!relationship) {
+      return res.status(500).json({ error: 'No se pudo crear la relación' });
+    }
+    await saveDb(db, { awaitPersistence: true });
+    console.log('[POST /api/relationships] ✓ Relación guardada');
+    return res.json(relationship);
+  } catch (err) {
+    console.error('❌ Error creating relationship', err);
+    return res.status(500).json({ error: err?.message || 'No se pudo crear la relación' });
+  }
 });
 
-app.delete('/api/relationships/:id', (req, res) => {
-  const { id } = req.params;
-  if (!id) return res.status(400).json({ error: 'Relationship id requerido' });
+app.delete('/api/relationships/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: 'Relationship id requerido' });
 
-  const db = getDb();
-  const before = db.careRelationships?.length || 0;
-  db.careRelationships = (db.careRelationships || []).filter(rel => rel.id !== id);
-  if ((db.careRelationships?.length || 0) === before) {
-    return res.status(404).json({ error: 'Relación no encontrada' });
+    const db = getDb();
+    const before = db.careRelationships?.length || 0;
+    db.careRelationships = (db.careRelationships || []).filter(rel => rel.id !== id);
+    if ((db.careRelationships?.length || 0) === before) {
+      return res.status(404).json({ error: 'Relación no encontrada' });
+    }
+    await saveDb(db, { awaitPersistence: true });
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('❌ Error deleting relationship by id', err);
+    return res.status(500).json({ error: err?.message || 'No se pudo eliminar la relación' });
   }
-  saveDb(db, { awaitPersistence: true });
-  res.json({ success: true });
 });
 
-app.delete('/api/relationships', (req, res) => {
-  const { psychologistId, patientId } = req.query;
-  if (!psychologistId || !patientId) {
-    return res.status(400).json({ error: 'psychologistId y patientId son obligatorios' });
-  }
+app.delete('/api/relationships', async (req, res) => {
+  try {
+    const { psychologistId, patientId } = req.query;
+    console.log('[DELETE /api/relationships] Request:', { psychologistId, patientId });
+    if (!psychologistId || !patientId) {
+      console.error('[DELETE /api/relationships] ❌ Missing required fields');
+      return res.status(400).json({ error: 'psychologistId y patientId son obligatorios' });
+    }
 
-  const db = getDb();
-  const removed = removeCareRelationshipByPair(db, psychologistId, patientId);
-  if (!removed) {
-    return res.status(404).json({ error: 'Relación no encontrada' });
+    const db = getDb();
+    const removed = removeCareRelationshipByPair(db, psychologistId, patientId);
+    console.log('[DELETE /api/relationships]', removed ? '✓ Eliminada' : '⚠️ No encontrada');
+    if (!removed) {
+      return res.status(404).json({ error: 'Relación no encontrada' });
+    }
+    await saveDb(db, { awaitPersistence: true });
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('❌ Error deleting relationship pair', err);
+    return res.status(500).json({ error: err?.message || 'No se pudo eliminar la relación' });
   }
-  saveDb(db, { awaitPersistence: true });
-  res.json({ success: true });
 });
 
 // --- SESSIONS / CALENDAR ---
@@ -2651,13 +2811,18 @@ app.get('/api/sessions', (req, res) => {
 });
 
 app.post('/api/sessions', async (req, res) => {
-  const db = getDb();
-  if (!db.sessions) db.sessions = [];
-  
-  const session = { ...req.body, id: req.body.id || Date.now().toString() };
-  db.sessions.push(session);
-  await saveDb(db, { awaitPersistence: true });
-  res.json(session);
+  try {
+    const db = getDb();
+    if (!db.sessions) db.sessions = [];
+
+    const session = { ...req.body, id: req.body.id || Date.now().toString() };
+    db.sessions.push(session);
+    await saveDb(db, { awaitPersistence: true });
+    return res.json(session);
+  } catch (err) {
+    console.error('❌ Error creating session', err);
+    return res.status(500).json({ error: err?.message || 'No se pudo crear la sesión' });
+  }
 });
 
 app.post('/api/sessions/availability', async (req, res) => {
@@ -2695,55 +2860,61 @@ app.post('/api/sessions/availability', async (req, res) => {
 });
 
 app.patch('/api/sessions/:id', async (req, res) => {
-  const { id } = req.params;
-  const db = getDb();
-  if (!db.sessions) db.sessions = [];
-  
-  const idx = db.sessions.findIndex(s => s.id === id);
-  if (idx === -1) return res.status(404).json({ error: 'Session not found' });
-  
-  const updatedSession = { ...db.sessions[idx], ...req.body };
+  try {
+    const { id } = req.params;
+    const db = getDb();
+    if (!db.sessions) db.sessions = [];
 
-  if (updatedSession.status === 'available') {
-    updatedSession.patientId = '';
-    updatedSession.patientName = 'Disponible';
-    updatedSession.patientPhone = '';
-    delete updatedSession.meetLink;
+    const idx = db.sessions.findIndex(s => s.id === id);
+    if (idx === -1) return res.status(404).json({ error: 'Session not found' });
+
+    const updatedSession = { ...db.sessions[idx], ...req.body };
+
+    if (updatedSession.status === 'available') {
+      updatedSession.patientId = '';
+      updatedSession.patientName = 'Disponible';
+      updatedSession.patientPhone = '';
+      delete updatedSession.meetLink;
+    }
+
+    if (updatedSession.status === 'scheduled' &&
+        updatedSession.type === 'online' &&
+        !updatedSession.meetLink) {
+      const meetId = crypto.randomBytes(12).toString('base64url');
+      updatedSession.meetLink = `https://meet.google.com/${meetId}`;
+      console.log(`🎥 Auto-generated Google Meet link for session ${id}: ${updatedSession.meetLink}`);
+    }
+
+    db.sessions[idx] = updatedSession;
+    await saveDb(db, { awaitPersistence: true });
+    return res.json(db.sessions[idx]);
+  } catch (err) {
+    console.error('❌ Error updating session', err);
+    return res.status(500).json({ error: err?.message || 'No se pudo actualizar la sesión' });
   }
-  
-  // Auto-generate Google Meet link when session is booked and type is online
-  if (updatedSession.status === 'scheduled' && 
-      updatedSession.type === 'online' && 
-      !updatedSession.meetLink) {
-    // Generate a unique meet link
-    // In production, this would integrate with Google Calendar API
-    // For now, we generate a placeholder link
-    const meetId = crypto.randomBytes(12).toString('base64url');
-    updatedSession.meetLink = `https://meet.google.com/${meetId}`;
-    console.log(`🎥 Auto-generated Google Meet link for session ${id}: ${updatedSession.meetLink}`);
-  }
-  
-  db.sessions[idx] = updatedSession;
-  await saveDb(db, { awaitPersistence: true });
-  res.json(db.sessions[idx]);
 });
 
 app.delete('/api/sessions/:id', async (req, res) => {
-  const { id } = req.params;
-  const db = getDb();
-  if (!db.sessions) db.sessions = [];
+  try {
+    const { id } = req.params;
+    const db = getDb();
+    if (!db.sessions) db.sessions = [];
 
-  const idx = db.sessions.findIndex(s => s.id === id);
-  if (idx === -1) return res.status(404).json({ error: 'Session not found' });
+    const idx = db.sessions.findIndex(s => s.id === id);
+    if (idx === -1) return res.status(404).json({ error: 'Session not found' });
 
-  const session = db.sessions[idx];
-  if (session.status !== 'available') {
-    return res.status(400).json({ error: 'Solo se pueden eliminar espacios con estado Disponible' });
+    const session = db.sessions[idx];
+    if (session.status !== 'available') {
+      return res.status(400).json({ error: 'Solo se pueden eliminar espacios con estado Disponible' });
+    }
+
+    db.sessions.splice(idx, 1);
+    await saveDb(db, { awaitPersistence: true });
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('❌ Error deleting session', err);
+    return res.status(500).json({ error: err?.message || 'No se pudo eliminar la sesión' });
   }
-
-  db.sessions.splice(idx, 1);
-  await saveDb(db, { awaitPersistence: true });
-  res.json({ success: true });
 });
 
 // --- PATIENTS LIST ---
