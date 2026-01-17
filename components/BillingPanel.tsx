@@ -93,10 +93,43 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
     return formData.items.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
   };
 
-  const generateInvoiceNumber = () => {
-    const year = new Date().getFullYear();
-    const count = invoices.filter(inv => inv.invoiceNumber.startsWith(`${year}-`)).length + 1;
-    return `${year}-${String(count).padStart(4, '0')}`;
+  const generateInvoiceNumber = async () => {
+    try {
+      // Fetch ALL invoices for this psychologist (not filtered by patient) to get correct numbering
+      const response = await fetch(`${API_URL}/invoices?psychologistId=${psychologistId}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch invoices for numbering');
+      }
+      
+      const allInvoices = await response.json();
+      const year = new Date().getFullYear();
+      
+      // Find the highest invoice number for the current year
+      const yearPrefix = `${year}-`;
+      const invoicesThisYear = allInvoices.filter((inv: any) => 
+        inv.invoiceNumber && inv.invoiceNumber.startsWith(yearPrefix)
+      );
+      
+      if (invoicesThisYear.length === 0) {
+        return `${year}-0001`;
+      }
+      
+      // Extract numbers and find max
+      const numbers = invoicesThisYear.map((inv: any) => {
+        const parts = inv.invoiceNumber.split('-');
+        return parseInt(parts[1] || '0', 10);
+      });
+      
+      const maxNumber = Math.max(...numbers);
+      const nextNumber = maxNumber + 1;
+      
+      return `${year}-${String(nextNumber).padStart(4, '0')}`;
+    } catch (error) {
+      console.error('Error generating invoice number:', error);
+      // Fallback to simple counting if fetch fails
+      const year = new Date().getFullYear();
+      return `${year}-${String(Date.now()).slice(-4)}`;
+    }
   };
 
   const handleCreateInvoice = async () => {
@@ -117,9 +150,12 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
     const patient = patients.find(p => p.id === formData.patientId);
     if (!patient) return;
 
+    // Generate invoice number asynchronously
+    const invoiceNumber = await generateInvoiceNumber();
+
     const newInvoice: Invoice = {
       id: Date.now().toString(),
-      invoiceNumber: generateInvoiceNumber(),
+      invoiceNumber,
       patientId: formData.patientId,
       patientName: patient.name,
       amount: calculateTotal(),
