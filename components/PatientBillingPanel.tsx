@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Download, FileText, Check, Clock, AlertCircle, X } from 'lucide-react';
 import { getCurrentUser } from '../services/authService';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+import { API_URL } from '../services/config';
 
 interface Invoice {
   id: string;
@@ -33,7 +32,9 @@ export default function PatientBillingPanel() {
       const currentUser = await getCurrentUser();
       if (!currentUser) return;
 
-      const response = await fetch(`${API_URL}/api/invoices?patientId=${currentUser.id}`);
+      console.log('[PatientBillingPanel] Loading invoices for patientId:', currentUser.id);
+      const response = await fetch(`${API_URL}/invoices?patientId=${currentUser.id}`);
+      console.log('[PatientBillingPanel] Response status:', response.status);
       if (response.ok) {
         const data = await response.json();
         setInvoices(data);
@@ -47,7 +48,7 @@ export default function PatientBillingPanel() {
 
   const handleDownloadPDF = async (invoiceId: string) => {
     try {
-      const response = await fetch(`${API_URL}/api/invoices/${invoiceId}/pdf`);
+      const response = await fetch(`${API_URL}/invoices/${invoiceId}/pdf`);
       if (response.ok) {
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);

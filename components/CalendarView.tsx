@@ -38,22 +38,29 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
   useEffect(() => {
     const loadPatientData = async () => {
       const user = await getCurrentUser();
+      console.log('[CalendarView] Current user:', user);
       if (!user || user.role !== 'PATIENT') return;
       
       // Get assigned psychologist
+      console.log('[CalendarView] accessList:', user.accessList);
       if (user.accessList && user.accessList.length > 0) {
+        console.log('[CalendarView] Setting psychologistId:', user.accessList[0]);
         setPsychologistId(user.accessList[0]);
         
         // Load patient sessions
         try {
           const response = await fetch(`${API_URL}/sessions?patientId=${user.id}`);
+          console.log('[CalendarView] Patient sessions response:', response.status);
           if (response.ok) {
             const sessions = await response.json();
+            console.log('[CalendarView] Patient sessions loaded:', sessions.length);
             setPatientSessions(sessions.filter((s: Session) => s.status === 'scheduled' || s.status === 'completed'));
           }
         } catch (err) {
           console.error('Error loading patient sessions:', err);
         }
+      } else {
+        console.warn('[CalendarView] ⚠️  El paciente no tiene psicólogo asignado en accessList');
       }
     };
     
@@ -61,14 +68,24 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
   }, []);
 
   const loadAvailability = async () => {
-    if (!psychologistId) return;
+    console.log('[CalendarView] loadAvailability called, psychologistId:', psychologistId);
+    if (!psychologistId) {
+      console.warn('[CalendarView] ⚠️  No hay psychologistId, no se puede cargar disponibilidad');
+      return;
+    }
     
     setIsLoading(true);
     try {
-      const response = await fetch(`${API_URL}/sessions?psychologistId=${psychologistId}`);
+      const url = `${API_URL}/sessions?psychologistId=${psychologistId}`;
+      console.log('[CalendarView] Fetching availability from:', url);
+      const response = await fetch(url);
+      console.log('[CalendarView] Response status:', response.status);
       if (response.ok) {
         const sessions = await response.json();
-        setAvailableSlots(sessions.filter((s: Session) => s.status === 'available'));
+        console.log('[CalendarView] Total sessions received:', sessions.length);
+        const available = sessions.filter((s: Session) => s.status === 'available');
+        console.log('[CalendarView] Available sessions:', available.length);
+        setAvailableSlots(available);
         setShowAvailability(true);
       }
     } catch (err) {
