@@ -119,12 +119,31 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
     }
     if (!window.confirm('¿Revocar acceso?')) return;
     try {
-      const patientId = currentUser.role === 'PATIENT' ? currentUser.id : targetUserId;
-      const psychId = currentUser.role === 'PATIENT' ? targetUserId : currentUser.id;
-      console.log('[handleRevoke]', { currentUserRole: currentUser.role, patientId, psychId, targetUserId });
-      await revokeAccess(patientId, psychId);
-      setToast({ type: 'success', text: 'Acceso revocado' });
-      await loadConnections();
+      // Necesitamos encontrar la relación real en care_relationships
+      // Buscamos en ambas direcciones porque no sabemos quién es el psychologist y quién el patient en la BD
+      console.log('[handleRevoke] Buscando relación para eliminar', { currentUserId: currentUser.id, targetUserId });
+      
+      // Intentar eliminar primero asumiendo que currentUser es patient y target es psychologist
+      try {
+        await revokeAccess(currentUser.id, targetUserId);
+        console.log('[handleRevoke] ✓ Relación eliminada (currentUser=patient, target=psychologist)');
+        setToast({ type: 'success', text: 'Acceso revocado' });
+        await loadConnections();
+        return;
+      } catch (firstErr: any) {
+        console.log('[handleRevoke] Primera dirección falló, intentando inversa...', firstErr.message);
+        // Si falla, intentar la dirección inversa
+        try {
+          await revokeAccess(targetUserId, currentUser.id);
+          console.log('[handleRevoke] ✓ Relación eliminada (target=patient, currentUser=psychologist)');
+          setToast({ type: 'success', text: 'Acceso revocado' });
+          await loadConnections();
+          return;
+        } catch (secondErr: any) {
+          console.error('[handleRevoke] Ambas direcciones fallaron', { firstErr, secondErr });
+          throw new Error('Relación no encontrada en la base de datos');
+        }
+      }
     } catch (err: any) {
       console.error('Error revoking access', err);
       setToast({ type: 'error', text: err?.message || 'No se pudo revocar el acceso' });

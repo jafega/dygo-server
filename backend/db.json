@@ -6,8 +6,7 @@
       "email": "garryjavi@gmail.com",
       "password": "123",
       "role": "PSYCHOLOGIST",
-      "isPsychologist": true,
-      "accessList": ["patient-001"]
+      "isPsychologist": true
     },
     {
       "id": "patient-001",
@@ -15,8 +14,7 @@
       "email": "garridojavierfernandez@gmail.com",
       "password": "123",
       "role": "PATIENT",
-      "isPsychologist": false,
-      "accessList": ["psych-001"]
+      "isPsychologist": false
     }
   ],
   "entries": [],

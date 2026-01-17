@@ -591,8 +591,8 @@ async function dedupeSupabaseUsers() {
     const scored = list.map((item) => {
       const hasSupabaseId = item.user?.supabaseId ? 2 : 0;
       const isPsych = String(item.user?.role || '').toUpperCase() === 'PSYCHOLOGIST' || item.user?.isPsychologist ? 1 : 0;
-      const accessScore = Array.isArray(item.user?.accessList) ? Math.min(item.user.accessList.length, 3) : 0;
-      return { ...item, score: hasSupabaseId * 10 + isPsych * 3 + accessScore };
+      // accessList removed - using care_relationships table only
+      return { ...item, score: hasSupabaseId * 10 + isPsych * 3 };
     });
 
     scored.sort((a, b) => b.score - a.score);
@@ -609,8 +609,7 @@ async function dedupeSupabaseUsers() {
         merged.role = 'PSYCHOLOGIST';
         merged.isPsychologist = true;
       }
-      const acc = new Set([...(merged.accessList || []), ...((o.user?.accessList) || [])]);
-      merged.accessList = Array.from(acc);
+      // accessList removed - using care_relationships table only
     }
 
     const updateRow = buildSupabaseRowFromEntity(canonical.row, merged);
