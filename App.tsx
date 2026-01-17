@@ -675,9 +675,9 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
         {!sidebarOpen && (
           <button
             onClick={() => setSidebarOpen(true)}
-            className="md:hidden fixed top-4 left-4 z-50 p-2 bg-white rounded-lg shadow-lg border border-slate-200 hover:bg-slate-50 transition-all duration-300"
+            className="md:hidden fixed top-4 right-4 z-50 w-12 h-12 bg-white rounded-full shadow-lg border border-slate-200 hover:bg-slate-50 transition-all duration-300 flex items-center justify-center"
           >
-            <Menu size={20} />
+            <DygoLogo className="w-7 h-7 text-indigo-600" />
           </button>
         )}
 
