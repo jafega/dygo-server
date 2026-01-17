@@ -1808,6 +1808,173 @@ app.get('/api/dbinfo', async (_req, res) => {
   }
 });
 
+// ==========================================
+// PSYCHOLOGIST PROFESSIONAL FEATURES
+// ==========================================
+
+// --- INVOICES ---
+app.get('/api/invoices', (req, res) => {
+  const psychologistId = req.query.psychologistId;
+  if (!psychologistId) return res.status(400).json({ error: 'Missing psychologistId' });
+
+  const db = getDb();
+  if (!db.invoices) db.invoices = [];
+  
+  const invoices = db.invoices.filter(inv => inv.psychologistId === psychologistId);
+  res.json(invoices);
+});
+
+app.post('/api/invoices', (req, res) => {
+  const db = getDb();
+  if (!db.invoices) db.invoices = [];
+  
+  const invoice = { ...req.body, id: req.body.id || Date.now().toString() };
+  db.invoices.push(invoice);
+  saveDb(db);
+  res.json(invoice);
+});
+
+app.post('/api/invoices/payment-link', (req, res) => {
+  const { invoiceId } = req.body;
+  const db = getDb();
+  if (!db.invoices) db.invoices = [];
+  
+  const invoice = db.invoices.find(inv => inv.id === invoiceId);
+  if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+  
+  // Generate a simple payment link (in production, integrate with Stripe)
+  const paymentLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/pay/${invoiceId}`;
+  invoice.stripePaymentLink = paymentLink;
+  saveDb(db);
+  
+  res.json({ paymentLink });
+});
+
+// --- PSYCHOLOGIST PROFILE ---
+app.get('/api/psychologist/:userId/profile', (req, res) => {
+  const { userId } = req.params;
+  const db = getDb();
+  if (!db.psychologistProfiles) db.psychologistProfiles = {};
+  
+  const profile = db.psychologistProfiles[userId] || {
+    name: '',
+    professionalId: '',
+    specialty: '',
+    phone: '',
+    email: '',
+    address: '',
+    city: '',
+    postalCode: '',
+    country: 'España',
+    businessName: '',
+    taxId: '',
+    iban: '',
+    sessionPrice: 0,
+    currency: 'EUR'
+  };
+  
+  res.json(profile);
+});
+
+app.put('/api/psychologist/:userId/profile', (req, res) => {
+  const { userId } = req.params;
+  const db = getDb();
+  if (!db.psychologistProfiles) db.psychologistProfiles = {};
+  
+  db.psychologistProfiles[userId] = req.body;
+  saveDb(db);
+  res.json(req.body);
+});
+
+// --- SESSIONS / CALENDAR ---
+app.get('/api/sessions', (req, res) => {
+  const { psychologistId, patientId, year, month } = req.query;
+  if (!psychologistId && !patientId) {
+    return res.status(400).json({ error: 'Missing psychologistId or patientId' });
+  }
+  
+  const db = getDb();
+  if (!db.sessions) db.sessions = [];
+  
+  let sessions = db.sessions;
+  
+  // Filter by psychologistId or patientId
+  if (psychologistId) {
+    sessions = sessions.filter(s => s.psychologistId === psychologistId);
+  }
+  if (patientId) {
+    sessions = sessions.filter(s => s.patientId === patientId);
+  }
+  
+  // Filter by year and month if provided
+  if (year && month) {
+    const yearNum = parseInt(year);
+    const monthNum = parseInt(month);
+    sessions = sessions.filter(s => {
+      const date = new Date(s.date);
+      return date.getFullYear() === yearNum && date.getMonth() + 1 === monthNum;
+    });
+  }
+  
+  res.json(sessions);
+});
+
+app.post('/api/sessions', (req, res) => {
+  const db = getDb();
+  if (!db.sessions) db.sessions = [];
+  
+  const session = { ...req.body, id: req.body.id || Date.now().toString() };
+  db.sessions.push(session);
+  saveDb(db);
+  res.json(session);
+});
+
+app.post('/api/sessions/availability', (req, res) => {
+  const { slots, psychologistId } = req.body;
+  const db = getDb();
+  if (!db.sessions) db.sessions = [];
+  
+  slots.forEach(slot => {
+    db.sessions.push({ ...slot, psychologistId });
+  });
+  
+  saveDb(db);
+  res.json({ success: true, count: slots.length });
+});
+
+app.patch('/api/sessions/:id', (req, res) => {
+  const { id } = req.params;
+  const db = getDb();
+  if (!db.sessions) db.sessions = [];
+  
+  const idx = db.sessions.findIndex(s => s.id === id);
+  if (idx === -1) return res.status(404).json({ error: 'Session not found' });
+  
+  db.sessions[idx] = { ...db.sessions[idx], ...req.body };
+  saveDb(db);
+  res.json(db.sessions[idx]);
+});
+
+// --- PATIENTS LIST ---
+app.get('/api/psychologist/:psychologistId/patients', (req, res) => {
+  const { psychologistId } = req.params;
+  const db = getDb();
+  
+  const patients = db.users
+    ? db.users.filter(user => 
+        user.role === 'PATIENT' && 
+        user.accessList && 
+        user.accessList.includes(psychologistId)
+      ).map(u => ({
+        id: u.id,
+        name: u.name,
+        email: u.email
+      }))
+    : [];
+  
+  res.json(patients);
+});
+
 app.get('/', (_req, res) => {
   res.send('DYGO API OK ✅ Usa /api/users, /api/entries, etc.');
 });

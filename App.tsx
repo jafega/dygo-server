@@ -14,6 +14,10 @@ import SettingsModal from './components/SettingsModal';
 import PatientDashboard from './components/PatientDashboard';
 import AuthScreen from './components/AuthScreen';
 import SuperAdmin from './components/SuperAdmin';
+import PsychologistSidebar from './components/PsychologistSidebar';
+import BillingPanel from './components/BillingPanel';
+import PsychologistProfilePanel from './components/PsychologistProfilePanel';
+import PsychologistCalendar from './components/PsychologistCalendar';
 import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle } from 'lucide-react';
 
 // Custom Dygo Logo Component
@@ -30,6 +34,8 @@ const App: React.FC = () => {
   const [pendingRole, setPendingRole] = useState<'PATIENT' | 'PSYCHOLOGIST' | null>(null);
   
   const [psychViewMode, setPsychViewMode] = useState<'DASHBOARD' | 'PERSONAL'>('DASHBOARD');
+  const [psychPanelView, setPsychPanelView] = useState<'patients' | 'billing' | 'profile' | 'calendar'>('patients');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
@@ -573,48 +579,62 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
   // Psychologist View
   if (currentUser?.role === 'PSYCHOLOGIST' && psychViewMode === 'DASHBOARD') {
       return (
-          <div className="min-h-screen bg-white text-slate-900 pb-20 md:pb-0 relative">
-               <div className="max-w-5xl mx-auto p-4 md:p-8 space-y-8">
-                    <header className="flex flex-col md:flex-row justify-between items-center gap-6">
-                        <div className="w-full md:w-auto flex items-center justify-between md:justify-start">
-                             <div className="flex-1">
-                                 <h1 className="text-3xl font-bold text-slate-900 tracking-tight flex items-center gap-3">
-                                    <DygoLogo className="w-10 h-10 text-indigo-600" />
-                                    <span className="font-dygo">dygo</span>
-                                    <span className="bg-purple-100 text-purple-700 text-xs px-2 py-0.5 rounded-lg border border-purple-200 uppercase tracking-wide font-sans mt-1 flex items-center gap-1">
-                                        <Stethoscope size={12} /> <span className="hidden sm:inline">Psicólogo</span>
-                                    </span>
-                                 </h1>
-                                 <p className="text-slate-500 ml-14">Dr/a. {currentUser.name}</p>
-                             </div>
-                             <div className="md:hidden"><ProfileCircle onClick={handleOpenSettings} /></div>
-                        </div>
-                        <div className="flex gap-3 w-full md:w-auto flex-wrap justify-center items-center">
-                            <button 
-                                onClick={() => setPsychViewMode('PERSONAL')}
-                                className="w-full md:w-auto px-5 py-3 md:py-2.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-full shadow-sm text-sm font-medium transition-colors flex items-center justify-center gap-2 border border-indigo-100"
-                            >
-                                <UserIcon size={18} /> <span>Mi Diario Personal</span>
-                            </button>
-                            <div className="hidden md:block"><ProfileCircle onClick={handleOpenSettings} /></div>
-                            {/* Superadmin access */}
-                            {currentUser && String(currentUser.email).toLowerCase() === 'garryjavi@gmail.com' && (
-                                <button onClick={() => setViewState(ViewState.SUPERADMIN)} className="px-4 py-2 bg-amber-50 text-amber-800 rounded-full text-sm ml-2">Superadmin</button>
-                            )}
-                        </div>
-                    </header>
+          <div className="min-h-screen bg-slate-50 text-slate-900 flex">
+               {/* Sidebar */}
+               <PsychologistSidebar 
+                  activeView={psychPanelView}
+                  onViewChange={setPsychPanelView}
+                  isOpen={sidebarOpen}
+                  onToggle={() => setSidebarOpen(!sidebarOpen)}
+               />
+               
+               {/* Main Content */}
+               <div className="flex-1 overflow-y-auto lg:ml-0">
+                    <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-8">
+                         <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                              <div className="flex-1 pl-12 lg:pl-0">
+                                   <h1 className="text-3xl font-bold text-slate-900 tracking-tight flex items-center gap-3 flex-wrap">
+                                      <DygoLogo className="w-10 h-10 text-indigo-600" />
+                                      <span className="font-dygo">dygo</span>
+                                      <span className="bg-purple-100 text-purple-700 text-xs px-2 py-0.5 rounded-lg border border-purple-200 uppercase tracking-wide font-sans flex items-center gap-1">
+                                          <Stethoscope size={12} /> <span>Profesional</span>
+                                      </span>
+                                   </h1>
+                                   <p className="text-slate-500 mt-1">Dr/a. {currentUser.name}</p>
+                              </div>
+                              <div className="flex gap-3 items-center pl-12 lg:pl-0">
+                                  <button 
+                                      onClick={() => setPsychViewMode('PERSONAL')}
+                                      className="px-4 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg shadow-sm text-sm font-medium transition-colors flex items-center gap-2 border border-indigo-100"
+                                  >
+                                      <UserIcon size={16} /> <span className="hidden sm:inline">Mi Diario</span>
+                                  </button>
+                                  <ProfileCircle onClick={handleOpenSettings} />
+                                  {/* Superadmin access */}
+                                  {currentUser && String(currentUser.email).toLowerCase() === 'garryjavi@gmail.com' && (
+                                      <button onClick={() => setViewState(ViewState.SUPERADMIN)} className="px-3 py-2 bg-amber-50 text-amber-800 rounded-lg text-xs font-medium">Admin</button>
+                                  )}
+                              </div>
+                         </header>
 
-                    <PatientDashboard />
+                         {/* Dynamic Panel Content */}
+                         <div className="animate-in fade-in">
+                              {psychPanelView === 'patients' && <PatientDashboard />}
+                              {psychPanelView === 'billing' && <BillingPanel psychologistId={currentUser.id} />}
+                              {psychPanelView === 'profile' && <PsychologistProfilePanel userId={currentUser.id} />}
+                              {psychPanelView === 'calendar' && <PsychologistCalendar psychologistId={currentUser.id} />}
+                         </div>
 
-                    {showSettings && (
-                        <SettingsModal 
-                            settings={settings} 
-                            onSave={handleSaveSettings} 
-                            onClose={() => { setShowSettings(false); if(currentUser) checkInvitations(currentUser.email); }} 
-                            onLogout={handleLogout}
-                            onUserUpdate={handleUserUpdate}
-                        />
-                    )}
+                         {showSettings && (
+                              <SettingsModal 
+                                  settings={settings} 
+                                  onSave={handleSaveSettings} 
+                                  onClose={() => { setShowSettings(false); if(currentUser) checkInvitations(currentUser.email); }} 
+                                  onLogout={handleLogout}
+                                  onUserUpdate={handleUserUpdate}
+                              />
+                         )}
+                    </div>
                </div>
           </div>
       );

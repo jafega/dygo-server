@@ -19,7 +19,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
   const [time, setTime] = useState(settings.notificationTime);
   const [language, setLanguage] = useState(settings.language || 'es-ES');
   const [voice, setVoice] = useState(settings.voice || 'Kore');
-  const [activeTab, setActiveTab] = useState<'general' | 'privacy'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'privacy' | 'personal'>('general');
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [sentInvitations, setSentInvitations] = useState<Invitation[]>([]);
   const [myPsychologists, setMyPsychologists] = useState<User[]>([]);
@@ -29,6 +29,19 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
   const [allPsychologists, setAllPsychologists] = useState<User[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Personal info state
+  const [personalInfo, setPersonalInfo] = useState({
+    firstName: '',
+    lastName: '',
+    dni: '',
+    phone: '',
+    address: '',
+    city: '',
+    postalCode: '',
+    country: 'España',
+    dateOfBirth: ''
+  });
 
   const voices = [
       { id: 'Kore', name: 'Kore (Femenina)' }, { id: 'Puck', name: 'Puck (Masculina)' },
@@ -46,6 +59,19 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
         const u = await getCurrentUser();
         setCurrentUser(u);
         if (!u) return;
+
+        // Load personal info
+        setPersonalInfo({
+          firstName: u.firstName || '',
+          lastName: u.lastName || '',
+          dni: u.dni || '',
+          phone: u.phone || '',
+          address: u.address || '',
+          city: u.city || '',
+          postalCode: u.postalCode || '',
+          country: u.country || 'España',
+          dateOfBirth: u.dateOfBirth || ''
+        });
 
         if (u.role === 'PATIENT') {
             setInvitations(await getPendingInvitationsForEmail(u.email));
@@ -84,6 +110,23 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
     } else {
         onSave(newSettings);
         onClose();
+    }
+  };
+
+  const handleSavePersonalInfo = async () => {
+    if (!currentUser) return;
+    try {
+      const updatedUser = { 
+        ...currentUser, 
+        ...personalInfo
+      };
+      await updateUser(updatedUser);
+      setCurrentUser(updatedUser);
+      if (onUserUpdate) onUserUpdate(updatedUser);
+      alert('Información personal guardada correctamente');
+    } catch (err: any) {
+      console.error('Error saving personal info', err);
+      alert(err?.message || 'Error guardando la información. Comprueba la conexión con el servidor.');
     }
   };
 
@@ -191,6 +234,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
         {/* Show tabs for all roles (Patient and Psychologist) */}
         <div className="flex border-b border-slate-100 shrink-0">
             <button onClick={() => setActiveTab('general')} className={`flex-1 py-3 text-sm font-medium ${activeTab === 'general' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-500'}`}>General</button>
+            <button onClick={() => setActiveTab('personal')} className={`flex-1 py-3 text-sm font-medium ${activeTab === 'personal' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-500'}`}>Información Personal</button>
             <button onClick={() => setActiveTab('privacy')} className={`flex-1 py-3 text-sm font-medium ${activeTab === 'privacy' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-500'}`}>Privacidad</button>
         </div>
         <div className="p-6 overflow-y-auto">
@@ -393,6 +437,133 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                                                         <button onClick={handleSave} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium">Guardar Cambios</button>
                                                         <button onClick={handleLogoutClick} className="w-full py-3 text-red-500 hover:bg-red-50 rounded-xl font-medium flex items-center justify-center gap-2"><LogOut size={16} /> Cerrar Sesión</button>
                                                 </div>
+                    </div>
+                </div>
+            ) : activeTab === 'personal' ? (
+                <div className="space-y-6">
+                    <div className="space-y-4">
+                        <h3 className="text-xs font-bold uppercase text-slate-400">Datos Personales</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <label className="block text-sm text-slate-700 font-medium">Nombre</label>
+                                <input
+                                    type="text"
+                                    value={personalInfo.firstName}
+                                    onChange={(e) => setPersonalInfo({ ...personalInfo, firstName: e.target.value })}
+                                    className="w-full p-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                    placeholder="Tu nombre"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="block text-sm text-slate-700 font-medium">Apellidos</label>
+                                <input
+                                    type="text"
+                                    value={personalInfo.lastName}
+                                    onChange={(e) => setPersonalInfo({ ...personalInfo, lastName: e.target.value })}
+                                    className="w-full p-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                    placeholder="Tus apellidos"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="block text-sm text-slate-700 font-medium">DNI / Documento</label>
+                                <input
+                                    type="text"
+                                    value={personalInfo.dni}
+                                    onChange={(e) => setPersonalInfo({ ...personalInfo, dni: e.target.value })}
+                                    className="w-full p-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                    placeholder="12345678A"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="block text-sm text-slate-700 font-medium">Fecha de Nacimiento</label>
+                                <input
+                                    type="date"
+                                    value={personalInfo.dateOfBirth}
+                                    onChange={(e) => setPersonalInfo({ ...personalInfo, dateOfBirth: e.target.value })}
+                                    className="w-full p-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="block text-sm text-slate-700 font-medium">Teléfono</label>
+                                <input
+                                    type="tel"
+                                    value={personalInfo.phone}
+                                    onChange={(e) => setPersonalInfo({ ...personalInfo, phone: e.target.value })}
+                                    className="w-full p-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                    placeholder="+34 600 000 000"
+                                />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="space-y-4">
+                        <h3 className="text-xs font-bold uppercase text-slate-400">Dirección</h3>
+                        <div className="grid grid-cols-1 gap-4">
+                            <div className="space-y-2">
+                                <label className="block text-sm text-slate-700 font-medium">Dirección Completa</label>
+                                <input
+                                    type="text"
+                                    value={personalInfo.address}
+                                    onChange={(e) => setPersonalInfo({ ...personalInfo, address: e.target.value })}
+                                    className="w-full p-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                    placeholder="Calle Principal, 123"
+                                />
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div className="space-y-2">
+                                    <label className="block text-sm text-slate-700 font-medium">Ciudad</label>
+                                    <input
+                                        type="text"
+                                        value={personalInfo.city}
+                                        onChange={(e) => setPersonalInfo({ ...personalInfo, city: e.target.value })}
+                                        className="w-full p-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                        placeholder="Madrid"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="block text-sm text-slate-700 font-medium">Código Postal</label>
+                                    <input
+                                        type="text"
+                                        value={personalInfo.postalCode}
+                                        onChange={(e) => setPersonalInfo({ ...personalInfo, postalCode: e.target.value })}
+                                        className="w-full p-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                        placeholder="28001"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="block text-sm text-slate-700 font-medium">País</label>
+                                    <select
+                                        value={personalInfo.country}
+                                        onChange={(e) => setPersonalInfo({ ...personalInfo, country: e.target.value })}
+                                        className="w-full p-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                    >
+                                        <option value="España">España</option>
+                                        <option value="México">México</option>
+                                        <option value="Argentina">Argentina</option>
+                                        <option value="Colombia">Colombia</option>
+                                        <option value="Chile">Chile</option>
+                                        <option value="Perú">Perú</option>
+                                        <option value="Otro">Otro</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                        <div className="text-sm text-blue-900 font-medium mb-1">¿Por qué necesitamos esta información?</div>
+                        <div className="text-xs text-blue-700">
+                            Esta información ayuda a tu psicólogo/a a conocerte mejor y personalizar tu tratamiento. Tus datos están protegidos y solo son visibles para los profesionales autorizados.
+                        </div>
+                    </div>
+
+                    <div className="space-y-2 pt-4 border-t border-slate-100">
+                        <button 
+                            onClick={handleSavePersonalInfo} 
+                            className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium"
+                        >
+                            Guardar Información Personal
+                        </button>
                     </div>
                 </div>
             ) : (

@@ -17,6 +17,17 @@ export interface User {
   premiumUntil?: number; // timestamp in ms
   stripeCustomerId?: string;
   stripeSubscriptionId?: string;
+
+  // Personal information fields
+  firstName?: string;
+  lastName?: string;
+  dni?: string; // Documento Nacional de Identidad
+  phone?: string;
+  address?: string;
+  city?: string;
+  postalCode?: string;
+  country?: string;
+  dateOfBirth?: string; // ISO format YYYY-MM-DD
 }
 
 export interface Invitation {
