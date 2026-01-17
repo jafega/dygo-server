@@ -11,7 +11,7 @@ interface Session {
   date: string;
   startTime: string;
   endTime: string;
-  type: 'in-person' | 'online';
+  type: 'in-person' | 'online' | 'home-visit';
   status: 'scheduled' | 'completed' | 'cancelled' | 'available';
   notes?: string;
   meetLink?: string;
@@ -257,12 +257,17 @@ const PatientSessions: React.FC = () => {
                       <div className="flex items-center gap-2">
                         {session.type === 'online' ? (
                           <>
-                            <Video size={16} className="text-green-600" />
+                            <Video size={16} className="text-indigo-600" />
                             <span className="text-sm text-slate-700">En línea</span>
+                          </>
+                        ) : session.type === 'home-visit' ? (
+                          <>
+                            <MapPin size={16} className="text-green-600" />
+                            <span className="text-sm text-slate-700">A domicilio</span>
                           </>
                         ) : (
                           <>
-                            <MapPin size={16} className="text-blue-600" />
+                            <MapPin size={16} className="text-purple-600" />
                             <span className="text-sm text-slate-700">Presencial</span>
                           </>
                         )}
@@ -343,12 +348,17 @@ const PatientSessions: React.FC = () => {
                     <div className="flex items-center gap-2">
                       {session.type === 'online' ? (
                         <>
-                          <Video size={16} className="text-green-600" />
+                          <Video size={16} className="text-indigo-600" />
                           <span>En línea</span>
+                        </>
+                      ) : session.type === 'home-visit' ? (
+                        <>
+                          <MapPin size={16} className="text-green-600" />
+                          <span>A domicilio</span>
                         </>
                       ) : (
                         <>
-                          <MapPin size={16} className="text-blue-600" />
+                          <MapPin size={16} className="text-purple-600" />
                           <span>Presencial</span>
                         </>
                       )}
@@ -422,12 +432,17 @@ const PatientSessions: React.FC = () => {
                 <div className="flex items-center gap-2">
                   {selectedSession.type === 'online' ? (
                     <>
-                      <Video size={16} className="text-green-600" />
+                      <Video size={16} className="text-indigo-600" />
                       <span className="text-slate-900">En línea</span>
+                    </>
+                  ) : selectedSession.type === 'home-visit' ? (
+                    <>
+                      <MapPin size={16} className="text-green-600" />
+                      <span className="text-slate-900">A domicilio</span>
                     </>
                   ) : (
                     <>
-                      <MapPin size={16} className="text-blue-600" />
+                      <MapPin size={16} className="text-purple-600" />
                       <span className="text-slate-900">Presencial</span>
                     </>
                   )}

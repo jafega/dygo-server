@@ -2509,7 +2509,21 @@ app.patch('/api/sessions/:id', (req, res) => {
   const idx = db.sessions.findIndex(s => s.id === id);
   if (idx === -1) return res.status(404).json({ error: 'Session not found' });
   
-  db.sessions[idx] = { ...db.sessions[idx], ...req.body };
+  const updatedSession = { ...db.sessions[idx], ...req.body };
+  
+  // Auto-generate Google Meet link when session is booked and type is online
+  if (updatedSession.status === 'scheduled' && 
+      updatedSession.type === 'online' && 
+      !updatedSession.meetLink) {
+    // Generate a unique meet link
+    // In production, this would integrate with Google Calendar API
+    // For now, we generate a placeholder link
+    const meetId = crypto.randomBytes(12).toString('base64url');
+    updatedSession.meetLink = `https://meet.google.com/${meetId}`;
+    console.log(`🎥 Auto-generated Google Meet link for session ${id}: ${updatedSession.meetLink}`);
+  }
+  
+  db.sessions[idx] = updatedSession;
   saveDb(db);
   res.json(db.sessions[idx]);
 });

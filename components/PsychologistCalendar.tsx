@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar as CalendarIcon, Clock, Plus, X, Users, Video, MapPin, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, Plus, X, Users, Video, MapPin, ChevronLeft, ChevronRight, LayoutGrid, List } from 'lucide-react';
 import { API_URL } from '../services/config';
 
 interface Session {
@@ -9,7 +9,7 @@ interface Session {
   date: string;
   startTime: string;
   endTime: string;
-  type: 'in-person' | 'online' | 'available';
+  type: 'in-person' | 'online' | 'home-visit';
   status: 'scheduled' | 'completed' | 'cancelled' | 'available';
   notes?: string;
   meetLink?: string;
@@ -19,8 +19,11 @@ interface PsychologistCalendarProps {
   psychologistId: string;
 }
 
+type ViewMode = 'MONTH' | 'WEEK' | 'LIST';
+
 const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologistId }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [viewMode, setViewMode] = useState<ViewMode>('MONTH');
   const [sessions, setSessions] = useState<Session[]>([]);
   const [patients, setPatients] = useState<any[]>([]);
   const [showNewSession, setShowNewSession] = useState(false);
@@ -38,7 +41,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
     date: '',
     startTime: '',
     endTime: '',
-    type: 'online' as 'in-person' | 'online',
+    type: 'online' as 'in-person' | 'online' | 'home-visit',
     notes: '',
     generateMeetLink: false
   });
@@ -49,7 +52,8 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
     startTime: '',
     endTime: '',
     duration: 60, // duration in minutes for each slot
-    daysOfWeek: [1, 2, 3, 4, 5] // Monday to Friday by default
+    daysOfWeek: [1, 2, 3, 4, 5], // Monday to Friday by default
+    type: 'online' as 'in-person' | 'online' | 'home-visit'
   });
 
   useEffect(() => {
@@ -215,7 +219,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
           date: dateStr,
           startTime: current.toTimeString().slice(0, 5),
           endTime: slotEnd.toTimeString().slice(0, 5),
-          type: 'online',
+          type: newAvailability.type,
           status: 'available'
         });
         
@@ -292,7 +296,8 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
       startTime: '',
       endTime: '',
       duration: 60,
-      daysOfWeek: [1, 2, 3, 4, 5]
+      daysOfWeek: [1, 2, 3, 4, 5],
+      type: 'online'
     });
   };
 
@@ -357,6 +362,30 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
   const { daysInMonth, startingDayOfWeek } = getDaysInMonth();
   const monthName = currentDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
   const weekDays = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+
+  // Get week days for week view
+  const getWeekDays = () => {
+    const dayOfWeek = currentDate.getDay();
+    const startOfWeek = new Date(currentDate);
+    startOfWeek.setDate(currentDate.getDate() - dayOfWeek);
+    
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(startOfWeek);
+      date.setDate(startOfWeek.getDate() + i);
+      days.push(date);
+    }
+    return days;
+  };
+
+  // Get all sessions sorted by date and time
+  const getSortedSessions = () => {
+    return [...sessions].sort((a, b) => {
+      const dateCompare = a.date.localeCompare(b.date);
+      if (dateCompare !== 0) return dateCompare;
+      return a.startTime.localeCompare(b.startTime);
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -424,7 +453,39 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
           >
             <ChevronLeft size={20} />
           </button>
-          <h3 className="text-lg font-semibold text-slate-900 capitalize">{monthName}</h3>
+          <div className="flex items-center gap-3">
+            <h3 className="text-lg font-semibold text-slate-900 capitalize">{monthName}</h3>
+            {/* View Mode Toggle */}
+            <div className="hidden sm:flex items-center gap-1 bg-slate-100 rounded-lg p-1">
+              <button
+                onClick={() => setViewMode('MONTH')}
+                className={`p-1.5 rounded transition-colors ${
+                  viewMode === 'MONTH' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'
+                }`}
+                title="Vista mensual"
+              >
+                <LayoutGrid size={16} />
+              </button>
+              <button
+                onClick={() => setViewMode('WEEK')}
+                className={`p-1.5 rounded transition-colors ${
+                  viewMode === 'WEEK' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'
+                }`}
+                title="Vista semanal"
+              >
+                <CalendarIcon size={16} />
+              </button>
+              <button
+                onClick={() => setViewMode('LIST')}
+                className={`p-1.5 rounded transition-colors ${
+                  viewMode === 'LIST' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'
+                }`}
+                title="Vista de lista"
+              >
+                <List size={16} />
+              </button>
+            </div>
+          </div>
           <button
             onClick={handleNextMonth}
             className="p-2 hover:bg-slate-200 rounded-lg transition-colors"
@@ -433,20 +494,20 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
           </button>
         </div>
 
-        {/* Calendar Grid */}
-        <div className="p-4">
-          {/* Week days */}
-          <div className="grid grid-cols-7 gap-2 mb-2">
-            {weekDays.map(day => (
-              <div key={day} className="text-center text-xs font-semibold text-slate-500 uppercase py-2">
-                {day}
-              </div>
-            ))}
-          </div>
+        {/* Month View */}
+        {viewMode === 'MONTH' && (
+          <div className="p-4">
+            {/* Week days */}
+            <div className="grid grid-cols-7 gap-2 mb-2">
+              {weekDays.map(day => (
+                <div key={day} className="text-center text-xs font-semibold text-slate-500 uppercase py-2">
+                  {day}
+                </div>
+              ))}
+            </div>
 
-          {/* Calendar days */}
-          <div className="grid grid-cols-7 gap-2">
-            {/* Empty cells for days before month starts */}
+            {/* Calendar days */}
+            <div className="grid grid-cols-7 gap-2">{/* Empty cells for days before month starts */}
             {Array.from({ length: startingDayOfWeek }).map((_, i) => (
               <div key={`empty-${i}`} className="aspect-square" />
             ))}
@@ -503,6 +564,128 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
             })}
           </div>
         </div>
+        )}
+
+        {/* Week View */}
+        {viewMode === 'WEEK' && (
+          <div className="p-4">
+            <div className="grid grid-cols-7 gap-2">
+              {getWeekDays().map(date => {
+                const dateStr = date.toISOString().split('T')[0];
+                const daySessions = getSessionsForDate(dateStr);
+                const isToday = new Date().toDateString() === date.toDateString();
+                
+                return (
+                  <div key={dateStr} className="border border-slate-200 rounded-lg overflow-hidden">
+                    <div className={`p-2 text-center border-b ${isToday ? 'bg-indigo-100 border-indigo-300' : 'bg-slate-50 border-slate-200'}`}>
+                      <div className="text-xs text-slate-500">{weekDays[date.getDay()]}</div>
+                      <div className={`text-lg font-bold ${isToday ? 'text-indigo-700' : 'text-slate-900'}`}>
+                        {date.getDate()}
+                      </div>
+                    </div>
+                    <div className="p-2 space-y-1 min-h-[200px] max-h-[400px] overflow-y-auto">
+                      {daySessions.length === 0 ? (
+                        <div className="text-xs text-slate-400 text-center py-4">Sin sesiones</div>
+                      ) : (
+                        daySessions.map(session => (
+                          <div
+                            key={session.id}
+                            onClick={() => {
+                              if (session.status === 'available') {
+                                setSelectedSlot(session);
+                                setShowAssignPatient(true);
+                              } else {
+                                setSelectedSession(session);
+                              }
+                            }}
+                            className={`text-[10px] p-1.5 rounded cursor-pointer hover:opacity-80 ${
+                              session.status === 'available' 
+                                ? 'bg-purple-100 text-purple-700'
+                                : session.status === 'scheduled'
+                                ? 'bg-green-100 text-green-700'
+                                : session.status === 'completed'
+                                ? 'bg-slate-100 text-slate-700'
+                                : 'bg-red-100 text-red-700'
+                            }`}
+                          >
+                            <div className="font-semibold">{session.startTime}</div>
+                            <div className="truncate">{session.patientName}</div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* List View */}
+        {viewMode === 'LIST' && (
+          <div className="p-4 max-h-[600px] overflow-y-auto">
+            {getSortedSessions().length === 0 ? (
+              <div className="text-center py-12 text-slate-400">
+                <CalendarIcon size={48} className="mx-auto mb-3" />
+                <p>No hay sesiones programadas</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {getSortedSessions().map(session => (
+                  <div
+                    key={session.id}
+                    onClick={() => {
+                      if (session.status === 'available') {
+                        setSelectedSlot(session);
+                        setShowAssignPatient(true);
+                      } else {
+                        setSelectedSession(session);
+                      }
+                    }}
+                    className="p-4 border border-slate-200 rounded-lg hover:border-indigo-300 hover:bg-slate-50 cursor-pointer transition-all"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-sm font-semibold text-slate-700">
+                            {new Date(session.date).toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })}
+                          </span>
+                          <span className="text-sm text-slate-500">
+                            {session.startTime} - {session.endTime}
+                          </span>
+                          {session.type === 'online' ? (
+                            <Video size={14} className="text-indigo-600" />
+                          ) : session.type === 'home-visit' ? (
+                            <MapPin size={14} className="text-green-600" />
+                          ) : (
+                            <MapPin size={14} className="text-purple-600" />
+                          )}
+                        </div>
+                        <div className="text-base font-medium text-slate-900">{session.patientName}</div>
+                        {session.notes && (
+                          <div className="text-xs text-slate-500 mt-1">{session.notes}</div>
+                        )}
+                      </div>
+                      <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${
+                        session.status === 'available' 
+                          ? 'bg-purple-100 text-purple-700'
+                          : session.status === 'scheduled'
+                          ? 'bg-green-100 text-green-700'
+                          : session.status === 'completed'
+                          ? 'bg-slate-100 text-slate-700'
+                          : 'bg-red-100 text-red-700'
+                      }`}>
+                        {session.status === 'available' ? 'Disponible' : 
+                         session.status === 'scheduled' ? 'Programada' :
+                         session.status === 'completed' ? 'Completada' : 'Cancelada'}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Day Sessions Detail Modal */}
@@ -895,6 +1078,48 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                   <option value="60">60 minutos</option>
                   <option value="90">90 minutos</option>
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Tipo de sesión *</label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNewAvailability({ ...newAvailability, type: 'online' })}
+                    className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg font-medium text-sm transition-all ${
+                      newAvailability.type === 'online'
+                        ? 'bg-indigo-600 text-white shadow-md'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    <Video size={16} />
+                    Online
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewAvailability({ ...newAvailability, type: 'in-person' })}
+                    className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg font-medium text-sm transition-all ${
+                      newAvailability.type === 'in-person'
+                        ? 'bg-purple-600 text-white shadow-md'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    <MapPin size={16} />
+                    Consulta
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewAvailability({ ...newAvailability, type: 'home-visit' })}
+                    className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg font-medium text-sm transition-all ${
+                      newAvailability.type === 'home-visit'
+                        ? 'bg-green-600 text-white shadow-md'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    <MapPin size={16} />
+                    Domicilio
+                  </button>
+                </div>
               </div>
 
               <div className="p-4 bg-purple-50 border border-purple-200 rounded-lg">
