@@ -671,44 +671,45 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
       )}
 
       <div className="flex h-screen overflow-hidden bg-slate-50">
-        {/* Mobile Static Header - Always visible on top */}
-        <div className="md:hidden fixed top-0 left-0 right-0 bg-white border-b border-slate-200 z-50 px-4 py-3 flex items-center justify-between shadow-sm">
-          <div className="flex items-center gap-2">
-            <DygoLogo className="w-7 h-7 text-indigo-600" />
-            <span className="font-dygo text-lg font-bold text-slate-900">dygo</span>
-          </div>
+        {/* Mobile Toggle Button - Only when closed */}
+        {!sidebarOpen && (
           <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
+            onClick={() => setSidebarOpen(true)}
+            className="md:hidden fixed top-4 left-4 z-50 p-2 bg-white rounded-lg shadow-lg border border-slate-200 hover:bg-slate-50 transition-all duration-300"
           >
-            {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
+            <Menu size={20} />
           </button>
-        </div>
+        )}
 
         {/* Overlay for mobile */}
         {sidebarOpen && (
           <div
             className="md:hidden fixed inset-0 bg-black/20 z-30 backdrop-blur-sm"
             onClick={() => setSidebarOpen(false)}
-            style={{ marginTop: '56px' }}
           />
         )}
 
         {/* Sidebar tipo Notion */}
         <aside className={`
-          fixed md:sticky h-screen bg-white border-r border-slate-200 z-40
+          fixed md:sticky top-0 left-0 h-screen bg-white border-r border-slate-200 z-40
           transition-transform duration-300 ease-in-out
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
           flex flex-col overflow-hidden
           w-64
-          md:top-0
-        `}
-        style={{ top: window.innerWidth < 768 ? '56px' : '0', height: window.innerWidth < 768 ? 'calc(100vh - 56px)' : '100vh' }}
-        >
-          <div className="p-4 flex items-center border-b border-slate-200">
-            <div className="flex items-center gap-2">
-              <DygoLogo className="w-8 h-8 text-indigo-600" />
-              <span className="font-dygo text-xl font-bold text-slate-900">dygo</span>
+        `}>
+          <div className="p-4 border-b border-slate-200">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <DygoLogo className="w-8 h-8 text-indigo-600" />
+                <span className="font-dygo text-xl font-bold text-slate-900">dygo</span>
+              </div>
+              {/* Close button for mobile - inside the menu */}
+              <button
+                onClick={() => setSidebarOpen(false)}
+                className="md:hidden p-1.5 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                <X size={20} className="text-slate-600" />
+              </button>
             </div>
           </div>
 

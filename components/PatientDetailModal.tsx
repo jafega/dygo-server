@@ -704,7 +704,8 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
 
   return (
     // FULL SCREEN OVERLAY - Uses 100dvh for dynamic viewport height on mobile
-    <div className="fixed top-0 left-0 w-screen h-[100dvh] bg-white z-[9999] flex flex-col overflow-hidden animate-in fade-in duration-200">
+    // On desktop (md+), leave space for sidebar (256px)
+    <div className="fixed top-0 left-0 md:left-64 w-screen md:w-[calc(100vw-256px)] h-[100dvh] bg-white z-[9999] flex flex-col overflow-hidden animate-in fade-in duration-200">
         
         {/* HEADER */}
         <div className="bg-white border-b border-slate-200 shrink-0 shadow-sm z-20">

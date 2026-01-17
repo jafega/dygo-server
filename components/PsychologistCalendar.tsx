@@ -737,15 +737,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                         {daySessions.map(session => (
                           <div
                             key={session.id}
-                            onClick={() => {
-                              if (session.status === 'available') {
-                                setSelectedSlot(session);
-                                setShowAssignPatient(true);
-                              } else {
-                                setSelectedSession(session);
-                              }
-                            }}
-                            className={`px-3 py-2 rounded-lg cursor-pointer transition-all hover:shadow-md border ${
+                            className={`group px-3 py-2 rounded-lg cursor-pointer transition-all hover:shadow-md border relative ${
                               session.status === 'available'
                                 ? 'bg-purple-50 border-purple-200 hover:bg-purple-100'
                                 : session.status === 'scheduled'
@@ -754,6 +746,14 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                                 ? 'bg-slate-50 border-slate-200 hover:bg-slate-100'
                                 : 'bg-red-50 border-red-200 hover:bg-red-100'
                             }`}
+                            onClick={() => {
+                              if (session.status === 'available') {
+                                setSelectedSlot(session);
+                                setShowAssignPatient(true);
+                              } else {
+                                setSelectedSession(session);
+                              }
+                            }}
                           >
                             <div className="flex items-center justify-between gap-2">
                               <div className="flex items-center gap-2 flex-1">
@@ -772,15 +772,31 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                                   <MapPin size={14} className="text-purple-500" />
                                 )}
                               </div>
-                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                                session.status === 'available' ? 'bg-purple-100 text-purple-700' :
-                                session.status === 'scheduled' ? 'bg-green-100 text-green-700' :
-                                session.status === 'completed' ? 'bg-slate-100 text-slate-700' : 'bg-red-100 text-red-700'
-                              }`}>
-                                {session.status === 'available' ? 'Disponible' :
-                                 session.status === 'scheduled' ? 'Programada' :
-                                 session.status === 'completed' ? 'Completada' : 'Cancelada'}
-                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                  session.status === 'available' ? 'bg-purple-100 text-purple-700' :
+                                  session.status === 'scheduled' ? 'bg-green-100 text-green-700' :
+                                  session.status === 'completed' ? 'bg-slate-100 text-slate-700' : 'bg-red-100 text-red-700'
+                                }`}>
+                                  {session.status === 'available' ? 'Disponible' :
+                                   session.status === 'scheduled' ? 'Programada' :
+                                   session.status === 'completed' ? 'Completada' : 'Cancelada'}
+                                </span>
+                                {session.status === 'available' && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (confirm('¿Eliminar esta disponibilidad?')) {
+                                        handleDeleteAvailability(session.id);
+                                      }
+                                    }}
+                                    className="md:opacity-0 md:group-hover:opacity-100 p-1 hover:bg-red-100 rounded transition-all text-red-600 hover:text-red-700"
+                                    title="Eliminar disponibilidad"
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                )}
+                              </div>
                             </div>
                             {session.patientName && (
                               <div className="text-xs text-slate-700 mt-1 font-medium">{session.patientName}</div>
