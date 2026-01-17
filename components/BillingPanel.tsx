@@ -25,9 +25,10 @@ interface InvoiceItem {
 
 interface BillingPanelProps {
   psychologistId: string;
+  patientId?: string;
 }
 
-const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
+const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }) => {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [patients, setPatients] = useState<any[]>([]);
   const [showNewInvoice, setShowNewInvoice] = useState(false);
@@ -47,13 +48,18 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
 
   useEffect(() => {
     loadInvoices();
-    loadPatients();
-  }, [psychologistId]);
+    if (!patientId) {
+      loadPatients();
+    }
+  }, [psychologistId, patientId]);
 
   const loadInvoices = async () => {
     setIsLoading(true);
     try {
-      const response = await fetch(`${API_URL}/invoices?psychologistId=${psychologistId}`);
+      const url = patientId 
+        ? `${API_URL}/invoices?psychologistId=${psychologistId}&patientId=${patientId}`
+        : `${API_URL}/invoices?psychologistId=${psychologistId}`;
+      const response = await fetch(url);
       if (response.ok) {
         const data = await response.json();
         setInvoices(data);
@@ -213,8 +219,8 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
     
     for (const invoiceId of Array.from(selectedInvoices)) {
       const invoice = invoices.find(inv => inv.id === invoiceId);
-      if (invoice) {
-        await handleDownloadPDF(invoiceId, invoice.invoiceNumber);
+      if (invoice && typeof invoiceId === 'string') {
+        handleDownloadPDF(invoiceId, invoice.invoiceNumber);
         // Pequeña pausa entre descargas
         await new Promise(resolve => setTimeout(resolve, 500));
       }
@@ -321,15 +327,19 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Facturación</h2>
-          <p className="text-sm text-slate-500 mt-1">Gestiona las facturas de tus pacientes</p>
+          <p className="text-sm text-slate-500 mt-1">
+            {patientId ? 'Facturas emitidas a este paciente' : 'Gestiona las facturas de tus pacientes'}
+          </p>
         </div>
-        <button
-          onClick={() => setShowNewInvoice(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-md"
-        >
-          <Plus size={18} />
-          Nueva Factura
-        </button>
+        {!patientId && (
+          <button
+            onClick={() => setShowNewInvoice(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-md"
+          >
+            <Plus size={18} />
+            Nueva Factura
+          </button>
+        )}
       </div>
 
       {/* Stats */}

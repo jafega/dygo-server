@@ -5,6 +5,7 @@ import { analyzeClinicalSession, analyzeJournalEntry } from '../services/genaiSe
 import InsightsPanel from './InsightsPanel';
 import GoalsPanel from './GoalsPanel';
 import SessionRecorder from './SessionRecorder';
+import BillingPanel from './BillingPanel';
 import mammoth from 'mammoth/mammoth.browser';
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min?url';
@@ -62,8 +63,9 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
     const [expandedTranscripts, setExpandedTranscripts] = useState<Set<string>>(new Set());
   
   // View State
-  const [activeTab, setActiveTab] = useState<'TIMELINE' | 'ANALYTICS' | 'PLAN' | 'INFO'>('TIMELINE');
+  const [activeTab, setActiveTab] = useState<'TIMELINE' | 'ANALYTICS' | 'PLAN' | 'INFO' | 'BILLING'>('TIMELINE');
   const [patientUser, setPatientUser] = useState<any>(null);
+  const [entryFilter, setEntryFilter] = useState<'ALL' | 'DIARY' | 'INTERNAL' | 'SESSION' | 'FEEDBACK'>('ALL');
   
   // Analytics State
   const [analyticsRange, setAnalyticsRange] = useState<'WEEK' | 'MONTH' | 'YEAR'>('WEEK');
@@ -136,6 +138,15 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
     let cancelled = false;
     const load = async () => {
       try {
+        // Get current psychologist ID from localStorage
+        const storedUser = localStorage.getItem('currentUser');
+        if (storedUser) {
+          const userData = JSON.parse(storedUser);
+          if (userData.id) {
+            setCurrentPsychologistId(userData.id);
+          }
+        }
+        
         const [e, g] = await Promise.all([
           getEntriesForUser(patient.id),
           getGoalsForUser(patient.id)
@@ -718,30 +729,36 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
             </div>
 
             {/* Sub-Header Tabs */}
-            <div className="flex px-4 pb-0 md:px-6">
+            <div className="flex px-4 pb-0 md:px-6 overflow-x-auto">
                  <button 
                      onClick={() => setActiveTab('TIMELINE')}
-                     className={`flex-1 md:flex-none pb-3 pt-1 text-sm font-medium border-b-2 transition-colors flex justify-center md:justify-start gap-2 ${activeTab === 'TIMELINE' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'}`}
+                     className={`flex-1 md:flex-none pb-3 pt-1 text-sm font-medium border-b-2 transition-colors flex justify-center md:justify-start gap-2 whitespace-nowrap ${activeTab === 'TIMELINE' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'}`}
                  >
-                     <List size={16} /> Historia Clínica
+                     <List size={16} /> <span className="hidden sm:inline">Historia Clínica</span><span className="sm:hidden">Historia</span>
                  </button>
                  <button 
                      onClick={() => setActiveTab('ANALYTICS')}
-                     className={`flex-1 md:flex-none md:ml-6 pb-3 pt-1 text-sm font-medium border-b-2 transition-colors flex justify-center md:justify-start gap-2 ${activeTab === 'ANALYTICS' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'}`}
+                     className={`flex-1 md:flex-none md:ml-6 pb-3 pt-1 text-sm font-medium border-b-2 transition-colors flex justify-center md:justify-start gap-2 whitespace-nowrap ${activeTab === 'ANALYTICS' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'}`}
                  >
                      <BarChart2 size={16} /> Analíticas
                  </button>
                  <button 
                      onClick={() => setActiveTab('PLAN')}
-                     className={`flex-1 md:flex-none md:ml-6 pb-3 pt-1 text-sm font-medium border-b-2 transition-colors flex justify-center md:justify-start gap-2 ${activeTab === 'PLAN' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'}`}
+                     className={`flex-1 md:flex-none md:ml-6 pb-3 pt-1 text-sm font-medium border-b-2 transition-colors flex justify-center md:justify-start gap-2 whitespace-nowrap ${activeTab === 'PLAN' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'}`}
                  >
                      <CheckSquare size={16} /> Plan
                  </button>
                  <button 
                      onClick={() => setActiveTab('INFO')}
-                     className={`flex-1 md:flex-none md:ml-6 pb-3 pt-1 text-sm font-medium border-b-2 transition-colors flex justify-center md:justify-start gap-2 ${activeTab === 'INFO' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'}`}
+                     className={`flex-1 md:flex-none md:ml-6 pb-3 pt-1 text-sm font-medium border-b-2 transition-colors flex justify-center md:justify-start gap-2 whitespace-nowrap ${activeTab === 'INFO' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'}`}
                  >
-                     <User size={16} /> Información Personal
+                     <User size={16} /> <span className="hidden sm:inline">Información Personal</span><span className="sm:hidden">Info</span>
+                 </button>
+                 <button 
+                     onClick={() => setActiveTab('BILLING')}
+                     className={`flex-1 md:flex-none md:ml-6 pb-3 pt-1 text-sm font-medium border-b-2 transition-colors flex justify-center md:justify-start gap-2 whitespace-nowrap ${activeTab === 'BILLING' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'}`}
+                 >
+                     <FileText size={16} /> Facturación
                  </button>
             </div>
         </div>
@@ -1148,10 +1165,72 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                             </div>
                         ) : (
                             <div className="relative w-full">
+                                {/* Filter Buttons */}
+                                <div className="mb-6 flex items-center gap-2 bg-white border border-slate-200 rounded-xl p-2 shadow-sm flex-wrap">
+                                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider px-2">Filtrar:</span>
+                                    <button
+                                        onClick={() => setEntryFilter('ALL')}
+                                        className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                                            entryFilter === 'ALL'
+                                                ? 'bg-slate-700 text-white shadow-sm'
+                                                : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'
+                                        }`}
+                                    >
+                                        Todas
+                                    </button>
+                                    <button
+                                        onClick={() => setEntryFilter('DIARY')}
+                                        className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1 ${
+                                            entryFilter === 'DIARY'
+                                                ? 'bg-indigo-600 text-white shadow-sm'
+                                                : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200'
+                                        }`}
+                                    >
+                                        <Calendar size={12} /> Entradas de Diario
+                                    </button>
+                                    <button
+                                        onClick={() => setEntryFilter('INTERNAL')}
+                                        className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1 ${
+                                            entryFilter === 'INTERNAL'
+                                                ? 'bg-amber-600 text-white shadow-sm'
+                                                : 'bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200'
+                                        }`}
+                                    >
+                                        <FileText size={12} /> Notas Internas
+                                    </button>
+                                    <button
+                                        onClick={() => setEntryFilter('SESSION')}
+                                        className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1 ${
+                                            entryFilter === 'SESSION'
+                                                ? 'bg-purple-600 text-white shadow-sm'
+                                                : 'bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200'
+                                        }`}
+                                    >
+                                        <Stethoscope size={12} /> Sesiones Terapéuticas
+                                    </button>
+                                    <button
+                                        onClick={() => setEntryFilter('FEEDBACK')}
+                                        className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1 ${
+                                            entryFilter === 'FEEDBACK'
+                                                ? 'bg-blue-600 text-white shadow-sm'
+                                                : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200'
+                                        }`}
+                                    >
+                                        <MessageCircle size={12} /> Feedback
+                                    </button>
+                                </div>
+
                                 <div className="absolute top-0 bottom-0 left-4 w-px bg-gradient-to-b from-transparent via-slate-200 to-transparent"></div>
 
                                 <div className="space-y-4">
-                                    {entries.map((entry) => {
+                                    {entries.filter(entry => {
+                                        if (entryFilter === 'ALL') return true;
+                                        if (entryFilter === 'DIARY') return entry.createdBy !== 'PSYCHOLOGIST';
+                                        if (entryFilter === 'SESSION') return entry.createdBy === 'PSYCHOLOGIST' && entry.psychologistEntryType === 'SESSION';
+                                        if (entryFilter === 'INTERNAL') return entry.createdBy === 'PSYCHOLOGIST' && entry.psychologistEntryType === 'INTERNAL';
+                                        if (entryFilter === 'FEEDBACK') return entry.createdBy === 'PSYCHOLOGIST' && entry.psychologistEntryType === 'FEEDBACK';
+                                        return true;
+                                    }).map((entry) => {
                                         const pNote = normalizeNote(entry.psychologistNote);
                                         const pFeed = normalizeNote(entry.psychologistFeedback);
                                         const isEditing = editingEntryId === entry.id;
@@ -1550,6 +1629,12 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                             )}
                         </div>
                     </div>
+                </div>
+            ) : activeTab === 'BILLING' ? (
+                <div className="h-full overflow-y-auto p-4 md:p-8 pb-20 md:pb-8">
+                    {currentPsychologistId && (
+                        <BillingPanel psychologistId={currentPsychologistId} patientId={patient.id} />
+                    )}
                 </div>
             ) : (
                 // ANALYTICS TAB CONTENT

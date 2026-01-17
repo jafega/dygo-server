@@ -1,5 +1,5 @@
 import React from 'react';
-import { Users, FileText, User as UserIcon, Calendar, Menu, X, ArrowLeftRight } from 'lucide-react';
+import { Users, FileText, User as UserIcon, Calendar, Menu, X, ArrowLeftRight, ShieldCheck } from 'lucide-react';
 
 const DygoLogo: React.FC<{ className?: string }> = ({ className = "w-8 h-8" }) => (
   <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
@@ -16,6 +16,8 @@ interface PsychologistSidebarProps {
   userEmail?: string;
   onSwitchToPersonal: () => void;
   onOpenSettings: () => void;
+  isSuperAdmin?: boolean;
+  onSuperAdminClick?: () => void;
 }
 
 const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({ 
@@ -26,7 +28,9 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
   userName = '',
   userEmail = '',
   onSwitchToPersonal,
-  onOpenSettings
+  onOpenSettings,
+  isSuperAdmin = false,
+  onSuperAdminClick
 }) => {
   const menuItems = [
     { id: 'patients' as const, label: 'Pacientes', icon: Users },
@@ -100,6 +104,22 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
               </button>
             );
           })}
+          
+          {/* Superadmin Button */}
+          {isSuperAdmin && onSuperAdminClick && (
+            <button
+              onClick={() => {
+                onSuperAdminClick();
+                if (window.innerWidth < 1024) {
+                  onToggle();
+                }
+              }}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all text-amber-600 hover:bg-amber-50 hover:text-amber-700 border-t border-slate-200 mt-2 pt-3"
+            >
+              <ShieldCheck size={18} />
+              <span>Superadmin</span>
+            </button>
+          )}
         </nav>
 
         {/* Footer */}
