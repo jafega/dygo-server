@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FileText, Plus, DollarSign, Check, Clock, ExternalLink, Download, Eye, Edit, Trash2, Send } from 'lucide-react';
-import { formatDate } from '../services/dateUtils';
+import { API_URL } from '../services/config';
 
 interface Invoice {
   id: string;
@@ -49,7 +49,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
   const loadInvoices = async () => {
     setIsLoading(true);
     try {
-      const response = await fetch(`/api/invoices?psychologistId=${psychologistId}`);
+      const response = await fetch(`${API_URL}/invoices?psychologistId=${psychologistId}`);
       if (response.ok) {
         const data = await response.json();
         setInvoices(data);
@@ -62,7 +62,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
 
   const loadPatients = async () => {
     try {
-      const response = await fetch(`/api/psychologist/${psychologistId}/patients`);
+      const response = await fetch(`${API_URL}/psychologist/${psychologistId}/patients`);
       if (response.ok) {
         const data = await response.json();
         setPatients(data);
@@ -105,7 +105,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
     };
 
     try {
-      const response = await fetch('/api/invoices', {
+      const response = await fetch(`${API_URL}/invoices`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...newInvoice, psychologistId })
@@ -124,7 +124,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
 
   const handleGeneratePaymentLink = async (invoiceId: string) => {
     try {
-      const response = await fetch('/api/invoices/payment-link', {
+      const response = await fetch(`${API_URL}/invoices/payment-link`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ invoiceId })
@@ -269,8 +269,8 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
                   <tr key={invoice.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3 text-sm font-medium text-slate-900">{invoice.invoiceNumber}</td>
                     <td className="px-4 py-3 text-sm text-slate-700">{invoice.patientName}</td>
-                    <td className="px-4 py-3 text-sm text-slate-600">{formatDate(invoice.date)}</td>
-                    <td className="px-4 py-3 text-sm text-slate-600">{formatDate(invoice.dueDate)}</td>
+                    <td className="px-4 py-3 text-sm text-slate-600">{new Date(invoice.date).toLocaleDateString()}</td>
+                    <td className="px-4 py-3 text-sm text-slate-600">{new Date(invoice.dueDate).toLocaleDateString()}</td>
                     <td className="px-4 py-3 text-sm font-semibold text-slate-900 text-right">€{invoice.amount.toFixed(2)}</td>
                     <td className="px-4 py-3">
                       <div className="flex justify-center">
@@ -326,11 +326,19 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
                   onChange={(e) => setFormData({ ...formData, patientId: e.target.value })}
                   className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 >
-                  <option value="">Selecciona un paciente</option>
+                  <option value="">-- Selecciona un paciente --</option>
                   {patients.map((patient) => (
-                    <option key={patient.id} value={patient.id}>{patient.name}</option>
+                    <option key={patient.id} value={patient.id}>
+                      {patient.name} ({patient.email})
+                    </option>
                   ))}
                 </select>
+                <p className="text-xs text-slate-500 mt-1">
+                  {patients.length === 0 
+                    ? 'No tienes pacientes asociados' 
+                    : `${patients.length} paciente${patients.length !== 1 ? 's' : ''} disponible${patients.length !== 1 ? 's' : ''}`
+                  }
+                </p>
               </div>
 
               {/* Due Date */}
@@ -458,11 +466,11 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Fecha de emisión</div>
-                  <div className="text-sm text-slate-900">{formatDate(selectedInvoice.date)}</div>
+                  <div className="text-sm text-slate-900">{new Date(selectedInvoice.date).toLocaleDateString()}</div>
                 </div>
                 <div>
                   <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Fecha de vencimiento</div>
-                  <div className="text-sm text-slate-900">{formatDate(selectedInvoice.dueDate)}</div>
+                  <div className="text-sm text-slate-900">{new Date(selectedInvoice.dueDate).toLocaleDateString()}</div>
                 </div>
               </div>
 

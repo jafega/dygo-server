@@ -294,34 +294,66 @@ export const getSentInvitationsForPsychologist = async (psychId: string): Promis
 export const acceptInvitation = async (invitationId: string, userId: string) => {
     let invs = await getInvitations();
     const inv = invs.find(i => i.id === invitationId);
-    if (!inv) return;
+    if (!inv) {
+        console.error('Invitation not found:', invitationId);
+        throw new Error('Invitación no encontrada');
+    }
 
     if (USE_BACKEND) {
         inv.status = 'ACCEPTED';
         try {
-            const res = await fetch(`${API_URL}/invitations?id=${inv.id}`, { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(inv) });
-            if (!res.ok) throw new Error(`Error accepting invitation (${res.status})`);
+            console.log('Accepting invitation:', inv);
+            const res = await fetch(`${API_URL}/invitations?id=${inv.id}`, { 
+                method: 'PUT', 
+                headers: {'Content-Type': 'application/json'}, 
+                body: JSON.stringify(inv) 
+            });
+            
+            if (!res.ok) {
+                const errorText = await res.text();
+                console.error('Error response:', res.status, errorText);
+                throw new Error(`Error accepting invitation (${res.status}): ${errorText}`);
+            }
+            
+            console.log('Invitation accepted successfully');
         } catch (e) {
-            if (ALLOW_LOCAL_FALLBACK) { inv.status = 'ACCEPTED'; localStorage.setItem(INVITATIONS_KEY, JSON.stringify(invs)); console.warn('Accept invitation failed, saved locally', e); }
-            else { throw e; }
+            console.error('Error in acceptInvitation backend call:', e);
+            if (ALLOW_LOCAL_FALLBACK) { 
+                inv.status = 'ACCEPTED'; 
+                localStorage.setItem(INVITATIONS_KEY, JSON.stringify(invs)); 
+                console.warn('Accept invitation failed, saved locally', e); 
+            } else { 
+                throw new Error(`No se pudo aceptar la invitación: ${e instanceof Error ? e.message : 'Error desconocido'}`);
+            }
         }
     } else {
         inv.status = 'ACCEPTED';
         localStorage.setItem(INVITATIONS_KEY, JSON.stringify(invs));
     }
 
-    const patient = await AuthService.getUserById(userId);
-    const psych = await AuthService.getUserById(inv.fromPsychologistId);
+    try {
+        const patient = await AuthService.getUserById(userId);
+        const psych = await AuthService.getUserById(inv.fromPsychologistId);
 
-    if (patient && psych) {
-        if (!patient.accessList.includes(psych.id)) {
-            patient.accessList.push(psych.id);
-            await AuthService.updateUser(patient);
+        if (patient && psych) {
+            console.log('Updating user access lists...');
+            if (!patient.accessList.includes(psych.id)) {
+                patient.accessList.push(psych.id);
+                await AuthService.updateUser(patient);
+                console.log('Patient accessList updated');
+            }
+            if (!psych.accessList.includes(patient.id)) {
+                psych.accessList.push(patient.id);
+                await AuthService.updateUser(psych);
+                console.log('Psychologist accessList updated');
+            }
+            console.log('Access lists updated successfully');
+        } else {
+            console.error('Could not find patient or psychologist:', { patient, psych });
         }
-        if (!psych.accessList.includes(patient.id)) {
-            psych.accessList.push(patient.id);
-            await AuthService.updateUser(psych);
-        }
+    } catch (e) {
+        console.error('Error updating access lists:', e);
+        throw new Error('La invitación fue aceptada pero hubo un error actualizando los permisos');
     }
 };
 

@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar as CalendarIcon, Clock, Plus, X, Users, Video, MapPin, ChevronLeft, ChevronRight } from 'lucide-react';
 import { API_URL } from '../services/config';
-import { formatDate, formatMonthYear, formatDateWithWeekday } from '../services/dateUtils';
 
 interface Session {
   id: string;
@@ -29,6 +28,9 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [showAssignPatient, setShowAssignPatient] = useState(false);
+  const [selectedSlot, setSelectedSlot] = useState<Session | null>(null);
+  const [selectedPatientId, setSelectedPatientId] = useState('');
   
   const [newSession, setNewSession] = useState({
     patientId: '',
@@ -72,10 +74,16 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
 
   const loadPatients = async () => {
     try {
+      console.log('Loading patients for psychologist:', psychologistId);
+      console.log('API URL:', `${API_URL}/psychologist/${psychologistId}/patients`);
       const response = await fetch(`${API_URL}/psychologist/${psychologistId}/patients`);
+      console.log('Response status:', response.status);
       if (response.ok) {
         const data = await response.json();
+        console.log('Patients loaded:', data);
         setPatients(data);
+      } else {
+        console.error('Failed to load patients:', response.status, response.statusText);
       }
     } catch (error) {
       console.error('Error loading patients:', error);
@@ -296,8 +304,48 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
     }));
   };
 
+  const handleAssignPatient = async () => {
+    if (!selectedPatientId || !selectedSlot) {
+      alert('Por favor selecciona un paciente');
+      return;
+    }
+
+    try {
+      const patient = patients.find(p => p.id === selectedPatientId);
+      if (!patient) {
+        alert('Paciente no encontrado');
+        return;
+      }
+
+      // Update slot to scheduled
+      const updateResponse = await fetch(`${API_URL}/sessions/${selectedSlot.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'scheduled',
+          patientId: patient.id,
+          patientName: patient.name
+        })
+      });
+
+      if (updateResponse.ok) {
+        alert('¡Paciente asignado exitosamente!');
+        await loadSessions();
+        setShowAssignPatient(false);
+        setSelectedSlot(null);
+        setSelectedPatientId('');
+        setSelectedSession(null);
+      } else {
+        alert('Error al asignar el paciente');
+      }
+    } catch (error) {
+      console.error('Error assigning patient:', error);
+      alert('Error al asignar el paciente');
+    }
+  };
+
   const { daysInMonth, startingDayOfWeek } = getDaysInMonth();
-  const monthName = formatMonthYear(currentDate);
+  const monthName = currentDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
   const weekDays = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
   return (
@@ -421,8 +469,10 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                           className={`text-[10px] px-1 py-0.5 rounded truncate ${
                             session.status === 'available' 
                               ? 'bg-purple-100 text-purple-700'
-                              : session.status === 'completed'
+                              : session.status === 'scheduled'
                               ? 'bg-green-100 text-green-700'
+                              : session.status === 'completed'
+                              ? 'bg-slate-100 text-slate-700'
                               : session.status === 'cancelled'
                               ? 'bg-red-100 text-red-700'
                               : 'bg-indigo-100 text-indigo-700'
@@ -452,7 +502,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
             <div className="p-6 border-b border-slate-200">
               <div className="flex items-center justify-between">
                 <h3 className="text-xl font-bold text-slate-900">
-                  {formatDateWithWeekday(selectedDate)}
+                  {new Date(selectedDate).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}
                 </h3>
                 <button
                   onClick={() => setSelectedDate('')}
@@ -473,7 +523,14 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                   {getSessionsForDate(selectedDate).map(session => (
                     <div
                       key={session.id}
-                      onClick={() => setSelectedSession(session)}
+                      onClick={() => {
+                        if (session.status === 'available') {
+                          setSelectedSlot(session);
+                          setShowAssignPatient(true);
+                        } else {
+                          setSelectedSession(session);
+                        }
+                      }}
                       className="p-4 border border-slate-200 rounded-lg hover:border-indigo-300 hover:bg-slate-50 cursor-pointer transition-all"
                     >
                       <div className="flex items-start justify-between">
@@ -497,15 +554,18 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                         <span className={`text-xs px-2 py-1 rounded-full font-medium ${
                           session.status === 'available' 
                             ? 'bg-purple-100 text-purple-700'
-                            : session.status === 'completed'
+                            : session.status === 'scheduled'
                             ? 'bg-green-100 text-green-700'
+                            : session.status === 'completed'
+                            ? 'bg-slate-100 text-slate-700'
                             : session.status === 'cancelled'
                             ? 'bg-red-100 text-red-700'
                             : 'bg-indigo-100 text-indigo-700'
                         }`}>
                           {session.status === 'available' ? 'Disponible' : 
+                           session.status === 'scheduled' ? 'Programada' :
                            session.status === 'completed' ? 'Completada' :
-                           session.status === 'cancelled' ? 'Cancelada' : 'Programada'}
+                           session.status === 'cancelled' ? 'Cancelada' : 'Sesión'}
                         </span>
                       </div>
                     </div>
@@ -542,7 +602,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Fecha</div>
-                  <div className="text-sm text-slate-900">{formatDate(selectedSession.date)}</div>
+                  <div className="text-sm text-slate-900">{new Date(selectedSession.date).toLocaleDateString('es-ES')}</div>
                 </div>
                 <div>
                   <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Hora</div>
@@ -849,6 +909,90 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                 className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium shadow-md"
               >
                 Crear Disponibilidad
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Assign Patient to Available Slot Modal */}
+      {showAssignPatient && selectedSlot && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full">
+            <div className="p-6 border-b border-slate-200">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xl font-bold text-slate-900">Asignar Paciente</h3>
+                <button
+                  onClick={() => {
+                    setShowAssignPatient(false);
+                    setSelectedSlot(null);
+                    setSelectedPatientId('');
+                  }}
+                  className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+            
+            <div className="p-6 space-y-4">
+              <div>
+                <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Horario</div>
+                <div className="text-lg font-semibold text-slate-900">
+                  {new Date(selectedSlot.date).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}
+                </div>
+                <div className="text-sm text-slate-600 mt-1">
+                  {selectedSlot.startTime} - {selectedSlot.endTime}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Seleccionar Paciente *
+                </label>
+                <select
+                  value={selectedPatientId}
+                  onChange={(e) => setSelectedPatientId(e.target.value)}
+                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                >
+                  <option value="">-- Selecciona un paciente --</option>
+                  {patients.map(patient => (
+                    <option key={patient.id} value={patient.id}>
+                      {patient.name} ({patient.email})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500 mt-1">
+                  {patients.length === 0 
+                    ? 'No tienes pacientes asociados aún' 
+                    : `${patients.length} paciente${patients.length !== 1 ? 's' : ''} disponible${patients.length !== 1 ? 's' : ''}`
+                  }
+                </p>
+              </div>
+
+              <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                <div className="text-xs text-green-700 font-medium">
+                  Al asignar, este espacio cambiará de "Disponible" a "Programada" y aparecerá en verde
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 border-t border-slate-200 flex gap-3 justify-end">
+              <button
+                onClick={() => {
+                  setShowAssignPatient(false);
+                  setSelectedSlot(null);
+                  setSelectedPatientId('');
+                }}
+                className="px-4 py-2 text-slate-700 hover:bg-slate-100 rounded-lg transition-colors font-medium"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleAssignPatient}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium shadow-md"
+              >
+                Asignar Paciente
               </button>
             </div>
           </div>

@@ -4,7 +4,6 @@ import { getPendingInvitationsForEmail, acceptInvitation, rejectInvitation, getP
 import { getCurrentUser, updateUser } from '../services/authService';
 import { X, Clock, Shield, UserCheck, Trash2, LogOut, Globe, Mic, Camera, Search, UserPlus } from 'lucide-react';
 import * as AuthService from '../services/authService';
-import { formatDate } from '../services/dateUtils';
 
 interface SettingsModalProps {
   settings: UserSettings;
@@ -399,7 +398,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                                     )}
 
                                     {currentUser?.premiumUntil && (
-                                        <div className="text-xs text-indigo-100">Válido hasta: {formatDate(Number(currentUser.premiumUntil))}</div>
+                                        <div className="text-xs text-indigo-100">Válido hasta: {new Date(Number(currentUser.premiumUntil)).toLocaleDateString()}</div>
                                     )}
                                 </div>
 

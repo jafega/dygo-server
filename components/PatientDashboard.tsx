@@ -115,15 +115,30 @@ const PatientDashboard: React.FC = () => {
     }
   };
 
-  const handleSendEmail = () => {
+  const handleSendEmail = async () => {
       if (!currentUser || !inviteEmail) return;
-      const registerLink = window.location.origin;
-      const subject = encodeURIComponent("Invitación a dygo - Tu diario de bienestar");
-      const body = encodeURIComponent(`Hola,\n\nTe invito a utilizar dygo.\nRegístrate aquí: ${registerLink}\n\nUn saludo,\n${currentUser.name}`);
-      window.open(`mailto:${inviteEmail.trim()}?subject=${subject}&body=${body}`, '_blank');
-      setInviteStatus('success');
-      setMsg('Se ha abierto tu cliente de correo.');
-      setTimeout(() => setShowInvite(false), 4000);
+      
+      try {
+          // Create invitation which will auto-create the patient user in backend
+          await sendInvitation(currentUser.id, currentUser.name, inviteEmail.trim());
+          
+          // Open email client
+          const registerLink = window.location.origin;
+          const subject = encodeURIComponent("Invitación a dygo - Tu diario de bienestar");
+          const body = encodeURIComponent(`Hola,\n\nTe invito a utilizar dygo.\nRegístrate aquí: ${registerLink}\n\nUn saludo,\n${currentUser.name}`);
+          window.open(`mailto:${inviteEmail.trim()}?subject=${subject}&body=${body}`, '_blank');
+          
+          setInviteStatus('success');
+          setMsg('Usuario creado y email abierto. Ya puedes empezar a trabajar con este paciente.');
+          
+          // Reload data to show the new patient
+          await loadData();
+          
+          setTimeout(() => setShowInvite(false), 4000);
+      } catch (err: any) {
+          setInviteStatus('error');
+          setMsg(err.message || 'Error al crear el paciente');
+      }
   };
 
   const getRiskColor = (level: string) => {
@@ -203,7 +218,8 @@ const PatientDashboard: React.FC = () => {
                          <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 text-center shadow-sm">
                              <div className="w-12 h-12 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-3"><UserX size={24} /></div>
                              <h5 className="font-bold text-amber-900 text-lg mb-1">No Registrado</h5>
-                             <button onClick={handleSendEmail} className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg flex items-center justify-center gap-2"><Mail size={16} /> Enviar Email</button>
+                             <p className="text-sm text-amber-800 mb-4">Se creará automáticamente una cuenta para este paciente.</p>
+                             <button onClick={handleSendEmail} className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg flex items-center justify-center gap-2"><UserPlus size={16} /> Crear y Enviar Email</button>
                          </div>
                      )}
                  </div>

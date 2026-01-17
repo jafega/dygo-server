@@ -1,7 +1,36 @@
 {
-  "users": [],
+  "users": [
+    {
+      "id": "psych-001",
+      "name": "Garry Javi",
+      "email": "garryjavi@gmail.com",
+      "password": "123",
+      "role": "PSYCHOLOGIST",
+      "isPsychologist": true,
+      "accessList": ["patient-001"]
+    },
+    {
+      "id": "patient-001",
+      "name": "Garrido Javier Fernandez",
+      "email": "garridojavierfernandez@gmail.com",
+      "password": "123",
+      "role": "PATIENT",
+      "isPsychologist": false,
+      "accessList": ["psych-001"]
+    }
+  ],
   "entries": [],
   "goals": [],
-  "invitations": [],
-  "settings": {}
+  "invitations": [
+    {
+      "id": "inv-001",
+      "fromPsychologistId": "psych-001",
+      "fromPsychologistName": "Garry Javi",
+      "toUserEmail": "garridojavierfernandez@gmail.com",
+      "status": "ACCEPTED",
+      "timestamp": 1737158400000
+    }
+  ],
+  "settings": {},
+  "sessions": []
 }

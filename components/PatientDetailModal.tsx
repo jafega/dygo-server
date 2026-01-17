@@ -8,7 +8,6 @@ import SessionRecorder from './SessionRecorder';
 import mammoth from 'mammoth/mammoth.browser';
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min?url';
-import { formatTime, formatDate } from '../services/dateUtils';
 import { 
     X, Mail, AlertTriangle, Calendar, FileText, MessageCircle, Save, Paperclip, 
     Image as ImageIcon, File, Trash2, Download, Plus, Stethoscope, 
@@ -1025,25 +1024,6 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                                         <p className="text-sm text-slate-500 mt-1">Revisa y ajusta el resumen antes de guardar</p>
                                                     </div>
 
-                                                    {/* Show uploaded files from Step 1 */}
-                                                    {sessionNote.attachments.length > 0 && (
-                                                        <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-lg">
-                                                            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2 block">
-                                                                📎 Archivos adjuntos
-                                                            </label>
-                                                            <div className="flex flex-wrap gap-2">
-                                                                {sessionNote.attachments.map(att => (
-                                                                    <div key={att.id} className="flex items-center gap-2 px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-full text-xs">
-                                                                        {att.type === 'AUDIO' && <Mic size={12} />}
-                                                                        {att.type === 'VIDEO' && <Video size={12} />}
-                                                                        {att.type === 'DOCUMENT' && <FileText size={12} />}
-                                                                        <span className="max-w-[150px] truncate">{att.name}</span>
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        </div>
-                                                    )}
-
                                                     <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
                                                         <label className="text-xs font-bold text-purple-700 uppercase tracking-wider mb-2 block">
                                                             📝 Resumen de la sesión
@@ -1178,7 +1158,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                         const isPsychEntry = entry.createdBy === 'PSYCHOLOGIST';
                                         const psychEntryLabel = entry.psychologistEntryType === 'SESSION' ? 'Sesión Clínica' : 'Nota Clínica';
                                         const isSession = entry.psychologistEntryType === 'SESSION';
-                                        const timeLabel = entry.timestamp ? formatTime(entry.timestamp) : '';
+                                        const timeLabel = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
                                         const hasAttachments = (pNote.attachments?.length || 0) + (pFeed.attachments?.length || 0) > 0;
                                         const feedText = (pFeed.text || '').trim();
                                         const summaryText = (entry.summary || '').trim();
@@ -1481,7 +1461,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                     <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
                                         <div className="text-xs text-slate-500 font-semibold mb-1">Fecha de Nacimiento</div>
                                         <div className="text-slate-900 font-medium">
-                                            {patientUser?.dateOfBirth ? formatDate(patientUser.dateOfBirth) : '—'}
+                                            {patientUser?.dateOfBirth ? new Date(patientUser.dateOfBirth).toLocaleDateString('es-ES') : '—'}
                                         </div>
                                     </div>
                                     <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">

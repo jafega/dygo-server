@@ -68,13 +68,6 @@ const App: React.FC = () => {
     return '';
   };
 
-  const getFeedbackAttachments = (entry: JournalEntry) => {
-    if (entry.psychologistFeedback && typeof entry.psychologistFeedback !== 'string') {
-      return entry.psychologistFeedback.attachments || [];
-    }
-    return [];
-  };
-
   const isFeedbackUnread = (entry: JournalEntry) => {
     if (!entry.psychologistFeedbackUpdatedAt) return false;
     const readAt = entry.psychologistFeedbackReadAt || 0;
@@ -83,7 +76,7 @@ const App: React.FC = () => {
 
   const hasFeedbackContent = (entry: JournalEntry) => {
     const textHas = getFeedbackText(entry).trim().length > 0;
-    const attHas = getFeedbackAttachments(entry).length > 0;
+    const attHas = Array.isArray(entry.psychologistFeedback?.attachments) && entry.psychologistFeedback?.attachments.length > 0;
     return Boolean(textHas || attHas);
   };
 

@@ -1196,6 +1196,7 @@ app.get('/api/users/:id', async (req, res) => {
 app.get('/api/users', async (req, res) => {
   try {
     const id = req.query.id || req.query.userId;
+    const email = req.query.email;
 
     if (supabaseAdmin) {
       if (id) {
@@ -1207,6 +1208,14 @@ app.get('/api/users', async (req, res) => {
           user.premiumUntil = undefined;
         }
 
+        return res.json(user);
+      }
+
+      if (email) {
+        const users = (await readSupabaseTable('users')) || [];
+        const normalizedEmail = normalizeEmail(email);
+        const user = users.find(u => normalizeEmail(u.email) === normalizedEmail);
+        if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
         return res.json(user);
       }
 
@@ -1237,6 +1246,22 @@ app.get('/api/users', async (req, res) => {
     if (id) {
       const user = db.users.find((u) => u.id === id);
       if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+      if (user.premiumUntil && Number(user.premiumUntil) < Date.now()) {
+        user.isPremium = false;
+        user.premiumUntil = undefined;
+        saveDb(db);
+      }
+
+      return res.json(user);
+    }
+
+    if (email) {
+      const normalizedEmail = normalizeEmail(email);
+      const user = db.users.find(u => normalizeEmail(u.email) === normalizedEmail);
+      if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+      return res.json(user);
+    }
 
       if (user.premiumUntil && Number(user.premiumUntil) < Date.now()) {
         user.isPremium = false;
@@ -1586,6 +1611,43 @@ app.post('/api/invitations', (req, res) => {
 
   if (!invitation.id) {
     invitation.id = crypto.randomUUID();
+  }
+
+  // Auto-create patient user if email doesn't exist
+  const normalizedEmail = normalizeEmail(invitation.toUserEmail);
+  let existingUser = db.users.find(u => normalizeEmail(u.email) === normalizedEmail);
+  let userWasCreated = false;
+  
+  if (!existingUser) {
+    // Create new patient user automatically
+    const patientName = invitation.toUserEmail.split('@')[0]; // Use email prefix as default name
+    const newPatient = {
+      id: crypto.randomUUID(),
+      name: patientName.charAt(0).toUpperCase() + patientName.slice(1), // Capitalize first letter
+      email: normalizedEmail,
+      password: crypto.randomBytes(16).toString('hex'), // Random temporary password
+      role: 'PATIENT',
+      accessList: [invitation.fromPsychologistId], // Associate with psychologist immediately
+      isPsychologist: false
+    };
+    
+    db.users.push(newPatient);
+    userWasCreated = true;
+    console.log(`Auto-created patient user: ${newPatient.name} (${newPatient.email})`);
+  } else {
+    // User exists, ensure psychologist is in accessList
+    if (!existingUser.accessList) {
+      existingUser.accessList = [];
+    }
+    if (!existingUser.accessList.includes(invitation.fromPsychologistId)) {
+      existingUser.accessList.push(invitation.fromPsychologistId);
+    }
+  }
+
+  // If user was auto-created, mark invitation as ACCEPTED (already linked)
+  // If user already existed, keep as PENDING so they can accept/reject
+  if (userWasCreated) {
+    invitation.status = 'ACCEPTED';
   }
 
   db.invitations.push(invitation);
