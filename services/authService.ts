@@ -178,12 +178,26 @@ export const getCurrentUser = async (): Promise<User | null> => {
 export const getUserById = async (id: string): Promise<User | undefined> => {
   if (USE_BACKEND) {
       try {
+          console.log('Fetching user by ID:', id);
           const res = await fetch(`${API_URL}/users?id=${id}`);
-          if (res.ok) return await res.json();
+          console.log('getUserById response:', res.status);
+          if (res.ok) {
+              const user = await res.json();
+              console.log('User found:', user);
+              return user;
+          }
+          if (res.status === 404) {
+              console.warn('User not found:', id);
+              return undefined;
+          }
           throw new Error(`Server error: ${res.status}`);
       } catch(e) {
-          if (ALLOW_LOCAL_FALLBACK) { console.warn("Fetch error, using local fallback.", e); return getLocalUsers().find(u => u.id === id); }
-          throw new Error("No se puede conectar con el servidor para obtener el usuario.");
+          console.error('Error in getUserById:', e);
+          if (ALLOW_LOCAL_FALLBACK) { 
+              console.warn("Fetch error, using local fallback.", e); 
+              return getLocalUsers().find(u => u.id === id); 
+          }
+          throw new Error(`No se puede conectar con el servidor para obtener el usuario: ${e instanceof Error ? e.message : 'Error desconocido'}`);
       }
   }
   return getLocalUsers().find(u => u.id === id);

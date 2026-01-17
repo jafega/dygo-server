@@ -31,6 +31,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
   const [showAssignPatient, setShowAssignPatient] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<Session | null>(null);
   const [selectedPatientId, setSelectedPatientId] = useState('');
+  const [meetLink, setMeetLink] = useState('');
   
   const [newSession, setNewSession] = useState({
     patientId: '',
@@ -317,6 +318,13 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
         return;
       }
 
+      // Generate Google Meet link if empty
+      let finalMeetLink = meetLink.trim();
+      if (!finalMeetLink) {
+        const randomId = Math.random().toString(36).substring(2, 15);
+        finalMeetLink = `https://meet.google.com/${randomId}`;
+      }
+
       // Update slot to scheduled
       const updateResponse = await fetch(`${API_URL}/sessions/${selectedSlot.id}`, {
         method: 'PATCH',
@@ -324,7 +332,8 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
         body: JSON.stringify({
           status: 'scheduled',
           patientId: patient.id,
-          patientName: patient.name
+          patientName: patient.name,
+          meetLink: finalMeetLink
         })
       });
 
@@ -334,6 +343,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
         setShowAssignPatient(false);
         setSelectedSlot(null);
         setSelectedPatientId('');
+        setMeetLink('');
         setSelectedSession(null);
       } else {
         alert('Error al asignar el paciente');
@@ -927,6 +937,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                     setShowAssignPatient(false);
                     setSelectedSlot(null);
                     setSelectedPatientId('');
+                    setMeetLink('');
                   }}
                   className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
                 >
@@ -970,6 +981,23 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                 </p>
               </div>
 
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  <Video className="inline-block mr-1" size={16} />
+                  Link de Google Meet (Opcional)
+                </label>
+                <input
+                  type="text"
+                  value={meetLink}
+                  onChange={(e) => setMeetLink(e.target.value)}
+                  placeholder="https://meet.google.com/xxx-xxxx-xxx"
+                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Si dejas vacío, se generará un link automáticamente
+                </p>
+              </div>
+
               <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
                 <div className="text-xs text-green-700 font-medium">
                   Al asignar, este espacio cambiará de "Disponible" a "Programada" y aparecerá en verde
@@ -983,6 +1011,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                   setShowAssignPatient(false);
                   setSelectedSlot(null);
                   setSelectedPatientId('');
+                  setMeetLink('');
                 }}
                 className="px-4 py-2 text-slate-700 hover:bg-slate-100 rounded-lg transition-colors font-medium"
               >

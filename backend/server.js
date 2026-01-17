@@ -1263,15 +1263,6 @@ app.get('/api/users', async (req, res) => {
       return res.json(user);
     }
 
-      if (user.premiumUntil && Number(user.premiumUntil) < Date.now()) {
-        user.isPremium = false;
-        user.premiumUntil = undefined;
-        saveDb(db);
-      }
-
-      return res.json(user);
-    }
-
     // Normalize premium flags
     let changed = false;
     db.users.forEach(u => {
