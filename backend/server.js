@@ -2414,8 +2414,13 @@ app.put('/api/psychologist/:userId/profile', (req, res) => {
   const db = getDb();
   if (!db.psychologistProfiles) db.psychologistProfiles = {};
   
+  console.log('[API] Saving psychologist profile for:', userId);
+  console.log('[API] Profile data:', req.body);
+  
   db.psychologistProfiles[userId] = req.body;
   saveDb(db);
+  
+  console.log('[API] Profile saved successfully');
   res.json(req.body);
 });
 

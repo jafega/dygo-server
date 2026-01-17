@@ -141,9 +141,12 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
       try {
         // Get current psychologist ID from localStorage
         const storedUser = localStorage.getItem('currentUser');
+        console.log('[PatientDetailModal] storedUser:', storedUser);
         if (storedUser) {
           const userData = JSON.parse(storedUser);
+          console.log('[PatientDetailModal] userData:', userData);
           if (userData.id) {
+            console.log('[PatientDetailModal] Setting currentPsychologistId:', userData.id);
             setCurrentPsychologistId(userData.id);
           }
         }
@@ -1638,9 +1641,22 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                 </div>
             ) : activeTab === 'BILLING' ? (
                 <div className="h-full overflow-y-auto p-4 md:p-8 pb-20 md:pb-8">
-                    {currentPsychologistId && (
-                        <BillingPanel psychologistId={currentPsychologistId} patientId={patient.id} />
-                    )}
+                    {(() => {
+                        console.log('[PatientDetailModal] BILLING tab - currentPsychologistId:', currentPsychologistId);
+                        console.log('[PatientDetailModal] BILLING tab - patient.id:', patient.id);
+                        return currentPsychologistId ? (
+                            <BillingPanel psychologistId={currentPsychologistId} patientId={patient.id} />
+                        ) : (
+                            <div className="flex items-center justify-center h-64">
+                                <div className="text-center">
+                                    <div className="text-gray-400 mb-2">
+                                        <FileText size={48} className="mx-auto" />
+                                    </div>
+                                    <div className="text-sm text-gray-500">Cargando información de facturación...</div>
+                                </div>
+                            </div>
+                        );
+                    })()}
                 </div>
             ) : (
                 // ANALYTICS TAB CONTENT

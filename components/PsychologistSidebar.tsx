@@ -41,15 +41,15 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
 
   return (
     <>
-      {/* Mobile Toggle Button */}
-      <button
-        onClick={onToggle}
-        className={`lg:hidden fixed top-4 z-50 p-2 bg-white rounded-lg shadow-lg border border-slate-200 hover:bg-slate-50 transition-all duration-300 ${
-          isOpen ? 'right-4' : 'left-4'
-        }`}
-      >
-        {isOpen ? <X size={20} /> : <Menu size={20} />}
-      </button>
+      {/* Mobile Toggle Button - Only when closed */}
+      {!isOpen && (
+        <button
+          onClick={onToggle}
+          className="lg:hidden fixed top-4 left-4 z-50 p-2 bg-white rounded-lg shadow-lg border border-slate-200 hover:bg-slate-50 transition-all duration-300"
+        >
+          <Menu size={20} />
+        </button>
+      )}
 
       {/* Overlay for mobile */}
       {isOpen && (
@@ -71,9 +71,18 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
       >
         {/* Header */}
         <div className="p-4 border-b border-slate-200">
-          <div className="flex items-center gap-2">
-            <DygoLogo className="w-8 h-8 text-indigo-600" />
-            <span className="font-dygo text-xl font-bold text-slate-900">dygo <span className="text-purple-600">pro</span></span>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <DygoLogo className="w-8 h-8 text-indigo-600" />
+              <span className="font-dygo text-xl font-bold text-slate-900">dygo <span className="text-purple-600">pro</span></span>
+            </div>
+            {/* Close button for mobile - inside the menu */}
+            <button
+              onClick={onToggle}
+              className="lg:hidden p-1.5 hover:bg-slate-100 rounded-lg transition-colors"
+            >
+              <X size={20} className="text-slate-600" />
+            </button>
           </div>
         </div>
 

@@ -59,10 +59,17 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       const url = patientId 
         ? `${API_URL}/invoices?psychologistId=${psychologistId}&patientId=${patientId}`
         : `${API_URL}/invoices?psychologistId=${psychologistId}`;
+      console.log('[BillingPanel] Loading invoices from:', url);
+      console.log('[BillingPanel] psychologistId:', psychologistId);
+      console.log('[BillingPanel] patientId:', patientId);
       const response = await fetch(url);
       if (response.ok) {
         const data = await response.json();
+        console.log('[BillingPanel] Invoices loaded:', data.length, 'invoices');
+        console.log('[BillingPanel] Invoices data:', data);
         setInvoices(data);
+      } else {
+        console.error('[BillingPanel] Error response:', response.status, response.statusText);
       }
     } catch (error) {
       console.error('Error loading invoices:', error);
