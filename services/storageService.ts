@@ -1,4 +1,4 @@
-import { JournalEntry, Goal, UserSettings, Invitation, User, PatientSummary } from '../types';
+import { JournalEntry, Goal, UserSettings, Invitation, User, PatientSummary, CareRelationship } from '../types';
 import * as AuthService from './authService';
 import { API_URL, USE_BACKEND, ALLOW_LOCAL_FALLBACK } from './config';
 
@@ -6,6 +6,145 @@ const ENTRIES_KEY = 'ai_diary_entries_v2';
 const GOALS_KEY = 'ai_diary_goals_v2';
 const SETTINGS_KEY = 'ai_diary_settings_v3';
 const INVITATIONS_KEY = 'ai_diary_invitations_v1';
+const RELATIONSHIPS_KEY = 'ai_diary_care_relationships_v1';
+
+type RelationshipFilter = {
+  psychologistId?: string;
+  patientId?: string;
+};
+
+const getLocalRelationships = (): CareRelationship[] => {
+  try {
+      const stored = localStorage.getItem(RELATIONSHIPS_KEY);
+      const parsed = stored ? JSON.parse(stored) : [];
+      return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+      console.warn('Failed to parse local care relationships', err);
+      return [];
+  }
+};
+
+const saveLocalRelationships = (relationships: CareRelationship[]) => {
+  localStorage.setItem(RELATIONSHIPS_KEY, JSON.stringify(relationships));
+};
+
+const matchesRelationshipFilter = (rel: CareRelationship, filter: RelationshipFilter) => {
+  if (!rel) return false;
+  if (filter.psychologistId && rel.psychologistId !== filter.psychologistId) return false;
+  if (filter.patientId && rel.patientId !== filter.patientId) return false;
+  return true;
+};
+
+const fetchRelationships = async (filter: RelationshipFilter): Promise<CareRelationship[]> => {
+  if (!filter.psychologistId && !filter.patientId) {
+      throw new Error('psychologistId o patientId requerido');
+  }
+
+  if (USE_BACKEND) {
+      const params = new URLSearchParams();
+      if (filter.psychologistId) params.append('psychologistId', filter.psychologistId);
+      if (filter.patientId) params.append('patientId', filter.patientId);
+      try {
+          const res = await fetch(`${API_URL}/relationships?${params.toString()}`);
+          if (!res.ok) {
+              let details = '';
+              try {
+                  const err = await res.json();
+                  details = err?.error ? `: ${err.error}` : '';
+              } catch (_) {
+                  // ignore json errors
+              }
+              throw new Error(`Error fetching relationships (${res.status})${details}`);
+          }
+          return await res.json();
+      } catch (err) {
+          if (!ALLOW_LOCAL_FALLBACK) {
+              throw err instanceof Error ? err : new Error('Error obteniendo relaciones');
+          }
+          console.warn('Fetch relationships failed, using local fallback', err);
+      }
+  }
+
+  if (USE_BACKEND && !ALLOW_LOCAL_FALLBACK) {
+      throw new Error('Persistencia local deshabilitada. El backend debe estar disponible.');
+  }
+
+  return getLocalRelationships().filter(rel => matchesRelationshipFilter(rel, filter));
+};
+
+const ensureLocalRelationship = (psychologistId: string, patientId: string): CareRelationship => {
+  const relationships = getLocalRelationships();
+  const existing = relationships.find(rel => rel.psychologistId === psychologistId && rel.patientId === patientId);
+  if (existing) return existing;
+  const relationship: CareRelationship = { id: crypto.randomUUID(), psychologistId, patientId, createdAt: Date.now() };
+  relationships.push(relationship);
+  saveLocalRelationships(relationships);
+  return relationship;
+};
+
+const removeLocalRelationship = (psychologistId: string, patientId: string) => {
+  const relationships = getLocalRelationships();
+  const filtered = relationships.filter(rel => !(rel.psychologistId === psychologistId && rel.patientId === patientId));
+  saveLocalRelationships(filtered);
+};
+
+const ensureRelationship = async (psychologistId: string, patientId: string): Promise<CareRelationship> => {
+  if (USE_BACKEND) {
+      try {
+          const res = await fetch(`${API_URL}/relationships`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ psychologistId, patientId })
+          });
+          if (!res.ok) {
+              const err = await res.json().catch(() => ({}));
+              throw new Error(err.error || `Error creating relationship (${res.status})`);
+          }
+          return await res.json();
+      } catch (err) {
+          if (!ALLOW_LOCAL_FALLBACK) {
+              throw err instanceof Error ? err : new Error('Error creando relación');
+          }
+          console.warn('Create relationship failed, saving locally', err);
+      }
+  }
+
+  if (USE_BACKEND && !ALLOW_LOCAL_FALLBACK) {
+      throw new Error('Persistencia local deshabilitada. El backend debe estar disponible.');
+  }
+
+  return ensureLocalRelationship(psychologistId, patientId);
+};
+
+const removeRelationship = async (psychologistId: string, patientId: string): Promise<void> => {
+  if (USE_BACKEND) {
+      const params = new URLSearchParams({ psychologistId, patientId });
+      try {
+          const res = await fetch(`${API_URL}/relationships?${params.toString()}`, { method: 'DELETE' });
+          if (!res.ok) {
+              const err = await res.json().catch(() => ({}));
+              throw new Error(err.error || `Error removing relationship (${res.status})`);
+          }
+          return;
+      } catch (err) {
+          if (!ALLOW_LOCAL_FALLBACK) {
+              throw err instanceof Error ? err : new Error('Error eliminando relación');
+          }
+          console.warn('Delete relationship failed, removing locally', err);
+      }
+  }
+
+  if (USE_BACKEND && !ALLOW_LOCAL_FALLBACK) {
+      throw new Error('Persistencia local deshabilitada. El backend debe estar disponible.');
+  }
+
+  removeLocalRelationship(psychologistId, patientId);
+};
+
+const relationshipExists = async (psychologistId: string, patientId: string): Promise<boolean> => {
+  const rels = await fetchRelationships({ psychologistId, patientId });
+  return rels.length > 0;
+};
 
 // --- Entries ---
 export const getEntriesForUser = async (userId: string): Promise<JournalEntry[]> => {
@@ -138,6 +277,19 @@ export const migrateLocalToBackend = async (userId: string) => {
             try { await sendInvitation(inv.fromPsychologistId, inv.fromPsychologistName, inv.toUserEmail); } catch (err) { console.warn('Failed to migrate invitation', inv.id, err); }
         }
 
+        const relationshipsToMigrate = getLocalRelationships().filter(rel => rel.patientId === userId || rel.psychologistId === userId);
+        for (const rel of relationshipsToMigrate) {
+            try {
+                await fetch(`${API_URL}/relationships`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ psychologistId: rel.psychologistId, patientId: rel.patientId })
+                });
+            } catch (err) {
+                console.warn('Failed to migrate relationship', `${rel.psychologistId}-${rel.patientId}`, err);
+            }
+        }
+
         console.log('✅ Local data migration attempted');
     } catch (e) {
         console.error('Error during migration', e);
@@ -245,14 +397,19 @@ export const sendInvitation = async (fromPsychId: string, fromName: string, toEm
     }
 
     // Prevent sending an invitation if the patient is already linked to this psychologist
-    try {
-        const existingUser = await AuthService.getUserByEmail(toEmail.trim());
-        if (existingUser && existingUser.accessList && existingUser.accessList.includes(fromPsychId)) {
-            throw new Error('Paciente ya agregado.');
+    const existingUser = await AuthService.getUserByEmail(toEmail.trim());
+    if (existingUser) {
+        try {
+            const alreadyLinked = await relationshipExists(fromPsychId, existingUser.id);
+            if (alreadyLinked) {
+                throw new Error('Paciente ya agregado.');
+            }
+        } catch (err) {
+            if (err instanceof Error && err.message === 'Paciente ya agregado.') {
+                throw err;
+            }
+            console.warn('No se pudo verificar si la relación ya existía, continuando con la invitación.', err);
         }
-    } catch (err) {
-        // If AuthService throws due to network and we are using backend, let the original flow handle it.
-        // We only want to block in clear cases where we can check the user locally or via backend.
     }
 
     const newInv: Invitation = {
@@ -332,28 +489,10 @@ export const acceptInvitation = async (invitationId: string, userId: string) => 
     }
 
     try {
-        const patient = await AuthService.getUserById(userId);
-        const psych = await AuthService.getUserById(inv.fromPsychologistId);
-
-        if (patient && psych) {
-            console.log('Updating user access lists...');
-            if (!patient.accessList.includes(psych.id)) {
-                patient.accessList.push(psych.id);
-                await AuthService.updateUser(patient);
-                console.log('Patient accessList updated');
-            }
-            if (!psych.accessList.includes(patient.id)) {
-                psych.accessList.push(patient.id);
-                await AuthService.updateUser(psych);
-                console.log('Psychologist accessList updated');
-            }
-            console.log('Access lists updated successfully');
-        } else {
-            console.error('Could not find patient or psychologist:', { patient, psych });
-        }
+        await ensureRelationship(inv.fromPsychologistId, userId);
     } catch (e) {
-        console.error('Error updating access lists:', e);
-        throw new Error('La invitación fue aceptada pero hubo un error actualizando los permisos');
+        console.error('Error creating care relationship:', e);
+        throw new Error('La invitación fue aceptada pero hubo un error creando la relación de cuidado');
     }
 };
 
@@ -373,33 +512,11 @@ export const rejectInvitation = async (invitationId: string) => {
 };
 
 export const linkPatientToPsychologist = async (patientId: string, psychId: string) => {
-     const patient = await AuthService.getUserById(patientId);
-     const psych = await AuthService.getUserById(psychId);
-
-     if (patient && psych) {
-         if (!patient.accessList.includes(psych.id)) {
-             patient.accessList.push(psych.id);
-             await AuthService.updateUser(patient);
-         }
-         if (!psych.accessList.includes(patient.id)) {
-             psych.accessList.push(patient.id);
-             await AuthService.updateUser(psych);
-         }
-     }
+     await ensureRelationship(psychId, patientId);
 };
 
 export const revokeAccess = async (patientId: string, psychId: string) => {
-    const patient = await AuthService.getUserById(patientId);
-    const psych = await AuthService.getUserById(psychId);
-
-    if (patient) {
-        patient.accessList = patient.accessList.filter(id => id !== psychId);
-        await AuthService.updateUser(patient);
-    }
-    if (psych) {
-        psych.accessList = psych.accessList.filter(id => id !== patientId);
-        await AuthService.updateUser(psych);
-    }
+    await removeRelationship(psychId, patientId);
 };
 
 export const getPatientsForPsychologist = async (psychId: string): Promise<PatientSummary[]> => {
@@ -429,15 +546,20 @@ export const getPatientsForPsychologist = async (psychId: string): Promise<Patie
         } as PatientSummary;
     };
 
-    // Parallel processing for speed
-    const patientPromises = psych.accessList.map(async (pid) => {
+    const relationships = await fetchRelationships({ psychologistId: psychId });
+    const patientIds = relationships
+        .map(rel => rel.patientId)
+        .filter((id): id is string => Boolean(id));
+    const uniquePatientIds = Array.from(new Set(patientIds));
+
+    const patientPromises = uniquePatientIds.map(async (pid) => {
         const p = await AuthService.getUserById(pid);
         if (p) return await processUser(p);
         return null;
     });
 
     const results = await Promise.all(patientPromises);
-    results.forEach(r => { if(r) patientsData.push(r); });
+    results.forEach(r => { if (r) patientsData.push(r); });
 
     patientsData.unshift(await processUser(psych, true));
 
@@ -445,18 +567,23 @@ export const getPatientsForPsychologist = async (psychId: string): Promise<Patie
 };
 
 export const getPsychologistsForPatient = async (patientId: string): Promise<User[]> => {
-    const patient = await AuthService.getUserById(patientId);
-    if (!patient) return [];
-    
-    const psychs = [];
-    for (const id of patient.accessList) {
-        const u = await AuthService.getUserById(id);
-        if (u) psychs.push(u);
-    }
-    return psychs;
+    const relationships = await fetchRelationships({ patientId });
+    if (relationships.length === 0) return [];
+
+    const psychIds = Array.from(new Set(
+        relationships
+            .map(rel => rel.psychologistId)
+            .filter((id): id is string => Boolean(id))
+    ));
+    const psychs = await Promise.all(psychIds.map(id => AuthService.getUserById(id)));
+    return psychs.filter((u): u is User => Boolean(u));
 };
 
 export const getAllPsychologists = async (): Promise<User[]> => {
     const users = await AuthService.getUsers();
     return users.filter(u => u.role && u.role.trim().toUpperCase() === 'PSYCHOLOGIST');
+};
+
+export const hasCareRelationship = async (psychologistId: string, patientId: string): Promise<boolean> => {
+    return relationshipExists(psychologistId, patientId);
 };

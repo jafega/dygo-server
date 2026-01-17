@@ -20,7 +20,8 @@ import PsychologistSidebar from './components/PsychologistSidebar';
 import BillingPanel from './components/BillingPanel';
 import PsychologistProfilePanel from './components/PsychologistProfilePanel';
 import PsychologistCalendar from './components/PsychologistCalendar';
-import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase } from 'lucide-react';
+import ConnectionsPanel from './components/ConnectionsPanel';
+import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2 } from 'lucide-react';
 
 // Custom Dygo Logo Component
 const DygoLogo: React.FC<{ className?: string }> = ({ className = "w-8 h-8" }) => (
@@ -36,7 +37,7 @@ const App: React.FC = () => {
   const [pendingRole, setPendingRole] = useState<'PATIENT' | 'PSYCHOLOGIST' | null>(null);
   
   const [psychViewMode, setPsychViewMode] = useState<'DASHBOARD' | 'PERSONAL'>('DASHBOARD');
-  const [psychPanelView, setPsychPanelView] = useState<'patients' | 'billing' | 'profile' | 'calendar'>('patients');
+  const [psychPanelView, setPsychPanelView] = useState<'patients' | 'billing' | 'profile' | 'calendar' | 'connections'>('patients');
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const [entries, setEntries] = useState<JournalEntry[]>([]);
@@ -55,7 +56,7 @@ const App: React.FC = () => {
   const [sessionDate, setSessionDate] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
-  const [activeTab, setActiveTab] = useState<'insights' | 'feedback' | 'sessions' | 'calendar' | 'billing'>('insights');
+  const [activeTab, setActiveTab] = useState<'insights' | 'feedback' | 'sessions' | 'calendar' | 'billing' | 'connections'>('insights');
   const [showSettings, setShowSettings] = useState(false);
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReport | null>(null);
   const [hasPendingInvites, setHasPendingInvites] = useState(false);
@@ -605,6 +606,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                     {psychPanelView === 'billing' && <BillingPanel psychologistId={currentUser.id} />}
                     {psychPanelView === 'profile' && <PsychologistProfilePanel userId={currentUser.id} />}
                     {psychPanelView === 'calendar' && <PsychologistCalendar psychologistId={currentUser.id} />}
+                    {psychPanelView === 'connections' && <ConnectionsPanel currentUser={currentUser} />}
 
                     {showSettings && (
                          <SettingsModal 
@@ -765,6 +767,18 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
               <FileText size={18} />
               <span className={`${sidebarOpen ? 'inline' : 'hidden'} md:inline`}>Facturación</span>
             </button>
+
+            <button
+              onClick={() => { setActiveTab('connections'); if (window.innerWidth < 768) setSidebarOpen(false); }}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium ${
+                activeTab === 'connections'
+                  ? 'bg-indigo-50 text-indigo-700 shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+              }`}
+            >
+              <Link2 size={18} />
+              <span className={`${sidebarOpen ? 'inline' : 'hidden'} md:inline`}>Conexiones</span>
+            </button>
           </nav>
 
           <div className={`${sidebarOpen ? 'block' : 'hidden'} md:block p-3 border-t border-slate-200 space-y-2`}>
@@ -821,6 +835,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   {activeTab === 'sessions' && 'Mis Sesiones'}
                   {activeTab === 'calendar' && 'Calendario'}
                   {activeTab === 'billing' && 'Facturación'}
+                  {activeTab === 'connections' && 'Conexiones'}
                   {currentUser?.role === 'PSYCHOLOGIST' && (
                     <span className="bg-indigo-100 text-indigo-700 text-xs px-2 py-0.5 rounded-lg border border-indigo-200 uppercase tracking-wide font-sans">
                       Modo Personal
@@ -833,6 +848,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   {activeTab === 'sessions' && 'Gestiona tus citas con el psicólogo'}
                   {activeTab === 'calendar' && 'Visualiza tus entradas y actividades'}
                   {activeTab === 'billing' && 'Consulta y descarga tus facturas'}
+                  {activeTab === 'connections' && 'Administra invitaciones y conexiones con tu psicólogo'}
                 </p>
               </div>
               <div className="flex gap-3">
@@ -1158,6 +1174,12 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
             {activeTab === 'billing' && (
               <div className="animate-in fade-in">
                 <PatientBillingPanel />
+              </div>
+            )}
+
+            {activeTab === 'connections' && currentUser && (
+              <div className="animate-in fade-in">
+                <ConnectionsPanel currentUser={currentUser} onPendingInvitesChange={setHasPendingInvites} />
               </div>
             )}
           </div>

@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { UserSettings, Invitation, User } from '../types';
-import { getPendingInvitationsForEmail, acceptInvitation, rejectInvitation, getPsychologistsForPatient, revokeAccess, getAllPsychologists, linkPatientToPsychologist, getSentInvitationsForPsychologist, getPatientsForPsychologist } from '../services/storageService';
+import { UserSettings, User } from '../types';
 import { getCurrentUser, updateUser } from '../services/authService';
-import { X, Clock, Shield, UserCheck, Trash2, LogOut, Globe, Mic, Camera, Search, UserPlus } from 'lucide-react';
+import { X, Clock, Shield, LogOut, Globe, Mic, Camera, UserCheck } from 'lucide-react';
 import * as AuthService from '../services/authService';
 
 interface SettingsModalProps {
@@ -19,14 +18,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
   const [time, setTime] = useState(settings.notificationTime);
   const [language, setLanguage] = useState(settings.language || 'es-ES');
   const [voice, setVoice] = useState(settings.voice || 'Kore');
-  const [activeTab, setActiveTab] = useState<'general' | 'privacy' | 'personal'>('general');
-  const [invitations, setInvitations] = useState<Invitation[]>([]);
-  const [sentInvitations, setSentInvitations] = useState<Invitation[]>([]);
-  const [myPsychologists, setMyPsychologists] = useState<User[]>([]);
-  const [myPatients, setMyPatients] = useState<any[]>([]);
-  const [showPsychSearch, setShowPsychSearch] = useState(false);
-  const [psychSearchTerm, setPsychSearchTerm] = useState('');
-  const [allPsychologists, setAllPsychologists] = useState<User[]>([]);
+    const [activeTab, setActiveTab] = useState<'general' | 'personal'>('general');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -73,14 +65,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
           dateOfBirth: u.dateOfBirth || ''
         });
 
-        if (u.role === 'PATIENT') {
-            setInvitations(await getPendingInvitationsForEmail(u.email));
-            setMyPsychologists(await getPsychologistsForPatient(u.id));
-        } else if (u.role === 'PSYCHOLOGIST') {
-            // For psychologists, load patients and sent invitations
-            setSentInvitations(await getSentInvitationsForPsychologist(u.id));
-            setMyPatients(await getPatientsForPsychologist(u.id));
-        }
     };
     load();
     // If user returns from Checkout (hosted Checkout), refresh current user to pick updated premium status
@@ -156,74 +140,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
       reader.readAsDataURL(file);
   };
 
-  const handleAcceptInv = async (invId: string) => {
-      if (!currentUser) return;
-      try {
-          await acceptInvitation(invId, currentUser.id);
-          setInvitations(prev => prev.filter(i => i.id !== invId));
-          setMyPsychologists(await getPsychologistsForPatient(currentUser.id));
-      } catch (err:any) {
-          console.error('Error accepting invitation', err);
-          alert(err?.message || 'Error aceptando invitación. Comprueba la conexión con el servidor.');
-      }
-  };
-
-  const handleRejectInv = async (invId: string) => {
-      try {
-          await rejectInvitation(invId);
-          setInvitations(prev => prev.filter(i => i.id !== invId));
-      } catch (err:any) {
-          console.error('Error rejecting invitation', err);
-          alert(err?.message || 'Error rechazando invitación. Comprueba la conexión con el servidor.');
-      }
-  };  
-
-  const handleRevoke = async (psychId: string) => {
-      if (!currentUser) return;
-      if (!window.confirm('¿Revocar acceso?')) return;
-      try {
-          await revokeAccess(currentUser.id, psychId);
-          setMyPsychologists(prev => prev.filter(u => u.id !== psychId));
-      } catch (err:any) {
-          console.error('Error revoking access', err);
-          alert(err?.message || 'Error revocando acceso. Comprueba la conexión con el servidor.');
-          try { setMyPsychologists(await getPsychologistsForPatient(currentUser.id)); } catch(e){}
-      }
-  }; 
-
-  const togglePsychSearch = async () => {
-      if (!showPsychSearch) {
-          setAllPsychologists(await getAllPsychologists());
-          setPsychSearchTerm('');
-      }
-      setShowPsychSearch(!showPsychSearch);
-  };
-
-  const handleConnectPsych = async (psychId: string) => {
-      if (!currentUser) return;
-      // Defensive: check if already connected
-      if (myPsychologists.some(mp => mp.id === psychId)) {
-          alert('Ya tienes a este especialista conectado.');
-          return;
-      }
-      try {
-          await linkPatientToPsychologist(currentUser.id, psychId);
-          setMyPsychologists(await getPsychologistsForPatient(currentUser.id));
-          setInvitations(prev => prev.filter(i => i.fromPsychologistId !== psychId));
-          alert("Conexión establecida.");
-      } catch (err:any) {
-          console.error('Error connecting to psychologist', err);
-          alert(err?.message || 'Error conectando con el especialista. Comprueba la conexión con el servidor.');
-      }
-  };
-
-  const availablePsychs = allPsychologists.filter(p => {
-      const isConnected = myPsychologists.some(mp => mp.id === p.id);
-      const isSelf = p.id === currentUser?.id;
-      const matches = p.name.toLowerCase().includes(psychSearchTerm.toLowerCase()) || p.email.toLowerCase().includes(psychSearchTerm.toLowerCase());
-      return !isConnected && !isSelf && matches;
-  });
-
   return (
     <div className="fixed top-0 left-0 w-screen h-[100dvh] bg-slate-900/50 flex items-center justify-center z-[9999] p-4 backdrop-blur-sm">
       <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden relative animate-in fade-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
@@ -235,7 +151,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
         <div className="flex border-b border-slate-100 shrink-0">
             <button onClick={() => setActiveTab('general')} className={`flex-1 py-3 text-sm font-medium ${activeTab === 'general' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-500'}`}>General</button>
             <button onClick={() => setActiveTab('personal')} className={`flex-1 py-3 text-sm font-medium ${activeTab === 'personal' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-500'}`}>Información Personal</button>
-            <button onClick={() => setActiveTab('privacy')} className={`flex-1 py-3 text-sm font-medium ${activeTab === 'privacy' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-500'}`}>Privacidad</button>
         </div>
         <div className="p-6 overflow-y-auto">
             {activeTab === 'general' ? (
@@ -439,7 +354,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                                                 </div>
                     </div>
                 </div>
-            ) : activeTab === 'personal' ? (
+            ) : (
                 <div className="space-y-6">
                     <div className="space-y-4">
                         <h3 className="text-xs font-bold uppercase text-slate-400">Datos Personales</h3>
@@ -565,64 +480,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                             Guardar Información Personal
                         </button>
                     </div>
-                </div>
-            ) : (
-                <div className="space-y-6">
-                     <div className="bg-indigo-50 p-4 rounded-xl text-sm text-indigo-800 border border-indigo-100"><p className="flex items-start gap-2"><Shield className="w-4 h-4 mt-0.5 shrink-0" /> Gestiona tus conexiones.</p></div>
-                     {!showPsychSearch && <button onClick={togglePsychSearch} className="w-full py-2.5 bg-white border border-indigo-200 text-indigo-700 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-indigo-50"><Search size={16} /> Buscar Especialista</button>}
-                     {showPsychSearch && (
-                         <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-3">
-                             <div className="flex justify-between items-center mb-1"><h4 className="text-sm font-bold text-slate-700">Directorio</h4><button onClick={togglePsychSearch} className="text-slate-400 hover:text-slate-600"><X size={16} /></button></div>
-                             <input type="text" placeholder="Buscar..." value={psychSearchTerm} onChange={(e) => setPsychSearchTerm(e.target.value)} className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg" />
-                             <div className="max-h-40 overflow-y-auto space-y-2 mt-2">{availablePsychs.length === 0 ? <p className="text-xs text-slate-400 text-center py-2 italic">Sin resultados.</p> : availablePsychs.map(psych => {
-                                     const isConnected = myPsychologists.some(mp => mp.id === psych.id);
-                                     const isSelf = psych.id === currentUser?.id;
-                                     return (
-                                         <div key={psych.id} className="bg-white p-2 rounded-lg border flex items-center justify-between">
-                                            <div className="flex flex-col">
-                                                <span className="text-sm font-medium text-slate-800">{psych.name}</span>
-                                                <span className="text-xs text-slate-400">{psych.email}</span>
-                                            </div>
-                                            {isConnected || isSelf ? (
-                                                <button disabled className="bg-slate-200 text-slate-400 p-1 rounded opacity-70 cursor-not-allowed">{isConnected ? 'Conectado' : 'Tú'}</button>
-                                            ) : (
-                                                <button onClick={() => handleConnectPsych(psych.id)} className="bg-indigo-600 text-white p-1 rounded" aria-label={`Conectar con ${psych.name}`}><UserPlus size={14}/></button>
-                                            )}
-                                         </div>
-                                     );
-                                 })}</div>
-                         </div>
-                     )}
-                     {currentUser?.role === 'PATIENT' ? (
-                         <>
-                           {invitations.length > 0 && <div><h3 className="text-xs font-bold uppercase text-slate-400 mb-3">Pendientes</h3><div className="space-y-2">{invitations.map(inv => (<div key={inv.id} className="bg-white border p-3 rounded-lg"><p className="text-sm mb-2">{inv.fromPsychologistName}</p><div className="flex gap-2"><button onClick={() => handleAcceptInv(inv.id)} className="flex-1 bg-indigo-600 text-white text-xs py-1 rounded">Aceptar</button><button onClick={() => handleRejectInv(inv.id)} className="flex-1 bg-slate-100 text-slate-600 text-xs py-1 rounded">Rechazar</button></div></div>))}</div></div>}
-                           <div><h3 className="text-xs font-bold uppercase text-slate-400 mb-3">Con Acceso</h3>{myPsychologists.length === 0 ? <p className="text-sm text-slate-400 italic">Nadie tiene acceso.</p> : <div className="space-y-2">{myPsychologists.map(psych => (<div key={psych.id} className="flex justify-between p-3 bg-slate-50 rounded-lg border"><div className="flex items-center gap-3"><UserCheck size={16} className="text-green-500" /><div className="flex flex-col"><span className="text-sm font-medium text-slate-800">{psych.name}</span><span className="text-xs text-slate-400">{psych.email}</span></div></div><button onClick={() => handleRevoke(psych.id)} className="text-slate-400 hover:text-red-500"><Trash2 size={16} /></button></div>))}</div>}</div>
-                         </>
-                     ) : (
-                         <>
-                             {sentInvitations.length > 0 && (
-                                 <div>
-                                     <h3 className="text-xs font-bold uppercase text-slate-400 mb-3">Solicitudes Enviadas</h3>
-                                     <div className="space-y-2">
-                                         {sentInvitations.map(inv => (
-                                             <div key={inv.id} className="bg-white border p-3 rounded-lg flex items-center justify-between">
-                                                 <div>
-                                                     <p className="text-sm font-medium">{inv.toUserEmail}</p>
-                                                     <p className="text-xs text-slate-400">{new Date(inv.timestamp).toLocaleString()}</p>
-                                                 </div>
-                                                 <span className="text-xs text-orange-700 bg-orange-100 px-2 py-1 rounded">{inv.status}</span>
-                                             </div>
-                                         ))}
-                                     </div>
-                                 </div>
-                             )}
-
-                             <div>
-                                 <h3 className="text-xs font-bold uppercase text-slate-400 mb-3">Pacientes</h3>
-                                 {myPatients.length === 0 ? <p className="text-sm text-slate-400 italic">No tienes pacientes asignados.</p> : <div className="space-y-2">{myPatients.map((p:any) => (<div key={p.id} className="flex justify-between p-3 bg-slate-50 rounded-lg border"><div className="flex items-center gap-3"><UserCheck size={16} className="text-green-500" /><div className="flex flex-col"><span className="text-sm font-medium text-slate-800">{p.name}</span><span className="text-xs text-slate-400">{p.email}</span></div></div><button onClick={async () => { if(confirm('¿Revocar acceso a este paciente?')) { await revokeAccess(p.id, currentUser!.id); setMyPatients(await getPatientsForPsychologist(currentUser!.id)); } }} className="text-slate-400 hover:text-red-500"><Trash2 size={16} /></button></div>))}</div>}
-                             </div>
-                         </>
-                     )}
                 </div>
             )}
         </div>

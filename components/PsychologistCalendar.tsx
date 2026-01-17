@@ -40,6 +40,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
   const [listStatusFilter, setListStatusFilter] = useState<SessionStatusFilter>('ALL');
   const [listStartDate, setListStartDate] = useState('');
   const [listEndDate, setListEndDate] = useState('');
+  const [showPastListSessions, setShowPastListSessions] = useState(false);
   
   const [newSession, setNewSession] = useState({
     patientId: '',
@@ -459,11 +460,16 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
   };
 
   const sortedSessions = getSortedSessions();
+  const todayMidnight = new Date();
+  todayMidnight.setHours(0, 0, 0, 0);
   const filteredListSessions = sortedSessions.filter(session => {
     const matchesStatus = listStatusFilter === 'ALL' || session.status === listStatusFilter;
     const matchesStart = !listStartDate || session.date >= listStartDate;
     const matchesEnd = !listEndDate || session.date <= listEndDate;
-    return matchesStatus && matchesStart && matchesEnd;
+    const sessionDate = new Date(`${session.date}T${session.endTime || session.startTime || '00:00'}`);
+    const isPast = sessionDate < todayMidnight;
+    const matchesTemporal = showPastListSessions || !isPast;
+    return matchesStatus && matchesStart && matchesEnd && matchesTemporal;
   });
   const statusFilterOptions: { label: string; value: SessionStatusFilter }[] = [
     { label: 'Todos los estados', value: 'ALL' },
@@ -477,6 +483,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
     setListStatusFilter('ALL');
     setListStartDate('');
     setListEndDate('');
+    setShowPastListSessions(false);
   };
 
   return (
@@ -578,6 +585,15 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                   className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
+              <label className="flex items-center gap-2 text-xs font-semibold text-slate-500 uppercase mb-1">
+                <input
+                  type="checkbox"
+                  checked={showPastListSessions}
+                  onChange={(event) => setShowPastListSessions(event.target.checked)}
+                  className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                <span className="text-[11px] text-slate-600 normal-case">Ver también pasadas</span>
+              </label>
               <button
                 type="button"
                 onClick={resetListFilters}

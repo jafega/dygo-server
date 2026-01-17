@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { PatientSummary, Invitation } from '../types';
-import { getPatientsForPsychologist, sendInvitation, getSentInvitationsForPsychologist } from '../services/storageService';
+import { PatientSummary, Invitation, User } from '../types';
+import { getPatientsForPsychologist, sendInvitation, getSentInvitationsForPsychologist, hasCareRelationship } from '../services/storageService';
 import { getCurrentUser, getUserByEmail } from '../services/authService';
 import PatientDetailModal from './PatientDetailModal';
 import { Users, AlertCircle, CheckCircle, Clock, UserPlus, Send, Mail, Hourglass, Search, UserCheck, UserX, ArrowLeft, Loader2 } from 'lucide-react';
@@ -15,7 +15,8 @@ const PatientDashboard: React.FC = () => {
   const [showInvite, setShowInvite] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteStep, setInviteStep] = useState<'INPUT' | 'DECISION'>('INPUT');
-  const [foundUser, setFoundUser] = useState<{name: string} | null>(null);
+    const [foundUser, setFoundUser] = useState<User | null>(null);
+    const [foundUserAlreadyLinked, setFoundUserAlreadyLinked] = useState(false);
 
   const [inviteStatus, setInviteStatus] = useState<'idle'|'success'|'error'>('idle');
   const [msg, setMsg] = useState('');
@@ -65,6 +66,7 @@ const PatientDashboard: React.FC = () => {
       setInviteEmail('');
       setInviteStep('INPUT');
       setFoundUser(null);
+      setFoundUserAlreadyLinked(false);
       setInviteStatus('idle');
       setMsg('');
   };
@@ -79,14 +81,22 @@ const PatientDashboard: React.FC = () => {
     setInviteStatus('idle');
     setMsg('');
 
-    // If user exists and is already part of our patients, surface that immediately
+    let alreadyLinked = false;
     if (existingUser && currentUser) {
-        const already = existingUser.accessList && existingUser.accessList.includes(currentUser.id);
-        const inPatients = patients.some(p => p.id === existingUser.id);
-        if (already || inPatients) {
-            setInviteStatus('error');
-            setMsg('Este paciente ya está en tu lista.');
+        try {
+            alreadyLinked = await hasCareRelationship(currentUser.id, existingUser.id);
+        } catch (err) {
+            console.warn('No se pudo verificar la relación existente', err);
         }
+    }
+
+    const inPatients = existingUser ? patients.some(p => p.id === existingUser.id) : false;
+    const userAlreadyInList = alreadyLinked || inPatients;
+    setFoundUserAlreadyLinked(userAlreadyInList);
+
+    if (userAlreadyInList) {
+        setInviteStatus('error');
+        setMsg('Este paciente ya está en tu lista.');
     }
   };
 
@@ -95,11 +105,16 @@ const PatientDashboard: React.FC = () => {
 
     // Re-check if the patient is already added to avoid race conditions
     if (foundUser) {
-        const already = (foundUser.accessList && foundUser.accessList.includes(currentUser.id)) || patients.some(p => p.id === foundUser.id);
-        if (already) {
-            setInviteStatus('error');
-            setMsg('Este paciente ya está en tu lista.');
-            return;
+        try {
+            const alreadyLinked = await hasCareRelationship(currentUser.id, foundUser.id);
+            if (alreadyLinked || patients.some(p => p.id === foundUser.id)) {
+                setFoundUserAlreadyLinked(true);
+                setInviteStatus('error');
+                setMsg('Este paciente ya está en tu lista.');
+                return;
+            }
+        } catch (err) {
+            console.warn('No se pudo verificar la relación antes de enviar la invitación', err);
         }
     }
 
@@ -193,7 +208,7 @@ const PatientDashboard: React.FC = () => {
                      {foundUser ? (
                         // If the found user is already added, show an informative state and disable the send button
                         (() => {
-                            const alreadyAdded = (foundUser.accessList && foundUser.accessList.includes(currentUser?.id)) || patients.some(p => p.id === foundUser.id);
+                            const alreadyAdded = foundUserAlreadyLinked || patients.some(p => p.id === foundUser.id);
                             if (alreadyAdded) {
                                 return (
                                     <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-5 text-center shadow-sm">

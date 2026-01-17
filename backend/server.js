@@ -89,9 +89,98 @@ const createInitialDb = () => ({
   invitations: [],
   settings: {},
   sessions: [],
+  careRelationships: [],
   invoices: [],
   psychologistProfiles: {}
 });
+
+const migrateLegacyAccessLists = (db) => {
+  if (!db || !Array.isArray(db.users)) return;
+  if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
+
+  const existing = new Set(
+    db.careRelationships
+      .filter(rel => rel && rel.psychologistId && rel.patientId)
+      .map(rel => `${rel.psychologistId}:${rel.patientId}`)
+  );
+
+  let added = 0;
+  for (const user of db.users) {
+    if (!Array.isArray(user?.accessList) || user.accessList.length === 0) continue;
+    const isPsych = String(user.role || '').toUpperCase() === 'PSYCHOLOGIST';
+
+    for (const targetId of user.accessList) {
+      if (!targetId) continue;
+      const psychologistId = isPsych ? user.id : targetId;
+      const patientId = isPsych ? targetId : user.id;
+      if (!psychologistId || !patientId) continue;
+      const key = `${psychologistId}:${patientId}`;
+      if (existing.has(key)) continue;
+      db.careRelationships.push({
+        id: crypto.randomUUID(),
+        psychologistId,
+        patientId,
+        createdAt: Date.now()
+      });
+      existing.add(key);
+      added++;
+    }
+  }
+
+  if (added > 0) {
+    console.log(`🔁 Migrated ${added} legacy accessList relationships`);
+  }
+};
+
+const ensureDbShape = (db) => {
+  if (!db || typeof db !== 'object') {
+    db = createInitialDb();
+  }
+
+  if (!Array.isArray(db.users)) db.users = [];
+  if (!Array.isArray(db.entries)) db.entries = [];
+  if (!Array.isArray(db.goals)) db.goals = [];
+  if (!Array.isArray(db.invitations)) db.invitations = [];
+  if (!db.settings || typeof db.settings !== 'object') db.settings = {};
+  if (!Array.isArray(db.sessions)) db.sessions = [];
+  if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
+  if (!Array.isArray(db.invoices)) db.invoices = [];
+  if (!db.psychologistProfiles || typeof db.psychologistProfiles !== 'object') db.psychologistProfiles = {};
+
+  migrateLegacyAccessLists(db);
+  return db;
+};
+
+const relationshipKey = (psychologistId, patientId) => `${psychologistId}:${patientId}`;
+
+const ensureCareRelationship = (db, psychologistId, patientId) => {
+  if (!psychologistId || !patientId) return null;
+  if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
+  const existing = db.careRelationships.find(rel => rel.psychologistId === psychologistId && rel.patientId === patientId);
+  if (existing) return existing;
+  const rel = {
+    id: crypto.randomUUID(),
+    psychologistId,
+    patientId,
+    createdAt: Date.now()
+  };
+  db.careRelationships.push(rel);
+  return rel;
+};
+
+const removeCareRelationshipByPair = (db, psychologistId, patientId) => {
+  if (!Array.isArray(db.careRelationships)) return false;
+  const before = db.careRelationships.length;
+  db.careRelationships = db.careRelationships.filter(rel => !(rel.psychologistId === psychologistId && rel.patientId === patientId));
+  return db.careRelationships.length !== before;
+};
+
+const removeCareRelationshipsForUser = (db, userId) => {
+  if (!Array.isArray(db.careRelationships) || !userId) return 0;
+  const before = db.careRelationships.length;
+  db.careRelationships = db.careRelationships.filter(rel => rel.psychologistId !== userId && rel.patientId !== userId);
+  return before - db.careRelationships.length;
+};
 
 // If you want durable persistence across restarts on platforms like Render, set USE_SQLITE=true
 // and optionally SQLITE_DB_FILE to a persistent volume path. Otherwise the default db.json is used.
@@ -101,6 +190,7 @@ let sqliteDb = null;
 let pgPool = null;
 let supabaseAdmin = null;
 let supabaseDbCache = null;
+let pgDbCache = null;
 const USE_POSTGRES = !!process.env.DATABASE_URL && !SUPABASE_REST_ONLY;
 
 if (USE_SQLITE) {
@@ -199,6 +289,7 @@ if (USE_POSTGRES) {
     await pgPool.query(`CREATE TABLE IF NOT EXISTS invitations (id TEXT PRIMARY KEY, data JSONB NOT NULL)`);
     await pgPool.query(`CREATE TABLE IF NOT EXISTS settings (id TEXT PRIMARY KEY, data JSONB NOT NULL)`);
     await pgPool.query(`CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, data JSONB NOT NULL)`);
+    await pgPool.query(`CREATE TABLE IF NOT EXISTS care_relationships (id TEXT PRIMARY KEY, data JSONB NOT NULL)`);
     await pgPool.query(`CREATE TABLE IF NOT EXISTS invoices (id TEXT PRIMARY KEY, data JSONB NOT NULL)`);
     await pgPool.query(`CREATE TABLE IF NOT EXISTS psychologist_profiles (id TEXT PRIMARY KEY, data JSONB NOT NULL)`);
 
@@ -224,6 +315,8 @@ if (USE_POSTGRES) {
           for (const s of settings) await insert('settings', s.id, JSON.parse(s.data));
           const sessions = read('sessions');
           for (const sess of sessions) await insert('sessions', sess.id, JSON.parse(sess.data));
+          const relationships = read('care_relationships');
+          for (const rel of relationships) await insert('care_relationships', rel.id, JSON.parse(rel.data));
           const invoices = read('invoices');
           for (const inv of invoices) await insert('invoices', inv.id, JSON.parse(inv.data));
           console.log('✅ Migrated data from SQLite to Postgres');
@@ -249,6 +342,7 @@ if (USE_POSTGRES) {
             await insert('invitations', parsed.invitations);
             await insert('settings', parsed.settings, true);
             await insert('sessions', parsed.sessions);
+            await insert('care_relationships', parsed.careRelationships);
             await insert('invoices', parsed.invoices);
             console.log('✅ Migrated db.json to Postgres');
           }
@@ -274,7 +368,8 @@ if (USE_POSTGRES) {
       const invoices = await q('invoices');
       const profilesArr = await q('psychologist_profiles');
       const psychologistProfiles = Object.fromEntries(profilesArr.map(p => [p.id, p]));
-      pgDbCache = { users, entries, goals, invitations, settings, sessions, invoices, psychologistProfiles };
+      const careRelationships = (await q('care_relationships')) || [];
+      pgDbCache = ensureDbShape({ users, entries, goals, invitations, settings, sessions, invoices, careRelationships, psychologistProfiles });
       console.log('ℹ️ Postgres data loaded into cache');
     } catch (err) {
       console.error('❌ Failed populating pg cache', err);
@@ -292,7 +387,7 @@ if (!pgPool && SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
       auth: { persistSession: false }
     });
     console.log('✅ Supabase REST persistence enabled (service role)');
-    supabaseDbCache = await loadSupabaseCache();
+    supabaseDbCache = ensureDbShape(await loadSupabaseCache());
     console.log('ℹ️ Supabase data loaded into cache');
     (async () => {
       try {
@@ -307,8 +402,6 @@ if (!pgPool && SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
     supabaseDbCache = null;
   }
 }
-
-let pgDbCache = null;
 
 function normalizeSupabaseRow(row) {
   if (!row) return row;
@@ -363,6 +456,7 @@ async function loadSupabaseCache() {
   const settingsRows = await readTable('settings');
   const sessionsRows = await readTable('sessions');
   const invoicesRows = await readTable('invoices');
+  const relationshipsRows = await readTable('care_relationships');
   const profilesRows = await readTable('psychologist_profiles');
 
   const users = usersRows.map(normalizeSupabaseRow);
@@ -371,10 +465,11 @@ async function loadSupabaseCache() {
   const invitations = invitationsRows.map(normalizeSupabaseRow);
   const sessions = sessionsRows.map(normalizeSupabaseRow);
   const invoices = invoicesRows.map(normalizeSupabaseRow);
+  const careRelationships = relationshipsRows.map(normalizeSupabaseRow);
   const settings = Object.fromEntries(settingsRows.map(row => [row.id, (row.data && typeof row.data === 'object') ? row.data : normalizeSupabaseRow(row)]));
   const psychologistProfiles = Object.fromEntries(profilesRows.map(row => [row.id, (row.data && typeof row.data === 'object') ? row.data : normalizeSupabaseRow(row)]));
 
-  return { users, entries, goals, invitations, settings, sessions, invoices, psychologistProfiles };
+  return { users, entries, goals, invitations, settings, sessions, invoices, careRelationships, psychologistProfiles };
 }
 
 async function readSupabaseTable(table) {
@@ -516,6 +611,7 @@ async function saveSupabaseDb(data, prevCache = null) {
   const settingsRows = Object.keys(settings).map(k => ({ id: k, data: settings[k] }));
   const sessionsRows = (data.sessions || []).map(s => ({ id: s.id, data: s }));
   const invoicesRows = (data.invoices || []).map(inv => ({ id: inv.id, data: inv }));
+  const relationshipsRows = (data.careRelationships || []).map(rel => ({ id: rel.id, data: rel }));
   const profiles = data.psychologistProfiles || {};
   const profilesRows = Object.keys(profiles).map(k => ({ id: k, data: profiles[k] }));
 
@@ -525,6 +621,7 @@ async function saveSupabaseDb(data, prevCache = null) {
   await upsertTable('invitations', invitationsRows);
   await upsertTable('settings', settingsRows);
   await upsertTable('sessions', sessionsRows);
+  await upsertTable('care_relationships', relationshipsRows);
   await upsertTable('invoices', invoicesRows);
   await upsertTable('psychologist_profiles', profilesRows);
 
@@ -535,6 +632,7 @@ async function saveSupabaseDb(data, prevCache = null) {
     await deleteMissing('invitations', (prevCache.invitations || []).map(i => i.id), invitationsRows.map(r => r.id));
     await deleteMissing('settings', Object.keys(prevCache.settings || {}), settingsRows.map(r => r.id));
     await deleteMissing('sessions', (prevCache.sessions || []).map(s => s.id), sessionsRows.map(r => r.id));
+    await deleteMissing('care_relationships', (prevCache.careRelationships || []).map(rel => rel.id), relationshipsRows.map(r => r.id));
     await deleteMissing('invoices', (prevCache.invoices || []).map(inv => inv.id), invoicesRows.map(r => r.id));
     await deleteMissing('psychologist_profiles', Object.keys(prevCache.psychologistProfiles || {}), profilesRows.map(r => r.id));
   }
@@ -542,16 +640,16 @@ async function saveSupabaseDb(data, prevCache = null) {
 
 const getDb = () => {
   if (DISALLOW_LOCAL_PERSISTENCE && !pgPool && !supabaseAdmin && !sqliteDb) {
-    return createInitialDb();
+    return ensureDbShape(createInitialDb());
   }
   // Postgres: return in-memory cache (keeps handler sync)
   if (pgPool && pgDbCache) {
-    return pgDbCache;
+    return ensureDbShape(pgDbCache);
   }
 
   // Supabase REST fallback: return in-memory cache
   if (supabaseAdmin && supabaseDbCache) {
-    return supabaseDbCache;
+    return ensureDbShape(supabaseDbCache);
   }
 
   if (sqliteDb) {
@@ -566,25 +664,25 @@ const getDb = () => {
     const invoices = read('invoices');
     const profilesArr = read('psychologist_profiles');
     const psychologistProfiles = Object.fromEntries(profilesArr.map((p) => [p.id, p]));
-    return { users, entries, goals, invitations, settings, sessions, invoices, psychologistProfiles };
+    return ensureDbShape({ users, entries, goals, invitations, settings, sessions, invoices, careRelationships: read('care_relationships'), psychologistProfiles });
   }
 
   // 1. Si no existe, crearla
   if (!fs.existsSync(DB_FILE)) {
     if (DISALLOW_LOCAL_PERSISTENCE) {
-      return createInitialDb();
+      return ensureDbShape(createInitialDb());
     }
     console.log('⚠️ db.json no encontrado. Creando nueva base de datos...');
     const initialDb = createInitialDb();
     fs.writeFileSync(DB_FILE, JSON.stringify(initialDb, null, 2), 'utf-8');
-    return initialDb;
+    return ensureDbShape(initialDb);
   }
 
   // 2. Intentar leerla. Si falla (json corrupto), reiniciarla.
   try {
     const fileContent = fs.readFileSync(DB_FILE, 'utf-8');
     if (!fileContent.trim()) throw new Error('Archivo vacío');
-    return JSON.parse(fileContent);
+    return ensureDbShape(JSON.parse(fileContent));
   } catch (error) {
     console.error('❌ Error leyendo db.json. El archivo parece estar corrupto.', error);
 
@@ -602,7 +700,7 @@ const getDb = () => {
     // Crear nueva DB limpia
     const initialDb = createInitialDb();
     fs.writeFileSync(DB_FILE, JSON.stringify(initialDb, null, 2), 'utf-8');
-    return initialDb;
+    return ensureDbShape(initialDb);
   }
 };
 
@@ -622,6 +720,7 @@ const saveDb = (data, options = {}) => {
         await client.query('DELETE FROM invitations');
         await client.query('DELETE FROM settings');
         await client.query('DELETE FROM sessions');
+        await client.query('DELETE FROM care_relationships');
         await client.query('DELETE FROM invoices');
         await client.query('DELETE FROM psychologist_profiles');
 
@@ -634,6 +733,7 @@ const saveDb = (data, options = {}) => {
         const settings = data.settings || {};
         for (const k of Object.keys(settings)) await insert('settings', k, settings[k]);
         for (const s of (data.sessions || [])) await insert('sessions', s.id, s);
+        for (const rel of (data.careRelationships || [])) await insert('care_relationships', rel.id, rel);
         for (const inv of (data.invoices || [])) await insert('invoices', inv.id, inv);
         const profiles = data.psychologistProfiles || {};
         for (const k of Object.keys(profiles)) await insert('psychologist_profiles', k, profiles[k]);
@@ -672,6 +772,10 @@ const saveDb = (data, options = {}) => {
       del.run('goals');
       del.run('invitations');
       del.run('settings');
+      del.run('sessions');
+      del.run('care_relationships');
+      del.run('invoices');
+      del.run('psychologist_profiles');
 
       (dbObj.users || []).forEach(u => insert.run({ table: 'users', id: u.id, data: JSON.stringify(u) }));
       (dbObj.entries || []).forEach(e => insert.run({ table: 'entries', id: e.id, data: JSON.stringify(e) }));
@@ -680,7 +784,10 @@ const saveDb = (data, options = {}) => {
       const settings = dbObj.settings || {};
       Object.keys(settings).forEach(k => insert.run({ table: 'settings', id: k, data: JSON.stringify(settings[k]) }));
       (dbObj.sessions || []).forEach(s => insert.run({ table: 'sessions', id: s.id, data: JSON.stringify(s) }));
+      (dbObj.careRelationships || []).forEach(rel => insert.run({ table: 'care_relationships', id: rel.id, data: JSON.stringify(rel) }));
       (dbObj.invoices || []).forEach(inv => insert.run({ table: 'invoices', id: inv.id, data: JSON.stringify(inv) }));
+      const profiles = dbObj.psychologistProfiles || {};
+      Object.keys(profiles).forEach(k => insert.run({ table: 'psychologist_profiles', id: k, data: JSON.stringify(profiles[k]) }));
     });
     try {
       tx(data);
@@ -737,8 +844,7 @@ app.post('/api/auth/register', (req, res) => {
       email: normalizedEmail,
       password, // OJO: en producción deberías hashearla
       role: normalizedRole,
-      isPsychologist: normalizedRole === 'PSYCHOLOGIST',
-      accessList: []
+      isPsychologist: normalizedRole === 'PSYCHOLOGIST'
     };
 
     db.users.push(newUser);
@@ -789,7 +895,6 @@ const handleSupabaseAuth = async (req, res) => {
         password: '',
         role: 'PATIENT',
         isPsychologist: false,
-        accessList: [],
         supabaseId: supUser.id
       };
       db.users.push(user);
@@ -954,12 +1059,8 @@ const handleAdminDeleteUser = (req, res) => {
       return !(fromMatch || toMatch);
     });
 
-    // 4) Remove this user's id from other users' accessList
-    db.users.forEach((u) => {
-      if (Array.isArray(u.accessList)) {
-        u.accessList = u.accessList.filter((id) => String(id) !== String(user.id));
-      }
-    });
+    // 4) Remove relationships referencing this user
+    const removedRelationships = removeCareRelationshipsForUser(db, user.id);
 
     // 5) Remove settings for this user
     if (db.settings && db.settings[user.id]) delete db.settings[user.id];
@@ -968,7 +1069,7 @@ const handleAdminDeleteUser = (req, res) => {
     db.users = db.users.filter((u) => String(u.id) !== String(user.id));
 
     saveDb(db);
-    console.log(`🗑️ Admin ${requester.email} deleted user ${user.email} and associated data`);
+    console.log(`🗑️ Admin ${requester.email} deleted user ${user.email} and associated data (removed ${removedRelationships} relationships)`);
     return res.json({ success: true });
   } catch (err) {
     console.error('Error in admin-delete-user', err);
@@ -1663,6 +1764,7 @@ app.post('/api/invitations', (req, res) => {
   const normalizedEmail = normalizeEmail(invitation.toUserEmail);
   let existingUser = db.users.find(u => normalizeEmail(u.email) === normalizedEmail);
   let userWasCreated = false;
+  let patientRecordId = existingUser?.id;
   
   if (!existingUser) {
     // Create new patient user automatically
@@ -1673,21 +1775,18 @@ app.post('/api/invitations', (req, res) => {
       email: normalizedEmail,
       password: crypto.randomBytes(16).toString('hex'), // Random temporary password
       role: 'PATIENT',
-      accessList: [invitation.fromPsychologistId], // Associate with psychologist immediately
       isPsychologist: false
     };
     
     db.users.push(newPatient);
+    existingUser = newPatient;
+    patientRecordId = newPatient.id;
     userWasCreated = true;
     console.log(`Auto-created patient user: ${newPatient.name} (${newPatient.email})`);
-  } else {
-    // User exists, ensure psychologist is in accessList
-    if (!existingUser.accessList) {
-      existingUser.accessList = [];
-    }
-    if (!existingUser.accessList.includes(invitation.fromPsychologistId)) {
-      existingUser.accessList.push(invitation.fromPsychologistId);
-    }
+  }
+
+  if (patientRecordId) {
+    ensureCareRelationship(db, invitation.fromPsychologistId, patientRecordId);
   }
 
   // If user was auto-created, mark invitation as ACCEPTED (already linked)
@@ -2426,6 +2525,65 @@ app.put('/api/psychologist/:userId/profile', async (req, res) => {
   res.json(req.body);
 });
 
+// --- RELACIONES PACIENTE / PSICÓLOGO ---
+app.get('/api/relationships', (req, res) => {
+  const { psychologistId, patientId } = req.query;
+  if (!psychologistId && !patientId) {
+    return res.status(400).json({ error: 'psychologistId o patientId requerido' });
+  }
+
+  const db = getDb();
+  const relationships = (db.careRelationships || []).filter(rel => {
+    if (!rel) return false;
+    const matchesPsych = psychologistId ? rel.psychologistId === psychologistId : true;
+    const matchesPatient = patientId ? rel.patientId === patientId : true;
+    return matchesPsych && matchesPatient;
+  });
+
+  res.json(relationships);
+});
+
+app.post('/api/relationships', (req, res) => {
+  const { psychologistId, patientId } = req.body || {};
+  if (!psychologistId || !patientId) {
+    return res.status(400).json({ error: 'psychologistId y patientId son obligatorios' });
+  }
+
+  const db = getDb();
+  const relationship = ensureCareRelationship(db, psychologistId, patientId);
+  saveDb(db, { awaitPersistence: true });
+  res.json(relationship);
+});
+
+app.delete('/api/relationships/:id', (req, res) => {
+  const { id } = req.params;
+  if (!id) return res.status(400).json({ error: 'Relationship id requerido' });
+
+  const db = getDb();
+  const before = db.careRelationships?.length || 0;
+  db.careRelationships = (db.careRelationships || []).filter(rel => rel.id !== id);
+  if ((db.careRelationships?.length || 0) === before) {
+    return res.status(404).json({ error: 'Relación no encontrada' });
+  }
+  saveDb(db, { awaitPersistence: true });
+  res.json({ success: true });
+});
+
+app.delete('/api/relationships', (req, res) => {
+  const { psychologistId, patientId } = req.query;
+  if (!psychologistId || !patientId) {
+    return res.status(400).json({ error: 'psychologistId y patientId son obligatorios' });
+  }
+
+  const db = getDb();
+  const removed = removeCareRelationshipByPair(db, psychologistId, patientId);
+  if (!removed) {
+    return res.status(404).json({ error: 'Relación no encontrada' });
+  }
+  saveDb(db, { awaitPersistence: true });
+  res.json({ success: true });
+});
+
 // --- SESSIONS / CALENDAR ---
 app.get('/api/sessions', (req, res) => {
   const { psychologistId, patientId, year, month } = req.query;
@@ -2435,6 +2593,12 @@ app.get('/api/sessions', (req, res) => {
   
   const db = getDb();
   if (!db.sessions) db.sessions = [];
+  if (!Array.isArray(db.users)) db.users = [];
+  const userIndex = new Map(
+    db.users
+      .filter(user => user && user.id)
+      .map(user => [user.id, user])
+  );
   
   let sessions = db.sessions;
   
@@ -2456,17 +2620,34 @@ app.get('/api/sessions', (req, res) => {
     });
   }
 
-  const sessionsWithPatientPhone = sessions.map(session => {
-    if (!session.patientId) return session;
-    const patient = db.users ? db.users.find(u => u.id === session.patientId) : null;
-    const resolvedPhone = (patient?.phone || '').trim() || session.patientPhone;
-    if (resolvedPhone && resolvedPhone !== session.patientPhone) {
-      return { ...session, patientPhone: resolvedPhone };
+  const sessionsWithDetails = sessions.map(session => {
+    const enriched = { ...session };
+    if (session.patientId) {
+      const patient = userIndex.get(session.patientId);
+      if (patient) {
+        const resolvedPhone = (patient.phone || '').trim() || enriched.patientPhone;
+        if (resolvedPhone && resolvedPhone !== enriched.patientPhone) {
+          enriched.patientPhone = resolvedPhone;
+        }
+        if (enriched.status !== 'available') {
+          enriched.patientName = enriched.patientName === 'Disponible' || !enriched.patientName ? patient.name : enriched.patientName;
+        }
+        enriched.patientEmail = patient.email;
+      }
     }
-    return session;
+
+    if (session.psychologistId) {
+      const psychologist = userIndex.get(session.psychologistId);
+      if (psychologist) {
+        enriched.psychologistName = enriched.psychologistName || psychologist.name;
+        enriched.psychologistEmail = psychologist.email;
+      }
+    }
+
+    return enriched;
   });
   
-  res.json(sessionsWithPatientPhone);
+  res.json(sessionsWithDetails);
 });
 
 app.post('/api/sessions', async (req, res) => {
@@ -2569,12 +2750,16 @@ app.delete('/api/sessions/:id', async (req, res) => {
 app.get('/api/psychologist/:psychologistId/patients', (req, res) => {
   const { psychologistId } = req.params;
   const db = getDb();
-  
+  const linkedPatientIds = new Set(
+    (db.careRelationships || [])
+      .filter(rel => rel.psychologistId === psychologistId)
+      .map(rel => rel.patientId)
+  );
+
   const patients = db.users
     ? db.users.filter(user => 
         user.role === 'PATIENT' && 
-        user.accessList && 
-        user.accessList.includes(psychologistId)
+        linkedPatientIds.has(user.id)
       ).map(u => ({
         id: u.id,
         name: u.name,

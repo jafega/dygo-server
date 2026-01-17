@@ -42,8 +42,8 @@ export const initializeDemoData = async () => {
     
     if (!hasPsych && !USE_BACKEND) {
         const demoPsychs: User[] = [
-            { id: 'psych-demo-1', name: 'Dra. Elena Foster', email: 'elena@dygo.health', password: '123', role: 'PSYCHOLOGIST', accessList: [] },
-            { id: 'psych-demo-2', name: 'Dr. Marc Spector', email: 'marc@dygo.health', password: '123', role: 'PSYCHOLOGIST', accessList: [] }
+            { id: 'psych-demo-1', name: 'Dra. Elena Foster', email: 'elena@dygo.health', password: '123', role: 'PSYCHOLOGIST' },
+            { id: 'psych-demo-2', name: 'Dr. Marc Spector', email: 'marc@dygo.health', password: '123', role: 'PSYCHOLOGIST' }
         ];
         const updated = [...users, ...demoPsychs];
         saveLocalUsers(updated);
@@ -82,7 +82,7 @@ export const register = async (name: string, email: string, password: string, ro
           if (ALLOW_LOCAL_FALLBACK) {
               const users = getLocalUsers();
               if (users.find(u => u.email === normalizedEmail)) throw new Error("El email ya está registrado (Local fallback).");
-              const newUser: User = { id: crypto.randomUUID(), name, email: normalizedEmail, password, role: normalizedRole, accessList: [] };
+              const newUser: User = { id: crypto.randomUUID(), name, email: normalizedEmail, password, role: normalizedRole };
               users.push(newUser); saveLocalUsers(users); localStorage.setItem(CURRENT_USER_KEY, newUser.id); return newUser;
           }
           if (e instanceof Error && (e.message.includes('Failed to fetch') || e.message.includes('NetworkError'))) {
@@ -97,8 +97,8 @@ export const register = async (name: string, email: string, password: string, ro
   if (users.find(u => u.email === normalizedEmail)) throw new Error("El email ya está registrado (Local).");
   
   const newUser: User = {
-    id: crypto.randomUUID(),
-    name, email: normalizedEmail, password, role: normalizedRole, accessList: []
+        id: crypto.randomUUID(),
+        name, email: normalizedEmail, password, role: normalizedRole
   };
   users.push(newUser);
   saveLocalUsers(users);
@@ -358,11 +358,7 @@ export const adminDeleteUser = async (targetEmail: string) => {
     const allSettings = JSON.parse(localStorage.getItem(settingsKey) || '{}');
     if (allSettings[user.id]) { delete allSettings[user.id]; localStorage.setItem(settingsKey, JSON.stringify(allSettings)); }
 
-    // Remove user id from other users' accessList
-    const uidx = users.findIndex(u => true);
-    users.forEach(u => {
-        if (Array.isArray(u.accessList)) u.accessList = u.accessList.filter((id:any) => String(id) !== String(user.id));
-    });
+    // Clean up any other user metadata referencing this user (handled by relationship store)
 
     saveLocalUsers(users);
 };

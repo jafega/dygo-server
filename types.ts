@@ -8,7 +8,6 @@ export interface User {
   role: UserRole;
   isPsychologist?: boolean;
   avatarUrl?: string; // Profile picture (Base64)
-  accessList: string[]; // For Patients: List of Psychologist IDs who can view data. For Psychs: List of Patient IDs.
   // Optional OAuth fields
   googleId?: string;
 
@@ -28,6 +27,13 @@ export interface User {
   postalCode?: string;
   country?: string;
   dateOfBirth?: string; // ISO format YYYY-MM-DD
+}
+
+export interface CareRelationship {
+  id: string;
+  psychologistId: string;
+  patientId: string;
+  createdAt: number;
 }
 
 export interface Invitation {

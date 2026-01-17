@@ -1,13 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Video, MapPin, CheckCircle, XCircle, Plus, Loader2, AlertCircle, Eye, X } from 'lucide-react';
+import { Calendar, Clock, Video, MapPin, CheckCircle, Plus, Loader2, AlertCircle, Eye, X, Stethoscope } from 'lucide-react';
 import { getCurrentUser } from '../services/authService';
 import { API_URL } from '../services/config';
+import { getPsychologistsForPatient } from '../services/storageService';
+import { User } from '../types';
 
 interface Session {
   id: string;
   patientId: string;
   patientName: string;
   psychologistId: string;
+  psychologistName?: string;
+  psychologistEmail?: string;
   patientPhone?: string;
   date: string;
   startTime: string;
@@ -18,6 +22,8 @@ interface Session {
   meetLink?: string;
 }
 
+type PsychologistDirectory = Record<string, { id: string; name: string; email?: string }>;
+
 const PatientSessions: React.FC = () => {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [showPastSessions, setShowPastSessions] = useState(false);
@@ -27,6 +33,8 @@ const PatientSessions: React.FC = () => {
   const [availableSlots, setAvailableSlots] = useState<Session[]>([]);
   const [bookingSlotId, setBookingSlotId] = useState<string | null>(null);
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
+  const [linkedPsychologists, setLinkedPsychologists] = useState<string[]>([]);
+  const [psychologistDirectory, setPsychologistDirectory] = useState<PsychologistDirectory>({});
 
   useEffect(() => {
     loadSessions();
@@ -38,15 +46,47 @@ const PatientSessions: React.FC = () => {
       const user = await getCurrentUser();
       if (!user || user.role !== 'PATIENT') return;
 
-      // Get assigned psychologist
-      if (user.accessList && user.accessList.length > 0) {
-        setPsychologistId(user.accessList[0]);
-      }
-
-      const response = await fetch(`${API_URL}/sessions?patientId=${user.id}`);
+      const [psychologists, response] = await Promise.all([
+        getPsychologistsForPatient(user.id),
+        fetch(`${API_URL}/sessions?patientId=${user.id}`)
+      ]);
       if (response.ok) {
         const data = await response.json();
-        setSessions(data.filter((s: Session) => s.status === 'scheduled' || s.status === 'completed' || s.status === 'cancelled'));
+        const filteredSessions = data.filter((s: Session) => s.status === 'scheduled' || s.status === 'completed' || s.status === 'cancelled');
+        setPsychologistDirectory(prev => {
+          const next = { ...prev } as PsychologistDirectory;
+          psychologists.forEach((psych: User) => {
+            if (!psych || !psych.id) return;
+            next[psych.id] = { id: psych.id, name: psych.name, email: psych.email };
+          });
+          filteredSessions.forEach((session: Session) => {
+            if (!session.psychologistId) return;
+            const existing = next[session.psychologistId] || { id: session.psychologistId, name: '' };
+            next[session.psychologistId] = {
+              id: session.psychologistId,
+              name: session.psychologistName || existing.name || 'Especialista',
+              email: session.psychologistEmail || existing.email
+            };
+          });
+          return next;
+        });
+        setSessions(filteredSessions);
+
+        const psychologistIds = new Set<string>(psychologists.map(p => p.id));
+        filteredSessions.forEach((s: Session) => {
+          if (s.psychologistId) {
+            psychologistIds.add(s.psychologistId);
+          }
+        });
+
+        const psychologistList = Array.from(psychologistIds);
+        setLinkedPsychologists(psychologistList);
+        setPsychologistId(prev => {
+          if (prev && psychologistList.includes(prev)) {
+            return prev;
+          }
+          return psychologistList[0] || null;
+        });
       }
     } catch (err) {
       console.error('Error loading sessions:', err);
@@ -56,31 +96,55 @@ const PatientSessions: React.FC = () => {
   };
 
   const loadAvailability = async () => {
-    if (!psychologistId) {
+    const candidateIds = psychologistId
+      ? [psychologistId, ...linkedPsychologists.filter(id => id !== psychologistId)]
+      : linkedPsychologists;
+
+    if (candidateIds.length === 0) {
       alert('No tienes un psicólogo asignado');
       return;
     }
 
     setIsLoading(true);
     try {
-      const response = await fetch(`${API_URL}/sessions?psychologistId=${psychologistId}`);
-      if (response.ok) {
+      let slotsToShow: Session[] = [];
+      let matchedPsychologist: string | null = null;
+      const now = new Date();
+
+      for (const candidateId of candidateIds) {
+        const response = await fetch(`${API_URL}/sessions?psychologistId=${candidateId}`);
+        if (!response.ok) {
+          console.warn('No se pudo cargar la disponibilidad para', candidateId, response.status);
+          continue;
+        }
+
         const allSessions = await response.json();
         const available = allSessions.filter((s: Session) => s.status === 'available');
-        
-        // Filter only future slots
-        const now = new Date();
         const futureSlots = available.filter((slot: Session) => {
           const slotDateTime = new Date(`${slot.date}T${slot.startTime}`);
           return slotDateTime > now;
         });
 
-        setAvailableSlots(futureSlots);
-        setShowAvailability(true);
-
-        if (futureSlots.length === 0) {
-          alert('No hay horarios disponibles en este momento. Por favor, contacta a tu psicólogo.');
+        if (futureSlots.length > 0) {
+          slotsToShow = futureSlots;
+          matchedPsychologist = candidateId;
+          break;
         }
+
+        if (!matchedPsychologist) {
+          matchedPsychologist = candidateId;
+          slotsToShow = futureSlots;
+        }
+      }
+
+      setAvailableSlots(slotsToShow);
+      setShowAvailability(true);
+      if (matchedPsychologist) {
+        setPsychologistId(matchedPsychologist);
+      }
+
+      if (slotsToShow.length === 0) {
+        alert('No hay horarios disponibles en este momento. Por favor, contacta a tu psicólogo.');
       }
     } catch (err) {
       console.error('Error loading availability:', err);
@@ -165,6 +229,28 @@ const PatientSessions: React.FC = () => {
     }
   };
 
+  const getPsychologistName = (session?: Partial<Session>) => {
+    if (!session) return 'Especialista asignado';
+    if (session.psychologistName && session.psychologistName.trim().length > 0) {
+      return session.psychologistName;
+    }
+    if (session.psychologistId && psychologistDirectory[session.psychologistId]) {
+      return psychologistDirectory[session.psychologistId].name;
+    }
+    return 'Especialista asignado';
+  };
+
+  const getPsychologistEmail = (session?: Partial<Session>) => {
+    if (!session) return '';
+    if (session.psychologistEmail && session.psychologistEmail.trim().length > 0) {
+      return session.psychologistEmail;
+    }
+    if (session.psychologistId && psychologistDirectory[session.psychologistId]?.email) {
+      return psychologistDirectory[session.psychologistId].email || '';
+    }
+    return '';
+  };
+
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
       {/* Header */}
@@ -225,6 +311,7 @@ const PatientSessions: React.FC = () => {
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Fecha</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Especialista</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Hora</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Tipo</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Estado</th>
@@ -245,6 +332,19 @@ const PatientSessions: React.FC = () => {
                         <span className="text-sm font-medium text-slate-900">
                           {formatDate(session.date)}
                         </span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-full bg-indigo-50 flex items-center justify-center">
+                          <Stethoscope size={16} className="text-indigo-600" />
+                        </div>
+                        <div>
+                          <div className="text-sm font-semibold text-slate-900">{getPsychologistName(session)}</div>
+                          {getPsychologistEmail(session) && (
+                            <div className="text-xs text-slate-500">{getPsychologistEmail(session)}</div>
+                          )}
+                        </div>
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -365,6 +465,15 @@ const PatientSessions: React.FC = () => {
                         </>
                       )}
                     </div>
+                    <div className="flex items-center gap-2">
+                      <Stethoscope size={16} className="text-indigo-600" />
+                      <div>
+                        <span className="font-semibold text-slate-900 block leading-tight">{getPsychologistName(session)}</span>
+                        {getPsychologistEmail(session) && (
+                          <span className="text-xs text-slate-500">{getPsychologistEmail(session)}</span>
+                        )}
+                      </div>
+                    </div>
                   </div>
 
                   {session.meetLink && session.status === 'scheduled' ? (
@@ -448,6 +557,21 @@ const PatientSessions: React.FC = () => {
                       <span className="text-slate-900">Presencial</span>
                     </>
                   )}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Especialista</div>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center">
+                    <Stethoscope size={18} className="text-indigo-600" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold text-slate-900">{getPsychologistName(selectedSession)}</div>
+                    {getPsychologistEmail(selectedSession) && (
+                      <div className="text-xs text-slate-500">{getPsychologistEmail(selectedSession)}</div>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -543,6 +667,10 @@ const PatientSessions: React.FC = () => {
                                   <span>Presencial</span>
                                 </>
                               )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Stethoscope size={16} className="text-indigo-600" />
+                              <span>{getPsychologistName(slot)}</span>
                             </div>
                           </div>
                         </div>
