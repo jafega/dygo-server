@@ -20,6 +20,7 @@ import PsychologistSidebar from './components/PsychologistSidebar';
 import BillingPanel from './components/BillingPanel';
 import PsychologistProfilePanel from './components/PsychologistProfilePanel';
 import PsychologistCalendar from './components/PsychologistCalendar';
+import PsychologistDashboard from './components/PsychologistDashboard';
 import ConnectionsPanel from './components/ConnectionsPanel';
 import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2 } from 'lucide-react';
 
@@ -37,7 +38,7 @@ const App: React.FC = () => {
   const [pendingRole, setPendingRole] = useState<'PATIENT' | 'PSYCHOLOGIST' | null>(null);
   
   const [psychViewMode, setPsychViewMode] = useState<'DASHBOARD' | 'PERSONAL'>('DASHBOARD');
-  const [psychPanelView, setPsychPanelView] = useState<'patients' | 'billing' | 'profile' | 'calendar' | 'connections'>('patients');
+  const [psychPanelView, setPsychPanelView] = useState<'patients' | 'billing' | 'profile' | 'calendar' | 'connections' | 'dashboard'>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const [entries, setEntries] = useState<JournalEntry[]>([]);
@@ -602,6 +603,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                
                {/* Main Content */}
                <div className="flex-1 overflow-y-auto px-4 md:px-8 py-4 md:py-6">
+                    {psychPanelView === 'dashboard' && <PsychologistDashboard psychologistId={currentUser.id} />}
                     {psychPanelView === 'patients' && <PatientDashboard />}
                     {psychPanelView === 'billing' && <BillingPanel psychologistId={currentUser.id} />}
                     {psychPanelView === 'profile' && <PsychologistProfilePanel userId={currentUser.id} />}

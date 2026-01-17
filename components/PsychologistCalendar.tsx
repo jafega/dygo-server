@@ -25,7 +25,7 @@ type SessionStatusFilter = Session['status'] | 'ALL';
 
 const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologistId }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [viewMode, setViewMode] = useState<ViewMode>('MONTH');
+  const [viewMode, setViewMode] = useState<ViewMode>('LIST');
   const [sessions, setSessions] = useState<Session[]>([]);
   const [patients, setPatients] = useState<any[]>([]);
   const [showNewSession, setShowNewSession] = useState(false);
@@ -117,10 +117,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
   };
 
   const handlePreviousMonth = () => {
-    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1));
-  };
-
-  const handleNextMonth = () => {
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1));\n  };\n\n  const handleNextMonth = () => {
     setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1));
   };
 
@@ -326,8 +323,6 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
   const handleDeleteAvailability = async (sessionId: string) => {
     const session = sessions.find(s => s.id === sessionId);
     if (!session || session.status !== 'available') return;
-    const confirmed = window.confirm('¿Seguro que quieres eliminar esta disponibilidad?');
-    if (!confirmed) return;
 
     try {
       const response = await fetch(`${API_URL}/sessions/${sessionId}`, {
@@ -337,7 +332,6 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
       if (response.ok) {
         await loadSessions();
         if (selectedSlot?.id === sessionId) setSelectedSlot(null);
-        alert('Disponibilidad eliminada');
       } else {
         const data = await response.json().catch(() => ({}));
         alert(data.error || 'No se pudo eliminar la disponibilidad');
@@ -604,34 +598,6 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
             </div>
           )}
         </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <div className="text-xs text-slate-500 uppercase font-semibold">Este Mes</div>
-          <div className="text-2xl font-bold text-slate-900 mt-2">
-            {sessions.filter(s => s.status === 'scheduled').length}
-          </div>
-        </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <div className="text-xs text-slate-500 uppercase font-semibold">Completadas</div>
-          <div className="text-2xl font-bold text-green-600 mt-2">
-            {sessions.filter(s => s.status === 'completed').length}
-          </div>
-        </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <div className="text-xs text-slate-500 uppercase font-semibold">Disponibles</div>
-          <div className="text-2xl font-bold text-purple-600 mt-2">
-            {sessions.filter(s => s.status === 'available').length}
-          </div>
-        </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <div className="text-xs text-slate-500 uppercase font-semibold">Canceladas</div>
-          <div className="text-2xl font-bold text-red-600 mt-2">
-            {sessions.filter(s => s.status === 'cancelled').length}
-          </div>
-        </div>
-      </div>
 
       {/* Calendar */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">

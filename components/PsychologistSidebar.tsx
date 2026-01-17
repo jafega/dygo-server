@@ -1,5 +1,5 @@
 import React from 'react';
-import { Users, FileText, User as UserIcon, Calendar, Menu, X, ArrowLeftRight, ShieldCheck, Link2 } from 'lucide-react';
+import { Users, FileText, User as UserIcon, Calendar, Menu, X, ArrowLeftRight, ShieldCheck, Link2, BarChart3 } from 'lucide-react';
 
 const DygoLogo: React.FC<{ className?: string }> = ({ className = "w-8 h-8" }) => (
   <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
@@ -8,8 +8,8 @@ const DygoLogo: React.FC<{ className?: string }> = ({ className = "w-8 h-8" }) =
 );
 
 interface PsychologistSidebarProps {
-  activeView: 'patients' | 'billing' | 'profile' | 'calendar' | 'connections';
-  onViewChange: (view: 'patients' | 'billing' | 'profile' | 'calendar' | 'connections') => void;
+  activeView: 'patients' | 'billing' | 'profile' | 'calendar' | 'connections' | 'dashboard';
+  onViewChange: (view: 'patients' | 'billing' | 'profile' | 'calendar' | 'connections' | 'dashboard') => void;
   isOpen: boolean;
   onToggle: () => void;
   userName?: string;
@@ -33,6 +33,7 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
   onSuperAdminClick
 }) => {
   const menuItems = [
+    { id: 'dashboard' as const, label: 'Dashboard', icon: BarChart3 },
     { id: 'patients' as const, label: 'Pacientes', icon: Users },
     { id: 'calendar' as const, label: 'Calendario', icon: Calendar },
     { id: 'billing' as const, label: 'Facturación', icon: FileText },
