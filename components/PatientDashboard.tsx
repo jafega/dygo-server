@@ -268,7 +268,13 @@ const PatientDashboard: React.FC = () => {
           </div>
        </div>
 
-       {selectedPatient && <PatientDetailModal patient={selectedPatient} onClose={() => setSelectedPatient(null)} />}
+       {selectedPatient && currentUser && (
+         <PatientDetailModal 
+           patient={selectedPatient} 
+           onClose={() => setSelectedPatient(null)} 
+           psychologistId={currentUser.id}
+         />
+       )}
     </div>
   );
 };

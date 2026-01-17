@@ -21,6 +21,7 @@ GlobalWorkerOptions.workerSrc = pdfjsWorker;
 interface PatientDetailModalProps {
   patient: PatientSummary;
   onClose: () => void;
+  psychologistId?: string;
 }
 
 // Helper to normalize data structure
@@ -56,7 +57,7 @@ const isLegacySessionFeedback = (feedback: ClinicalNoteContent, summary: string)
     return lower.includes('resumen de la sesión') || lower.includes('meta terapéutica');
 };
 
-const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClose }) => {
+const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClose, psychologistId: propPsychologistId }) => {
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
@@ -66,7 +67,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   const [activeTab, setActiveTab] = useState<'TIMELINE' | 'ANALYTICS' | 'PLAN' | 'INFO' | 'BILLING'>('TIMELINE');
   const [patientUser, setPatientUser] = useState<any>(null);
   const [entryFilter, setEntryFilter] = useState<'ALL' | 'DIARY' | 'INTERNAL' | 'SESSION' | 'FEEDBACK'>('ALL');
-  const [currentPsychologistId, setCurrentPsychologistId] = useState<string>('');
+  const [currentPsychologistId, setCurrentPsychologistId] = useState<string>(propPsychologistId || '');
   
   // Analytics State
   const [analyticsRange, setAnalyticsRange] = useState<'WEEK' | 'MONTH' | 'YEAR'>('WEEK');
@@ -139,15 +140,20 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
     let cancelled = false;
     const load = async () => {
       try {
-        // Get current psychologist ID from localStorage
-        const storedUser = localStorage.getItem('currentUser');
-        console.log('[PatientDetailModal] storedUser:', storedUser);
-        if (storedUser) {
-          const userData = JSON.parse(storedUser);
-          console.log('[PatientDetailModal] userData:', userData);
-          if (userData.id) {
-            console.log('[PatientDetailModal] Setting currentPsychologistId:', userData.id);
-            setCurrentPsychologistId(userData.id);
+        // Use prop psychologistId if available, otherwise get from localStorage
+        if (propPsychologistId) {
+          console.log('[PatientDetailModal] Using prop psychologistId:', propPsychologistId);
+          setCurrentPsychologistId(propPsychologistId);
+        } else {
+          const storedUser = localStorage.getItem('currentUser');
+          console.log('[PatientDetailModal] storedUser:', storedUser);
+          if (storedUser) {
+            const userData = JSON.parse(storedUser);
+            console.log('[PatientDetailModal] userData:', userData);
+            if (userData.id) {
+              console.log('[PatientDetailModal] Setting currentPsychologistId:', userData.id);
+              setCurrentPsychologistId(userData.id);
+            }
           }
         }
         
