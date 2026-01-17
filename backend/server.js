@@ -200,6 +200,7 @@ if (USE_POSTGRES) {
     await pgPool.query(`CREATE TABLE IF NOT EXISTS settings (id TEXT PRIMARY KEY, data JSONB NOT NULL)`);
     await pgPool.query(`CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, data JSONB NOT NULL)`);
     await pgPool.query(`CREATE TABLE IF NOT EXISTS invoices (id TEXT PRIMARY KEY, data JSONB NOT NULL)`);
+    await pgPool.query(`CREATE TABLE IF NOT EXISTS psychologist_profiles (id TEXT PRIMARY KEY, data JSONB NOT NULL)`);
 
     // If Postgres empty, try to migrate from sqlite or db.json
     const { rows } = await pgPool.query("SELECT COUNT(*) as c FROM entries");
@@ -271,7 +272,9 @@ if (USE_POSTGRES) {
       const settings = Object.fromEntries(settingsArr.map(s => [s.id, s]));
       const sessions = await q('sessions');
       const invoices = await q('invoices');
-      pgDbCache = { users, entries, goals, invitations, settings, sessions, invoices };
+      const profilesArr = await q('psychologist_profiles');
+      const psychologistProfiles = Object.fromEntries(profilesArr.map(p => [p.id, p]));
+      pgDbCache = { users, entries, goals, invitations, settings, sessions, invoices, psychologistProfiles };
       console.log('ℹ️ Postgres data loaded into cache');
     } catch (err) {
       console.error('❌ Failed populating pg cache', err);
@@ -561,7 +564,9 @@ const getDb = () => {
     const settings = Object.fromEntries(settingsArr.map((s) => [s.id, s]));
     const sessions = read('sessions');
     const invoices = read('invoices');
-    return { users, entries, goals, invitations, settings, sessions, invoices };
+    const profilesArr = read('psychologist_profiles');
+    const psychologistProfiles = Object.fromEntries(profilesArr.map((p) => [p.id, p]));
+    return { users, entries, goals, invitations, settings, sessions, invoices, psychologistProfiles };
   }
 
   // 1. Si no existe, crearla
@@ -617,6 +622,7 @@ const saveDb = (data) => {
         await client.query('DELETE FROM settings');
         await client.query('DELETE FROM sessions');
         await client.query('DELETE FROM invoices');
+        await client.query('DELETE FROM psychologist_profiles');
 
         const insert = async (table, id, obj) => client.query(`INSERT INTO ${table} (id, data) VALUES ($1,$2)`, [id, obj]);
 
@@ -628,6 +634,8 @@ const saveDb = (data) => {
         for (const k of Object.keys(settings)) await insert('settings', k, settings[k]);
         for (const s of (data.sessions || [])) await insert('sessions', s.id, s);
         for (const inv of (data.invoices || [])) await insert('invoices', inv.id, inv);
+        const profiles = data.psychologistProfiles || {};
+        for (const k of Object.keys(profiles)) await insert('psychologist_profiles', k, profiles[k]);
 
         await client.query('COMMIT');
       } catch (err) {
