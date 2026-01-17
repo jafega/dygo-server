@@ -174,15 +174,15 @@ const PatientDashboard: React.FC = () => {
   if (isLoading) return <div className="p-8 text-center text-slate-400"><Loader2 className="animate-spin inline-block mr-2"/> Cargando pacientes...</div>;
 
   return (
-    <div className="space-y-6">
-       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                <Users className="w-6 h-6 text-indigo-500" />
+    <div className="space-y-4 sm:space-y-6">
+       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4">
+            <h3 className="text-lg sm:text-xl font-bold text-slate-800 flex items-center gap-2">
+                <Users className="w-5 h-5 sm:w-6 sm:h-6 text-indigo-500" />
                 Panel de Pacientes
             </h3>
             <div className="flex gap-2 w-full sm:w-auto">
-                <button onClick={openInviteModal} className="flex-1 sm:flex-none justify-center bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors shadow-sm">
-                    <UserPlus size={16} /> <span className="sm:hidden">Nuevo</span><span className="hidden sm:inline">Añadir Paciente</span>
+                <button onClick={openInviteModal} className="flex-1 sm:flex-none justify-center bg-indigo-600 hover:bg-indigo-700 text-white px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg text-xs sm:text-sm font-medium flex items-center gap-1.5 sm:gap-2 transition-colors shadow-sm">
+                    <UserPlus size={14} className="sm:w-4 sm:h-4" /> <span className="sm:hidden">Nuevo</span><span className="hidden sm:inline">Añadir Paciente</span>
                 </button>
             </div>
        </div>
@@ -258,24 +258,32 @@ const PatientDashboard: React.FC = () => {
        )}
 
        <div className="space-y-3">
-          {pendingInvites.length > 0 && <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wide mt-4">Pacientes Activos</h4>}
-          <div className="grid gap-4">
+          {pendingInvites.length > 0 && <h4 className="text-xs sm:text-sm font-bold text-slate-400 uppercase tracking-wide mt-3 sm:mt-4">Pacientes Activos</h4>}
+          <div className="grid gap-3 sm:gap-4">
             {patients.length === 0 ? (
-                <div className="text-center py-12 bg-white rounded-2xl border border-slate-100 border-dashed">
-                    <Users className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                    <p className="text-slate-500">No tienes pacientes activos.</p>
+                <div className="text-center py-10 sm:py-12 bg-white rounded-xl sm:rounded-2xl border border-slate-100 border-dashed">
+                    <Users className="w-10 h-10 sm:w-12 sm:h-12 text-slate-300 mx-auto mb-2 sm:mb-3" />
+                    <p className="text-sm sm:text-base text-slate-500">No tienes pacientes activos.</p>
                 </div>
             ) : (
                 patients.map(patient => (
-                    <div key={patient.id} onClick={() => setSelectedPatient(patient)} className="border border-slate-200 rounded-xl p-5 hover:shadow-md transition-shadow bg-white cursor-pointer group">
-                        <div className="flex flex-col sm:flex-row justify-between items-start mb-3 gap-2">
-                            <div><h4 className="font-bold text-slate-800 text-lg group-hover:text-indigo-600 transition-colors">{patient.name}</h4><div className="flex items-center gap-2 text-xs text-slate-400 mt-1"><Clock size={12} /> Última Act: {patient.lastUpdate}</div></div>
-                            <span className={`px-3 py-1 rounded-full text-xs font-bold border ${getRiskColor(patient.riskLevel)} self-start`}>Riesgo {patient.riskLevel}</span>
+                    <div key={patient.id} onClick={() => setSelectedPatient(patient)} className="border border-slate-200 rounded-xl p-4 sm:p-5 hover:shadow-md transition-shadow bg-white cursor-pointer group">
+                        <div className="flex flex-col sm:flex-row justify-between items-start mb-2 sm:mb-3 gap-2">
+                            <div className="min-w-0 flex-1">
+                                <h4 className="font-bold text-slate-800 text-base sm:text-lg group-hover:text-indigo-600 transition-colors truncate">{patient.name}</h4>
+                                <div className="flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs text-slate-400 mt-0.5 sm:mt-1">
+                                    <Clock size={10} className="sm:w-3 sm:h-3 shrink-0" /> 
+                                    <span className="truncate">Última Act: {patient.lastUpdate}</span>
+                                </div>
+                            </div>
+                            <span className={`px-2.5 sm:px-3 py-1 rounded-full text-[10px] sm:text-xs font-bold border ${getRiskColor(patient.riskLevel)} self-start shrink-0 whitespace-nowrap`}>
+                                Riesgo {patient.riskLevel}
+                            </span>
                         </div>
-                        <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 mb-4"><p className="text-slate-600 text-sm leading-relaxed line-clamp-2">{patient.recentSummary}</p></div>
-                        <div className="flex items-center justify-between border-t border-slate-100 pt-3">
-                            <div className="text-sm text-slate-500">Bienestar</div>
-                            <div className={`font-bold text-lg ${getSentimentColor(patient.averageSentiment)}`}>{patient.averageSentiment}</div>
+                        <div className="bg-slate-50 p-2.5 sm:p-3 rounded-lg border border-slate-100 mb-3 sm:mb-4"><p className="text-slate-600 text-xs sm:text-sm leading-relaxed line-clamp-2">{patient.recentSummary}</p></div>
+                        <div className="flex items-center justify-between border-t border-slate-100 pt-2.5 sm:pt-3">
+                            <div className="text-xs sm:text-sm text-slate-500">Bienestar</div>
+                            <div className={`font-bold text-base sm:text-lg ${getSentimentColor(patient.averageSentiment)}`}>{patient.averageSentiment}</div>
                         </div>
                     </div>
                 ))

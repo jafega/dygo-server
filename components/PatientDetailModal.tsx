@@ -708,72 +708,72 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
         
         {/* HEADER */}
         <div className="bg-white border-b border-slate-200 shrink-0 shadow-sm z-20">
-            <div className="px-4 py-3 flex justify-between items-center">
-                <div className="flex items-center gap-3 overflow-hidden">
-                    <button onClick={onClose} className="md:hidden text-slate-500 hover:text-slate-800 -ml-2 p-1">
-                        <ChevronLeft size={24} />
+            <div className="px-3 sm:px-4 py-2.5 sm:py-3 flex justify-between items-center gap-2">
+                <div className="flex items-center gap-2 sm:gap-3 overflow-hidden min-w-0 flex-1">
+                    <button onClick={onClose} className="md:hidden text-slate-500 hover:text-slate-800 p-1.5 shrink-0">
+                        <ChevronLeft size={20} />
                     </button>
-                    <div className="w-8 h-8 md:w-10 md:h-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-700 font-bold text-sm md:text-lg shrink-0">
+                    <div className="w-9 h-9 sm:w-10 sm:h-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-700 font-bold text-base sm:text-lg shrink-0">
                         {patient.name.charAt(0)}
                     </div>
-                    <div className="overflow-hidden">
-                        <h2 className="text-lg md:text-xl font-bold text-slate-800 flex items-center gap-2 truncate">
-                            {patient.name}
+                    <div className="overflow-hidden min-w-0 flex-1">
+                        <h2 className="text-base sm:text-lg md:text-xl font-bold text-slate-800 flex items-center gap-1.5 sm:gap-2 truncate">
+                            <span className="truncate">{patient.name}</span>
                             {patient.riskLevel === 'HIGH' && (
-                                <span className="bg-red-100 text-red-700 text-[10px] px-1.5 py-0.5 rounded-full font-bold border border-red-200 shrink-0">
-                                    Riesgo Alto
+                                <span className="bg-red-100 text-red-700 text-[9px] sm:text-[10px] px-1.5 py-0.5 rounded-full font-bold border border-red-200 shrink-0 whitespace-nowrap">
+                                    Alto
                                 </span>
                             )}
                         </h2>
-                        <p className="text-xs text-slate-500 truncate">{patient.email}</p>
+                        <p className="text-[10px] sm:text-xs text-slate-500 truncate">{patient.email}</p>
                     </div>
                 </div>
                 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
                     <button 
                         onClick={handleStartCreate}
-                        className="bg-indigo-600 hover:bg-indigo-700 text-white p-2 md:px-4 md:py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors shadow-sm"
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white p-2 sm:px-3 sm:py-2 md:px-4 rounded-lg text-xs sm:text-sm font-medium flex items-center gap-1.5 transition-colors shadow-sm"
                         title="Nueva Nota"
                     >
-                        <Plus size={20} /> <span className="hidden md:inline">Nueva Entrada</span>
+                        <Plus size={18} className="sm:w-5 sm:h-5" /> <span className="hidden md:inline">Nueva Entrada</span>
                     </button>
                     <button onClick={onClose} className="hidden md:block p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-500 hover:text-red-500">
-                        <X size={28} />
+                        <X size={24} />
                     </button>
                 </div>
             </div>
 
             {/* Sub-Header Tabs */}
-            <div className="flex px-4 pb-0 md:px-6 overflow-x-auto">
+            <div className="flex px-3 sm:px-4 md:px-6 pb-0 overflow-x-auto scrollbar-hide">
                  <button 
                      onClick={() => setActiveTab('TIMELINE')}
-                     className={`flex-1 md:flex-none pb-3 pt-1 text-sm font-medium border-b-2 transition-colors flex justify-center md:justify-start gap-2 whitespace-nowrap ${activeTab === 'TIMELINE' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'}`}
+                     className={`flex-shrink-0 px-3 sm:px-4 pb-2.5 sm:pb-3 pt-1 text-xs sm:text-sm font-medium border-b-2 transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap ${activeTab === 'TIMELINE' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'}`}
                  >
-                     <List size={16} /> <span className="hidden sm:inline">Historia Clínica</span><span className="sm:hidden">Historia</span>
+                     <List size={14} className="sm:w-4 sm:h-4" /> <span className="hidden xs:inline">Historia</span>
                  </button>
                  <button 
                      onClick={() => setActiveTab('ANALYTICS')}
-                     className={`flex-1 md:flex-none md:ml-6 pb-3 pt-1 text-sm font-medium border-b-2 transition-colors flex justify-center md:justify-start gap-2 whitespace-nowrap ${activeTab === 'ANALYTICS' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'}`}
+                     className={`flex-shrink-0 px-3 sm:px-4 pb-2.5 sm:pb-3 pt-1 text-xs sm:text-sm font-medium border-b-2 transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap ${activeTab === 'ANALYTICS' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'}`}
                  >
-                     <BarChart2 size={16} /> Analíticas
+                     <BarChart2 size={14} className="sm:w-4 sm:h-4" /> <span className="hidden xs:inline">Analíticas</span>
                  </button>
                  <button 
                      onClick={() => setActiveTab('PLAN')}
-                     className={`flex-1 md:flex-none md:ml-6 pb-3 pt-1 text-sm font-medium border-b-2 transition-colors flex justify-center md:justify-start gap-2 whitespace-nowrap ${activeTab === 'PLAN' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'}`}
+                     className={`flex-shrink-0 px-3 sm:px-4 pb-2.5 sm:pb-3 pt-1 text-xs sm:text-sm font-medium border-b-2 transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap ${activeTab === 'PLAN' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'}`}
                  >
-                     <CheckSquare size={16} /> Plan
+                     <CheckSquare size={14} className="sm:w-4 sm:h-4" /> <span className="hidden xs:inline">Plan</span>
                  </button>
                  <button 
                      onClick={() => setActiveTab('INFO')}
-                     className={`flex-1 md:flex-none md:ml-6 pb-3 pt-1 text-sm font-medium border-b-2 transition-colors flex justify-center md:justify-start gap-2 whitespace-nowrap ${activeTab === 'INFO' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'}`}
+                     className={`flex-shrink-0 px-3 sm:px-4 pb-2.5 sm:pb-3 pt-1 text-xs sm:text-sm font-medium border-b-2 transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap ${activeTab === 'INFO' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'}`}
                  >
-                     <User size={16} /> <span className="hidden sm:inline">Información Personal</span><span className="sm:hidden">Info</span>
+                     <User size={14} className="sm:w-4 sm:h-4" /> <span className="hidden xs:inline">Info</span>
                  </button>
                  <button 
                      onClick={() => setActiveTab('BILLING')}
-                     className={`flex-1 md:flex-none md:ml-6 pb-3 pt-1 text-sm font-medium border-b-2 transition-colors flex justify-center md:justify-start gap-2 whitespace-nowrap ${activeTab === 'BILLING' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'}`}
+                     className={`flex-shrink-0 px-3 sm:px-4 pb-2.5 sm:pb-3 pt-1 text-xs sm:text-sm font-medium border-b-2 transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap ${activeTab === 'BILLING' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'}`}
                  >
-                     <FileText size={16} /> Facturación
+                     <FileText size={14} className="sm:w-4 sm:h-4" /> <span className="hidden xs:inline">Facturación</span>
                  </button>
             </div>
         </div>
@@ -784,18 +784,18 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
             {activeTab === 'TIMELINE' ? (
                 <div className="flex h-full flex-col md:flex-row">
                     {/* Left: Timeline Feed */}
-                    <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-20 md:pb-8">
+                    <div className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6 lg:p-8 pb-20 md:pb-8">
 
                         {/* Timeline Summary */}
-                        <div className="mb-6 md:mb-8">
-                            <div className="bg-gradient-to-br from-indigo-50 via-white to-purple-50 border border-indigo-100 rounded-2xl p-4 md:p-6 shadow-sm">
-                                <div className="flex items-start justify-between gap-3 mb-4">
-                                    <div>
-                                        <h3 className="text-base md:text-lg font-bold text-slate-800 flex items-center gap-2">
-                                            <FileText size={18} className="text-indigo-500" />
-                                            Historial Clínico
+                        <div className="mb-4 sm:mb-6 md:mb-8">
+                            <div className="bg-gradient-to-br from-indigo-50 via-white to-purple-50 border border-indigo-100 rounded-xl sm:rounded-2xl p-3 sm:p-4 md:p-6 shadow-sm">
+                                <div className="flex items-start justify-between gap-2 sm:gap-3 mb-3 sm:mb-4">
+                                    <div className="min-w-0 flex-1">
+                                        <h3 className="text-sm sm:text-base md:text-lg font-bold text-slate-800 flex items-center gap-1.5 sm:gap-2">
+                                            <FileText size={16} className="sm:w-[18px] sm:h-[18px] text-indigo-500 shrink-0" />
+                                            <span className="truncate">Historial Clínico</span>
                                         </h3>
-                                        <p className="text-xs md:text-sm text-slate-500 mt-1">
+                                        <p className="text-[10px] sm:text-xs md:text-sm text-slate-500 mt-0.5 sm:mt-1 truncate">
                                             Última actualización: <span className="font-semibold text-slate-700">{lastUpdateDate}</span>
                                         </p>
                                     </div>

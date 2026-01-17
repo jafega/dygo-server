@@ -664,11 +664,16 @@ async function saveSupabaseDb(data, prevCache = null) {
 
   const upsertTable = async (table, rows) => {
     if (!rows.length) return;
+    console.log(`🔄 [saveSupabaseDb] Haciendo upsert en tabla '${table}' con ${rows.length} filas`);
     const chunks = chunk(rows);
     for (const c of chunks) {
       const { error: upsertError } = await supabaseAdmin.from(table).upsert(c, { onConflict: 'id' });
-      if (upsertError) throw upsertError;
+      if (upsertError) {
+        console.error(`❌ [saveSupabaseDb] Error en upsert de tabla '${table}':`, upsertError);
+        throw upsertError;
+      }
     }
+    console.log(`✅ [saveSupabaseDb] Upsert completado en tabla '${table}'`);
   };
 
   const deleteMissing = async (table, prevIds, nextIds) => {
@@ -2746,6 +2751,7 @@ app.delete('/api/relationships', async (req, res) => {
 // --- SESSIONS / CALENDAR ---
 app.get('/api/sessions', (req, res) => {
   const { psychologistId, patientId, year, month } = req.query;
+  console.log('📥 GET /api/sessions', { psychologistId, patientId, year, month });
   if (!psychologistId && !patientId) {
     return res.status(400).json({ error: 'Missing psychologistId or patientId' });
   }
@@ -2753,6 +2759,8 @@ app.get('/api/sessions', (req, res) => {
   const db = getDb();
   if (!db.sessions) db.sessions = [];
   if (!Array.isArray(db.users)) db.users = [];
+  console.log('[GET /api/sessions] Total sessions in DB:', db.sessions.length);
+  console.log('[GET /api/sessions] Sessions:', db.sessions.map(s => ({ id: s.id, psychologistId: s.psychologistId, patientId: s.patientId, status: s.status, date: s.date })));
   const userIndex = new Map(
     db.users
       .filter(user => user && user.id)
@@ -2764,9 +2772,11 @@ app.get('/api/sessions', (req, res) => {
   // Filter by psychologistId or patientId
   if (psychologistId) {
     sessions = sessions.filter(s => s.psychologistId === psychologistId);
+    console.log('[GET /api/sessions] After filtering by psychologistId:', sessions.length);
   }
   if (patientId) {
     sessions = sessions.filter(s => s.patientId === patientId);
+    console.log('[GET /api/sessions] After filtering by patientId:', sessions.length);
   }
   
   // Filter by year and month if provided
@@ -2861,11 +2871,18 @@ app.post('/api/sessions/availability', async (req, res) => {
 app.patch('/api/sessions/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    console.log(`📝 [PATCH /api/sessions/${id}] Actualizando sesión con datos:`, req.body);
+    
     const db = getDb();
     if (!db.sessions) db.sessions = [];
 
     const idx = db.sessions.findIndex(s => s.id === id);
-    if (idx === -1) return res.status(404).json({ error: 'Session not found' });
+    if (idx === -1) {
+      console.log(`❌ [PATCH /api/sessions/${id}] Sesión no encontrada`);
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    console.log(`✅ [PATCH /api/sessions/${id}] Sesión encontrada en índice ${idx}:`, db.sessions[idx]);
 
     const updatedSession = { ...db.sessions[idx], ...req.body };
 
@@ -2885,7 +2902,14 @@ app.patch('/api/sessions/:id', async (req, res) => {
     }
 
     db.sessions[idx] = updatedSession;
+    console.log(`💾 [PATCH /api/sessions/${id}] Guardando sesión actualizada en memoria:`, updatedSession);
+    console.log(`🔄 [PATCH /api/sessions/${id}] Llamando a saveDb con awaitPersistence=true...`);
+    
     await saveDb(db, { awaitPersistence: true });
+    
+    console.log(`✅ [PATCH /api/sessions/${id}] saveDb completado. Sesión guardada en Supabase.`);
+    console.log(`📤 [PATCH /api/sessions/${id}] Enviando respuesta al cliente:`, db.sessions[idx]);
+    
     return res.json(db.sessions[idx]);
   } catch (err) {
     console.error('❌ Error updating session', err);

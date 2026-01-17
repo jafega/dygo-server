@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Save, Building, Phone, Mail, MapPin, CreditCard, User as UserIcon, FileText } from 'lucide-react';
+import { API_URL } from '../services/config';
 
 interface PsychologistProfile {
   // Personal Info
@@ -58,7 +59,7 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId }
   const loadProfile = async () => {
     setIsLoading(true);
     try {
-      const response = await fetch(`/api/psychologist/${userId}/profile`);
+      const response = await fetch(`${API_URL}/psychologist/${userId}/profile`);
       if (response.ok) {
         const data = await response.json();
         setProfile(data);
@@ -72,7 +73,7 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId }
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      const response = await fetch(`/api/psychologist/${userId}/profile`, {
+      const response = await fetch(`${API_URL}/psychologist/${userId}/profile`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(profile)
@@ -82,11 +83,12 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId }
         setSaveSuccess(true);
         setTimeout(() => setSaveSuccess(false), 3000);
       } else {
-        alert('Error al guardar el perfil');
+        const errorData = await response.json().catch(() => ({}));
+        alert(errorData.error || 'Error al guardar el perfil. Comprueba la conexión con el servidor.');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving profile:', error);
-      alert('Error al guardar el perfil');
+      alert(error?.message || 'Error al guardar el perfil. Comprueba la conexión con el servidor.');
     }
     setIsSaving(false);
   };

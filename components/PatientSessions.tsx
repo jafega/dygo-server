@@ -44,15 +44,26 @@ const PatientSessions: React.FC = () => {
     setIsLoading(true);
     try {
       const user = await getCurrentUser();
-      if (!user || user.role !== 'PATIENT') return;
+      console.log('[PatientSessions] Current user:', { id: user?.id, role: user?.role, name: user?.name });
+      if (!user) {
+        console.log('[PatientSessions] No user found, exiting');
+        return;
+      }
 
+      console.log('[PatientSessions] Fetching psychologists and sessions...');
       const [psychologists, response] = await Promise.all([
         getPsychologistsForPatient(user.id),
         fetch(`${API_URL}/sessions?patientId=${user.id}`)
       ]);
+      
+      console.log('[PatientSessions] psychologists from getPsychologistsForPatient:', psychologists);
+      console.log('[PatientSessions] sessions response ok:', response.ok);
+      
       if (response.ok) {
         const data = await response.json();
         const filteredSessions = data.filter((s: Session) => s.status === 'scheduled' || s.status === 'completed' || s.status === 'cancelled');
+        console.log('[PatientSessions] filteredSessions:', filteredSessions.length);
+        
         setPsychologistDirectory(prev => {
           const next = { ...prev } as PsychologistDirectory;
           psychologists.forEach((psych: User) => {
@@ -72,6 +83,7 @@ const PatientSessions: React.FC = () => {
         });
         setSessions(filteredSessions);
 
+        // Construir lista de psicólogos: incluir TODOS los de care_relationships
         const psychologistIds = new Set<string>(psychologists.map(p => p.id));
         filteredSessions.forEach((s: Session) => {
           if (s.psychologistId) {
@@ -80,6 +92,7 @@ const PatientSessions: React.FC = () => {
         });
 
         const psychologistList = Array.from(psychologistIds);
+        console.log('[PatientSessions] linkedPsychologists:', psychologistList);
         setLinkedPsychologists(psychologistList);
         setPsychologistId(prev => {
           if (prev && psychologistList.includes(prev)) {
@@ -100,8 +113,12 @@ const PatientSessions: React.FC = () => {
       ? [psychologistId, ...linkedPsychologists.filter(id => id !== psychologistId)]
       : linkedPsychologists;
 
+    console.log('[loadAvailability] psychologistId:', psychologistId);
+    console.log('[loadAvailability] linkedPsychologists:', linkedPsychologists);
+    console.log('[loadAvailability] candidateIds:', candidateIds);
+
     if (candidateIds.length === 0) {
-      alert('No tienes un psicólogo asignado');
+      alert('No tienes un psicólogo asignado. Por favor, acepta una invitación de un psicólogo primero.');
       return;
     }
 
@@ -112,18 +129,23 @@ const PatientSessions: React.FC = () => {
       const now = new Date();
 
       for (const candidateId of candidateIds) {
-        const response = await fetch(`${API_URL}/sessions?psychologistId=${candidateId}`);
+        const url = `${API_URL}/sessions?psychologistId=${candidateId}`;
+        console.log('[loadAvailability] Fetching availability from:', url);
+        const response = await fetch(url);
         if (!response.ok) {
-          console.warn('No se pudo cargar la disponibilidad para', candidateId, response.status);
+          console.warn('[loadAvailability] No se pudo cargar la disponibilidad para', candidateId, response.status);
           continue;
         }
 
         const allSessions = await response.json();
+        console.log('[loadAvailability] Sessions returned for', candidateId, ':', allSessions.length, 'total');
         const available = allSessions.filter((s: Session) => s.status === 'available');
+        console.log('[loadAvailability] Available sessions:', available.length);
         const futureSlots = available.filter((slot: Session) => {
           const slotDateTime = new Date(`${slot.date}T${slot.startTime}`);
           return slotDateTime > now;
         });
+        console.log('[loadAvailability] Future slots:', futureSlots.length);
 
         if (futureSlots.length > 0) {
           slotsToShow = futureSlots;
@@ -159,28 +181,39 @@ const PatientSessions: React.FC = () => {
     if (!user) return;
 
     setBookingSlotId(slotId);
+    console.log(`[bookSession] Iniciando reserva de sesión ${slotId} para usuario:`, user);
+    
     try {
+      const requestBody = {
+        status: 'scheduled',
+        patientId: user.id,
+        patientName: user.name,
+        patientPhone: user.phone || ''
+      };
+      
+      console.log(`[bookSession] Haciendo PATCH a ${API_URL}/sessions/${slotId} con:`, requestBody);
+      
       const response = await fetch(`${API_URL}/sessions/${slotId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          status: 'scheduled',
-          patientId: user.id,
-          patientName: user.name,
-          patientPhone: user.phone || ''
-        })
+        body: JSON.stringify(requestBody)
       });
 
+      console.log(`[bookSession] Respuesta recibida. Status: ${response.status}, OK: ${response.ok}`);
+
       if (response.ok) {
+        const updatedSession = await response.json();
+        console.log(`[bookSession] ✅ Sesión reservada exitosamente:`, updatedSession);
         alert('¡Cita reservada exitosamente!');
         setShowAvailability(false);
         await loadSessions();
       } else {
         const error = await response.json();
+        console.error(`[bookSession] ❌ Error del servidor:`, error);
         alert('Error al reservar la cita: ' + (error.error || 'Error desconocido'));
       }
     } catch (err) {
-      console.error('Error booking session:', err);
+      console.error('[bookSession] ❌ Error en la petición:', err);
       alert('Error al reservar la cita');
     } finally {
       setBookingSlotId(null);
