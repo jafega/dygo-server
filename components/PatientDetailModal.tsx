@@ -1425,7 +1425,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                     />
                 </div>
             ) : activeTab === 'INFO' ? (
-                <div className="p-4 md:p-8 max-w-4xl mx-auto overflow-y-auto">
+                <div className="h-full overflow-y-auto p-4 md:p-8 pb-20 md:pb-8 max-w-4xl mx-auto">
                     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                         <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-6 text-white">
                             <div className="flex items-center gap-4">

@@ -1,24 +1,32 @@
 import React from 'react';
-import { Users, FileText, User as UserIcon, Calendar, Menu, X } from 'lucide-react';
+import { Users, FileText, User as UserIcon, Calendar, Menu, X, ArrowLeftRight } from 'lucide-react';
 
 interface PsychologistSidebarProps {
   activeView: 'patients' | 'billing' | 'profile' | 'calendar';
   onViewChange: (view: 'patients' | 'billing' | 'profile' | 'calendar') => void;
   isOpen: boolean;
   onToggle: () => void;
+  userName?: string;
+  userEmail?: string;
+  onSwitchToPersonal: () => void;
+  onOpenSettings: () => void;
 }
 
 const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({ 
   activeView, 
   onViewChange,
   isOpen,
-  onToggle 
+  onToggle,
+  userName = '',
+  userEmail = '',
+  onSwitchToPersonal,
+  onOpenSettings
 }) => {
   const menuItems = [
     { id: 'patients' as const, label: 'Pacientes', icon: Users },
     { id: 'calendar' as const, label: 'Calendario', icon: Calendar },
     { id: 'billing' as const, label: 'Facturación', icon: FileText },
-    { id: 'profile' as const, label: 'Mi Perfil', icon: UserIcon },
+    { id: 'profile' as const, label: 'Mi Perfil Profesional', icon: UserIcon },
   ];
 
   return (
@@ -87,10 +95,31 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
         </nav>
 
         {/* Footer */}
-        <div className="p-4 border-t border-slate-200">
-          <div className="text-xs text-slate-400 text-center">
-            dygo Pro
+        <div className="p-3 border-t border-slate-200 space-y-2">
+          <div className="flex items-center gap-3 px-3 py-2">
+            <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
+              <span className="text-indigo-700 font-semibold text-sm">
+                {userName?.charAt(0).toUpperCase() || '?'}
+              </span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-slate-900 truncate">{userName}</p>
+              <p className="text-xs text-slate-500 truncate">{userEmail}</p>
+            </div>
           </div>
+          <button
+            onClick={onSwitchToPersonal}
+            className="w-full px-3 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors text-left flex items-center gap-2 border border-indigo-100"
+          >
+            <ArrowLeftRight size={16} />
+            <span>Mi Diario Personal</span>
+          </button>
+          <button
+            onClick={onOpenSettings}
+            className="w-full px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 rounded-lg transition-colors text-left"
+          >
+            Configuración
+          </button>
         </div>
       </aside>
     </>

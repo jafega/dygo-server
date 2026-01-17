@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, Plus, DollarSign, Check, Clock, ExternalLink, Download, Eye, Edit, Trash2, Send } from 'lucide-react';
+import { FileText, Plus, DollarSign, Check, Clock, ExternalLink, Download, Eye, Edit, Trash2, Send, CheckSquare, Square } from 'lucide-react';
 import { API_URL } from '../services/config';
 
 interface Invoice {
@@ -33,10 +33,13 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
   const [showNewInvoice, setShowNewInvoice] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [selectedInvoices, setSelectedInvoices] = useState<Set<string>>(new Set());
+  const [isDownloadingBatch, setIsDownloadingBatch] = useState(false);
   
   // New invoice form
   const [formData, setFormData] = useState({
     patientId: '',
+    date: new Date().toISOString().split('T')[0],
     dueDate: '',
     description: '',
     items: [{ description: 'Sesión de terapia', quantity: 1, unitPrice: 0 }]
@@ -84,8 +87,17 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
   };
 
   const handleCreateInvoice = async () => {
-    if (!formData.patientId || !formData.dueDate) {
+    if (!formData.patientId || !formData.date || !formData.dueDate) {
       alert('Por favor completa todos los campos requeridos');
+      return;
+    }
+
+    // Validar que la fecha de factura sea anterior a la fecha de vencimiento
+    const invoiceDate = new Date(formData.date);
+    const dueDate = new Date(formData.dueDate);
+    
+    if (invoiceDate >= dueDate) {
+      alert('La fecha de factura debe ser anterior a la fecha de vencimiento');
       return;
     }
 
@@ -98,7 +110,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
       patientId: formData.patientId,
       patientName: patient.name,
       amount: calculateTotal(),
-      date: new Date().toISOString().split('T')[0],
+      date: formData.date,
       dueDate: formData.dueDate,
       status: 'pending',
       description: formData.description,
@@ -116,6 +128,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
         await loadInvoices();
         setShowNewInvoice(false);
         resetForm();
+        alert('Factura creada correctamente');
       }
     } catch (error) {
       console.error('Error creating invoice:', error);
@@ -147,10 +160,69 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
   const resetForm = () => {
     setFormData({
       patientId: '',
+      date: new Date().toISOString().split('T')[0],
       dueDate: '',
       description: '',
       items: [{ description: 'Sesión de terapia', quantity: 1, unitPrice: 0 }]
     });
+  };
+
+  const handleChangeStatus = async (invoiceId: string, newStatus: 'paid' | 'pending' | 'overdue' | 'cancelled') => {
+    try {
+      const response = await fetch(`${API_URL}/invoices/${invoiceId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      });
+
+      if (response.ok) {
+        await loadInvoices();
+        alert('Estado actualizado correctamente');
+      }
+    } catch (error) {
+      console.error('Error updating invoice status:', error);
+      alert('Error al actualizar el estado');
+    }
+  };
+
+  const toggleSelectInvoice = (invoiceId: string) => {
+    const newSelected = new Set(selectedInvoices);
+    if (newSelected.has(invoiceId)) {
+      newSelected.delete(invoiceId);
+    } else {
+      newSelected.add(invoiceId);
+    }
+    setSelectedInvoices(newSelected);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedInvoices.size === invoices.length) {
+      setSelectedInvoices(new Set());
+    } else {
+      setSelectedInvoices(new Set(invoices.map(inv => inv.id)));
+    }
+  };
+
+  const handleDownloadSelectedPDFs = async () => {
+    if (selectedInvoices.size === 0) {
+      alert('Selecciona al menos una factura');
+      return;
+    }
+
+    setIsDownloadingBatch(true);
+    
+    for (const invoiceId of Array.from(selectedInvoices)) {
+      const invoice = invoices.find(inv => inv.id === invoiceId);
+      if (invoice) {
+        await handleDownloadPDF(invoiceId, invoice.invoiceNumber);
+        // Pequeña pausa entre descargas
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+    
+    setIsDownloadingBatch(false);
+    setSelectedInvoices(new Set());
+    alert(`${selectedInvoices.size} facturas descargadas`);
   };
 
   const addItem = () => {
@@ -288,10 +360,37 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
 
       {/* Invoice List */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        {selectedInvoices.size > 0 && (
+          <div className="bg-indigo-50 border-b border-indigo-200 px-4 py-3 flex items-center justify-between">
+            <span className="text-sm font-medium text-indigo-700">
+              {selectedInvoices.size} factura{selectedInvoices.size !== 1 ? 's' : ''} seleccionada{selectedInvoices.size !== 1 ? 's' : ''}
+            </span>
+            <button
+              onClick={handleDownloadSelectedPDFs}
+              disabled={isDownloadingBatch}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium disabled:opacity-50"
+            >
+              <Download size={16} />
+              {isDownloadingBatch ? 'Descargando...' : 'Descargar PDFs'}
+            </button>
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
+                <th className="px-4 py-3">
+                  <button
+                    onClick={toggleSelectAll}
+                    className="p-1 hover:bg-slate-200 rounded transition-colors"
+                  >
+                    {selectedInvoices.size === invoices.length && invoices.length > 0 ? (
+                      <CheckSquare size={18} className="text-indigo-600" />
+                    ) : (
+                      <Square size={18} className="text-slate-400" />
+                    )}
+                  </button>
+                </th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase">Nº Factura</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase">Paciente</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase">Fecha</th>
@@ -304,13 +403,25 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
             <tbody className="divide-y divide-slate-100">
               {invoices.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                  <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
                     No hay facturas todavía. Crea tu primera factura.
                   </td>
                 </tr>
               ) : (
                 invoices.map((invoice) => (
                   <tr key={invoice.id} className={`hover:bg-slate-50 transition-colors ${invoice.status === 'cancelled' ? 'opacity-60' : ''}`}>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => toggleSelectInvoice(invoice.id)}
+                        className="p-1 hover:bg-slate-200 rounded transition-colors"
+                      >
+                        {selectedInvoices.has(invoice.id) ? (
+                          <CheckSquare size={18} className="text-indigo-600" />
+                        ) : (
+                          <Square size={18} className="text-slate-400" />
+                        )}
+                      </button>
+                    </td>
                     <td className={`px-4 py-3 text-sm font-medium text-slate-900 ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>{invoice.invoiceNumber}</td>
                     <td className={`px-4 py-3 text-sm text-slate-700 ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>{invoice.patientName}</td>
                     <td className={`px-4 py-3 text-sm text-slate-600 ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>{new Date(invoice.date).toLocaleDateString()}</td>
@@ -318,10 +429,24 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
                     <td className={`px-4 py-3 text-sm font-semibold text-slate-900 text-right ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>€{invoice.amount.toFixed(2)}</td>
                     <td className="px-4 py-3">
                       <div className="flex justify-center">
-                        <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(invoice.status)}`}>
-                          {getStatusIcon(invoice.status)}
-                          {getStatusLabel(invoice.status)}
-                        </span>
+                        <div className="relative group">
+                          <select
+                            value={invoice.status}
+                            onChange={(e) => handleChangeStatus(invoice.id, e.target.value as any)}
+                            className={`appearance-none text-xs font-semibold border rounded-lg pl-3 pr-8 py-2 cursor-pointer transition-all hover:shadow-md focus:ring-2 focus:ring-indigo-500 focus:border-transparent focus:outline-none ${getStatusColor(invoice.status)}`}
+                            style={{ minWidth: '120px' }}
+                          >
+                            <option value="pending">⏱️ Pendiente</option>
+                            <option value="paid">✅ Pagada</option>
+                            <option value="overdue">⚠️ Vencida</option>
+                            <option value="cancelled">❌ Cancelada</option>
+                          </select>
+                          <div className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
+                            <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </div>
+                        </div>
                       </div>
                     </td>
                     <td className="px-4 py-3">
@@ -401,6 +526,17 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
                 </p>
               </div>
 
+              {/* Invoice Date */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Fecha de Factura *</label>
+                <input
+                  type="date"
+                  value={formData.date}
+                  onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+              </div>
+
               {/* Due Date */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">Fecha de Vencimiento *</label>
@@ -408,8 +544,10 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId }) => {
                   type="date"
                   value={formData.dueDate}
                   onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
+                  min={formData.date}
                   className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 />
+                <p className="text-xs text-slate-500 mt-1">Debe ser posterior a la fecha de factura</p>
               </div>
 
               {/* Description */}

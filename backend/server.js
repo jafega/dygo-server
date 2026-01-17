@@ -1915,12 +1915,23 @@ app.get('/api/dbinfo', async (_req, res) => {
 // --- INVOICES ---
 app.get('/api/invoices', (req, res) => {
   const psychologistId = req.query.psychologistId;
-  if (!psychologistId) return res.status(400).json({ error: 'Missing psychologistId' });
+  const patientId = req.query.patientId;
+  
+  if (!psychologistId && !patientId) {
+    return res.status(400).json({ error: 'Missing psychologistId or patientId' });
+  }
 
   const db = getDb();
   if (!db.invoices) db.invoices = [];
   
-  const invoices = db.invoices.filter(inv => inv.psychologistId === psychologistId);
+  let invoices = db.invoices;
+  if (psychologistId) {
+    invoices = invoices.filter(inv => inv.psychologistId === psychologistId);
+  }
+  if (patientId) {
+    invoices = invoices.filter(inv => inv.patientId === patientId);
+  }
+  
   res.json(invoices);
 });
 

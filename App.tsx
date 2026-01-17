@@ -6,6 +6,7 @@ import { USE_BACKEND } from './services/config';
 import { analyzeJournalEntry, analyzeGoalsProgress, generateWeeklyReport } from './services/genaiService';
 import VoiceSession from './components/VoiceSession';
 import PatientSessions from './components/PatientSessions';
+import PatientBillingPanel from './components/PatientBillingPanel';
 import CalendarView from './components/CalendarView';
 import InsightsPanel from './components/InsightsPanel';
 import GoalsPanel from './components/GoalsPanel';
@@ -19,7 +20,7 @@ import PsychologistSidebar from './components/PsychologistSidebar';
 import BillingPanel from './components/BillingPanel';
 import PsychologistProfilePanel from './components/PsychologistProfilePanel';
 import PsychologistCalendar from './components/PsychologistCalendar';
-import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp } from 'lucide-react';
+import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase } from 'lucide-react';
 
 // Custom Dygo Logo Component
 const DygoLogo: React.FC<{ className?: string }> = ({ className = "w-8 h-8" }) => (
@@ -54,7 +55,7 @@ const App: React.FC = () => {
   const [sessionDate, setSessionDate] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
-  const [activeTab, setActiveTab] = useState<'insights' | 'feedback' | 'sessions' | 'calendar'>('insights');
+  const [activeTab, setActiveTab] = useState<'insights' | 'feedback' | 'sessions' | 'calendar' | 'billing'>('insights');
   const [showSettings, setShowSettings] = useState(false);
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReport | null>(null);
   const [hasPendingInvites, setHasPendingInvites] = useState(false);
@@ -587,6 +588,10 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   onViewChange={setPsychPanelView}
                   isOpen={sidebarOpen}
                   onToggle={() => setSidebarOpen(!sidebarOpen)}
+                  userName={currentUser.name}
+                  userEmail={currentUser.email}
+                  onSwitchToPersonal={() => setPsychViewMode('PERSONAL')}
+                  onOpenSettings={handleOpenSettings}
                />
                
                {/* Main Content */}
@@ -604,13 +609,6 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                                    <p className="text-slate-500 mt-1">Dr/a. {currentUser.name}</p>
                               </div>
                               <div className="flex gap-3 items-center pl-12 lg:pl-0">
-                                  <button 
-                                      onClick={() => setPsychViewMode('PERSONAL')}
-                                      className="px-4 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg shadow-sm text-sm font-medium transition-colors flex items-center gap-2 border border-indigo-100"
-                                  >
-                                      <UserIcon size={16} /> <span className="hidden sm:inline">Mi Diario</span>
-                                  </button>
-                                  <ProfileCircle onClick={handleOpenSettings} />
                                   {/* Superadmin access */}
                                   {currentUser && String(currentUser.email).toLowerCase() === 'garryjavi@gmail.com' && (
                                       <button onClick={() => setViewState(ViewState.SUPERADMIN)} className="px-3 py-2 bg-amber-50 text-amber-800 rounded-lg text-xs font-medium">Admin</button>
@@ -619,7 +617,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                          </header>
 
                          {/* Dynamic Panel Content */}
-                         <div className="animate-in fade-in">
+                         <div className="animate-in fade-in max-h-[calc(100vh-12rem)] overflow-y-auto">
                               {psychPanelView === 'patients' && <PatientDashboard />}
                               {psychPanelView === 'billing' && <BillingPanel psychologistId={currentUser.id} />}
                               {psychPanelView === 'profile' && <PsychologistProfilePanel userId={currentUser.id} />}
@@ -689,20 +687,12 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
 
       <div className="flex h-screen overflow-hidden bg-slate-50">
         {/* Sidebar tipo Notion */}
-        <aside className={`${sidebarOpen ? 'w-64' : 'w-0'} md:${sidebarOpen ? 'w-64' : 'w-16'} transition-all duration-300 bg-white border-r border-slate-200 flex flex-col overflow-hidden`}>
-          <div className="p-4 flex items-center justify-between border-b border-slate-200">
-            {sidebarOpen && (
-              <div className="flex items-center gap-2">
-                <DygoLogo className="w-8 h-8 text-indigo-600" />
-                <span className="font-dygo text-xl font-bold text-slate-900">dygo</span>
-              </div>
-            )}
-            <button
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="p-2 hover:bg-slate-100 rounded-lg transition-colors hidden md:block"
-            >
-              {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
-            </button>
+        <aside className={`${sidebarOpen ? 'w-64' : 'w-0'} md:w-64 transition-all duration-300 bg-white border-r border-slate-200 flex flex-col overflow-hidden`}>
+          <div className="p-4 flex items-center border-b border-slate-200">
+            <div className="flex items-center gap-2">
+              <DygoLogo className="w-8 h-8 text-indigo-600" />
+              <span className="font-dygo text-xl font-bold text-slate-900">dygo</span>
+            </div>
           </div>
 
           <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
@@ -715,38 +705,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
               }`}
             >
               <LayoutDashboard size={18} />
-              {sidebarOpen && <span>Resumen</span>}
-            </button>
-
-            <button
-              onClick={() => setActiveTab('feedback')}
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm font-medium ${
-                activeTab === 'feedback'
-                  ? 'bg-indigo-50 text-indigo-700'
-                  : 'text-slate-700 hover:bg-slate-100'
-              }`}
-            >
-              <MessageCircle size={18} />
-              {sidebarOpen && (
-                <span className="flex-1 text-left">Feedback</span>
-              )}
-              {sidebarOpen && unreadFeedbackCount > 0 && (
-                <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-xs font-bold flex items-center justify-center">
-                  {unreadFeedbackCount > 99 ? '99+' : unreadFeedbackCount}
-                </span>
-              )}
-            </button>
-
-            <button
-              onClick={() => setActiveTab('sessions')}
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm font-medium ${
-                activeTab === 'sessions'
-                  ? 'bg-indigo-50 text-indigo-700'
-                  : 'text-slate-700 hover:bg-slate-100'
-              }`}
-            >
-              <Stethoscope size={18} />
-              {sidebarOpen && <span>Sesiones</span>}
+              <span className={`${sidebarOpen ? 'inline' : 'hidden'} md:inline`}>Resumen</span>
             </button>
 
             <button
@@ -758,31 +717,79 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
               }`}
             >
               <Calendar size={18} />
-              {sidebarOpen && <span>Calendario</span>}
+              <span className={`${sidebarOpen ? 'inline' : 'hidden'} md:inline`}>Calendario</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('sessions')}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm font-medium ${
+                activeTab === 'sessions'
+                  ? 'bg-indigo-50 text-indigo-700'
+                  : 'text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              <Stethoscope size={18} />
+              <span className={`${sidebarOpen ? 'inline' : 'hidden'} md:inline`}>Sesiones</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('feedback')}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm font-medium ${
+                activeTab === 'feedback'
+                  ? 'bg-indigo-50 text-indigo-700'
+                  : 'text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              <MessageCircle size={18} />
+              <span className={`${sidebarOpen ? 'inline' : 'hidden'} md:inline flex-1 text-left`}>Feedback</span>
+              {unreadFeedbackCount > 0 && (
+                <span className={`${sidebarOpen ? 'inline-flex' : 'hidden'} md:inline-flex min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-xs font-bold items-center justify-center`}>
+                  {unreadFeedbackCount > 99 ? '99+' : unreadFeedbackCount}
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={() => setActiveTab('billing')}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm font-medium ${
+                activeTab === 'billing'
+                  ? 'bg-indigo-50 text-indigo-700'
+                  : 'text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              <FileText size={18} />
+              <span className={`${sidebarOpen ? 'inline' : 'hidden'} md:inline`}>Facturación</span>
             </button>
           </nav>
 
-          {sidebarOpen && (
-            <div className="p-3 border-t border-slate-200">
-              <div className="flex items-center gap-3 px-3 py-2">
-                <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center">
-                  <span className="text-indigo-700 font-semibold text-sm">
-                    {currentUser?.name?.charAt(0).toUpperCase()}
-                  </span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-slate-900 truncate">{currentUser?.name}</p>
-                  <p className="text-xs text-slate-500 truncate">{currentUser?.email}</p>
-                </div>
+          <div className={`${sidebarOpen ? 'block' : 'hidden'} md:block p-3 border-t border-slate-200`}>
+            <div className="flex items-center gap-3 px-3 py-2">
+              <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center">
+                <span className="text-indigo-700 font-semibold text-sm">
+                  {currentUser?.name?.charAt(0).toUpperCase()}
+                </span>
               </div>
-              <button
-                onClick={handleOpenSettings}
-                className="w-full mt-2 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 rounded-lg transition-colors text-left"
-              >
-                Configuración
-              </button>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-slate-900 truncate">{currentUser?.name}</p>
+                <p className="text-xs text-slate-500 truncate">{currentUser?.email}</p>
+              </div>
             </div>
-          )}
+            {currentUser?.role === 'PSYCHOLOGIST' && (
+              <button
+                onClick={() => setPsychViewMode('DASHBOARD')}
+                className="w-full mt-2 px-3 py-2 text-sm font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors text-left flex items-center gap-2 border border-purple-100"
+              >
+                <Briefcase size={16} />
+                <span>Panel Pro</span>
+              </button>
+            )}
+            <button
+              onClick={handleOpenSettings}
+              className="w-full mt-2 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 rounded-lg transition-colors text-left"
+            >
+              Configuración
+            </button>
+          </div>
         </aside>
 
         {/* Main Content */}
@@ -794,7 +801,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                 onClick={() => setSidebarOpen(!sidebarOpen)}
                 className="p-2 hover:bg-slate-100 rounded-lg"
               >
-                <Menu size={24} />
+                {sidebarOpen ? <X size={24} /> : <Menu size={24} />}
               </button>
               <div className="flex items-center gap-2">
                 <DygoLogo className="w-8 h-8 text-indigo-600" />
@@ -816,6 +823,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   {activeTab === 'feedback' && 'Feedback del Psicólogo'}
                   {activeTab === 'sessions' && 'Mis Sesiones'}
                   {activeTab === 'calendar' && 'Calendario'}
+                  {activeTab === 'billing' && 'Facturación'}
                   {currentUser?.role === 'PSYCHOLOGIST' && (
                     <span className="bg-indigo-100 text-indigo-700 text-xs px-2 py-0.5 rounded-lg border border-indigo-200 uppercase tracking-wide font-sans">
                       Modo Personal
@@ -827,18 +835,10 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   {activeTab === 'feedback' && 'Comentarios y recomendaciones de tu psicólogo'}
                   {activeTab === 'sessions' && 'Gestiona tus citas con el psicólogo'}
                   {activeTab === 'calendar' && 'Visualiza tus entradas y actividades'}
+                  {activeTab === 'billing' && 'Consulta y descarga tus facturas'}
                 </p>
               </div>
               <div className="flex gap-3">
-                {currentUser?.role === 'PSYCHOLOGIST' && (
-                  <button
-                    onClick={() => setPsychViewMode('DASHBOARD')}
-                    className="px-4 py-2 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 border border-purple-200"
-                  >
-                    <ArrowLeftRight size={16} />
-                    Volver a Pacientes
-                  </button>
-                )}
                 <button
                   onClick={() => handleStartSession()}
                   className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-lg font-medium flex items-center gap-2 transition-all shadow-lg hover:shadow-indigo-500/30"
@@ -1154,6 +1154,13 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   selectedDate={selectedDate}
                   onDateSelect={(date) => { setSelectedDate(date); setSelectedEntryMode('day'); }}
                 />
+              </div>
+            )}
+
+            {/* Vista de Facturación */}
+            {activeTab === 'billing' && (
+              <div className="animate-in fade-in">
+                <PatientBillingPanel />
               </div>
             )}
           </div>
