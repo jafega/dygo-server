@@ -291,44 +291,44 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
         </div>
         
         {/* Vertical Bar Chart */}
-        <div className="relative h-56 sm:h-72 px-2">
+        <div className="relative h-48 sm:h-72 px-2">
           {/* Grid lines */}
-          <div className="absolute inset-0 flex flex-col justify-between pointer-events-none" style={{ paddingBottom: '32px' }}>
+          <div className="absolute inset-0 flex flex-col justify-between pointer-events-none pb-8">
             {[0, 1, 2, 3, 4].map(i => (
               <div key={i} className="border-t border-slate-100" />
             ))}
           </div>
           
           {/* Bars container */}
-          <div className="relative h-full flex items-end justify-between gap-1" style={{ paddingBottom: '32px' }}>
+          <div className="relative h-full flex items-end justify-between gap-0.5 sm:gap-1 pb-8">
             {last12Months.map((month, idx) => {
               const key = Object.keys(monthlyRevenue)[idx];
               const value = monthlyRevenue[key];
               const percentage = (value / maxRevenue) * 100;
               
               return (
-                <div key={key} className="flex-1 flex flex-col items-center justify-end group relative" style={{ minWidth: '0' }}>
+                <div key={key} className="flex-1 flex flex-col items-center justify-end group relative min-w-0">
                   {/* Bar */}
-                  <div className="w-full flex flex-col items-center justify-end" style={{ height: '240px' }}>
+                  <div className="w-full h-full flex flex-col items-center justify-end">
                     {/* Tooltip on hover */}
                     {value > 0 && (
-                      <div className="absolute -top-8 bg-slate-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
-                        {value.toFixed(2)}€
+                      <div className="absolute -top-8 bg-slate-800 text-white text-[10px] px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
+                        {value.toFixed(0)}€
                       </div>
                     )}
                     
                     <div 
-                      className="w-full bg-gradient-to-t from-green-600 via-green-500 to-emerald-400 rounded-t-lg transition-all duration-500 hover:opacity-90 cursor-pointer shadow-sm"
+                      className="w-full bg-gradient-to-t from-green-600 via-green-500 to-emerald-400 rounded-t transition-all duration-500 hover:opacity-90 cursor-pointer shadow-sm"
                       style={{ 
                         height: `${Math.max(percentage, 2)}%`,
-                        minHeight: value > 0 ? '8px' : '0'
+                        minHeight: value > 0 ? '4px' : '0'
                       }}
                     />
                   </div>
                   
                   {/* Month label */}
-                  <div className="absolute -bottom-7 w-full flex justify-center">
-                    <span className="text-[9px] font-medium text-slate-600 whitespace-nowrap">
+                  <div className="absolute -bottom-6 w-full flex justify-center">
+                    <span className="text-[8px] sm:text-[9px] font-medium text-slate-600 whitespace-nowrap">
                       {month}
                     </span>
                   </div>
@@ -340,11 +340,11 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
           {/* Y-axis line */}
           <div className="absolute left-0 bottom-8 top-0 border-l-2 border-slate-200" />
           {/* X-axis line */}
-          <div className="absolute left-0 right-0 border-b-2 border-slate-200" style={{ bottom: '32px' }} />
+          <div className="absolute left-0 right-0 bottom-8 border-b-2 border-slate-200" />
         </div>
         
         {/* Legend/Summary */}
-        <div className="mt-8 pt-4 border-t border-slate-100 flex items-center justify-between text-xs">
+        <div className="mt-6 sm:mt-8 pt-3 sm:pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded bg-gradient-to-t from-green-600 to-emerald-400"></div>
             <span className="text-slate-600">Ingresos mensuales</span>

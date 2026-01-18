@@ -107,18 +107,6 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-end">
-        <button
-          onClick={handleSave}
-          disabled={isSaving}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <Save size={18} />
-          {isSaving ? 'Guardando...' : 'Guardar Cambios'}
-        </button>
-      </div>
-
       {saveSuccess && (
         <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center gap-2">
           <Save size={18} />
