@@ -162,7 +162,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
     const date = new Date();
     date.setMonth(date.getMonth() - i);
     const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-    const label = date.toLocaleDateString('es-ES', { month: 'short', year: '2-digit' });
+    const label = `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getFullYear()).slice(-2)}`;
     last12Months.push(label);
     monthlyRevenue[key] = 0;
   }
@@ -176,8 +176,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
   });
 
   const revenueValues = Object.values(monthlyRevenue);
-  const highestRevenue = Math.max(...revenueValues, 0);
-  const maxRevenue = highestRevenue + 200;
+  const maxRevenue = Math.max(...revenueValues, 1); // Use highest value as max for auto-scaling
   
   // Revenue in selected date range
   const revenueInRange = paidInvoices
@@ -349,9 +348,6 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded bg-gradient-to-t from-green-600 to-emerald-400"></div>
             <span className="text-slate-600">Ingresos mensuales</span>
-          </div>
-          <div className="text-slate-500">
-            Máximo: <span className="font-bold text-green-600">{maxRevenue.toFixed(0)}€</span>
           </div>
         </div>
       </div>
