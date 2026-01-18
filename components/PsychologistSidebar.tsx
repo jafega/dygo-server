@@ -102,9 +102,10 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
             right: menuButtonPos.right !== undefined ? `${menuButtonPos.right}px` : undefined,
             left: menuButtonPos.left !== undefined ? `${menuButtonPos.left}px` : undefined,
             touchAction: 'none',
-            cursor: isDragging ? 'grabbing' : 'grab'
+            cursor: isDragging ? 'grabbing' : 'grab',
+            transition: isDragging ? 'none' : 'all 0.3s'
           }}
-          className="lg:hidden fixed z-50 w-12 h-12 bg-white rounded-full shadow-lg border border-slate-200 hover:bg-slate-50 transition-all duration-300 flex items-center justify-center"
+          className="lg:hidden fixed z-50 w-12 h-12 bg-white rounded-full shadow-lg border border-slate-200 hover:bg-slate-50 flex items-center justify-center"
         >
           <DygoLogo className="w-7 h-7 text-indigo-600" />
         </button>
