@@ -175,16 +175,10 @@ const PatientDashboard: React.FC = () => {
 
   return (
     <div className="space-y-4 sm:space-y-6">
-       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4">
-            <h3 className="text-lg sm:text-xl font-bold text-slate-800 flex items-center gap-2">
-                <Users className="w-5 h-5 sm:w-6 sm:h-6 text-indigo-500" />
-                Panel de Pacientes
-            </h3>
-            <div className="flex gap-2 w-full sm:w-auto">
-                <button onClick={openInviteModal} className="flex-1 sm:flex-none justify-center bg-indigo-600 hover:bg-indigo-700 text-white px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg text-xs sm:text-sm font-medium flex items-center gap-1.5 sm:gap-2 transition-colors shadow-sm">
-                    <UserPlus size={14} className="sm:w-4 sm:h-4" /> <span className="sm:hidden">Nuevo</span><span className="hidden sm:inline">Añadir Paciente</span>
-                </button>
-            </div>
+       <div className="flex justify-end items-center">
+            <button onClick={openInviteModal} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg text-xs sm:text-sm font-medium flex items-center gap-1.5 sm:gap-2 transition-colors shadow-sm">
+                <UserPlus size={14} className="sm:w-4 sm:h-4" /> <span className="sm:hidden">Nuevo</span><span className="hidden sm:inline">Añadir Paciente</span>
+            </button>
        </div>
 
        {showInvite && (

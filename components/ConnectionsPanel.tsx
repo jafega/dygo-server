@@ -216,24 +216,6 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
 
   return (
     <div className="space-y-6 animate-in fade-in">
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm relative overflow-hidden">
-        <div className="absolute -top-8 -right-8 w-32 h-32 bg-indigo-50 rounded-full" />
-        <div className="relative z-10 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
-              <Link2 size={24} />
-            </div>
-            <div>
-              <p className="text-xs uppercase font-semibold text-indigo-600 tracking-wide">Conexiones</p>
-              <h2 className="text-2xl font-bold text-slate-900">Gestiona quién puede verte y a quién acompañas</h2>
-            </div>
-          </div>
-          <div className="text-sm text-slate-500 flex items-center gap-2">
-            <Shield size={16} />
-            Datos protegidos bajo tu consentimiento
-          </div>
-        </div>
-      </div>
 
       {toast && (
         <div className={`flex items-start gap-2 px-4 py-3 rounded-xl text-sm ${toast.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>

@@ -196,11 +196,6 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-purple-600 to-indigo-600 rounded-2xl p-8 text-white">
-        <h1 className="text-3xl font-bold mb-2">Dashboard Profesional</h1>
-        <p className="text-purple-100">Resumen completo de tu actividad</p>
-      </div>
 
       {/* Date Range Selector */}
       <div className="bg-white rounded-xl border border-slate-200 p-4">

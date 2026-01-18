@@ -108,11 +108,7 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId }
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900">Mi Perfil Profesional</h2>
-          <p className="text-sm text-slate-500 mt-1">Información personal y datos de facturación</p>
-        </div>
+      <div className="flex items-center justify-end">
         <button
           onClick={handleSave}
           disabled={isSaving}

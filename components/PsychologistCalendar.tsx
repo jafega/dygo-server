@@ -485,19 +485,14 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900">Calendario de Sesiones</h2>
-          <p className="text-sm text-slate-500 mt-1">Gestiona tus citas y disponibilidad</p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setShowNewAvailability(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors shadow-md"
-          >
-            <Clock size={18} />
-            <span className="hidden sm:inline">Añadir Disponibilidad</span>
-            <span className="sm:hidden">Disponibilidad</span>
+      <div className="flex items-center justify-end flex-wrap gap-2">
+        <button
+          onClick={() => setShowNewAvailability(true)}
+          className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors shadow-md"
+        >
+          <Clock size={18} />
+          <span className="hidden sm:inline">Añadir Disponibilidad</span>
+          <span className="sm:hidden">Disponibilidad</span>
           </button>
           <button
             onClick={() => setShowNewSession(true)}
@@ -507,7 +502,6 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
             <span className="hidden sm:inline">Nueva Sesión</span>
             <span className="sm:hidden">Sesión</span>
           </button>
-        </div>
       </div>
 
         {/* View controls & filters */}

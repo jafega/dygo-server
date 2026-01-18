@@ -44,7 +44,10 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
   // State for draggable menu button position
   const [menuButtonPos, setMenuButtonPos] = useState(() => {
     const saved = localStorage.getItem('menuButtonPositionPro');
-    return saved ? JSON.parse(saved) : { top: 16, right: 16 };
+    if (saved) return JSON.parse(saved);
+    // Default position: bottom-left (16px from edges)
+    const defaultTop = typeof window !== 'undefined' ? window.innerHeight - 64 : 700;
+    return { top: defaultTop, left: 16 };
   });
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });

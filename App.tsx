@@ -22,7 +22,7 @@ import PsychologistProfilePanel from './components/PsychologistProfilePanel';
 import PsychologistCalendar from './components/PsychologistCalendar';
 import PsychologistDashboard from './components/PsychologistDashboard';
 import ConnectionsPanel from './components/ConnectionsPanel';
-import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2 } from 'lucide-react';
+import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2 } from 'lucide-react';
 
 // Custom Dygo Logo Component
 const DygoLogo: React.FC<{ className?: string }> = ({ className = "w-8 h-8" }) => (
@@ -44,7 +44,10 @@ const App: React.FC = () => {
   // State for draggable menu button position
   const [menuButtonPos, setMenuButtonPos] = useState(() => {
     const saved = localStorage.getItem('menuButtonPosition');
-    return saved ? JSON.parse(saved) : { top: 16, right: 16 };
+    if (saved) return JSON.parse(saved);
+    // Default position: bottom-left (16px from edges)
+    const defaultTop = typeof window !== 'undefined' ? window.innerHeight - 64 : 700;
+    return { top: defaultTop, left: 16 };
   });
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
@@ -616,16 +619,32 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                
                {/* Main Content */}
                <div className="flex-1 overflow-y-auto px-4 md:px-8 py-4 md:py-6">
-                    {/* Mobile Header with page titles */}
-                    <header className="lg:hidden mb-4">
-                      <h1 className="text-2xl font-bold text-slate-900">
-                        {psychPanelView === 'dashboard' && 'Dashboard'}
-                        {psychPanelView === 'patients' && 'Pacientes'}
-                        {psychPanelView === 'billing' && 'Facturación'}
-                        {psychPanelView === 'profile' && 'Mi Perfil'}
-                        {psychPanelView === 'calendar' && 'Calendario'}
-                        {psychPanelView === 'connections' && 'Conexiones'}
-                      </h1>
+                    {/* Mobile Header with page titles, icon and description */}
+                    <header className="lg:hidden mb-6">
+                      <div className="flex items-center gap-3 mb-2">
+                        {psychPanelView === 'dashboard' && <LayoutDashboard className="w-6 h-6 text-indigo-600" />}
+                        {psychPanelView === 'patients' && <Users className="w-6 h-6 text-indigo-600" />}
+                        {psychPanelView === 'billing' && <FileText className="w-6 h-6 text-indigo-600" />}
+                        {psychPanelView === 'profile' && <UserIcon className="w-6 h-6 text-indigo-600" />}
+                        {psychPanelView === 'calendar' && <CalendarIcon className="w-6 h-6 text-indigo-600" />}
+                        {psychPanelView === 'connections' && <Link2 className="w-6 h-6 text-indigo-600" />}
+                        <h1 className="text-2xl font-bold text-slate-900">
+                          {psychPanelView === 'dashboard' && 'Dashboard'}
+                          {psychPanelView === 'patients' && 'Pacientes'}
+                          {psychPanelView === 'billing' && 'Facturación'}
+                          {psychPanelView === 'profile' && 'Mi Perfil'}
+                          {psychPanelView === 'calendar' && 'Calendario'}
+                          {psychPanelView === 'connections' && 'Conexiones'}
+                        </h1>
+                      </div>
+                      <p className="text-sm text-slate-500">
+                        {psychPanelView === 'dashboard' && 'Resumen completo de tu actividad'}
+                        {psychPanelView === 'patients' && 'Gestiona tu lista de pacientes'}
+                        {psychPanelView === 'billing' && 'Gestiona facturas y pagos'}
+                        {psychPanelView === 'profile' && 'Información personal y datos de facturación'}
+                        {psychPanelView === 'calendar' && 'Agenda y disponibilidad'}
+                        {psychPanelView === 'connections' && 'Gestiona quién puede verte y a quién acompañas'}
+                      </p>
                     </header>
 
                     {psychPanelView === 'dashboard' && <PsychologistDashboard psychologistId={currentUser.id} />}

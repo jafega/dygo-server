@@ -367,13 +367,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900">Facturación</h2>
-          <p className="text-sm text-slate-500 mt-1">
-            {patientId ? 'Facturas emitidas a este paciente' : 'Gestiona las facturas de tus pacientes'}
-          </p>
-        </div>
+      <div className="flex items-center justify-end">
         {!patientId && (
           <button
             onClick={() => setShowNewInvoice(true)}
