@@ -371,11 +371,11 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       }
     }}>
       {/* Header - Only visible on mobile */}
-      <div className="flex items-center justify-end lg:hidden">
+      <div className="lg:hidden">
         {!patientId && (
           <button
             onClick={() => setShowNewInvoice(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-md"
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors shadow-md font-medium"
           >
             <Plus size={18} />
             Nueva Factura

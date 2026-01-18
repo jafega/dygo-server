@@ -490,22 +490,20 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
       }
     }}>
       {/* Header - Only visible on mobile */}
-      <div className="flex items-center justify-end flex-wrap gap-2 lg:hidden">
+      <div className="flex flex-col items-stretch gap-2 lg:hidden">
         <button
           onClick={() => setShowNewAvailability(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors shadow-md"
+          className="flex items-center justify-center gap-2 px-4 py-3 bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition-colors shadow-md font-medium"
         >
           <Clock size={18} />
-          <span className="hidden sm:inline">Añadir Disponibilidad</span>
-          <span className="sm:hidden">Disponibilidad</span>
+          <span>Añadir Disponibilidad</span>
           </button>
           <button
             onClick={() => setShowNewSession(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-md"
+            className="flex items-center justify-center gap-2 px-4 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors shadow-md font-medium"
           >
             <Plus size={18} />
-            <span className="hidden sm:inline">Nueva Sesión</span>
-            <span className="sm:hidden">Sesión</span>
+            <span>Nueva Sesión</span>
           </button>
       </div>
 

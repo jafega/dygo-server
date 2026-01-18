@@ -1016,12 +1016,13 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
             </header>
 
             {/* Mobile Action Button */}
-            <div className="md:hidden fixed bottom-6 right-6 z-50">
+            <div className="md:hidden fixed bottom-6 left-4 right-4 z-50">
               <button
                 onClick={() => handleStartSession()}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white p-4 rounded-full shadow-2xl hover:shadow-indigo-500/50 transition-all"
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl shadow-2xl hover:shadow-indigo-500/50 transition-all flex items-center justify-center gap-2 font-medium"
               >
-                <Mic size={24} />
+                <Mic size={20} />
+                Grabar entrada
               </button>
             </div>
 
