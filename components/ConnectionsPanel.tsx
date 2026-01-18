@@ -348,83 +348,89 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
           {currentUser.role === 'PSYCHOLOGIST' && (
             <>
               <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                <div className="flex flex-col gap-2 mb-4">
-                  <h4 className="text-sm font-bold text-slate-600 uppercase tracking-wide flex items-center gap-2">
-                    <UserPlus size={14} /> Invitar pacientes
-                  </h4>
-                  <p className="text-sm text-slate-500">Comparte un acceso seguro para que tus pacientes te vinculen en dygo.</p>
-                </div>
-                <div className="flex flex-col gap-3 md:flex-row">
-                  <input
-                    type="email"
-                    value={inviteEmail}
-                    onChange={(e) => setInviteEmail(e.target.value)}
-                    placeholder="correo@paciente.com"
-                    className="flex-1 px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  />
-                  <button
-                    onClick={handleSendInvitation}
-                    disabled={isSendingInvite || !inviteEmail.trim()}
-                    className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {isSendingInvite ? (<Loader2 size={16} className="animate-spin" />) : (<UserPlus size={16} />)}
-                    {isSendingInvite ? 'Enviando…' : 'Enviar invitación'}
-                  </button>
-                </div>
-              </div>
-
-              {sentInvitations.length > 0 && (
-                <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                  <h4 className="text-sm font-bold text-slate-600 uppercase tracking-wide mb-4 flex items-center gap-2">
-                    <Mail size={14} /> Solicitudes pendientes enviadas
-                  </h4>
-                  <div className="space-y-3">
-                    {sentInvitations.map(inv => (
-                      <div key={inv.id} className="p-4 rounded-xl border border-slate-100 bg-slate-50 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-900">{inv.toUserEmail}</p>
-                          <p className="text-xs text-slate-500">Enviada por {inv.fromPsychologistName}</p>
-                        </div>
-                        <button 
-                          onClick={() => handleRevokeSentInvitation(inv.id)} 
-                          className="px-4 py-2 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-sm flex items-center gap-1"
-                        >
-                          <X size={14} />
-                          Revocar solicitud
-                        </button>
-                      </div>
-                    ))}
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-6">
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-900">Pacientes bajo tu cuidado</h3>
+                    <p className="text-sm text-slate-500">Invita y gestiona tus pacientes en dygo.</p>
                   </div>
                 </div>
-              )}
 
-              <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
+                {/* Invitar pacientes */}
+                <div className="mb-6 pb-6 border-b border-slate-100">
+                  <h4 className="text-sm font-bold text-slate-600 uppercase tracking-wide flex items-center gap-2 mb-3">
+                    <UserPlus size={14} /> Invitar pacientes
+                  </h4>
+                  <div className="flex flex-col gap-3 md:flex-row">
+                    <input
+                      type="email"
+                      value={inviteEmail}
+                      onChange={(e) => setInviteEmail(e.target.value)}
+                      placeholder="correo@paciente.com"
+                      className="flex-1 px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    />
+                    <button
+                      onClick={handleSendInvitation}
+                      disabled={isSendingInvite || !inviteEmail.trim()}
+                      className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                    >
+                      {isSendingInvite ? (<Loader2 size={16} className="animate-spin" />) : (<UserPlus size={16} />)}
+                      {isSendingInvite ? 'Enviando…' : 'Enviar invitación'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Solicitudes pendientes enviadas */}
+                {sentInvitations.length > 0 && (
+                  <div className="mb-6 pb-6 border-b border-slate-100">
+                    <h4 className="text-sm font-bold text-slate-600 uppercase tracking-wide mb-4 flex items-center gap-2">
+                      <Mail size={14} /> Solicitudes pendientes enviadas
+                    </h4>
+                    <div className="space-y-3">
+                      {sentInvitations.map(inv => (
+                        <div key={inv.id} className="p-4 rounded-xl border border-slate-100 bg-slate-50 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900">{inv.toUserEmail}</p>
+                            <p className="text-xs text-slate-500">Enviada por {inv.fromPsychologistName}</p>
+                          </div>
+                          <button 
+                            onClick={() => handleRevokeSentInvitation(inv.id)} 
+                            className="px-4 py-2 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-sm flex items-center gap-1"
+                          >
+                            <X size={14} />
+                            Revocar solicitud
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Pacientes conectados */}
+                <div>
+                  <div className="flex items-center justify-between mb-4">
                     <h4 className="text-sm font-bold text-slate-600 uppercase tracking-wide flex items-center gap-2">
                       <UserCheck size={14} /> Pacientes conectados
                     </h4>
-                    <p className="text-xs text-slate-500">Solo tú puedes ver su diario y feedback.</p>
+                    <span className="text-xs text-slate-400">{myPatients.length} activos</span>
                   </div>
-                  <span className="text-xs text-slate-400">{myPatients.length} activos</span>
-                </div>
-                {myPatients.length === 0 ? (
-                  <p className="text-sm text-slate-500">Aún no tienes pacientes con acceso.</p>
-                ) : (
-                  <div className="space-y-3">
-                    {myPatients.map(patient => (
-                      <div key={patient.id} className="flex items-center justify-between border border-slate-100 rounded-xl p-4">
-                        <div>
-                          <p className="font-semibold text-slate-900">{patient.name}</p>
-                          <p className="text-xs text-slate-500">{patient.email}</p>
+                  {myPatients.length === 0 ? (
+                    <p className="text-sm text-slate-500">Aún no tienes pacientes con acceso.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {myPatients.map(patient => (
+                        <div key={patient.id} className="flex items-center justify-between border border-slate-100 rounded-xl p-4">
+                          <div>
+                            <p className="font-semibold text-slate-900">{patient.name}</p>
+                            <p className="text-xs text-slate-500">{patient.email}</p>
+                          </div>
+                          <button onClick={() => handleRevoke(patient.id)} className="text-xs text-slate-400 hover:text-red-500 flex items-center gap-1">
+                            <Trash2 size={14} /> Revocar
+                          </button>
                         </div>
-                        <button onClick={() => handleRevoke(patient.id)} className="text-xs text-slate-400 hover:text-red-500 flex items-center gap-1">
-                          <Trash2 size={14} /> Revocar
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </>
           )}

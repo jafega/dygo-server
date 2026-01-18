@@ -97,7 +97,7 @@ export interface Goal {
   description: string;
   createdAt: number;
   completed: boolean;
-  aiFeedback: string;
+  aiFeedback?: string; // Made optional since AI feedback is removed
   createdBy?: 'USER' | 'PSYCHOLOGIST'; // To distinguish personal goals from assigned tasks
 }
 

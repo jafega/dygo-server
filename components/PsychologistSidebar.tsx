@@ -41,9 +41,9 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
     { id: 'profile' as const, label: 'Mi Perfil Profesional', icon: UserIcon },
   ];
 
-  // State for draggable menu button position
+  // State for draggable menu button position (unified across personal/professional)
   const [menuButtonPos, setMenuButtonPos] = useState(() => {
-    const saved = localStorage.getItem('menuButtonPositionPro');
+    const saved = localStorage.getItem('dygoMenuButtonPos');
     if (saved) return JSON.parse(saved);
     // Default position: bottom-left (16px from edges)
     const defaultTop = typeof window !== 'undefined' ? window.innerHeight - 64 : 700;
@@ -54,7 +54,7 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
 
   // Save menu button position to localStorage
   useEffect(() => {
-    localStorage.setItem('menuButtonPositionPro', JSON.stringify(menuButtonPos));
+    localStorage.setItem('dygoMenuButtonPos', JSON.stringify(menuButtonPos));
   }, [menuButtonPos]);
 
   return (

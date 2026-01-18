@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Goal } from '../types';
-import { Target, Plus, Trash2, CheckCircle, Circle, Sparkles, Stethoscope, User } from 'lucide-react';
+import { Target, Plus, Trash2, CheckCircle, Circle, Stethoscope, User } from 'lucide-react';
 
 interface GoalsPanelProps {
   goals: Goal[];
@@ -90,16 +90,6 @@ const GoalsPanel: React.FC<GoalsPanelProps> = ({
                                 <p className={`font-medium text-sm sm:text-[15px] leading-snug ${goal.completed ? 'text-slate-500 line-through' : 'text-slate-800'}`}>
                                     {goal.description}
                                 </p>
-                                
-                                {/* AI Feedback */}
-                                {goal.aiFeedback && !goal.completed && (
-                                    <div className="mt-3 bg-indigo-50/60 p-3 rounded-xl flex gap-2 items-start border border-indigo-50">
-                                        <Sparkles size={12} className="text-indigo-500 mt-0.5 shrink-0" />
-                                        <p className="text-xs text-indigo-700 italic leading-tight">
-                                            {goal.aiFeedback}
-                                        </p>
-                                    </div>
-                                )}
                             </div>
                             
                             {!readOnly && (

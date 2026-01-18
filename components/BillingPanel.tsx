@@ -365,9 +365,13 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
   };
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-end">
+    <div className="space-y-6" data-billing-component ref={(el) => {
+      if (el) {
+        (el as any).openNewInvoice = () => setShowNewInvoice(true);
+      }
+    }}>
+      {/* Header - Only visible on mobile */}
+      <div className="flex items-center justify-end lg:hidden">
         {!patientId && (
           <button
             onClick={() => setShowNewInvoice(true)}

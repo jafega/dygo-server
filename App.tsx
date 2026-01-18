@@ -22,7 +22,7 @@ import PsychologistProfilePanel from './components/PsychologistProfilePanel';
 import PsychologistCalendar from './components/PsychologistCalendar';
 import PsychologistDashboard from './components/PsychologistDashboard';
 import ConnectionsPanel from './components/ConnectionsPanel';
-import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2 } from 'lucide-react';
+import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock } from 'lucide-react';
 
 // Custom Dygo Logo Component
 const DygoLogo: React.FC<{ className?: string }> = ({ className = "w-8 h-8" }) => (
@@ -41,9 +41,9 @@ const App: React.FC = () => {
   const [psychPanelView, setPsychPanelView] = useState<'patients' | 'billing' | 'profile' | 'calendar' | 'connections' | 'dashboard'>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   
-  // State for draggable menu button position
+  // State for draggable menu button position (unified across personal/professional)
   const [menuButtonPos, setMenuButtonPos] = useState(() => {
-    const saved = localStorage.getItem('menuButtonPosition');
+    const saved = localStorage.getItem('dygoMenuButtonPos');
     if (saved) return JSON.parse(saved);
     // Default position: bottom-left (16px from edges)
     const defaultTop = typeof window !== 'undefined' ? window.innerHeight - 64 : 700;
@@ -54,7 +54,7 @@ const App: React.FC = () => {
 
   // Save menu button position to localStorage
   useEffect(() => {
-    localStorage.setItem('menuButtonPosition', JSON.stringify(menuButtonPos));
+    localStorage.setItem('dygoMenuButtonPos', JSON.stringify(menuButtonPos));
   }, [menuButtonPos]);
 
   const [entries, setEntries] = useState<JournalEntry[]>([]);
@@ -345,10 +345,7 @@ const App: React.FC = () => {
       const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
       const targetDate = sessionDate || today;
       
-      const [newEntry, updatedGoals] = await Promise.all([
-        analyzeJournalEntry(transcript, targetDate, currentUser.id),
-        analyzeGoalsProgress(transcript, goals.filter(g => !g.completed))
-      ]);
+      const newEntry = await analyzeJournalEntry(transcript, targetDate, currentUser.id);
       
       try {
         await StorageService.saveEntry(newEntry);
@@ -361,18 +358,6 @@ const App: React.FC = () => {
       
       const updatedEntries = await StorageService.getEntriesForUser(currentUser.id);
       setEntries(updatedEntries);
-
-      const finalGoals = goals.map(g => {
-        const updated = updatedGoals.find(ug => ug.id === g.id);
-        return updated ? updated : g;
-      });
-      setGoals(finalGoals);
-      try {
-        await StorageService.saveUserGoals(currentUser.id, finalGoals);
-      } catch (err:any) {
-        console.error('Error saving goals after session', err);
-        alert(err?.message || 'Error guardando las metas. Comprueba la conexión con el servidor.');
-      }
       
       setSelectedDate(targetDate);
       setSessionDate(null);
@@ -392,7 +377,6 @@ const App: React.FC = () => {
       description: desc,
       createdAt: Date.now(),
       completed: false,
-      aiFeedback: '¡Empieza hoy mismo!',
       createdBy: 'USER'
     };
     const prev = goals;
@@ -645,6 +629,67 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                         {psychPanelView === 'calendar' && 'Agenda y disponibilidad'}
                         {psychPanelView === 'connections' && 'Gestiona quién puede verte y a quién acompañas'}
                       </p>
+                    </header>
+
+                    {/* Desktop Header */}
+                    <header className="hidden lg:flex justify-between items-center mb-6">
+                      <div>
+                        <h1 className="text-3xl font-bold text-slate-900">
+                          {psychPanelView === 'dashboard' && 'Dashboard'}
+                          {psychPanelView === 'patients' && 'Pacientes'}
+                          {psychPanelView === 'billing' && 'Facturación'}
+                          {psychPanelView === 'profile' && 'Mi Perfil Profesional'}
+                          {psychPanelView === 'calendar' && 'Calendario'}
+                          {psychPanelView === 'connections' && 'Conexiones'}
+                        </h1>
+                        <p className="text-slate-500 mt-1">
+                          {psychPanelView === 'dashboard' && 'Resumen completo de tu actividad profesional'}
+                          {psychPanelView === 'patients' && 'Gestiona tu lista de pacientes y su progreso'}
+                          {psychPanelView === 'billing' && 'Gestiona facturas y pagos de tus servicios'}
+                          {psychPanelView === 'profile' && 'Información personal y datos de facturación'}
+                          {psychPanelView === 'calendar' && 'Gestiona tu agenda y disponibilidad'}
+                          {psychPanelView === 'connections' && 'Gestiona quién puede verte y a quién acompañas'}
+                        </p>
+                      </div>
+                      {/* Action Buttons */}
+                      <div className="flex gap-3">
+                        {psychPanelView === 'calendar' && (
+                          <>
+                            <button
+                              onClick={() => {
+                                const calendar = document.querySelector('[data-calendar-component]') as any;
+                                if (calendar && calendar.openNewAvailability) calendar.openNewAvailability();
+                              }}
+                              className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors shadow-md"
+                            >
+                              <Clock size={18} />
+                              Añadir Disponibilidad
+                            </button>
+                            <button
+                              onClick={() => {
+                                const calendar = document.querySelector('[data-calendar-component]') as any;
+                                if (calendar && calendar.openNewSession) calendar.openNewSession();
+                              }}
+                              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-md"
+                            >
+                              <Plus size={18} />
+                              Nueva Sesión
+                            </button>
+                          </>
+                        )}
+                        {psychPanelView === 'billing' && (
+                          <button
+                            onClick={() => {
+                              const billing = document.querySelector('[data-billing-component]') as any;
+                              if (billing && billing.openNewInvoice) billing.openNewInvoice();
+                            }}
+                            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-md"
+                          >
+                            <Plus size={18} />
+                            Nueva Factura
+                          </button>
+                        )}
+                      </div>
                     </header>
 
                     {psychPanelView === 'dashboard' && <PsychologistDashboard psychologistId={currentUser.id} />}
@@ -910,34 +955,45 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
 
         {/* Main Content */}
         <main className="flex-1 overflow-y-auto">
-          <div className="max-w-5xl mx-auto p-4 md:p-8 space-y-6">
+          <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
             {/* Mobile Header - Now visible with page title */}
-            <header className="md:hidden">
-              <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-                {activeTab === 'insights' && 'Resumen'}
-                {activeTab === 'feedback' && 'Feedback'}
-                {activeTab === 'sessions' && 'Sesiones'}
-                {activeTab === 'calendar' && 'Calendario'}
-                {activeTab === 'billing' && 'Facturación'}
-                {activeTab === 'connections' && 'Conexiones'}
-              </h1>
+            <header className="md:hidden mb-6">
+              <div className="flex items-center gap-3 mb-2">
+                {activeTab === 'insights' && <LayoutDashboard className="w-6 h-6 text-indigo-600" />}
+                {activeTab === 'feedback' && <MessageCircle className="w-6 h-6 text-indigo-600" />}
+                {activeTab === 'sessions' && <Stethoscope className="w-6 h-6 text-indigo-600" />}
+                {activeTab === 'calendar' && <Calendar className="w-6 h-6 text-indigo-600" />}
+                {activeTab === 'billing' && <FileText className="w-6 h-6 text-indigo-600" />}
+                {activeTab === 'connections' && <Link2 className="w-6 h-6 text-indigo-600" />}
+                <h1 className="text-2xl font-bold text-slate-900">
+                  {activeTab === 'insights' && 'Resumen'}
+                  {activeTab === 'feedback' && 'Feedback'}
+                  {activeTab === 'sessions' && 'Sesiones'}
+                  {activeTab === 'calendar' && 'Calendario'}
+                  {activeTab === 'billing' && 'Facturación'}
+                  {activeTab === 'connections' && 'Conexiones'}
+                </h1>
+              </div>
+              <p className="text-sm text-slate-500">
+                {activeTab === 'insights' && 'Vista general de tu progreso'}
+                {activeTab === 'feedback' && 'Comentarios y recomendaciones'}
+                {activeTab === 'sessions' && 'Gestiona tus citas con el psicólogo'}
+                {activeTab === 'calendar' && 'Visualiza tus entradas y actividades'}
+                {activeTab === 'billing' && 'Consulta y descarga tus facturas'}
+                {activeTab === 'connections' && 'Administra conexiones con tu psicólogo'}
+              </p>
             </header>
 
             {/* Desktop Header */}
             <header className="hidden md:flex justify-between items-center">
               <div>
-                <h1 className="text-3xl font-bold text-slate-900 flex items-center gap-3">
+                <h1 className="text-3xl font-bold text-slate-900">
                   {activeTab === 'insights' && 'Resumen'}
                   {activeTab === 'feedback' && 'Feedback del Psicólogo'}
                   {activeTab === 'sessions' && 'Mis Sesiones'}
                   {activeTab === 'calendar' && 'Calendario'}
                   {activeTab === 'billing' && 'Facturación'}
                   {activeTab === 'connections' && 'Conexiones'}
-                  {currentUser?.role === 'PSYCHOLOGIST' && (
-                    <span className="bg-indigo-100 text-indigo-700 text-xs px-2 py-0.5 rounded-lg border border-indigo-200 uppercase tracking-wide font-sans">
-                      Modo Personal
-                    </span>
-                  )}
                 </h1>
                 <p className="text-slate-500 mt-1">
                   {activeTab === 'insights' && 'Vista general de tu progreso'}

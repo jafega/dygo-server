@@ -195,28 +195,28 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3 sm:space-y-6">
 
       {/* Date Range Selector */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-          <div className="flex items-center gap-2">
-            <Calendar className="text-slate-600" size={20} />
-            <span className="text-sm font-semibold text-slate-700">Rango de fechas para estadísticas:</span>
+      <div className="bg-white rounded-xl border border-slate-200 p-2 sm:p-4">
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-1.5">
+            <Calendar className="text-slate-600" size={18} />
+            <span className="text-xs sm:text-sm font-semibold text-slate-700">Rango de fechas:</span>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
             <input
               type="date"
               value={dateRange.start}
               onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-              className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className="w-full sm:w-auto px-3 py-2 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
             />
-            <span className="text-slate-500">—</span>
+            <span className="text-slate-500 text-center sm:text-left">—</span>
             <input
               type="date"
               value={dateRange.end}
               onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-              className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className="w-full sm:w-auto px-3 py-2 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
             />
             <button
               onClick={() => {
@@ -228,7 +228,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
                   end: end.toISOString().split('T')[0]
                 });
               }}
-              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm rounded-lg transition-colors"
+              className="w-full sm:w-auto px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs sm:text-sm rounded-lg transition-colors whitespace-nowrap"
             >
               Últimos 30 días
             </button>
@@ -237,61 +237,61 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
       </div>
 
       {/* Financial Overview */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-4">
         {/* Total Revenue */}
-        <div className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl p-4 text-white shadow-lg">
-          <div className="flex items-center justify-between mb-2">
-            <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
-              <DollarSign size={20} />
+        <div className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl p-2.5 sm:p-4 text-white shadow-lg">
+          <div className="flex items-center justify-between mb-1.5">
+            <div className="p-1.5 sm:p-2 bg-white/20 rounded-lg backdrop-blur-sm">
+              <DollarSign size={18} className="sm:w-5 sm:h-5" />
             </div>
-            <span className="text-xs font-semibold bg-white/20 px-2 py-1 rounded-full backdrop-blur-sm">
+            <span className="text-[10px] sm:text-xs font-semibold bg-white/20 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full backdrop-blur-sm">
               Total
             </span>
           </div>
-          <div className="text-2xl font-bold mb-1">{totalRevenue.toFixed(2)}€</div>
-          <div className="text-xs text-green-100">Facturación Total</div>
+          <div className="text-lg sm:text-2xl font-bold mb-0.5">{totalRevenue.toFixed(2)}€</div>
+          <div className="text-[10px] sm:text-xs text-green-100">Facturación Total</div>
         </div>
 
         {/* Revenue in Range */}
-        <div className="bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl p-4 text-white shadow-lg">
-          <div className="flex items-center justify-between mb-2">
-            <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
-              <TrendingUp size={20} />
+        <div className="bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl p-2.5 sm:p-4 text-white shadow-lg">
+          <div className="flex items-center justify-between mb-1.5">
+            <div className="p-1.5 sm:p-2 bg-white/20 rounded-lg backdrop-blur-sm">
+              <TrendingUp size={18} className="sm:w-5 sm:h-5" />
             </div>
-            <span className="text-xs font-semibold bg-white/20 px-2 py-1 rounded-full backdrop-blur-sm">
+            <span className="text-[10px] sm:text-xs font-semibold bg-white/20 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full backdrop-blur-sm">
               Rango
             </span>
           </div>
-          <div className="text-2xl font-bold mb-1">{revenueInRange.toFixed(2)}€</div>
-          <div className="text-xs text-blue-100">Facturado en Período</div>
+          <div className="text-lg sm:text-2xl font-bold mb-0.5">{revenueInRange.toFixed(2)}€</div>
+          <div className="text-[10px] sm:text-xs text-blue-100">Facturado en Período</div>
         </div>
 
         {/* Paid Invoices */}
-        <div className="bg-gradient-to-br from-purple-500 to-pink-600 rounded-xl p-4 text-white shadow-lg">
-          <div className="flex items-center justify-between mb-2">
-            <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
-              <CheckCircle size={20} />
+        <div className="bg-gradient-to-br from-purple-500 to-pink-600 rounded-xl p-2.5 sm:p-4 text-white shadow-lg">
+          <div className="flex items-center justify-between mb-1.5">
+            <div className="p-1.5 sm:p-2 bg-white/20 rounded-lg backdrop-blur-sm">
+              <CheckCircle size={18} className="sm:w-5 sm:h-5" />
             </div>
-            <span className="text-xs font-semibold bg-white/20 px-2 py-1 rounded-full backdrop-blur-sm">
+            <span className="text-[10px] sm:text-xs font-semibold bg-white/20 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full backdrop-blur-sm">
               Pagadas
             </span>
           </div>
-          <div className="text-2xl font-bold mb-1">{paidInvoices.length}</div>
-          <div className="text-xs text-purple-100">Facturas Cobradas</div>
+          <div className="text-lg sm:text-2xl font-bold mb-0.5">{paidInvoices.length}</div>
+          <div className="text-[10px] sm:text-xs text-purple-100">Facturas Cobradas</div>
         </div>
       </div>
 
       {/* Monthly Revenue Chart */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4">
-        <div className="flex items-center gap-2 mb-4">
+      <div className="bg-white rounded-xl border border-slate-200 p-2 sm:p-4">
+        <div className="flex items-center gap-2 mb-2 sm:mb-4">
           <div className="p-2 bg-green-100 rounded-lg">
-            <BarChart3 className="text-green-600" size={18} />
+            <BarChart3 className="text-green-600" size={16} />
           </div>
-          <h2 className="text-lg font-bold text-slate-900">Facturación Mensual (Últimos 12 Meses)</h2>
+          <h2 className="text-sm sm:text-lg font-bold text-slate-900">Facturación Mensual (12 Meses)</h2>
         </div>
         
         {/* Vertical Bar Chart */}
-        <div className="relative h-72 px-2">
+        <div className="relative h-56 sm:h-72 px-2">
           {/* Grid lines */}
           <div className="absolute inset-0 flex flex-col justify-between pointer-events-none" style={{ paddingBottom: '32px' }}>
             {[0, 1, 2, 3, 4].map(i => (
@@ -356,93 +356,89 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
       </div>
 
       {/* Main Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
         {/* Total Patients */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4 hover:shadow-lg transition-shadow">
-          <div className="flex items-center justify-between mb-3">
-            <div className="p-2 bg-blue-100 rounded-lg">
-              <Users className="text-blue-600" size={20} />
+        <div className="bg-white rounded-xl border border-slate-200 p-2 sm:p-4 hover:shadow-lg transition-shadow">
+          <div className="flex items-center justify-between mb-2">
+            <div className="p-1 sm:p-2 bg-blue-100 rounded-lg">
+              <Users className="text-blue-600" size={16} />
             </div>
-            <span className="text-xs font-semibold text-green-600 bg-green-100 px-2 py-1 rounded-full">
-              {activePatients} activos
+            <span className="text-[9px] sm:text-xs font-semibold text-green-600 bg-green-100 px-1 sm:px-2 py-0.5 rounded-full leading-none">
+              {activePatients}
             </span>
           </div>
-          <div className="text-2xl font-bold text-slate-900">{patients.length}</div>
-          <div className="text-xs text-slate-500 mt-1">Pacientes Totales</div>
+          <div className="text-lg sm:text-2xl font-bold text-slate-900">{patients.length}</div>
+          <div className="text-[10px] sm:text-xs text-slate-500 mt-0.5">Pacientes</div>
         </div>
 
         {/* Scheduled Sessions */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4 hover:shadow-lg transition-shadow">
-          <div className="flex items-center justify-between mb-3">
-            <div className="p-2 bg-green-100 rounded-lg">
-              <Calendar className="text-green-600" size={20} />
+        <div className="bg-white rounded-xl border border-slate-200 p-2 sm:p-4 hover:shadow-lg transition-shadow">
+          <div className="flex items-center justify-between mb-2">
+            <div className="p-1 sm:p-2 bg-green-100 rounded-lg">
+              <Calendar className="text-green-600" size={16} />
             </div>
-            <span className="text-xs font-semibold text-blue-600 bg-blue-100 px-2 py-1 rounded-full">
-              +{sessionsNext7Days.length} próximos 7d
+            <span className="text-[9px] sm:text-xs font-semibold text-blue-600 bg-blue-100 px-1 sm:px-2 py-0.5 rounded-full leading-none">
+              +{sessionsNext7Days.length}
             </span>
           </div>
-          <div className="text-2xl font-bold text-slate-900">{scheduledSessions.length}</div>
-          <div className="text-xs text-slate-500 mt-1">Sesiones Programadas</div>
+          <div className="text-lg sm:text-2xl font-bold text-slate-900">{scheduledSessions.length}</div>
+          <div className="text-[10px] sm:text-xs text-slate-500 mt-0.5">Programadas</div>
         </div>
 
         {/* Available Slots */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4 hover:shadow-lg transition-shadow">
-          <div className="flex items-center justify-between mb-3">
-            <div className="p-2 bg-purple-100 rounded-lg">
-              <Clock className="text-purple-600" size={20} />
+        <div className="bg-white rounded-xl border border-slate-200 p-2 sm:p-4 hover:shadow-lg transition-shadow">
+          <div className="flex items-center justify-between mb-2">
+            <div className="p-1 sm:p-2 bg-purple-100 rounded-lg">
+              <Clock className="text-purple-600" size={16} />
             </div>
-            <span className="text-xs font-semibold text-purple-600 bg-purple-100 px-2 py-1 rounded-full">
-              Disponibles
-            </span>
           </div>
-          <div className="text-2xl font-bold text-slate-900">{availableSessions.length}</div>
-          <div className="text-xs text-slate-500 mt-1">Espacios Libres</div>
+          <div className="text-lg sm:text-2xl font-bold text-slate-900">{availableSessions.length}</div>
+          <div className="text-[10px] sm:text-xs text-slate-500 mt-0.5">Disponibles</div>
         </div>
 
         {/* Completion Rate */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4 hover:shadow-lg transition-shadow">
-          <div className="flex items-center justify-between mb-3">
-            <div className="p-2 bg-amber-100 rounded-lg">
-              <Target className="text-amber-600" size={20} />
+        <div className="bg-white rounded-xl border border-slate-200 p-2 sm:p-4 hover:shadow-lg transition-shadow">
+          <div className="flex items-center justify-between mb-2">
+            <div className="p-1 sm:p-2 bg-amber-100 rounded-lg">
+              <Target className="text-amber-600" size={16} />
             </div>
-            <span className="text-xs font-semibold text-amber-600 bg-amber-100 px-2 py-1 rounded-full">
-              Este mes
-            </span>
           </div>
-          <div className="text-2xl font-bold text-slate-900">{completionRate}%</div>
-          <div className="text-xs text-slate-500 mt-1">Tasa de Asistencia</div>
+          <div className="text-lg sm:text-2xl font-bold text-slate-900">{completionRate}%</div>
+          <div className="text-[10px] sm:text-xs text-slate-500 mt-0.5">Asistencia</div>
         </div>
       </div>
 
       {/* This Month Stats */}
-      <div className="bg-white rounded-xl border border-slate-200 p-6">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="p-2 bg-indigo-100 rounded-lg">
-            <Activity className="text-indigo-600" size={20} />
+      <div className="bg-white rounded-xl border border-slate-200 p-2 sm:p-6">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 mb-3 sm:mb-6">
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-indigo-100 rounded-lg">
+              <Activity className="text-indigo-600" size={18} />
+            </div>
+            <h2 className="text-base sm:text-xl font-bold text-slate-900">Estadísticas del Período</h2>
           </div>
-          <h2 className="text-xl font-bold text-slate-900">Estadísticas del Período Seleccionado</h2>
-          <span className="text-sm text-slate-500">
-            ({new Date(dateRange.start).toLocaleDateString('es-ES')} - {new Date(dateRange.end).toLocaleDateString('es-ES')})
+          <span className="text-xs sm:text-sm text-slate-500">
+            ({new Date(dateRange.start).toLocaleDateString('es-ES', { month: 'short', day: 'numeric' })} - {new Date(dateRange.end).toLocaleDateString('es-ES', { month: 'short', day: 'numeric' })})
           </span>
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="text-center p-4 bg-green-50 rounded-xl border border-green-200">
-            <CheckCircle className="text-green-600 mx-auto mb-2" size={32} />
-            <div className="text-3xl font-bold text-green-700">{rangeCompleted}</div>
-            <div className="text-sm text-green-600 font-medium mt-1">Completadas</div>
+        <div className="grid grid-cols-3 gap-2 sm:gap-6">
+          <div className="text-center p-2 sm:p-4 bg-green-50 rounded-xl border border-green-200">
+            <CheckCircle className="text-green-600 mx-auto mb-1 sm:mb-2" size={24} />
+            <div className="text-xl sm:text-3xl font-bold text-green-700">{rangeCompleted}</div>
+            <div className="text-[10px] sm:text-sm text-green-600 font-medium mt-0.5 sm:mt-1">Completadas</div>
           </div>
 
-          <div className="text-center p-4 bg-blue-50 rounded-xl border border-blue-200">
-            <Activity className="text-blue-600 mx-auto mb-2" size={32} />
-            <div className="text-3xl font-bold text-blue-700">{rangeScheduled}</div>
-            <div className="text-sm text-blue-600 font-medium mt-1">Programadas</div>
+          <div className="text-center p-2 sm:p-4 bg-blue-50 rounded-xl border border-blue-200">
+            <Activity className="text-blue-600 mx-auto mb-1 sm:mb-2" size={24} />
+            <div className="text-xl sm:text-3xl font-bold text-blue-700">{rangeScheduled}</div>
+            <div className="text-[10px] sm:text-sm text-blue-600 font-medium mt-0.5 sm:mt-1">Programadas</div>
           </div>
 
-          <div className="text-center p-4 bg-red-50 rounded-xl border border-red-200">
-            <XCircle className="text-red-600 mx-auto mb-2" size={32} />
-            <div className="text-3xl font-bold text-red-700">{rangeCancelled}</div>
-            <div className="text-sm text-red-600 font-medium mt-1">Canceladas</div>
+          <div className="text-center p-2 sm:p-4 bg-red-50 rounded-xl border border-red-200">
+            <XCircle className="text-red-600 mx-auto mb-1 sm:mb-2" size={24} />
+            <div className="text-xl sm:text-3xl font-bold text-red-700">{rangeCancelled}</div>
+            <div className="text-[10px] sm:text-sm text-red-600 font-medium mt-0.5 sm:mt-1">Canceladas</div>
           </div>
         </div>
         
@@ -541,33 +537,33 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
       </div>
 
       {/* Performance Indicator */}
-      <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl border border-green-200 p-6">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="p-2 bg-green-100 rounded-lg">
-            <Award className="text-green-600" size={24} />
+      <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl border border-green-200 p-3 sm:p-6">
+        <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
+          <div className="p-1.5 sm:p-2 bg-green-100 rounded-lg">
+            <Award className="text-green-600" size={20} />
           </div>
           <div>
-            <h3 className="text-lg font-bold text-slate-900">Rendimiento</h3>
-            <p className="text-sm text-slate-600">Métricas de tu desempeño profesional</p>
+            <h3 className="text-base sm:text-lg font-bold text-slate-900">Rendimiento</h3>
+            <p className="text-xs sm:text-sm text-slate-600 hidden sm:block">Métricas de tu desempeño profesional</p>
           </div>
         </div>
         
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4 mt-3 sm:mt-4">
           <div className="text-center">
-            <div className="text-2xl font-bold text-green-700">{rangeCompletionRate}%</div>
-            <div className="text-xs text-slate-600 mt-1">Asistencia Período</div>
+            <div className="text-lg sm:text-2xl font-bold text-green-700">{rangeCompletionRate}%</div>
+            <div className="text-[10px] sm:text-xs text-slate-600 mt-0.5 sm:mt-1">Asistencia</div>
           </div>
           <div className="text-center">
-            <div className="text-2xl font-bold text-blue-700">{activePatients}</div>
-            <div className="text-xs text-slate-600 mt-1">Pacientes Activos</div>
+            <div className="text-lg sm:text-2xl font-bold text-blue-700">{activePatients}</div>
+            <div className="text-[10px] sm:text-xs text-slate-600 mt-0.5 sm:mt-1">Activos</div>
           </div>
           <div className="text-center">
-            <div className="text-2xl font-bold text-purple-700">{sessionsInRange.length}</div>
-            <div className="text-xs text-slate-600 mt-1">Sesiones en Período</div>
+            <div className="text-lg sm:text-2xl font-bold text-purple-700">{sessionsInRange.length}</div>
+            <div className="text-[10px] sm:text-xs text-slate-600 mt-0.5 sm:mt-1">En Período</div>
           </div>
           <div className="text-center">
-            <div className="text-2xl font-bold text-amber-700">{sessionsNext7Days.length}</div>
-            <div className="text-xs text-slate-600 mt-1">Próximos 7 Días</div>
+            <div className="text-lg sm:text-2xl font-bold text-amber-700">{sessionsNext7Days.length}</div>
+            <div className="text-[10px] sm:text-xs text-slate-600 mt-0.5 sm:mt-1">7 Días</div>
           </div>
         </div>
       </div>

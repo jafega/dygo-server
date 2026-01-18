@@ -483,9 +483,14 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
   };
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-end flex-wrap gap-2">
+    <div className="space-y-6" data-calendar-component ref={(el) => {
+      if (el) {
+        (el as any).openNewAvailability = () => setShowNewAvailability(true);
+        (el as any).openNewSession = () => setShowNewSession(true);
+      }
+    }}>
+      {/* Header - Only visible on mobile */}
+      <div className="flex items-center justify-end flex-wrap gap-2 lg:hidden">
         <button
           onClick={() => setShowNewAvailability(true)}
           className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors shadow-md"
