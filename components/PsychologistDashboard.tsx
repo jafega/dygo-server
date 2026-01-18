@@ -176,7 +176,8 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
   });
 
   const revenueValues = Object.values(monthlyRevenue);
-  const maxRevenue = Math.max(...revenueValues, 1);
+  const highestRevenue = Math.max(...revenueValues, 0);
+  const maxRevenue = highestRevenue + 200;
   
   // Revenue in selected date range
   const revenueInRange = paidInvoices
