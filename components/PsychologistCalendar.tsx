@@ -37,7 +37,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
   const [selectedSlot, setSelectedSlot] = useState<Session | null>(null);
   const [selectedPatientId, setSelectedPatientId] = useState('');
   const [meetLink, setMeetLink] = useState('');
-  const [listStatusFilter, setListStatusFilter] = useState<SessionStatusFilter>('ALL');
+  const [listStatusFilter, setListStatusFilter] = useState<SessionStatusFilter>('scheduled');
   const [listStartDate, setListStartDate] = useState('');
   const [listEndDate, setListEndDate] = useState('');
   const [showPastListSessions, setShowPastListSessions] = useState(false);
@@ -112,7 +112,8 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
   };
 
   const getSessionsForDate = (date: string) => {
-    return sessions.filter(s => s.date === date).sort((a, b) => a.startTime.localeCompare(b.startTime));
+    const dateSessions = sessions.filter(s => s.date === date).sort((a, b) => a.startTime.localeCompare(b.startTime));
+    return getFilteredSessionsByStatus(dateSessions);
   };
 
   const handlePreviousMonth = () => {
@@ -121,6 +122,18 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
 
   const handleNextMonth = () => {
     setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1));
+  };
+
+  const handlePreviousWeek = () => {
+    const newDate = new Date(currentDate);
+    newDate.setDate(currentDate.getDate() - 7);
+    setCurrentDate(newDate);
+  };
+
+  const handleNextWeek = () => {
+    const newDate = new Date(currentDate);
+    newDate.setDate(currentDate.getDate() + 7);
+    setCurrentDate(newDate);
   };
 
   const handleCreateSession = async () => {
@@ -455,6 +468,12 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
     });
   };
 
+  // Filtrar sesiones por estado (aplica a todas las vistas)
+  const getFilteredSessionsByStatus = (sessionsToFilter: Session[]) => {
+    if (listStatusFilter === 'ALL') return sessionsToFilter;
+    return sessionsToFilter.filter(session => session.status === listStatusFilter);
+  };
+
   const sortedSessions = getSortedSessions();
   const todayMidnight = new Date();
   todayMidnight.setHours(0, 0, 0, 0);
@@ -476,7 +495,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
   ];
 
   const resetListFilters = () => {
-    setListStatusFilter('ALL');
+    setListStatusFilter('scheduled');
     setListStartDate('');
     setListEndDate('');
     setShowPastListSessions(false);
@@ -507,8 +526,66 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
           </button>
       </div>
 
-        {/* View controls & filters */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+        {/* Filtro de estado - Aplica a todas las vistas */}
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="flex flex-col">
+              <label className="text-xs font-semibold text-slate-500 uppercase mb-1">Estado</label>
+              <select
+                value={listStatusFilter}
+                onChange={(event) => setListStatusFilter(event.target.value as SessionStatusFilter)}
+                className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                {statusFilterOptions.map(option => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {viewMode === 'LIST' && (
+              <>
+                <div className="flex flex-col">
+                  <label className="text-xs font-semibold text-slate-500 uppercase mb-1">Desde</label>
+                  <input
+                    type="date"
+                    value={listStartDate}
+                    onChange={(event) => setListStartDate(event.target.value)}
+                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div className="flex flex-col">
+                  <label className="text-xs font-semibold text-slate-500 uppercase mb-1">Hasta</label>
+                  <input
+                    type="date"
+                    value={listEndDate}
+                    onChange={(event) => setListEndDate(event.target.value)}
+                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <label className="flex items-center gap-2 text-xs font-semibold text-slate-500 uppercase mb-1">
+                  <input
+                    type="checkbox"
+                    checked={showPastListSessions}
+                    onChange={(event) => setShowPastListSessions(event.target.checked)}
+                    className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="text-[11px] text-slate-600 normal-case">Ver también pasadas</span>
+                </label>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={resetListFilters}
+              className="ml-auto text-sm font-semibold text-slate-600 hover:text-slate-900"
+            >
+              Limpiar filtros
+            </button>
+          </div>
+        </div>
+
+        {/* View controls */}
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-1 bg-slate-100 rounded-xl p-1">
               <button
@@ -543,81 +620,35 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
               Vista actual: {viewMode === 'LIST' ? 'Lista' : viewMode === 'MONTH' ? 'Mes' : 'Semana'}
             </span>
           </div>
-
-          {viewMode === 'LIST' && (
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="flex flex-col">
-                <label className="text-xs font-semibold text-slate-500 uppercase mb-1">Estado</label>
-                <select
-                  value={listStatusFilter}
-                  onChange={(event) => setListStatusFilter(event.target.value as SessionStatusFilter)}
-                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                >
-                  {statusFilterOptions.map(option => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex flex-col">
-                <label className="text-xs font-semibold text-slate-500 uppercase mb-1">Desde</label>
-                <input
-                  type="date"
-                  value={listStartDate}
-                  onChange={(event) => setListStartDate(event.target.value)}
-                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-              <div className="flex flex-col">
-                <label className="text-xs font-semibold text-slate-500 uppercase mb-1">Hasta</label>
-                <input
-                  type="date"
-                  value={listEndDate}
-                  onChange={(event) => setListEndDate(event.target.value)}
-                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-              <label className="flex items-center gap-2 text-xs font-semibold text-slate-500 uppercase mb-1">
-                <input
-                  type="checkbox"
-                  checked={showPastListSessions}
-                  onChange={(event) => setShowPastListSessions(event.target.checked)}
-                  className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                />
-                <span className="text-[11px] text-slate-600 normal-case">Ver también pasadas</span>
-              </label>
-              <button
-                type="button"
-                onClick={resetListFilters}
-                className="ml-auto text-sm font-semibold text-slate-600 hover:text-slate-900"
-              >
-                Limpiar filtros
-              </button>
-            </div>
-          )}
         </div>
 
       {/* Calendar */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        {/* Month Navigation */}
-        <div className="flex items-center justify-between p-4 border-b border-slate-200 bg-slate-50">
-          <button
-            onClick={handlePreviousMonth}
-            className="p-2 hover:bg-slate-200 rounded-lg transition-colors"
-          >
-            <ChevronLeft size={20} />
-          </button>
-          <div className="flex items-center gap-3">
-            <h3 className="text-lg font-semibold text-slate-900 capitalize">{monthName}</h3>
+        {/* Navigation - Oculta en vista lista */}
+        {viewMode !== 'LIST' && (
+          <div className="flex items-center justify-between p-4 border-b border-slate-200 bg-slate-50">
+            <button
+              onClick={viewMode === 'WEEK' ? handlePreviousWeek : handlePreviousMonth}
+              className="p-2 hover:bg-slate-200 rounded-lg transition-colors"
+            >
+              <ChevronLeft size={20} />
+            </button>
+            <div className="flex items-center gap-3">
+              <h3 className="text-lg font-semibold text-slate-900 capitalize">
+                {viewMode === 'WEEK' 
+                  ? `Semana del ${getWeekDays()[0].getDate()} al ${getWeekDays()[6].getDate()} de ${currentDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}`
+                  : monthName
+                }
+              </h3>
+            </div>
+            <button
+              onClick={viewMode === 'WEEK' ? handleNextWeek : handleNextMonth}
+              className="p-2 hover:bg-slate-200 rounded-lg transition-colors"
+            >
+              <ChevronRight size={20} />
+            </button>
           </div>
-          <button
-            onClick={handleNextMonth}
-            className="p-2 hover:bg-slate-200 rounded-lg transition-colors"
-          >
-            <ChevronRight size={20} />
-          </button>
-        </div>
+        )}
 
         {/* Month View */}
         {viewMode === 'MONTH' && (
