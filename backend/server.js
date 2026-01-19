@@ -1907,6 +1907,12 @@ app.post('/api/goals-sync', handleGoalsSync);
 // --- RUTAS DE INVITACIONES ---
 app.get('/api/invitations', (_req, res) => {
   const db = getDb();
+  // Prevenir caché del navegador
+  res.set({
+    'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+    'Pragma': 'no-cache',
+    'Expires': '0'
+  });
   res.json(db.invitations);
 });
 
@@ -2022,7 +2028,13 @@ app.delete('/api/invitations/:id', (req, res) => {
     saveDb(db);
   }
   
-  res.json({ success: true });
+  // Prevenir caché y devolver lista actualizada
+  res.set({
+    'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+    'Pragma': 'no-cache',
+    'Expires': '0'
+  });
+  res.json({ success: true, remainingInvitations: db.invitations });
 });
 
 app.delete('/api/invitations', (req, res) => {
@@ -2063,7 +2075,13 @@ app.delete('/api/invitations', (req, res) => {
     saveDb(db);
   }
   
-  res.json({ success: true });
+  // Prevenir caché y devolver lista actualizada
+  res.set({
+    'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+    'Pragma': 'no-cache',
+    'Expires': '0'
+  });
+  res.json({ success: true, remainingInvitations: db.invitations });
 });
 
 // --- RUTAS DE CONFIGURACIÓN (SETTINGS) ---

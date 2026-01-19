@@ -385,7 +385,13 @@ export const saveSettings = async (userId: string, settings: UserSettings): Prom
 const getInvitations = async (): Promise<Invitation[]> => {
     if (USE_BACKEND) {
         try {
-            const res = await fetch(`${API_URL}/invitations`);
+            // Agregar timestamp para evitar caché del navegador
+            const res = await fetch(`${API_URL}/invitations?_t=${Date.now()}`, {
+                headers: {
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache'
+                }
+            });
             if (res.ok) return await res.json();
             throw new Error(`Server error: ${res.status}`);
         } catch(e) {
@@ -507,10 +513,27 @@ export const acceptInvitation = async (invitationId: string, userId: string) => 
 export const rejectInvitation = async (invitationId: string) => {
     if (USE_BACKEND) {
         try {
-            const res = await fetch(`${API_URL}/invitations?id=${invitationId}`, { method: 'DELETE' });
+            const res = await fetch(`${API_URL}/invitations?id=${invitationId}`, { 
+                method: 'DELETE',
+                headers: {
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache'
+                }
+            });
             if (!res.ok) throw new Error(`Error rejecting invitation (${res.status})`);
+            console.log('✅ Invitación revocada exitosamente:', invitationId);
             return;
-        } catch (e) { if (ALLOW_LOCAL_FALLBACK) { const invs = (await getInvitations()).filter(i => i.id !== invitationId); localStorage.setItem(INVITATIONS_KEY, JSON.stringify(invs)); console.warn('Reject invitation failed, updated locally', e); return; } else { throw e; } }
+        } catch (e) { 
+            console.error('❌ Error al revocar invitación:', e);
+            if (ALLOW_LOCAL_FALLBACK) { 
+                const invs = (await getInvitations()).filter(i => i.id !== invitationId); 
+                localStorage.setItem(INVITATIONS_KEY, JSON.stringify(invs)); 
+                console.warn('Reject invitation failed, updated locally', e); 
+                return; 
+            } else { 
+                throw e; 
+            } 
+        }
     }
     if (USE_BACKEND) {
         throw new Error('Persistencia local deshabilitada. El backend debe estar disponible.');

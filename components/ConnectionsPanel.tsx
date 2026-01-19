@@ -198,13 +198,20 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
     if (!window.confirm('¿Estás seguro de que quieres revocar esta invitación? Esta acción no se puede deshacer.')) {
       return;
     }
+    
+    // Actualización optimista: eliminar inmediatamente de la UI
+    setSentInvitations(prev => prev.filter(inv => inv.id !== invId));
+    
     try {
       await rejectInvitation(invId);
       setToast({ type: 'success', text: 'Solicitud revocada correctamente' });
-      await loadConnections();
+      // Recargar para confirmar el estado desde el servidor
+      await loadConnections(false);
     } catch (err: any) {
       console.error('Error revoking invitation', err);
       setToast({ type: 'error', text: err?.message || 'No se pudo revocar la solicitud' });
+      // Si falla, recargar para restaurar el estado correcto
+      await loadConnections();
     }
   };
 
