@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ViewState, JournalEntry, Goal, UserSettings, WeeklyReport, User } from './types';
 import * as StorageService from './services/storageService';
 import * as AuthService from './services/authService';
-import { USE_BACKEND } from './services/config';
+import { USE_BACKEND, API_URL } from './services/config';
 import { analyzeJournalEntry, analyzeGoalsProgress, generateWeeklyReport } from './services/genaiService';
 import VoiceSession from './components/VoiceSession';
 import PatientSessions from './components/PatientSessions';
@@ -19,10 +19,11 @@ import SuperAdmin from './components/SuperAdmin';
 import PsychologistSidebar from './components/PsychologistSidebar';
 import BillingPanel from './components/BillingPanel';
 import PsychologistProfilePanel from './components/PsychologistProfilePanel';
+import PatientProfilePanel from './components/PatientProfilePanel';
 import PsychologistCalendar from './components/PsychologistCalendar';
 import PsychologistDashboard from './components/PsychologistDashboard';
 import ConnectionsPanel from './components/ConnectionsPanel';
-import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock } from 'lucide-react';
+import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock, AlertCircle } from 'lucide-react';
 
 // Custom Dygo Logo Component
 const DygoLogo: React.FC<{ className?: string }> = ({ className = "w-8 h-8" }) => (
@@ -73,10 +74,11 @@ const App: React.FC = () => {
   const [sessionDate, setSessionDate] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
-  const [activeTab, setActiveTab] = useState<'insights' | 'feedback' | 'sessions' | 'calendar' | 'billing' | 'connections'>('insights');
+  const [activeTab, setActiveTab] = useState<'insights' | 'feedback' | 'sessions' | 'calendar' | 'billing' | 'connections' | 'profile'>('insights');
   const [showSettings, setShowSettings] = useState(false);
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReport | null>(null);
   const [hasPendingInvites, setHasPendingInvites] = useState(false);
+  const [isProfileIncomplete, setIsProfileIncomplete] = useState(false);
 
   const getFeedbackText = (entry: JournalEntry) => {
     if (typeof entry.psychologistFeedback === 'string') return entry.psychologistFeedback;
@@ -147,6 +149,8 @@ const App: React.FC = () => {
       if (refreshed) setCurrentUser(refreshed);
       await loadUserData(userId);
       if (refreshed?.email) await checkInvitations(refreshed.email);
+      // Check profile for both psychologists and patients
+      await checkProfileComplete(userId);
     } catch (e) {
       console.warn('No se pudo refrescar el perfil desde el servidor.', e);
     }
@@ -155,6 +159,45 @@ const App: React.FC = () => {
   const checkInvitations = async (email: string) => {
       const invites = await StorageService.getPendingInvitationsForEmail(email);
       setHasPendingInvites(invites.length > 0);
+  };
+
+  const checkProfileComplete = async (userId: string) => {
+    if (!currentUser) {
+      setIsProfileIncomplete(false);
+      return;
+    }
+
+    try {
+      const endpoint = currentUser.role === 'PSYCHOLOGIST' 
+        ? `${API_URL}/psychologist/${userId}/profile`
+        : `${API_URL}/patient/${userId}/profile`;
+      
+      const response = await fetch(endpoint);
+      if (response.ok) {
+        const profile = await response.json();
+        
+        // Campos esenciales según el rol
+        const requiredFields = currentUser.role === 'PSYCHOLOGIST' 
+          ? [
+              profile.name,
+              profile.phone,
+              profile.email,
+              profile.businessName,
+              profile.taxId,
+              profile.iban
+            ]
+          : [
+              profile.name,
+              profile.phone,
+              profile.email
+            ];
+        
+        const isIncomplete = requiredFields.some(field => !field || String(field).trim() === '');
+        setIsProfileIncomplete(isIncomplete);
+      }
+    } catch (error) {
+      console.error('Error checking profile completeness:', error);
+    }
   };
 
   const handleAuthSuccess = async () => {
@@ -599,6 +642,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   onOpenSettings={handleOpenSettings}
                   isSuperAdmin={String(currentUser.email).toLowerCase() === 'garryjavi@gmail.com'}
                   onSuperAdminClick={() => setViewState(ViewState.SUPERADMIN)}
+                  isProfileIncomplete={isProfileIncomplete}
                />
                
                {/* Main Content */}
@@ -924,6 +968,21 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
               <Link2 size={18} />
               <span className={`${sidebarOpen ? 'inline' : 'hidden'} md:inline`}>Conexiones</span>
             </button>
+
+            <button
+              onClick={() => { setActiveTab('profile'); if (window.innerWidth < 768) setSidebarOpen(false); }}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium relative ${
+                activeTab === 'profile'
+                  ? 'bg-indigo-50 text-indigo-700 shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+              }`}
+            >
+              <UserIcon size={18} />
+              <span className={`${sidebarOpen ? 'inline' : 'hidden'} md:inline flex-1 text-left`}>Mi Perfil</span>
+              {isProfileIncomplete && (
+                <AlertCircle size={18} className="text-amber-500 animate-pulse" title="Perfil incompleto" />
+              )}
+            </button>
           </nav>
 
           <div className={`${sidebarOpen ? 'block' : 'hidden'} md:block p-3 border-t border-slate-200 space-y-2`}>
@@ -965,6 +1024,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                 {activeTab === 'calendar' && <Calendar className="w-6 h-6 text-indigo-600" />}
                 {activeTab === 'billing' && <FileText className="w-6 h-6 text-indigo-600" />}
                 {activeTab === 'connections' && <Link2 className="w-6 h-6 text-indigo-600" />}
+                {activeTab === 'profile' && <UserIcon className="w-6 h-6 text-indigo-600" />}
                 <h1 className="text-2xl font-bold text-slate-900">
                   {activeTab === 'insights' && 'Resumen'}
                   {activeTab === 'feedback' && 'Feedback'}
@@ -972,6 +1032,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   {activeTab === 'calendar' && 'Calendario'}
                   {activeTab === 'billing' && 'Facturación'}
                   {activeTab === 'connections' && 'Conexiones'}
+                  {activeTab === 'profile' && 'Mi Perfil'}
                 </h1>
               </div>
               <p className="text-sm text-slate-500">
@@ -981,6 +1042,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                 {activeTab === 'calendar' && 'Visualiza tus entradas y actividades'}
                 {activeTab === 'billing' && 'Consulta y descarga tus facturas'}
                 {activeTab === 'connections' && 'Administra conexiones con tu psicólogo'}
+                {activeTab === 'profile' && 'Información personal y preferencias'}
               </p>
             </header>
 
@@ -994,6 +1056,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   {activeTab === 'calendar' && 'Calendario'}
                   {activeTab === 'billing' && 'Facturación'}
                   {activeTab === 'connections' && 'Conexiones'}
+                  {activeTab === 'profile' && 'Mi Perfil'}
                 </h1>
                 <p className="text-slate-500 mt-1">
                   {activeTab === 'insights' && 'Vista general de tu progreso'}
@@ -1002,6 +1065,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   {activeTab === 'calendar' && 'Visualiza tus entradas y actividades'}
                   {activeTab === 'billing' && 'Consulta y descarga tus facturas'}
                   {activeTab === 'connections' && 'Administra invitaciones y conexiones con tu psicólogo'}
+                  {activeTab === 'profile' && 'Información personal y configuración de tu cuenta'}
                 </p>
               </div>
               <div className="flex gap-3">
@@ -1330,6 +1394,12 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
             {activeTab === 'connections' && currentUser && (
               <div className="animate-in fade-in">
                 <ConnectionsPanel currentUser={currentUser} onPendingInvitesChange={setHasPendingInvites} />
+              </div>
+            )}
+
+            {activeTab === 'profile' && currentUser && (
+              <div className="animate-in fade-in">
+                <PatientProfilePanel userId={currentUser.id} />
               </div>
             )}
           </div>

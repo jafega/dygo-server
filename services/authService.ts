@@ -411,5 +411,35 @@ export const createBillingPortalSession = async () => {
     return await res.json();
 };
 
+export const uploadAvatar = async (userId: string, base64Image: string): Promise<string> => {
+    if (USE_BACKEND) {
+        try {
+            const res = await fetch(`${API_URL}/upload-avatar`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId, base64Image })
+            });
+            
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || 'Error subiendo avatar');
+            }
+            
+            const data = await res.json();
+            return data.url;
+        } catch (e) {
+            console.error('Error uploading avatar:', e);
+            if (ALLOW_LOCAL_FALLBACK) {
+                console.warn('Upload failed, using base64 directly');
+                return base64Image;
+            }
+            throw e;
+        }
+    }
+    
+    // Sin backend, devolver el base64 directamente
+    return base64Image;
+};
+
 
 

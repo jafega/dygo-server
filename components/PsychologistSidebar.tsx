@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, FileText, User as UserIcon, Calendar, Menu, X, ArrowLeftRight, ShieldCheck, Link2, BarChart3 } from 'lucide-react';
+import { Users, FileText, User as UserIcon, Calendar, Menu, X, ArrowLeftRight, ShieldCheck, Link2, BarChart3, AlertCircle } from 'lucide-react';
 
 const DygoLogo: React.FC<{ className?: string }> = ({ className = "w-8 h-8" }) => (
   <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
@@ -18,6 +18,7 @@ interface PsychologistSidebarProps {
   onOpenSettings: () => void;
   isSuperAdmin?: boolean;
   onSuperAdminClick?: () => void;
+  isProfileIncomplete?: boolean;
 }
 
 const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({ 
@@ -30,7 +31,8 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
   onSwitchToPersonal,
   onOpenSettings,
   isSuperAdmin = false,
-  onSuperAdminClick
+  onSuperAdminClick,
+  isProfileIncomplete = false
 }) => {
   const menuItems = [
     { id: 'dashboard' as const, label: 'Dashboard', icon: BarChart3 },
@@ -166,7 +168,7 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
                 }}
                 className={`
                   w-full flex items-center gap-3 px-3 py-2.5 rounded-lg
-                  text-sm font-medium transition-all
+                  text-sm font-medium transition-all relative
                   ${isActive 
                     ? 'bg-indigo-50 text-indigo-700 shadow-sm' 
                     : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
@@ -174,7 +176,10 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
                 `}
               >
                 <Icon size={18} />
-                <span>{item.label}</span>
+                <span className="flex-1 text-left">{item.label}</span>
+                {item.id === 'profile' && isProfileIncomplete && (
+                  <AlertCircle size={18} className="text-amber-500 animate-pulse" title="Perfil incompleto" />
+                )}
               </button>
             );
           })}

@@ -1778,6 +1778,87 @@ app.put('/api/users', async (req, res) => {
   }
 });
 
+// --- SUBIDA DE AVATAR ---
+app.post('/api/upload-avatar', async (req, res) => {
+  try {
+    const { userId, base64Image } = req.body;
+    
+    if (!userId || !base64Image) {
+      return res.status(400).json({ error: 'userId y base64Image son requeridos' });
+    }
+
+    // Si no hay Supabase configurado, guardar base64 directamente
+    if (!supabaseAdmin) {
+      console.log('⚠️ Supabase no configurado, guardando base64 directamente');
+      const db = getDb();
+      const userIdx = db.users.findIndex(u => u.id === userId);
+      if (userIdx === -1) return res.status(404).json({ error: 'Usuario no encontrado' });
+      
+      db.users[userIdx].avatarUrl = base64Image;
+      await saveDb(db, { awaitPersistence: true });
+      return res.json({ url: base64Image });
+    }
+
+    try {
+      // Extraer el tipo MIME y los datos del base64
+      const matches = base64Image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+      if (!matches || matches.length !== 3) {
+        throw new Error('Formato de imagen base64 inválido');
+      }
+
+      const contentType = matches[1];
+      const base64Data = matches[2];
+      const buffer = Buffer.from(base64Data, 'base64');
+
+      // Generar nombre de archivo único
+      const fileExt = contentType.split('/')[1] || 'jpg';
+      const fileName = `${userId}-${Date.now()}.${fileExt}`;
+      const filePath = `avatars/${fileName}`;
+
+      // Subir a Supabase Storage
+      const { data, error } = await supabaseAdmin.storage
+        .from('avatars')
+        .upload(filePath, buffer, {
+          contentType,
+          upsert: true
+        });
+
+      if (error) {
+        console.error('Error subiendo a Supabase Storage:', error);
+        throw error;
+      }
+
+      // Obtener URL pública
+      const { data: { publicUrl } } = supabaseAdmin.storage
+        .from('avatars')
+        .getPublicUrl(filePath);
+
+      // Actualizar usuario con la nueva URL
+      const db = getDb();
+      const userIdx = db.users.findIndex(u => u.id === userId);
+      if (userIdx !== -1) {
+        db.users[userIdx].avatarUrl = publicUrl;
+        await saveDb(db, { awaitPersistence: true });
+      }
+
+      return res.json({ url: publicUrl });
+    } catch (storageError) {
+      console.error('Error con Supabase Storage, usando base64:', storageError);
+      // Fallback a base64 si falla Supabase Storage
+      const db = getDb();
+      const userIdx = db.users.findIndex(u => u.id === userId);
+      if (userIdx === -1) return res.status(404).json({ error: 'Usuario no encontrado' });
+      
+      db.users[userIdx].avatarUrl = base64Image;
+      await saveDb(db, { awaitPersistence: true });
+      return res.json({ url: base64Image });
+    }
+  } catch (err) {
+    console.error('Error in POST /api/upload-avatar', err);
+    return res.status(500).json({ error: err?.message || 'Error subiendo avatar' });
+  }
+});
+
 // --- RUTAS DE ENTRADAS (ENTRIES) ---
 app.get('/api/entries', async (req, res) => {
   try {
@@ -2953,6 +3034,45 @@ app.put('/api/psychologist/:userId/profile', async (req, res) => {
   } catch (err) {
     console.error('❌ Error saving psychologist profile', err);
     return res.status(500).json({ error: err?.message || 'No se pudo guardar el perfil profesional' });
+  }
+});
+
+// --- PATIENT PROFILE ---
+app.get('/api/patient/:userId/profile', (req, res) => {
+  const { userId } = req.params;
+  const db = getDb();
+  if (!db.patientProfiles) db.patientProfiles = {};
+  
+  const profile = db.patientProfiles[userId] || {
+    name: '',
+    phone: '',
+    email: '',
+    address: '',
+    city: '',
+    postalCode: '',
+    country: 'España'
+  };
+  
+  res.json(profile);
+});
+
+app.put('/api/patient/:userId/profile', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const db = getDb();
+    if (!db.patientProfiles) db.patientProfiles = {};
+
+    console.log('[API] Saving patient profile for:', userId);
+    console.log('[API] Profile data:', req.body);
+
+    db.patientProfiles[userId] = req.body;
+    await saveDb(db, { awaitPersistence: true });
+
+    console.log('[API] Patient profile saved successfully');
+    return res.json(req.body);
+  } catch (err) {
+    console.error('❌ Error saving patient profile', err);
+    return res.status(500).json({ error: err?.message || 'No se pudo guardar el perfil' });
   }
 });
 
