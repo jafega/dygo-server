@@ -677,15 +677,30 @@ async function saveSupabaseDb(data, prevCache = null) {
   };
 
   const deleteMissing = async (table, prevIds, nextIds) => {
-    if (!prevIds || !prevIds.length) return;
+    console.log(`🔍 [deleteMissing] Tabla: ${table}, prevIds: ${prevIds?.length || 0}, nextIds: ${nextIds?.length || 0}`);
+    if (!prevIds || !prevIds.length) {
+      console.log(`⏭️ [deleteMissing] No hay IDs previos para ${table}, saltando eliminación`);
+      return;
+    }
     const nextSet = new Set(nextIds || []);
     const toDelete = prevIds.filter((id) => !nextSet.has(id));
-    if (!toDelete.length) return;
+    console.log(`📝 [deleteMissing] ${table} - IDs a eliminar:`, toDelete);
+    if (!toDelete.length) {
+      console.log(`✅ [deleteMissing] No hay registros que eliminar en ${table}`);
+      return;
+    }
+    console.log(`🗑️ [deleteMissing] Eliminando ${toDelete.length} registros de ${table} en Supabase...`);
     const chunks = chunk(toDelete, 200);
     for (const c of chunks) {
+      console.log(`   Eliminando chunk de ${c.length} registros:`, c);
       const { error: delError } = await supabaseAdmin.from(table).delete().in('id', c);
-      if (delError) throw delError;
+      if (delError) {
+        console.error(`❌ [deleteMissing] Error eliminando chunk de ${table}:`, delError);
+        throw delError;
+      }
+      console.log(`   ✅ Chunk eliminado correctamente`);
     }
+    console.log(`✅ [deleteMissing] Completada eliminación de ${toDelete.length} registros de ${table}`);
   };
 
   const usersRows = (data.users || []).map(u => ({ id: u.id, data: u }));
@@ -1939,24 +1954,37 @@ app.put('/api/invitations', (req, res) => {
 });
 
 app.delete('/api/invitations/:id', (req, res) => {
+  console.log('🗑️ [DELETE /api/invitations/:id] Iniciando revocación de invitación:', req.params.id);
   const prevDb = getDb();
+  console.log('📊 [DELETE /api/invitations/:id] Invitaciones antes:', prevDb.invitations.length);
   const db = { ...prevDb };
   const before = db.invitations.length;
+  const deletedInvitation = db.invitations.find((i) => i.id === req.params.id);
   db.invitations = db.invitations.filter((i) => i.id !== req.params.id);
 
   if (db.invitations.length === before) {
+    console.log('❌ [DELETE /api/invitations/:id] Invitación no encontrada:', req.params.id);
     return res.status(404).json({ error: 'Invitación no encontrada' });
   }
+
+  console.log('✅ [DELETE /api/invitations/:id] Invitación eliminada del cache:', deletedInvitation);
+  console.log('📊 [DELETE /api/invitations/:id] Invitaciones después:', db.invitations.length);
 
   // Pasar prevDb como segundo argumento para que deleteMissing funcione en Supabase
   if (supabaseAdmin) {
     const prevCache = supabaseDbCache;
+    console.log('🔄 [DELETE /api/invitations/:id] Iniciando persistencia en Supabase...');
+    console.log('📊 [DELETE /api/invitations/:id] prevCache.invitations:', prevCache.invitations?.length || 0);
+    console.log('📊 [DELETE /api/invitations/:id] db.invitations:', db.invitations.length);
     saveDb(db);
     supabaseDbCache = db;
-    persistSupabaseData(db, prevCache).catch(err => {
-      console.error('❌ Error persistiendo eliminación de invitación en Supabase:', err);
+    persistSupabaseData(db, prevCache).then(() => {
+      console.log('✅ [DELETE /api/invitations/:id] Persistencia en Supabase completada exitosamente');
+    }).catch(err => {
+      console.error('❌ [DELETE /api/invitations/:id] Error persistiendo eliminación de invitación en Supabase:', err);
     });
   } else {
+    console.log('💾 [DELETE /api/invitations/:id] Guardando solo en archivo local (sin Supabase)');
     saveDb(db);
   }
   
@@ -1967,24 +1995,37 @@ app.delete('/api/invitations', (req, res) => {
   const id = req.query.id;
   if (!id) return res.status(400).json({ error: 'Missing invitation id' });
 
+  console.log('🗑️ [DELETE /api/invitations] Iniciando revocación de invitación (query):', id);
   const prevDb = getDb();
+  console.log('📊 [DELETE /api/invitations] Invitaciones antes:', prevDb.invitations.length);
   const db = { ...prevDb };
   const before = db.invitations.length;
+  const deletedInvitation = db.invitations.find((i) => i.id === id);
   db.invitations = db.invitations.filter((i) => i.id !== id);
 
   if (db.invitations.length === before) {
+    console.log('❌ [DELETE /api/invitations] Invitación no encontrada:', id);
     return res.status(404).json({ error: 'Invitación no encontrada' });
   }
+
+  console.log('✅ [DELETE /api/invitations] Invitación eliminada del cache:', deletedInvitation);
+  console.log('📊 [DELETE /api/invitations] Invitaciones después:', db.invitations.length);
 
   // Pasar prevDb como segundo argumento para que deleteMissing funcione en Supabase
   if (supabaseAdmin) {
     const prevCache = supabaseDbCache;
+    console.log('🔄 [DELETE /api/invitations] Iniciando persistencia en Supabase...');
+    console.log('📊 [DELETE /api/invitations] prevCache.invitations:', prevCache.invitations?.length || 0);
+    console.log('📊 [DELETE /api/invitations] db.invitations:', db.invitations.length);
     saveDb(db);
     supabaseDbCache = db;
-    persistSupabaseData(db, prevCache).catch(err => {
-      console.error('❌ Error persistiendo eliminación de invitación en Supabase:', err);
+    persistSupabaseData(db, prevCache).then(() => {
+      console.log('✅ [DELETE /api/invitations] Persistencia en Supabase completada exitosamente');
+    }).catch(err => {
+      console.error('❌ [DELETE /api/invitations] Error persistiendo eliminación de invitación en Supabase:', err);
     });
   } else {
+    console.log('💾 [DELETE /api/invitations] Guardando solo en archivo local (sin Supabase)');
     saveDb(db);
   }
   

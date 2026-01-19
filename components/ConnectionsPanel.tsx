@@ -39,11 +39,20 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
   useEffect(() => {
     if (!currentUser) return;
     loadConnections();
+    
+    // Recargar invitaciones cada 10 segundos para detectar cambios en tiempo real
+    const interval = setInterval(() => {
+      loadConnections(false); // No mostrar loader en recargas automáticas
+    }, 10000);
+    
+    return () => clearInterval(interval);
   }, [currentUser?.id]);
 
-  const loadConnections = async () => {
+  const loadConnections = async (showLoader = true) => {
     if (!currentUser) return;
-    setIsLoading(true);
+    if (showLoader) {
+      setIsLoading(true);
+    }
     setError('');
     try {
       const basePromise = getPsychologistsForPatient(currentUser.id);
@@ -70,7 +79,9 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
       console.error('Error loading connections', err);
       setError(err?.message || 'No se pudieron cargar las conexiones');
     } finally {
-      setIsLoading(false);
+      if (showLoader) {
+        setIsLoading(false);
+      }
     }
   };
 
