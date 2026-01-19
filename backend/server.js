@@ -1800,6 +1800,37 @@ app.post('/api/upload-avatar', async (req, res) => {
     }
 
     try {
+      // Obtener el usuario actual para verificar si ya tiene avatar
+      const db = getDb();
+      const userIdx = db.users.findIndex(u => u.id === userId);
+      if (userIdx === -1) {
+        return res.status(404).json({ error: 'Usuario no encontrado' });
+      }
+
+      const currentUser = db.users[userIdx];
+      
+      // Si el usuario ya tiene un avatar en Supabase Storage, eliminarlo
+      if (currentUser.avatarUrl && currentUser.avatarUrl.includes('supabase.co/storage')) {
+        try {
+          // Extraer el path del archivo de la URL
+          const urlParts = currentUser.avatarUrl.split('/storage/v1/object/public/avatars/');
+          if (urlParts.length > 1) {
+            const oldFilePath = `avatars/${urlParts[1]}`;
+            const { error: deleteError } = await supabaseAdmin.storage
+              .from('avatars')
+              .remove([oldFilePath]);
+            
+            if (deleteError) {
+              console.warn('⚠️ Error eliminando avatar anterior:', deleteError);
+            } else {
+              console.log('🗑️ Avatar anterior eliminado:', oldFilePath);
+            }
+          }
+        } catch (deleteErr) {
+          console.warn('⚠️ No se pudo eliminar avatar anterior:', deleteErr);
+        }
+      }
+
       // Extraer el tipo MIME y los datos del base64
       const matches = base64Image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
       if (!matches || matches.length !== 3) {
@@ -1810,17 +1841,18 @@ app.post('/api/upload-avatar', async (req, res) => {
       const base64Data = matches[2];
       const buffer = Buffer.from(base64Data, 'base64');
 
-      // Generar nombre de archivo único
+      // Usar nombre de archivo basado solo en userId para sobrescribir automáticamente
       const fileExt = contentType.split('/')[1] || 'jpg';
-      const fileName = `${userId}-${Date.now()}.${fileExt}`;
+      const fileName = `${userId}.${fileExt}`;
       const filePath = `avatars/${fileName}`;
 
-      // Subir a Supabase Storage
+      // Subir a Supabase Storage (upsert sobrescribe si existe)
       const { data, error } = await supabaseAdmin.storage
         .from('avatars')
         .upload(filePath, buffer, {
           contentType,
-          upsert: true
+          upsert: true,
+          cacheControl: '3600'
         });
 
       if (error) {
@@ -1828,20 +1860,20 @@ app.post('/api/upload-avatar', async (req, res) => {
         throw error;
       }
 
-      // Obtener URL pública
+      // Obtener URL pública con timestamp para evitar caché
       const { data: { publicUrl } } = supabaseAdmin.storage
         .from('avatars')
         .getPublicUrl(filePath);
+      
+      // Añadir timestamp para forzar actualización en el navegador
+      const updatedUrl = `${publicUrl}?t=${Date.now()}`;
 
       // Actualizar usuario con la nueva URL
-      const db = getDb();
-      const userIdx = db.users.findIndex(u => u.id === userId);
-      if (userIdx !== -1) {
-        db.users[userIdx].avatarUrl = publicUrl;
-        await saveDb(db, { awaitPersistence: true });
-      }
+      db.users[userIdx].avatarUrl = updatedUrl;
+      await saveDb(db, { awaitPersistence: true });
 
-      return res.json({ url: publicUrl });
+      console.log('✅ Avatar actualizado para usuario:', userId);
+      return res.json({ url: updatedUrl });
     } catch (storageError) {
       console.error('Error con Supabase Storage, usando base64:', storageError);
       // Fallback a base64 si falla Supabase Storage
