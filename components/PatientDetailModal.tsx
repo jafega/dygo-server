@@ -158,7 +158,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
         }
         
         const [e, g] = await Promise.all([
-          getEntriesForUser(patient.id),
+          getEntriesForUser(patient.id, psychologistId),
           getGoalsForUser(patient.id)
         ]);
         if (!cancelled) {
@@ -319,6 +319,10 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   };
 
   const handleSaveNotes = async (entry: JournalEntry) => {
+            if (!psychologistId) {
+                alert('No se pudo identificar al psicólogo actual. Vuelve a iniciar sesión e inténtalo de nuevo.');
+                return;
+            }
             if (entry.psychologistEntryType !== 'SESSION') {
                 const hasFeedback = hasFeedbackContent(feedback);
                 const internalText = (internalNote.text || '').trim();
@@ -342,6 +346,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                     psychologistFeedbackUpdatedAt: hasFeedback ? Date.now() : undefined,
                     psychologistFeedbackReadAt: hasFeedback ? undefined : undefined,
                     createdBy: 'PSYCHOLOGIST',
+                    createdByPsychologistId: psychologistId,
                     psychologistEntryType: noteType === 'FEEDBACK' ? 'FEEDBACK' : 'NOTE'
                 };
 
@@ -351,7 +356,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
 
                 try {
                     await saveEntry(newPsychEntry);
-                    const e = await getEntriesForUser(patient.id);
+                    const e = await getEntriesForUser(patient.id, psychologistId);
                     setEntries(mergeEntryList(e, newPsychEntry));
                 } catch (err) {
                     console.error('Error creating psych entry', err);
@@ -398,6 +403,10 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   };
 
   const handleCreateEntry = async () => {
+      if (!psychologistId) {
+          alert('No se pudo identificar al psicólogo actual. Vuelve a iniciar sesión e inténtalo de nuevo.');
+          return;
+      }
       if (noteType === 'SESSION') {
           if (sessionStep === 1) {
               // Step 1: Validate and generate summary
@@ -448,6 +457,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                       psychologistFeedbackUpdatedAt: hasSessionFeedback ? Date.now() : undefined,
                       psychologistFeedbackReadAt: hasSessionFeedback ? undefined : undefined,
                       createdBy: 'PSYCHOLOGIST',
+                      createdByPsychologistId: psychologistId,
                       psychologistEntryType: 'SESSION'
                   };
 
@@ -457,7 +467,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
 
                   try {
                       await saveEntry(newEntry);
-                      const e = await getEntriesForUser(patient.id);
+                      const e = await getEntriesForUser(patient.id, psychologistId);
                       setEntries(mergeEntryList(e, newEntry));
                   } catch (err) {
                       console.error('Error creating session entry', err);
@@ -499,6 +509,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
           psychologistFeedbackUpdatedAt: hasFeedback ? Date.now() : undefined,
           psychologistFeedbackReadAt: hasFeedback ? undefined : undefined,
           createdBy: 'PSYCHOLOGIST',
+          createdByPsychologistId: psychologistId,
           psychologistEntryType: noteType === 'FEEDBACK' ? 'FEEDBACK' : 'NOTE'
       };
             const prevEntries = entries;
@@ -507,8 +518,8 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
 
       try {
         await saveEntry(newEntry);
-        const e = await getEntriesForUser(patient.id);
-                setEntries(mergeEntryList(e, newEntry));
+        const e = await getEntriesForUser(patient.id, psychologistId);
+            setEntries(mergeEntryList(e, newEntry));
       } catch (err) {
         console.error('Error creating entry', err);
                 setEntries(prevEntries);

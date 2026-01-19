@@ -166,10 +166,13 @@ const relationshipExists = async (psychologistId: string, patientId: string): Pr
 };
 
 // --- Entries ---
-export const getEntriesForUser = async (userId: string): Promise<JournalEntry[]> => {
+export const getEntriesForUser = async (userId: string, viewerId?: string): Promise<JournalEntry[]> => {
   if (USE_BACKEND) {
       try {
-          const res = await fetch(`${API_URL}/entries?userId=${userId}`);
+          const url = viewerId 
+            ? `${API_URL}/entries?userId=${userId}&viewerId=${viewerId}`
+            : `${API_URL}/entries?userId=${userId}`;
+          const res = await fetch(url);
           if (res.ok) return (await res.json()).sort((a: any, b: any) => b.timestamp - a.timestamp);
           throw new Error(`Server error: ${res.status}`);
       } catch (e) {
@@ -649,6 +652,37 @@ export const revokeAccess = async (patientId: string, psychId: string) => {
     await removeRelationship(psychId, patientId);
 };
 
+export const endRelationship = async (psychologistId: string, patientId: string) => {
+    // Finalizar relación (marcar con endedAt) en lugar de eliminarla
+    if (!USE_BACKEND) {
+        throw new Error('La finalización de relaciones solo está disponible con backend');
+    }
+    
+    try {
+        const res = await fetch(`${API_URL}/relationships/end`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache'
+            },
+            body: JSON.stringify({ psychologistId, patientId })
+        });
+        
+        if (!res.ok) {
+            const error = await res.json();
+            throw new Error(error.error || `Error finalizando relación (${res.status})`);
+        }
+        
+        const relationship = await res.json();
+        console.log('✅ Relación finalizada exitosamente:', relationship);
+        return relationship;
+    } catch (e) {
+        console.error('❌ Error al finalizar relación:', e);
+        throw e;
+    }
+};
+
 export const getPatientsForPsychologist = async (psychId: string): Promise<PatientSummary[]> => {
     console.log('[getPatientsForPsychologist]', { psychId });
     const psych = await AuthService.getUserById(psychId);
@@ -669,6 +703,7 @@ export const getPatientsForPsychologist = async (psychId: string): Promise<Patie
             id: user.id,
             name: isSelf ? `${user.name} (Tú)` : user.name,
             email: user.email,
+            avatarUrl: user.avatarUrl,
             lastUpdate: lastEntry ? lastEntry.date : 'Sin datos',
             averageSentiment: parseFloat(avgSentiment.toFixed(1)),
             recentSummary: lastEntry ? lastEntry.summary : 'No hay registros recientes.',

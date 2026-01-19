@@ -1894,7 +1894,7 @@ app.post('/api/upload-avatar', async (req, res) => {
 // --- RUTAS DE ENTRADAS (ENTRIES) ---
 app.get('/api/entries', async (req, res) => {
   try {
-    const { userId } = req.query;
+    const { userId, viewerId } = req.query;
 
     if (supabaseAdmin) {
       const entries = (await readSupabaseTable('entries')) || [];
@@ -1907,11 +1907,37 @@ app.get('/api/entries', async (req, res) => {
         } catch (e) {
           // ignore lookup errors
         }
-        const filtered = entries.filter((e) => {
+        let filtered = entries.filter((e) => {
           const uid = String(e.userId || '').trim();
           const uemail = String(e.userEmail || e.email || '').trim().toLowerCase();
           return ids.has(uid) || (uemail && ids.has(uemail));
         });
+        
+        // Si viewerId está presente, verificar si la relación está finalizada
+        if (viewerId && String(viewerId) !== String(userId)) {
+          const relationshipsSource = (supabaseDbCache?.careRelationships && supabaseDbCache.careRelationships.length > 0)
+            ? supabaseDbCache.careRelationships
+            : (getDb().careRelationships || []);
+          const relationship = relationshipsSource.find(rel => 
+            (rel.psychologistId === String(viewerId) && rel.patientId === String(userId)) ||
+            (rel.psychologistId === String(userId) && rel.patientId === String(viewerId))
+          );
+          
+          // Si la relación está finalizada, solo mostrar entradas creadas por el viewer
+          if (relationship?.endedAt) {
+            console.log('[GET /api/entries] Relación finalizada - filtrando entradas creadas por viewer:', viewerId);
+            filtered = filtered.filter(e => {
+              // Solo incluir entradas donde el createdByPsychologistId es el viewerId
+              // O entradas del usuario que no tienen createdByPsychologistId (son del paciente)
+              if (e.createdByPsychologistId) {
+                return e.createdByPsychologistId === String(viewerId);
+              }
+              // Si no tiene createdByPsychologistId, es una entrada del paciente - no mostrar
+              return false;
+            });
+          }
+        }
+        
         return res.json(filtered);
       }
       return res.json(entries);
@@ -1919,9 +1945,28 @@ app.get('/api/entries', async (req, res) => {
 
     const db = getDb();
 
-    const entries = userId
+    let entries = userId
       ? db.entries.filter((e) => String(e.userId) === String(userId))
       : db.entries;
+    
+    // Si viewerId está presente, verificar si la relación está finalizada
+    if (userId && viewerId && String(viewerId) !== String(userId)) {
+      const relationship = (db.careRelationships || []).find(rel => 
+        (rel.psychologistId === String(viewerId) && rel.patientId === String(userId)) ||
+        (rel.psychologistId === String(userId) && rel.patientId === String(viewerId))
+      );
+      
+      // Si la relación está finalizada, solo mostrar entradas creadas por el viewer
+      if (relationship?.endedAt) {
+        console.log('[GET /api/entries] Relación finalizada - filtrando entradas creadas por viewer:', viewerId);
+        entries = entries.filter(e => {
+          if (e.createdByPsychologistId) {
+            return e.createdByPsychologistId === String(viewerId);
+          }
+          return false;
+        });
+      }
+    }
 
     res.json(entries);
   } catch (err) {
@@ -1932,6 +1977,40 @@ app.get('/api/entries', async (req, res) => {
 
 app.post('/api/entries', (req, res) => {
   const entry = req.body;
+
+  // Si la entrada la crea un psicólogo para un paciente, validar que la relación esté activa
+  try {
+    const authorPsychId = entry?.createdByPsychologistId;
+    const targetUserId = entry?.userId;
+    if (authorPsychId && targetUserId && String(authorPsychId) !== String(targetUserId)) {
+      const findRelationship = () => {
+        // Priorizar cache de Supabase si está disponible
+        if (supabaseDbCache?.careRelationships) {
+          return supabaseDbCache.careRelationships.find(rel => (
+            rel.psychologistId === String(authorPsychId) && rel.patientId === String(targetUserId)
+          ));
+        }
+        const db = getDb();
+        if (!Array.isArray(db.careRelationships)) return null;
+        return db.careRelationships.find(rel => (
+          rel.psychologistId === String(authorPsychId) && rel.patientId === String(targetUserId)
+        ));
+      };
+
+      const relationship = findRelationship();
+      if (!relationship) {
+        console.warn('[POST /api/entries] ❌ Relación no encontrada para crear entrada clínica', { authorPsychId, targetUserId });
+        return res.status(403).json({ error: 'No existe una relación activa con este paciente' });
+      }
+      if (relationship.endedAt) {
+        console.warn('[POST /api/entries] ❌ Relación finalizada, bloqueo de creación de entrada', { authorPsychId, targetUserId, endedAt: relationship.endedAt });
+        return res.status(403).json({ error: 'La relación está finalizada. No se pueden crear nuevas entradas.' });
+      }
+    }
+  } catch (validationErr) {
+    console.error('[POST /api/entries] Error validando relación', validationErr);
+    return res.status(500).json({ error: 'No se pudo validar la relación' });
+  }
 
   // Si no viene id, generamos uno
   if (!entry.id) {
@@ -3111,8 +3190,8 @@ app.put('/api/patient/:userId/profile', async (req, res) => {
 // --- RELACIONES PACIENTE / PSICÓLOGO ---
 app.get('/api/relationships', (req, res) => {
   try {
-    const { psychologistId, patientId } = req.query;
-    console.log('[GET /api/relationships] Request:', { psychologistId, patientId });
+    const { psychologistId, patientId, includeEnded } = req.query;
+    console.log('[GET /api/relationships] Request:', { psychologistId, patientId, includeEnded });
     if (!psychologistId && !patientId) {
       return res.status(400).json({ error: 'psychologistId o patientId requerido' });
     }
@@ -3127,8 +3206,16 @@ app.get('/api/relationships', (req, res) => {
       const matchesPsych = psychologistId ? rel.psychologistId === psychologistId : true;
       const matchesPatient = patientId ? rel.patientId === patientId : true;
       const matches = matchesPsych && matchesPatient;
+      
+      // Por defecto, solo devolver relaciones activas (sin endedAt)
+      // A menos que includeEnded=true
+      if (matches && !includeEnded && rel.endedAt) {
+        console.log('[GET /api/relationships] SKIPPING ended relationship:', { id: rel.id, endedAt: rel.endedAt });
+        return false;
+      }
+      
       if (matches) {
-        console.log('[GET /api/relationships] MATCH found:', { id: rel.id, psychologistId: rel.psychologistId, patientId: rel.patientId });
+        console.log('[GET /api/relationships] MATCH found:', { id: rel.id, psychologistId: rel.psychologistId, patientId: rel.patientId, endedAt: rel.endedAt || 'active' });
       }
       return matches;
     });
@@ -3234,6 +3321,61 @@ app.delete('/api/relationships', async (req, res) => {
   } catch (err) {
     console.error('❌ Error deleting relationship pair', err);
     return res.status(500).json({ error: err?.message || 'No se pudo eliminar la relación' });
+  }
+});
+
+// Finalizar relación (marcar con endedAt en lugar de eliminar)
+app.patch('/api/relationships/end', async (req, res) => {
+  try {
+    const { psychologistId, patientId } = req.body;
+    console.log('[PATCH /api/relationships/end] Request:', { psychologistId, patientId });
+    if (!psychologistId || !patientId) {
+      console.error('[PATCH /api/relationships/end] ❌ Missing required fields');
+      return res.status(400).json({ error: 'psychologistId y patientId son obligatorios' });
+    }
+
+    const db = getDb();
+    if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
+    
+    const relationship = db.careRelationships.find(
+      rel => rel.psychologistId === psychologistId && rel.patientId === patientId
+    );
+    
+    if (!relationship) {
+      console.error('[PATCH /api/relationships/end] ❌ Relación no encontrada');
+      return res.status(404).json({ error: 'Relación no encontrada' });
+    }
+    
+    if (relationship.endedAt) {
+      console.log('[PATCH /api/relationships/end] ⚠️ Relación ya finalizada');
+      return res.status(400).json({ error: 'La relación ya está finalizada' });
+    }
+    
+    relationship.endedAt = Date.now();
+    console.log('[PATCH /api/relationships/end] ✓ Relación finalizada:', relationship);
+    
+    // Refrescar cache Supabase si existe
+    if (supabaseDbCache?.careRelationships) {
+      const idx = supabaseDbCache.careRelationships.findIndex(rel => rel.id === relationship.id);
+      if (idx >= 0) supabaseDbCache.careRelationships[idx] = { ...relationship };
+    }
+
+    // Persistir en Supabase si está habilitado
+    if (supabaseAdmin) {
+      try {
+        const payload = { id: relationship.id, data: relationship };
+        await trySupabaseUpsert('care_relationships', [payload, relationship]);
+        console.log('[PATCH /api/relationships/end] ✓ Supabase actualizado');
+      } catch (supErr) {
+        console.error('[PATCH /api/relationships/end] ⚠️ No se pudo actualizar Supabase', supErr);
+      }
+    }
+    
+    await saveDb(db, { awaitPersistence: true });
+    return res.json(relationship);
+  } catch (err) {
+    console.error('❌ Error ending relationship', err);
+    return res.status(500).json({ error: err?.message || 'No se pudo finalizar la relación' });
   }
 });
 

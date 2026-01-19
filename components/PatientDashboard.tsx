@@ -79,11 +79,23 @@ const PatientDashboard: React.FC = () => {
                 patients.map(patient => (
                     <div key={patient.id} onClick={() => setSelectedPatient(patient)} className="border border-slate-200 rounded-xl p-4 sm:p-5 hover:shadow-md transition-shadow bg-white cursor-pointer group">
                         <div className="flex flex-col sm:flex-row justify-between items-start mb-2 sm:mb-3 gap-2">
-                            <div className="min-w-0 flex-1">
-                                <h4 className="font-bold text-slate-800 text-base sm:text-lg group-hover:text-indigo-600 transition-colors truncate">{patient.name}</h4>
-                                <div className="flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs text-slate-400 mt-0.5 sm:mt-1">
-                                    <Clock size={10} className="sm:w-3 sm:h-3 shrink-0" /> 
-                                    <span className="truncate">Última Act: {patient.lastUpdate}</span>
+                            <div className="min-w-0 flex-1 flex items-center gap-3">
+                                {/* Avatar del paciente */}
+                                <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0 overflow-hidden border-2 border-slate-200">
+                                    {patient.avatarUrl ? (
+                                        <img src={patient.avatarUrl} alt={patient.name} className="w-full h-full object-cover" />
+                                    ) : (
+                                        <span className="text-indigo-700 font-semibold text-base sm:text-lg">
+                                            {patient.name?.charAt(0).toUpperCase()}
+                                        </span>
+                                    )}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                    <h4 className="font-bold text-slate-800 text-base sm:text-lg group-hover:text-indigo-600 transition-colors truncate">{patient.name}</h4>
+                                    <div className="flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs text-slate-400 mt-0.5 sm:mt-1">
+                                        <Clock size={10} className="sm:w-3 sm:h-3 shrink-0" /> 
+                                        <span className="truncate">Última Act: {patient.lastUpdate}</span>
+                                    </div>
                                 </div>
                             </div>
                             <span className={`px-2.5 sm:px-3 py-1 rounded-full text-[10px] sm:text-xs font-bold border ${getRiskColor(patient.riskLevel)} self-start shrink-0 whitespace-nowrap`}>

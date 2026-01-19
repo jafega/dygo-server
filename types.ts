@@ -34,6 +34,7 @@ export interface CareRelationship {
   psychologistId: string;
   patientId: string;
   createdAt: number;
+  endedAt?: number; // Timestamp cuando se finalizó la relación
 }
 
 export interface Invitation {
@@ -101,6 +102,9 @@ export interface JournalEntry {
   
   // New field to identify if entry was created manually by psychologist
   createdBy?: 'USER' | 'PSYCHOLOGIST';
+  
+  // ID del psicólogo que creó esta entrada (para filtrar en relaciones finalizadas)
+  createdByPsychologistId?: string;
 }
 
 export interface Goal {
@@ -133,6 +137,7 @@ export interface PatientSummary {
   id: string;
   name: string;
   email: string;
+  avatarUrl?: string;
   lastUpdate: string;
   averageSentiment: number;
   recentSummary: string;

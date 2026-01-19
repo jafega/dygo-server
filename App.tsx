@@ -301,14 +301,6 @@ const App: React.FC = () => {
     window.history.replaceState({}, '', url.toString());
   }, [currentUser]);
 
-  useEffect(() => {
-      if (!currentUser) return;
-      const interval = setInterval(() => {
-          checkInvitations(currentUser.email);
-      }, 5000);
-      return () => clearInterval(interval);
-  }, [currentUser]);
-
   const markFeedbackAsRead = async (entriesToMark: JournalEntry[]) => {
     if (entriesToMark.length === 0) return;
     const now = Date.now();
@@ -638,6 +630,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   onToggle={() => setSidebarOpen(!sidebarOpen)}
                   userName={currentUser.name}
                   userEmail={currentUser.email}
+                  avatarUrl={currentUser.avatarUrl}
                   onSwitchToPersonal={() => setPsychViewMode('PERSONAL')}
                   onOpenSettings={handleOpenSettings}
                   isSuperAdmin={String(currentUser.email).toLowerCase() === 'garryjavi@gmail.com'}
@@ -990,10 +983,14 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
               onClick={handleOpenSettings}
               className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer"
             >
-              <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
-                <span className="text-indigo-700 font-semibold text-sm">
-                  {currentUser?.name?.charAt(0).toUpperCase()}
-                </span>
+              <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                {currentUser?.avatarUrl ? (
+                  <img src={currentUser.avatarUrl} alt="avatar" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-indigo-700 font-semibold text-sm">
+                    {currentUser?.name?.charAt(0).toUpperCase()}
+                  </span>
+                )}
               </div>
               <div className="flex-1 min-w-0 text-left">
                 <p className="text-sm font-medium text-slate-900 truncate">{currentUser?.name}</p>

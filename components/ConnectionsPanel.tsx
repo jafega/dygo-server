@@ -6,6 +6,7 @@ import {
   rejectInvitation,
   getPsychologistsForPatient,
   revokeAccess,
+  endRelationship,
   getAllPsychologists,
   linkPatientToPsychologist,
   getSentInvitationsForPsychologist,
@@ -141,26 +142,26 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
       setToast({ type: 'error', text: 'ID de usuario objetivo no válido' });
       return;
     }
-    if (!window.confirm('¿Revocar acceso?')) return;
+    if (!window.confirm('¿Finalizar esta relación? El psicólogo ya no podrá crear nuevas entradas en tu perfil, pero seguirá viendo las entradas que creó anteriormente.')) return;
     try {
       // Necesitamos encontrar la relación real en care_relationships
       // Buscamos en ambas direcciones porque no sabemos quién es el psychologist y quién el patient en la BD
-      console.log('[handleRevoke] Buscando relación para eliminar', { currentUserId: currentUser.id, targetUserId });
+      console.log('[handleRevoke] Finalizando relación', { currentUserId: currentUser.id, targetUserId });
       
-      // Intentar eliminar primero asumiendo que currentUser es patient y target es psychologist
+      // Intentar finalizar primero asumiendo que currentUser es patient y target es psychologist
       try {
-        await revokeAccess(currentUser.id, targetUserId);
-        console.log('[handleRevoke] ✓ Relación eliminada (currentUser=patient, target=psychologist)');
-        setToast({ type: 'success', text: 'Acceso revocado' });
+        await endRelationship(targetUserId, currentUser.id);
+        console.log('[handleRevoke] ✓ Relación finalizada (target=psychologist, currentUser=patient)');
+        setToast({ type: 'success', text: 'Relación finalizada correctamente' });
         await loadConnections();
         return;
       } catch (firstErr: any) {
         console.log('[handleRevoke] Primera dirección falló, intentando inversa...', firstErr.message);
         // Si falla, intentar la dirección inversa
         try {
-          await revokeAccess(targetUserId, currentUser.id);
-          console.log('[handleRevoke] ✓ Relación eliminada (target=patient, currentUser=psychologist)');
-          setToast({ type: 'success', text: 'Acceso revocado' });
+          await endRelationship(currentUser.id, targetUserId);
+          console.log('[handleRevoke] ✓ Relación finalizada (currentUser=psychologist, target=patient)');
+          setToast({ type: 'success', text: 'Relación finalizada correctamente' });
           await loadConnections();
           return;
         } catch (secondErr: any) {
@@ -169,8 +170,8 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
         }
       }
     } catch (err: any) {
-      console.error('Error revoking access', err);
-      setToast({ type: 'error', text: err?.message || 'No se pudo revocar el acceso' });
+      console.error('Error ending relationship', err);
+      setToast({ type: 'error', text: err?.message || 'No se pudo finalizar la relación' });
     }
   };
 
@@ -430,11 +431,11 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
                       </div>
                       <button 
                         onClick={() => handleRevoke(psych.id)} 
-                        className="px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 text-[11px] sm:text-xs flex items-center gap-1 whitespace-nowrap flex-shrink-0"
+                        className="px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg border border-orange-200 text-orange-600 hover:bg-orange-50 text-[11px] sm:text-xs flex items-center gap-1 whitespace-nowrap flex-shrink-0"
                       >
                         <Trash2 size={12} className="sm:w-3.5 sm:h-3.5" /> 
-                        <span className="hidden sm:inline">Revocar acceso</span>
-                        <span className="sm:hidden">Revocar</span>
+                        <span className="hidden sm:inline">Finalizar relación</span>
+                        <span className="sm:hidden">Finalizar</span>
                       </button>
                     </div>
                   ))}
@@ -631,10 +632,10 @@ ${currentUser.name || 'Tu psicólogo/a'}
                             <p className="text-xs sm:text-sm font-semibold text-slate-900 truncate">{patient.name}</p>
                             <p className="text-[11px] sm:text-xs text-slate-500 truncate">{patient.email}</p>
                           </div>
-                          <button onClick={() => handleRevoke(patient.id)} className="text-[11px] sm:text-xs text-slate-400 hover:text-red-500 flex items-center gap-1 whitespace-nowrap flex-shrink-0">
+                          <button onClick={() => handleRevoke(patient.id)} className="text-[11px] sm:text-xs text-slate-400 hover:text-orange-500 flex items-center gap-1 whitespace-nowrap flex-shrink-0">
                             <Trash2 size={12} className="sm:w-3.5 sm:h-3.5" /> 
-                            <span className="hidden sm:inline">Revocar acceso</span>
-                            <span className="sm:hidden">Revocar</span>
+                            <span className="hidden sm:inline">Finalizar relación</span>
+                            <span className="sm:hidden">Finalizar</span>
                           </button>
                         </div>
                       ))}
