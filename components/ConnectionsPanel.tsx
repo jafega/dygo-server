@@ -69,16 +69,20 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
         onPendingInvitesChange?.(pending.length > 0);
       } else {
         console.log('👨‍⚕️ [ConnectionsPanel] Cargando datos para PSICÓLOGO...');
-        const [connected, sent, patients] = await Promise.all([
+        // Los psicólogos también pueden recibir invitaciones como pacientes
+        const [connected, sent, patients, pending] = await Promise.all([
           basePromise,
-          getSentInvitationsForPsychologist(currentUser.id),
-          getPatientsForPsychologist(currentUser.id)
+          getSentInvitationsForPsychologist(currentUser.id, currentUser.email),
+          getPatientsForPsychologist(currentUser.id),
+          getPendingInvitationsForEmail(currentUser.email)
         ]);
-        console.log('✅ [ConnectionsPanel] Datos recibidos - Conectados:', connected.length, 'Invitaciones enviadas:', sent.length, 'Pacientes:', patients.length);
+        console.log('✅ [ConnectionsPanel] Datos recibidos - Conectados:', connected.length, 'Invitaciones enviadas:', sent.length, 'Pacientes:', patients.length, 'Invitaciones recibidas:', pending.length);
         setMyPsychologists(connected);
         setSentInvitations(sent);
         setMyPatients(patients.filter(p => !p.isSelf));
-        console.log('📊 [ConnectionsPanel] Estado actualizado - sentInvitations:', sent);
+        setInvitations(pending);
+        onPendingInvitesChange?.(pending.length > 0);
+        console.log('📊 [ConnectionsPanel] Estado actualizado - sentInvitations:', sent, 'pending:', pending);
       }
     } catch (err: any) {
       console.error('Error loading connections', err);
@@ -194,7 +198,15 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
     
     setIsSendingInvite(true);
     try {
-      await sendInvitation(currentUser.id, currentUser.name || 'Psicólogo', targetEmail);
+      // El usuario actual es PSYCHOLOGIST, así que invita a un paciente
+      // El destinatario será PATIENT en esta relación
+      await sendInvitation(
+        currentUser.id,
+        currentUser.email,
+        currentUser.name || 'Psicólogo',
+        targetEmail,
+        'PATIENT' // El destinatario será el paciente
+      );
       setToast({ type: 'success', text: 'Invitación enviada correctamente' });
       setInviteEmail('');
       await loadConnections();
@@ -329,25 +341,74 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
               </div>
             )}
 
+            {/* Invitaciones pendientes recibidas */}
+            {invitations.length > 0 && (
+              <div className="mt-6 pb-6 border-b border-slate-100">
+                <div className="flex items-center justify-between mb-4">
+                  <h4 className="text-sm font-bold text-amber-600 uppercase tracking-wide flex items-center gap-2">
+                    <Mail size={14} /> Invitaciones Pendientes
+                  </h4>
+                  <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded-full font-medium">
+                    {invitations.length} pendiente{invitations.length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mb-3">Invitaciones de psicólogos que quieren acceder a tu perfil</p>
+                <div className="space-y-3">
+                  {invitations.map(inv => (
+                    <div key={inv.id} className="p-4 rounded-xl border border-amber-100 bg-amber-50/30 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">{inv.psychologistName || inv.fromPsychologistName || 'Psicólogo'}</p>
+                        <p className="text-xs text-slate-500">{inv.patientEmail || inv.toUserEmail}</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => handleRejectInvitation(inv.id)} 
+                          className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-white text-sm flex items-center gap-1"
+                        >
+                          <X size={14} />
+                          Rechazar
+                        </button>
+                        <button 
+                          onClick={() => handleAcceptInvitation(inv.id)} 
+                          className="px-4 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 text-sm flex items-center gap-1"
+                        >
+                          <UserPlus size={14} />
+                          Aceptar
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Psicólogos conectados */}
             <div className="mt-6">
               <div className="flex items-center justify-between mb-4">
-                <h4 className="text-sm font-bold text-slate-600 uppercase tracking-wide flex items-center gap-2">
-                  <UserCheck size={14} /> Psicólogos conectados
+                <h4 className="text-sm font-bold text-green-700 uppercase tracking-wide flex items-center gap-2">
+                  <UserCheck size={14} /> Psicólogos Conectados
                 </h4>
-                <span className="text-xs text-slate-400">{myPsychologists.length} activos</span>
+                <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-medium">
+                  {myPsychologists.length} activo{myPsychologists.length !== 1 ? 's' : ''}
+                </span>
               </div>
+              <p className="text-xs text-slate-500 mb-3">Profesionales con acceso autorizado a tu perfil</p>
               {myPsychologists.length === 0 ? (
-                <p className="text-sm text-slate-500">Aún no has autorizado a ningún especialista.</p>
+                <p className="text-sm text-slate-500 py-4 text-center bg-slate-50 rounded-xl">Aún no has autorizado a ningún especialista.</p>
               ) : (
                 <div className="space-y-3">
                   {myPsychologists.map(psych => (
-                    <div key={psych.id} className="flex items-center justify-between border border-slate-100 rounded-xl p-4">
+                    <div key={psych.id} className="flex items-center justify-between border border-green-100 bg-green-50/30 rounded-xl p-4">
                       <div>
                         <p className="font-semibold text-slate-900">{psych.name}</p>
                         <p className="text-xs text-slate-500">{psych.email}</p>
                       </div>
-                      <button onClick={() => handleRevoke(psych.id)} className="text-xs text-slate-400 hover:text-red-500 flex items-center gap-1">
-                        <Trash2 size={14} /> Revocar
+                      <button 
+                        onClick={() => handleRevoke(psych.id)} 
+                        className="px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 text-xs flex items-center gap-1"
+                      >
+                        <Trash2 size={14} /> 
+                        Revocar acceso
                       </button>
                     </div>
                   ))}
@@ -355,28 +416,6 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
               )}
             </div>
           </div>
-
-          {currentUser.role === 'PATIENT' && invitations.length > 0 && (
-            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-              <h4 className="text-sm font-bold text-slate-600 uppercase tracking-wide mb-4 flex items-center gap-2">
-                <Mail size={14} /> Invitaciones pendientes
-              </h4>
-              <div className="space-y-3">
-                {invitations.map(inv => (
-                  <div key={inv.id} className="p-4 rounded-xl border border-slate-100 bg-slate-50 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900">{inv.fromPsychologistName}</p>
-                      <p className="text-xs text-slate-500">{inv.toUserEmail}</p>
-                    </div>
-                    <div className="flex gap-2">
-                      <button onClick={() => handleRejectInvitation(inv.id)} className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-white text-sm">Rechazar</button>
-                      <button onClick={() => handleAcceptInvitation(inv.id)} className="px-4 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 text-sm">Aceptar</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           {currentUser.role === 'PSYCHOLOGIST' && (
             <>
@@ -425,21 +464,76 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
                     </div>
                     <p className="text-xs text-slate-500 mb-3">Invitaciones enviadas que aún no han sido aceptadas</p>
                     <div className="space-y-3">
-                      {sentInvitations.map(inv => (
-                        <div key={inv.id} className="p-4 rounded-xl border border-amber-100 bg-amber-50/30 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                          <div>
-                            <p className="text-sm font-semibold text-slate-900">{inv.toUserEmail}</p>
-                            <p className="text-xs text-slate-500">Esperando aceptación</p>
+                      {sentInvitations.map(inv => {
+                        // Obtener email del paciente (nueva estructura o retrocompat)
+                        const patientEmail = inv.patientEmail || inv.toUserEmail;
+                        
+                        // Construir el email pre-cargado
+                        const emailSubject = encodeURIComponent('¡Te invito a usar dygo! 🌱 La herramienta que usamos para tu seguimiento');
+                        const emailBody = encodeURIComponent(
+`¡Hola! 👋
+
+Te escribo porque quiero invitarte a formar parte de dygo, la plataforma digital que utilizo para acompañar a mis pacientes en su proceso terapéutico.
+
+💡 ¿Por qué es importante que te registres?
+
+dygo es la herramienta que uso diariamente para hacer seguimiento de tu evolución, gestionar objetivos y preparar nuestras sesiones de forma más efectiva. No es solo una aplicación más, ¡es nuestra forma de trabajar juntos entre sesiones!
+
+🌟 ¿Qué puedes hacer en dygo?
+
+📝 Llevar un diario emocional - Registra cómo te sientes día a día, tus pensamientos y experiencias
+🎯 Establecer objetivos personalizados - Define metas realistas y sigue tu progreso semana a semana  
+📊 Visualizar tu evolución - Gráficos e insights que te ayudan a ver cómo avanzas
+💬 Preparar nuestras sesiones - Anota lo que quieres trabajar conmigo antes de cada encuentro
+🌙 Acceso 24/7 - Escribe cuando lo necesites, desde cualquier dispositivo
+📈 Reportes semanales - Recibe resúmenes automáticos de tu progreso
+
+✨ ¿Cómo empezar? (¡Solo te tomará 2 minutos!)
+
+1️⃣ Entra en https://dygo.vercel.app
+2️⃣ Regístrate con ESTE email (${patientEmail}) - Es importante que uses este correo para que podamos conectarnos
+3️⃣ Acepta el consentimiento informado para que pueda acceder a tus registros
+4️⃣ ¡Ya está! Empieza a explorar y a registrar tu día a día
+
+🔒 Tu privacidad es lo primero
+
+Toda tu información está protegida por el secreto profesional y las normativas de protección de datos (RGPD). Tú decides qué compartes y tienes el control total sobre quién accede a tu información.
+
+Créeme, usar dygo marcará una gran diferencia en nuestro trabajo conjunto. Muchos de mis pacientes me comentan que les ayuda a ser más conscientes de sus emociones y a aprovechar mejor las sesiones.
+
+Si tienes cualquier duda sobre cómo registrarte o usar la plataforma, coméntamelo sin problema. ¡Estoy aquí para ayudarte! 😊
+
+Nos vemos pronto,
+${currentUser.name || 'Tu psicólogo/a'}
+`);
+                        const mailtoLink = `mailto:${patientEmail}?subject=${emailSubject}&body=${emailBody}`;
+
+                        return (
+                          <div key={inv.id} className="p-4 rounded-xl border border-amber-100 bg-amber-50/30 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                            <div>
+                              <p className="text-sm font-semibold text-slate-900">{patientEmail}</p>
+                              <p className="text-xs text-slate-500">Esperando aceptación</p>
+                            </div>
+                            <div className="flex gap-2">
+                              <a 
+                                href={mailtoLink}
+                                className="px-4 py-2 rounded-xl border border-indigo-200 text-indigo-600 hover:bg-indigo-50 text-sm flex items-center gap-1 justify-center"
+                                title="Enviar email de invitación"
+                              >
+                                <Mail size={14} />
+                                Enviar Email
+                              </a>
+                              <button 
+                                onClick={() => handleRevokeSentInvitation(inv.id)} 
+                                className="px-4 py-2 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-sm flex items-center gap-1 justify-center"
+                              >
+                                <X size={14} />
+                                Revocar
+                              </button>
+                            </div>
                           </div>
-                          <button 
-                            onClick={() => handleRevokeSentInvitation(inv.id)} 
-                            className="px-4 py-2 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-sm flex items-center gap-1 justify-center"
-                          >
-                            <X size={14} />
-                            Revocar
-                          </button>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}

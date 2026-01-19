@@ -431,26 +431,46 @@ const getInvitations = async (): Promise<Invitation[]> => {
     return JSON.parse(localStorage.getItem(INVITATIONS_KEY) || '[]');
 };
 
+// Nueva función para enviar invitaciones con roles explícitos
 export const sendInvitation = async (
-    fromPsychId: string, 
-    fromName: string, 
-    toEmail: string
+    fromUserId: string,
+    fromUserEmail: string,
+    fromUserName: string,
+    toEmail: string,
+    role: 'PSYCHOLOGIST' | 'PATIENT' // rol que tendrá el destinatario en la relación
 ) => {
     const invs = await getInvitations();
-    if (invs.find(i => i.fromPsychologistId === fromPsychId && i.toUserEmail === toEmail && i.status === 'PENDING')) {
+    
+    // Determinar quién es psicólogo y quién paciente según el rol deseado
+    const isPsychologistInvite = role === 'PSYCHOLOGIST'; // Estás invitando a un psicólogo
+    const psychologistId = isPsychologistInvite ? '' : fromUserId; // Se llenará con el ID del invitado si es psych
+    const psychologistEmail = isPsychologistInvite ? toEmail : fromUserEmail;
+    const psychologistName = isPsychologistInvite ? '' : fromUserName; // Se llenará después
+    const patientEmail = isPsychologistInvite ? fromUserEmail : toEmail;
+    const patientName = isPsychologistInvite ? fromUserName : '';
+
+    // Verificar si ya existe invitación pendiente
+    const existingInv = invs.find(i => 
+        (i.psychologistEmail?.toLowerCase().trim() === psychologistEmail.toLowerCase().trim() || i.fromPsychologistId) && 
+        (i.patientEmail?.toLowerCase().trim() === patientEmail.toLowerCase().trim() || i.toUserEmail?.toLowerCase().trim() === patientEmail.toLowerCase().trim()) && 
+        i.status === 'PENDING'
+    );
+    if (existingInv) {
         throw new Error("Invitación ya pendiente.");
     }
 
-    // Prevent sending an invitation if the patient is already linked to this psychologist
+    // Prevent sending an invitation if relationship already exists
     const existingUser = await AuthService.getUserByEmail(toEmail.trim());
     if (existingUser) {
         try {
-            const alreadyLinked = await relationshipExists(fromPsychId, existingUser.id);
+            const psychId = isPsychologistInvite ? existingUser.id : fromUserId;
+            const patId = isPsychologistInvite ? fromUserId : existingUser.id;
+            const alreadyLinked = await relationshipExists(psychId, patId);
             if (alreadyLinked) {
-                throw new Error('Paciente ya agregado.');
+                throw new Error('Relación ya existe.');
             }
         } catch (err) {
-            if (err instanceof Error && err.message === 'Paciente ya agregado.') {
+            if (err instanceof Error && err.message === 'Relación ya existe.') {
                 throw err;
             }
             console.warn('No se pudo verificar si la relación ya existía, continuando con la invitación.', err);
@@ -459,17 +479,24 @@ export const sendInvitation = async (
 
     const newInv: Invitation = {
         id: crypto.randomUUID(),
-        fromPsychologistId: fromPsychId,
-        fromPsychologistName: fromName,
-        toUserEmail: toEmail,
+        psychologistId: psychologistId || (existingUser && isPsychologistInvite ? existingUser.id : ''),
+        psychologistEmail,
+        psychologistName,
+        patientEmail,
+        patientName,
+        patientId: existingUser && !isPsychologistInvite ? existingUser.id : undefined,
         status: 'PENDING',
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        createdAt: new Date().toISOString()
     };
 
     if (USE_BACKEND) {
         try {
             const res = await fetch(`${API_URL}/invitations`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(newInv) });
-            if (!res.ok) throw new Error(`Error creating invitation (${res.status})`);
+            if (!res.ok) {
+                const errorData = await res.json().catch(() => ({}));
+                throw new Error(errorData.error || `Error creating invitation (${res.status})`);
+            }
             return;
         } catch (e) {
             if (ALLOW_LOCAL_FALLBACK) { invs.push(newInv); localStorage.setItem(INVITATIONS_KEY, JSON.stringify(invs)); console.warn('Create invitation failed, saved locally', e); return; }
@@ -483,16 +510,28 @@ export const sendInvitation = async (
     localStorage.setItem(INVITATIONS_KEY, JSON.stringify(invs));
 };
 
+// Obtener invitaciones pendientes donde este email es el PACIENTE
 export const getPendingInvitationsForEmail = async (email: string): Promise<Invitation[]> => {
     const invs = await getInvitations();
-    return invs.filter(i => i.toUserEmail === email && i.status === 'PENDING');
+    const normalizedEmail = email.toLowerCase().trim();
+    return invs.filter(i => 
+        (i.patientEmail?.toLowerCase().trim() === normalizedEmail || i.toUserEmail?.toLowerCase().trim() === normalizedEmail) && 
+        i.status === 'PENDING'
+    );
 };
 
-export const getSentInvitationsForPsychologist = async (psychId: string): Promise<Invitation[]> => {
+// Obtener invitaciones enviadas donde este usuario es el PSICÓLOGO (invitó a pacientes)
+export const getSentInvitationsForPsychologist = async (psychId: string, psychEmail?: string): Promise<Invitation[]> => {
     console.log('📋 [getSentInvitationsForPsychologist] Buscando invitaciones enviadas por:', psychId);
     const invs = await getInvitations();
     console.log('📊 [getSentInvitationsForPsychologist] Total invitaciones:', invs.length);
-    const filtered = invs.filter(i => i.fromPsychologistId === psychId && i.status === 'PENDING');
+    const normalizedEmail = psychEmail?.toLowerCase().trim();
+    const filtered = invs.filter(i => 
+        (i.psychologistId === psychId || 
+         (normalizedEmail && i.psychologistEmail?.toLowerCase().trim() === normalizedEmail) ||
+         i.fromPsychologistId === psychId) && 
+        i.status === 'PENDING'
+    );
     console.log('✅ [getSentInvitationsForPsychologist] Invitaciones PENDING de este psicólogo:', filtered.length, filtered);
     return filtered;
 };

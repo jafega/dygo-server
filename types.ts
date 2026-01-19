@@ -38,12 +38,18 @@ export interface CareRelationship {
 
 export interface Invitation {
   id: string;
-  fromPsychologistId: string;
-  fromPsychologistName: string;
-  toUserEmail: string;
+  // El psicólogo en esta relación (quien dará tratamiento)
+  psychologistId: string;
+  psychologistEmail: string;
+  psychologistName: string;
+  // El paciente en esta relación (quien recibirá tratamiento)
+  patientId?: string; // Se rellena al aceptar si el usuario ya existe
+  patientEmail: string;
+  patientName?: string;
   status: 'PENDING' | 'ACCEPTED' | 'REJECTED';
   timestamp: number;
-  // Información del paciente proporcionada por el psicólogo
+  createdAt?: string; // ISO string
+  // Información adicional del paciente proporcionada por el psicólogo
   patientFirstName?: string;
   patientLastName?: string;
   emailSent?: boolean; // Indica si se envió el email de bienvenida

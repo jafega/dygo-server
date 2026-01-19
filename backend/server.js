@@ -244,8 +244,55 @@ const ensureDbShape = (db) => {
   if (!Array.isArray(db.invoices)) db.invoices = [];
   if (!db.psychologistProfiles || typeof db.psychologistProfiles !== 'object') db.psychologistProfiles = {};
 
+  // Migrar invitaciones antiguas a nueva estructura
+  migrateInvitationsToNewStructure(db);
+  
   // migrateLegacyAccessLists(db); // DISABLED - use care_relationships table only
   return db;
+};
+
+// Migrar invitaciones antiguas (fromPsychologistId/toUserEmail) a nueva estructura (psychologistId/patientEmail)
+const migrateInvitationsToNewStructure = (db) => {
+  if (!Array.isArray(db.invitations)) return;
+  
+  let migrated = 0;
+  db.invitations.forEach(inv => {
+    // Detectar estructura antigua: tiene fromPsychologistId pero no psychologistEmail
+    if (inv.fromPsychologistId && !inv.psychologistEmail) {
+      console.log('🔄 Migrando invitación antigua:', inv.id);
+      
+      // Buscar psicólogo
+      const psychologist = db.users.find(u => u.id === inv.fromPsychologistId);
+      if (psychologist) {
+        inv.psychologistId = inv.fromPsychologistId;
+        inv.psychologistEmail = psychologist.email;
+        inv.psychologistName = inv.fromPsychologistName || psychologist.name;
+        inv.patientEmail = inv.toUserEmail;
+        
+        // Buscar paciente si existe
+        const patient = db.users.find(u => normalizeEmail(u.email) === normalizeEmail(inv.toUserEmail));
+        if (patient) {
+          inv.patientId = patient.id;
+          inv.patientName = patient.name;
+        }
+        
+        inv.createdAt = inv.createdAt || new Date().toISOString();
+        
+        console.log('✅ Invitación migrada:', {
+          id: inv.id,
+          psychologistEmail: inv.psychologistEmail,
+          patientEmail: inv.patientEmail
+        });
+        migrated++;
+      } else {
+        console.warn('⚠️ No se encontró psicólogo para migrar invitación:', inv.id, 'psychId:', inv.fromPsychologistId);
+      }
+    }
+  });
+  
+  if (migrated > 0) {
+    console.log(`📊 Total invitaciones migradas: ${migrated}`);
+  }
 };
 
 const relationshipKey = (psychologistId, patientId) => `${psychologistId}:${patientId}`;
@@ -1993,7 +2040,7 @@ app.get('/api/invitations', (_req, res) => {
   const db = getDb();
   console.log(`📋 GET /api/invitations - Total: ${db.invitations.length}`);
   db.invitations.forEach((inv, i) => {
-    console.log(`   ${i + 1}. ID: ${inv.id}, From: ${inv.fromPsychologistId}, To: ${inv.toUserEmail}, Status: ${inv.status || 'PENDING'}`);
+    console.log(`   ${i + 1}. ID: ${inv.id}, Psych: ${inv.psychologistEmail || inv.fromPsychologistId}, Patient: ${inv.patientEmail || inv.toUserEmail}, Status: ${inv.status || 'PENDING'}`);
   });
   
   // Prevenir caché del navegador
@@ -2014,34 +2061,43 @@ app.post('/api/invitations', async (req, res) => {
     invitation.id = crypto.randomUUID();
   }
 
-  // Verificar que el psicólogo no se esté invitando a sí mismo
-  const psychologist = db.users.find(u => u.id === invitation.fromPsychologistId);
-  if (psychologist && normalizeEmail(psychologist.email) === normalizeEmail(invitation.toUserEmail)) {
-    console.log('❌ Intento de auto-invitación bloqueado:', psychologist.email);
+  // Asegurar que tenemos psychologistId, psychologistEmail, patientEmail
+  if (!invitation.psychologistId || !invitation.psychologistEmail || !invitation.patientEmail) {
+    return res.status(400).json({ error: 'Se requieren psychologistId, psychologistEmail y patientEmail' });
+  }
+
+  // Normalizar emails
+  const normalizedPsychEmail = normalizeEmail(invitation.psychologistEmail);
+  const normalizedPatientEmail = normalizeEmail(invitation.patientEmail);
+
+  // Verificar auto-invitación
+  if (normalizedPsychEmail === normalizedPatientEmail) {
+    console.log('❌ Intento de auto-invitación bloqueado:', normalizedPsychEmail);
     return res.status(400).json({ error: 'No puedes enviarte una invitación a ti mismo' });
   }
 
   // Asegurar que status sea PENDING siempre (el usuario debe aceptar manualmente)
   invitation.status = 'PENDING';
+  invitation.timestamp = invitation.timestamp || Date.now();
+  invitation.createdAt = invitation.createdAt || new Date().toISOString();
 
-  const normalizedEmail = normalizeEmail(invitation.toUserEmail);
-  const existingUser = db.users.find(u => normalizeEmail(u.email) === normalizedEmail);
-  
-  if (existingUser) {
-    console.log(`✅ Usuario ${normalizedEmail} ya existe: ${existingUser.id}`);
-    invitation.toUserId = existingUser.id;
-    // NO crear relación automáticamente - esperar a que el usuario acepte
+  // Verificar si el paciente ya existe
+  const existingPatient = db.users.find(u => normalizeEmail(u.email) === normalizedPatientEmail);
+  if (existingPatient) {
+    console.log(`✅ Paciente ${normalizedPatientEmail} ya existe: ${existingPatient.id}`);
+    invitation.patientId = existingPatient.id;
+    invitation.patientName = invitation.patientName || existingPatient.name;
   } else {
-    console.log(`📧 Usuario ${normalizedEmail} no existe - invitación queda PENDING`);
-    // No crear usuario ni relación - se hará cuando el usuario se registre
+    console.log(`📧 Paciente ${normalizedPatientEmail} no existe - invitación queda PENDING`);
   }
 
   db.invitations.push(invitation);
   console.log(`💾 Invitación guardada:`, {
     id: invitation.id,
-    from: invitation.fromPsychologistId,
-    to: invitation.toUserEmail,
-    toUserId: invitation.toUserId,
+    psychologistId: invitation.psychologistId,
+    psychologistEmail: invitation.psychologistEmail,
+    patientEmail: invitation.patientEmail,
+    patientId: invitation.patientId,
     status: invitation.status
   });
   
