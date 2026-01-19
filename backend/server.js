@@ -962,6 +962,25 @@ app.post('/api/auth/register', (req, res) => {
     };
 
     db.users.push(newUser);
+
+    // ✨ Procesar invitaciones pendientes para este email
+    const pendingInvitations = db.invitations.filter(
+      inv => inv.toUserEmail === normalizedEmail && inv.status === 'PENDING'
+    );
+
+    if (pendingInvitations.length > 0) {
+      console.log(`📧 Encontradas ${pendingInvitations.length} invitaciones pendientes para ${normalizedEmail}`);
+      
+      // Las invitaciones ya están asociadas por email, solo las marcamos como visibles para el usuario
+      pendingInvitations.forEach(inv => {
+        console.log(`   - Invitación de ${inv.fromPsychologistName} (${inv.fromPsychologistId})`);
+        // No cambiamos el estado aquí - el usuario debe aceptar/rechazar manualmente
+        // La invitación ya está accesible vía getPendingInvitationsForEmail(email)
+      });
+
+      console.log('✅ El usuario podrá ver y gestionar estas invitaciones en el panel de Conexiones');
+    }
+
     saveDb(db);
 
     console.log('✅ Usuario creado:', newUser.id);
@@ -1014,6 +1033,21 @@ const handleSupabaseAuth = async (req, res) => {
       db.users.push(user);
       if (!db.settings) db.settings = {};
       if (!db.settings[user.id]) db.settings[user.id] = {};
+      
+      // ✨ Procesar invitaciones pendientes para este email (Supabase OAuth)
+      const normalizedEmail = normalizeEmail(supUser.email);
+      const pendingInvitations = db.invitations.filter(
+        inv => inv.toUserEmail === normalizedEmail && inv.status === 'PENDING'
+      );
+
+      if (pendingInvitations.length > 0) {
+        console.log(`📧 [Supabase Auth] Encontradas ${pendingInvitations.length} invitaciones pendientes para ${normalizedEmail}`);
+        pendingInvitations.forEach(inv => {
+          console.log(`   - Invitación de ${inv.fromPsychologistName} (${inv.fromPsychologistId})`);
+        });
+        console.log('✅ El usuario podrá ver y gestionar estas invitaciones en el panel de Conexiones');
+      }
+      
       saveDb(db);
       console.log('✅ Created new user from Supabase sign-in:', user.email);
     } else {

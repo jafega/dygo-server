@@ -26,11 +26,23 @@ Si el email ya está registrado:
 - Puede aceptar o rechazar
 - El sistema recarga automáticamente cada 10 segundos para detectar nuevas invitaciones
 
-#### B. Usuario Nuevo
+#### B. Usuario Nuevo (✨ MEJORADO)
 Si el email NO está registrado:
-- Cuando se registre con ese email
-- Al abrir "Conexiones" por primera vez, verá la invitación
-- Puede aceptar o rechazar
+- La invitación queda en estado `PENDING` en Supabase
+- Cuando el usuario se registre con ese email:
+  - El backend detecta automáticamente las invitaciones pendientes
+  - Las registra en los logs para visibilidad
+  - Quedan inmediatamente disponibles para el usuario
+- Al abrir "Conexiones", verá todas sus invitaciones pendientes
+- Puede aceptar o rechazar cada una
+
+**✨ NUEVO:** El sistema ahora valida y reporta invitaciones pendientes durante el registro:
+```javascript
+// En backend/server.js - POST /api/auth/register
+📧 Encontradas X invitaciones pendientes para email@example.com
+   - Invitación de Psicólogo Name (psych-id)
+✅ El usuario podrá ver y gestionar estas invitaciones en el panel de Conexiones
+```
 
 ### 3. Revocación de Invitación (Psicólogo)
 
@@ -57,7 +69,7 @@ Las invitaciones pendientes son para:
 
 ### Scripts de Verificación
 
-Se han creado 3 scripts útiles en `backend/scripts/`:
+Se han creado 5 scripts útiles en `backend/scripts/`:
 
 #### 1. `check-invitations.js`
 Consulta todas las invitaciones en Supabase y muestra estadísticas.
@@ -93,6 +105,34 @@ node scripts/revoke-invitation.js <invitation-id>
 node scripts/revoke-invitation.js c72eb0d7-9ef4-4e53-a1f0-81bc6101cfc9
 ```
 
+#### 4. `verify-invitation-email-mapping.js` ✨ NUEVO
+Verifica cómo están asociadas las invitaciones pendientes por email.
+
+```bash
+cd backend
+node scripts/verify-invitation-email-mapping.js
+```
+
+**Muestra:**
+- Todas las invitaciones pendientes
+- Si existe un usuario con ese email
+- Estado de disponibilidad para cada invitación
+
+#### 5. `test-invitation-flow.js` ✨ NUEVO
+Prueba el flujo completo: crear invitación → registrar usuario → aceptar invitación.
+
+```bash
+cd backend
+node scripts/test-invitation-flow.js
+```
+
+**Verifica:**
+- Creación de invitación antes del registro
+- Registro de nuevo usuario
+- Disponibilidad de invitaciones para el usuario
+- Aceptación de invitación
+- Creación de relación
+
 ## Mejoras Implementadas
 
 ### 1. Logs Detallados en Backend
@@ -102,6 +142,8 @@ Se agregaron logs extensivos en `backend/server.js` para rastrear el flujo compl
 **Endpoints afectados:**
 - `DELETE /api/invitations/:id`
 - `DELETE /api/invitations?id=...`
+- `POST /api/auth/register` ✨ NUEVO
+- Supabase OAuth flow ✨ NUEVO
 
 **Información que se registra:**
 - 🗑️ Inicio de revocación
@@ -110,6 +152,7 @@ Se agregaron logs extensivos en `backend/server.js` para rastrear el flujo compl
 - 🔄 Inicio de persistencia en Supabase
 - ✅ Confirmación de persistencia exitosa
 - ❌ Errores detallados si fallan
+- 📧 **NUEVO:** Detección de invitaciones pendientes al registrarse
 
 **Función `deleteMissing`:**
 - 🔍 Tabla, IDs previos/nuevos
@@ -117,7 +160,37 @@ Se agregaron logs extensivos en `backend/server.js` para rastrear el flujo compl
 - 🗑️ Progreso de eliminación por chunks
 - ✅ Confirmación de finalización
 
-### 2. Recarga Automática en ConnectionsPanel
+### 2. Detección Automática de Invitaciones al Registrarse ✨ NUEVO
+
+**Problema anterior:** 
+No había visibilidad clara de si un nuevo usuario tenía invitaciones pendientes esperándole.
+
+**Solución:**
+Cuando un usuario se registra (vía email/password o Supabase OAuth), el backend:
+1. Busca automáticamente invitaciones pendientes para ese email
+2. Registra en los logs cuántas invitaciones hay y de quién son
+3. Las invitaciones quedan inmediatamente disponibles vía `getPendingInvitationsForEmail()`
+
+```javascript
+// En POST /api/auth/register y Supabase OAuth
+const pendingInvitations = db.invitations.filter(
+  inv => inv.toUserEmail === normalizedEmail && inv.status === 'PENDING'
+);
+
+if (pendingInvitations.length > 0) {
+  console.log(`📧 Encontradas ${pendingInvitations.length} invitaciones pendientes para ${normalizedEmail}`);
+  pendingInvitations.forEach(inv => {
+    console.log(`   - Invitación de ${inv.fromPsychologistName} (${inv.fromPsychologistId})`);
+  });
+}
+```
+
+**Beneficios:**
+- Visibilidad completa en los logs del servidor
+- Debugging más fácil de problemas con invitaciones
+- Confirmación inmediata de que el sistema funciona correctamente
+
+### 3. Recarga Automática en ConnectionsPanel
 
 **Problema anterior:** 
 Si un usuario tenía la sesión abierta, no veía cambios en invitaciones hasta que recargara manualmente la página.
@@ -143,7 +216,7 @@ useEffect(() => {
 - Sin molestias visuales (no muestra loader en recargas automáticas)
 - Limpieza apropiada del intervalo al desmontar componente
 
-### 3. Persistencia Correcta en Supabase
+### 4. Persistencia Correcta en Supabase
 
 Los endpoints DELETE ahora pasan correctamente `prevCache` a `persistSupabaseData`:
 
