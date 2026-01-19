@@ -49,6 +49,7 @@ export interface Invitation {
   status: 'PENDING' | 'ACCEPTED' | 'REJECTED';
   timestamp: number;
   createdAt?: string; // ISO string
+  initiatorEmail?: string; // Email de quien inició la invitación
   // Información adicional del paciente proporcionada por el psicólogo
   patientFirstName?: string;
   patientLastName?: string;

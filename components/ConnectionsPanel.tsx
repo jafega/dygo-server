@@ -9,6 +9,7 @@ import {
   getAllPsychologists,
   linkPatientToPsychologist,
   getSentInvitationsForPsychologist,
+  getPendingPsychologistInvitationsForEmail,
   getPatientsForPsychologist,
   sendInvitation
 } from '../services/storageService';
@@ -26,6 +27,7 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
 
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [sentInvitations, setSentInvitations] = useState<Invitation[]>([]);
+  const [psychologistRequests, setPsychologistRequests] = useState<Invitation[]>([]); // Solicitudes donde me piden como psicólogo
   const [myPsychologists, setMyPsychologists] = useState<User[]>([]);
   const [myPatients, setMyPatients] = useState<PatientSummary[]>([]);
 
@@ -70,19 +72,21 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
       } else {
         console.log('👨‍⚕️ [ConnectionsPanel] Cargando datos para PSICÓLOGO...');
         // Los psicólogos también pueden recibir invitaciones como pacientes
-        const [connected, sent, patients, pending] = await Promise.all([
+        const [connected, sent, patients, pending, psychRequests] = await Promise.all([
           basePromise,
           getSentInvitationsForPsychologist(currentUser.id, currentUser.email),
           getPatientsForPsychologist(currentUser.id),
-          getPendingInvitationsForEmail(currentUser.email)
+          getPendingInvitationsForEmail(currentUser.email),
+          getPendingPsychologistInvitationsForEmail(currentUser.email)
         ]);
-        console.log('✅ [ConnectionsPanel] Datos recibidos - Conectados:', connected.length, 'Invitaciones enviadas:', sent.length, 'Pacientes:', patients.length, 'Invitaciones recibidas:', pending.length);
+        console.log('✅ [ConnectionsPanel] Datos recibidos - Conectados:', connected.length, 'Invitaciones enviadas:', sent.length, 'Pacientes:', patients.length, 'Invitaciones recibidas:', pending.length, 'Solicitudes como psicólogo:', psychRequests.length);
         setMyPsychologists(connected);
         setSentInvitations(sent);
         setMyPatients(patients.filter(p => !p.isSelf));
         setInvitations(pending);
-        onPendingInvitesChange?.(pending.length > 0);
-        console.log('📊 [ConnectionsPanel] Estado actualizado - sentInvitations:', sent, 'pending:', pending);
+        setPsychologistRequests(psychRequests);
+        onPendingInvitesChange?.(pending.length > 0 || psychRequests.length > 0);
+        console.log('📊 [ConnectionsPanel] Estado actualizado - sentInvitations:', sent, 'pending:', pending, 'psychRequests:', psychRequests);
       }
     } catch (err: any) {
       console.error('Error loading connections', err);
@@ -172,13 +176,29 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
 
   const handleConnect = async (psychologistId: string) => {
     if (!currentUser) return;
+    
+    // Buscar el email del psicólogo
+    const psychologist = allPsychologists.find(p => p.id === psychologistId);
+    if (!psychologist) {
+      setToast({ type: 'error', text: 'Psicólogo no encontrado' });
+      return;
+    }
+    
     try {
-      await linkPatientToPsychologist(currentUser.id, psychologistId);
-      setToast({ type: 'success', text: 'Has solicitado conectar con este especialista' });
+      // Enviar invitación donde el destinatario es PSYCHOLOGIST y yo soy PATIENT
+      await sendInvitation(
+        currentUser.id,
+        currentUser.email,
+        currentUser.name || 'Usuario',
+        psychologist.email,
+        'PSYCHOLOGIST' // El destinatario será el psicólogo
+      );
+      setToast({ type: 'success', text: 'Solicitud enviada al psicólogo' });
+      setShowDirectory(false);
       await loadConnections();
     } catch (err: any) {
       console.error('Error connecting to psychologist', err);
-      setToast({ type: 'error', text: err?.message || 'No se pudo crear la conexión' });
+      setToast({ type: 'error', text: err?.message || 'No se pudo enviar la solicitud' });
     }
   };
 
@@ -331,9 +351,10 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
                       <button
                         onClick={() => handleConnect(psych.id)}
                         className="px-3 py-1.5 text-xs font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-1"
+                        title="Enviar solicitud para que este psicólogo acceda a tu perfil"
                       >
-                        <UserPlus size={14} />
-                        Conectar
+                        <Mail size={14} />
+                        Solicitar
                       </button>
                     </div>
                   ))}
@@ -358,7 +379,7 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
                     <div key={inv.id} className="p-4 rounded-xl border border-amber-100 bg-amber-50/30 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                       <div>
                         <p className="text-sm font-semibold text-slate-900">{inv.psychologistName || inv.fromPsychologistName || 'Psicólogo'}</p>
-                        <p className="text-xs text-slate-500">{inv.patientEmail || inv.toUserEmail}</p>
+                        <p className="text-xs text-slate-500">{inv.psychologistEmail || inv.patientEmail}</p>
                       </div>
                       <div className="flex gap-2">
                         <button 
@@ -451,7 +472,48 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
                   </div>
                 </div>
 
-                {/* Solicitudes pendientes enviadas */}
+                {/* Solicitudes de pacientes (donde me piden como psicólogo) */}
+                {psychologistRequests.length > 0 && (
+                  <div className="mb-6 pb-6 border-b border-slate-100">
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="text-sm font-bold text-purple-600 uppercase tracking-wide flex items-center gap-2">
+                        <Mail size={14} /> Solicitudes de Pacientes
+                      </h4>
+                      <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-full font-medium">
+                        {psychologistRequests.length} pendiente{psychologistRequests.length !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mb-3">Usuarios que te han solicitado como psicólogo</p>
+                    <div className="space-y-3">
+                      {psychologistRequests.map(inv => (
+                        <div key={inv.id} className="p-4 rounded-xl border border-purple-100 bg-purple-50/30 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900">{inv.patientName || inv.patientEmail}</p>
+                            <p className="text-xs text-slate-500">{inv.patientEmail}</p>
+                          </div>
+                          <div className="flex gap-2">
+                            <button 
+                              onClick={() => handleRejectInvitation(inv.id)} 
+                              className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-white text-sm flex items-center gap-1"
+                            >
+                              <X size={14} />
+                              Rechazar
+                            </button>
+                            <button 
+                              onClick={() => handleAcceptInvitation(inv.id)} 
+                              className="px-4 py-2 rounded-xl bg-purple-600 text-white hover:bg-purple-700 text-sm flex items-center gap-1"
+                            >
+                              <UserPlus size={14} />
+                              Aceptar
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Invitaciones enviadas */}
                 {sentInvitations.length > 0 && (
                   <div className="mb-6 pb-6 border-b border-slate-100">
                     <div className="flex items-center justify-between mb-4">

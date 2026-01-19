@@ -487,7 +487,8 @@ export const sendInvitation = async (
         patientId: existingUser && !isPsychologistInvite ? existingUser.id : undefined,
         status: 'PENDING',
         timestamp: Date.now(),
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        initiatorEmail: fromUserEmail // Email de quien inició la invitación
     };
 
     if (USE_BACKEND) {
@@ -533,6 +534,20 @@ export const getSentInvitationsForPsychologist = async (psychId: string, psychEm
         i.status === 'PENDING'
     );
     console.log('✅ [getSentInvitationsForPsychologist] Invitaciones PENDING de este psicólogo:', filtered.length, filtered);
+    return filtered;
+};
+
+// Obtener invitaciones donde solicitan a este email como PSICÓLOGO (para aprobar)
+export const getPendingPsychologistInvitationsForEmail = async (email: string): Promise<Invitation[]> => {
+    console.log('📋 [getPendingPsychologistInvitationsForEmail] Buscando solicitudes para:', email);
+    const invs = await getInvitations();
+    const normalizedEmail = email.toLowerCase().trim();
+    const filtered = invs.filter(i => 
+        i.psychologistEmail?.toLowerCase().trim() === normalizedEmail && 
+        i.status === 'PENDING' &&
+        i.initiatorEmail?.toLowerCase().trim() !== normalizedEmail // Excluir las que el psicólogo inició
+    );
+    console.log('✅ [getPendingPsychologistInvitationsForEmail] Solicitudes PENDING iniciadas por pacientes:', filtered.length, filtered);
     return filtered;
 };
 
