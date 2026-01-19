@@ -43,6 +43,11 @@ export interface Invitation {
   toUserEmail: string;
   status: 'PENDING' | 'ACCEPTED' | 'REJECTED';
   timestamp: number;
+  // Información del paciente proporcionada por el psicólogo
+  patientFirstName?: string;
+  patientLastName?: string;
+  emailSent?: boolean; // Indica si se envió el email de bienvenida
+  emailSentAt?: number; // Timestamp del envío
 }
 
 export interface Attachment {

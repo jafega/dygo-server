@@ -395,7 +395,15 @@ const getInvitations = async (): Promise<Invitation[]> => {
             if (res.ok) return await res.json();
             throw new Error(`Server error: ${res.status}`);
         } catch(e) {
-            if (ALLOW_LOCAL_FALLBACK) { console.warn('Fetch invitations failed, using local fallback', e); } else { throw new Error('No se puede conectar con el servidor para obtener invitaciones.'); }
+            console.warn('Fetch invitations failed', e);
+            if (ALLOW_LOCAL_FALLBACK) { 
+                console.warn('Using local fallback');
+                return JSON.parse(localStorage.getItem(INVITATIONS_KEY) || '[]');
+            } else { 
+                // Devolver array vacío en lugar de lanzar error para evitar bloquear la UI
+                console.error('No se puede conectar con el servidor para obtener invitaciones. Mostrando lista vacía.');
+                return [];
+            }
         }
     }
     if (USE_BACKEND) {
@@ -404,7 +412,13 @@ const getInvitations = async (): Promise<Invitation[]> => {
     return JSON.parse(localStorage.getItem(INVITATIONS_KEY) || '[]');
 };
 
-export const sendInvitation = async (fromPsychId: string, fromName: string, toEmail: string) => {
+export const sendInvitation = async (
+    fromPsychId: string, 
+    fromName: string, 
+    toEmail: string,
+    patientFirstName?: string,
+    patientLastName?: string
+) => {
     const invs = await getInvitations();
     if (invs.find(i => i.fromPsychologistId === fromPsychId && i.toUserEmail === toEmail && i.status === 'PENDING')) {
         throw new Error("Invitación ya pendiente.");
@@ -432,7 +446,9 @@ export const sendInvitation = async (fromPsychId: string, fromName: string, toEm
         fromPsychologistName: fromName,
         toUserEmail: toEmail,
         status: 'PENDING',
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        patientFirstName,
+        patientLastName
     };
 
     if (USE_BACKEND) {

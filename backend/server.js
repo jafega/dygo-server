@@ -42,6 +42,90 @@ let supabaseTablesEnsured = false;
 
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
 
+// Función para enviar email de bienvenida al paciente
+async function sendWelcomeEmail(toEmail, firstName, lastName, psychologistName) {
+  console.log(`📧 [sendWelcomeEmail] Preparando email para ${firstName} ${lastName} (${toEmail})`);
+  
+  // En desarrollo, solo loguear el contenido del email
+  const emailContent = {
+    to: toEmail,
+    subject: `Invitación a dygo de ${psychologistName}`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+          .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
+          .button { display: inline-block; padding: 12px 30px; background: #667eea; color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; }
+          .footer { text-align: center; margin-top: 30px; font-size: 12px; color: #666; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>¡Bienvenido/a a dygo!</h1>
+          </div>
+          <div class="content">
+            <p>Hola <strong>${firstName} ${lastName}</strong>,</p>
+            
+            <p><strong>${psychologistName}</strong> te ha invitado a unirte a dygo, una plataforma diseñada para facilitar tu proceso terapéutico y mantener una comunicación fluida con tu psicólogo/a.</p>
+            
+            <h3>¿Qué es dygo?</h3>
+            <p>dygo es tu espacio personal de bienestar emocional donde podrás:</p>
+            <ul>
+              <li>📝 Registrar tus pensamientos y emociones diarias</li>
+              <li>💬 Comunicarte de forma segura con tu psicólogo/a</li>
+              <li>📊 Ver tu progreso a lo largo del tiempo</li>
+              <li>🎯 Trabajar en objetivos terapéuticos personalizados</li>
+            </ul>
+            
+            <h3>Próximos pasos:</h3>
+            <ol>
+              <li>Regístrate en dygo usando este correo electrónico: <strong>${toEmail}</strong></li>
+              <li>Completa y firma el consentimiento informado dentro de la aplicación</li>
+              <li>Comienza a utilizar la plataforma para tu proceso terapéutico</li>
+            </ol>
+            
+            <div style="text-align: center;">
+              <a href="${process.env.FRONTEND_URL || 'https://dygo.vercel.app'}" class="button">Comenzar ahora</a>
+            </div>
+            
+            <p><strong>Importante:</strong> El consentimiento informado es un requisito necesario para utilizar la plataforma. Lo encontrarás durante el proceso de registro.</p>
+            
+            <p>Si tienes alguna pregunta, no dudes en contactar con ${psychologistName}.</p>
+            
+            <p>¡Nos alegra que formes parte de dygo!</p>
+            
+            <p>Saludos cordiales,<br>El equipo de dygo</p>
+          </div>
+          <div class="footer">
+            <p>Este correo fue enviado porque ${psychologistName} te invitó a unirte a dygo.</p>
+            <p>dygo - Tu espacio de bienestar emocional</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `
+  };
+  
+  // En desarrollo, solo loguear
+  console.log('📧 [DEV MODE] Email que se enviaría:');
+  console.log('   Para:', emailContent.to);
+  console.log('   Asunto:', emailContent.subject);
+  console.log('   Link de registro:', process.env.FRONTEND_URL || 'https://dygo.vercel.app');
+  
+  // TODO: En producción, integrar con servicio de email (SendGrid, AWS SES, etc.)
+  // Ejemplo con nodemailer:
+  // const transporter = nodemailer.createTransport({ ... });
+  // await transporter.sendMail(emailContent);
+  
+  return emailContent;
+}
+
 
 
 // --- MIDDLEWARE ---
@@ -1916,7 +2000,7 @@ app.get('/api/invitations', (_req, res) => {
   res.json(db.invitations);
 });
 
-app.post('/api/invitations', (req, res) => {
+app.post('/api/invitations', async (req, res) => {
   const db = getDb();
   const invitation = req.body;
 
@@ -1931,22 +2015,44 @@ app.post('/api/invitations', (req, res) => {
   let patientRecordId = existingUser?.id;
   
   if (!existingUser) {
-    // Create new patient user automatically
-    const patientName = invitation.toUserEmail.split('@')[0]; // Use email prefix as default name
-    const newPatient = {
-      id: crypto.randomUUID(),
-      name: patientName.charAt(0).toUpperCase() + patientName.slice(1), // Capitalize first letter
-      email: normalizedEmail,
-      password: crypto.randomBytes(16).toString('hex'), // Random temporary password
-      role: 'PATIENT',
-      isPsychologist: false
-    };
-    
-    db.users.push(newPatient);
-    existingUser = newPatient;
-    patientRecordId = newPatient.id;
-    userWasCreated = true;
-    console.log(`Auto-created patient user: ${newPatient.name} (${newPatient.email})`);
+    // Si se proporcionó información del paciente, no crear usuario automáticamente
+    // El usuario se creará cuando el paciente se registre
+    if (invitation.patientFirstName && invitation.patientLastName) {
+      console.log(`📧 Nueva invitación con información del paciente: ${invitation.patientFirstName} ${invitation.patientLastName} (${normalizedEmail})`);
+      
+      // Enviar email de bienvenida
+      try {
+        await sendWelcomeEmail(
+          normalizedEmail,
+          invitation.patientFirstName,
+          invitation.patientLastName,
+          invitation.fromPsychologistName
+        );
+        invitation.emailSent = true;
+        invitation.emailSentAt = Date.now();
+        console.log(`✅ Email de bienvenida enviado a ${normalizedEmail}`);
+      } catch (emailError) {
+        console.error('❌ Error enviando email de bienvenida:', emailError);
+        invitation.emailSent = false;
+      }
+    } else {
+      // Comportamiento antiguo: crear usuario automáticamente
+      const patientName = invitation.toUserEmail.split('@')[0];
+      const newPatient = {
+        id: crypto.randomUUID(),
+        name: patientName.charAt(0).toUpperCase() + patientName.slice(1),
+        email: normalizedEmail,
+        password: crypto.randomBytes(16).toString('hex'),
+        role: 'PATIENT',
+        isPsychologist: false
+      };
+      
+      db.users.push(newPatient);
+      existingUser = newPatient;
+      patientRecordId = newPatient.id;
+      userWasCreated = true;
+      console.log(`Auto-created patient user: ${newPatient.name} (${newPatient.email})`);
+    }
   }
 
   if (patientRecordId) {

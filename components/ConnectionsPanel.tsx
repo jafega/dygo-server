@@ -12,6 +12,7 @@ import {
   getPatientsForPsychologist,
   sendInvitation
 } from '../services/storageService';
+import { getUserByEmail } from '../services/authService';
 import { Shield, Loader2, Search, X, UserPlus, UserCheck, Trash2, Mail, Link2 } from 'lucide-react';
 
 interface ConnectionsPanelProps {
@@ -35,6 +36,12 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
   const [allPsychologists, setAllPsychologists] = useState<User[]>([]);
   const [inviteEmail, setInviteEmail] = useState('');
   const [isSendingInvite, setIsSendingInvite] = useState(false);
+  
+  // Nuevo estado para el modal de información del paciente
+  const [showPatientInfoModal, setShowPatientInfoModal] = useState(false);
+  const [patientFirstName, setPatientFirstName] = useState('');
+  const [patientLastName, setPatientLastName] = useState('');
+  const [pendingInviteEmail, setPendingInviteEmail] = useState('');
 
   useEffect(() => {
     if (!currentUser) return;
@@ -180,11 +187,61 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
       setToast({ type: 'error', text: 'Ingresa un correo válido' });
       return;
     }
+    
+    // Verificar si el usuario existe
+    try {
+      const existingUser = await getUserByEmail(targetEmail);
+      if (!existingUser) {
+        // Usuario no existe, abrir modal para pedir información del paciente
+        setPendingInviteEmail(targetEmail);
+        setShowPatientInfoModal(true);
+        return;
+      }
+    } catch (err) {
+      console.log('Usuario no existe, mostrar modal');
+      setPendingInviteEmail(targetEmail);
+      setShowPatientInfoModal(true);
+      return;
+    }
+    
+    // Usuario existe, enviar invitación directamente
     setIsSendingInvite(true);
     try {
       await sendInvitation(currentUser.id, currentUser.name || 'Psicólogo', targetEmail);
       setToast({ type: 'success', text: 'Solicitud enviada correctamente' });
       setInviteEmail('');
+      await loadConnections();
+    } catch (err: any) {
+      console.error('Error sending invitation', err);
+      setToast({ type: 'error', text: err?.message || 'No se pudo enviar la solicitud' });
+    } finally {
+      setIsSendingInvite(false);
+    }
+  };
+
+  const handleSendInvitationWithPatientInfo = async () => {
+    if (!currentUser) return;
+    if (!patientFirstName.trim() || !patientLastName.trim()) {
+      setToast({ type: 'error', text: 'Por favor completa nombre y apellidos del paciente' });
+      return;
+    }
+    
+    setIsSendingInvite(true);
+    try {
+      await sendInvitation(
+        currentUser.id, 
+        currentUser.name || 'Psicólogo', 
+        pendingInviteEmail,
+        patientFirstName.trim(),
+        patientLastName.trim()
+      );
+      
+      setToast({ type: 'success', text: `Invitación enviada a ${patientFirstName} ${patientLastName}. Se ha enviado un email de bienvenida.` });
+      setInviteEmail('');
+      setShowPatientInfoModal(false);
+      setPatientFirstName('');
+      setPatientLastName('');
+      setPendingInviteEmail('');
       await loadConnections();
     } catch (err: any) {
       console.error('Error sending invitation', err);
@@ -455,6 +512,95 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
               </div>
             </>
           )}
+        </div>
+      )}
+
+      {/* Modal para información del paciente */}
+      {showPatientInfoModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
+            <div className="mb-6">
+              <h3 className="text-xl font-bold text-slate-900 mb-2">
+                Información del Paciente
+              </h3>
+              <p className="text-sm text-slate-600">
+                El usuario <strong>{pendingInviteEmail}</strong> no existe aún en la plataforma.
+                Por favor, proporciona la información básica del paciente para enviar la invitación.
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Nombre <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={patientFirstName}
+                  onChange={(e) => setPatientFirstName(e.target.value)}
+                  placeholder="Ej: María"
+                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Apellidos <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={patientLastName}
+                  onChange={(e) => setPatientLastName(e.target.value)}
+                  placeholder="Ej: García López"
+                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <p className="text-xs text-blue-800">
+                  <strong>📧 Email de bienvenida:</strong> Se enviará automáticamente un correo a {pendingInviteEmail} con:
+                </p>
+                <ul className="text-xs text-blue-700 mt-2 ml-4 list-disc space-y-1">
+                  <li>Instrucciones para registrarse</li>
+                  <li>Información sobre la plataforma</li>
+                  <li>Recordatorio del consentimiento informado</li>
+                </ul>
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => {
+                  setShowPatientInfoModal(false);
+                  setPatientFirstName('');
+                  setPatientLastName('');
+                  setPendingInviteEmail('');
+                }}
+                className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition"
+                disabled={isSendingInvite}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSendInvitationWithPatientInfo}
+                className="flex-1 px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                disabled={isSendingInvite || !patientFirstName.trim() || !patientLastName.trim()}
+              >
+                {isSendingInvite ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    Enviando...
+                  </>
+                ) : (
+                  <>
+                    <Mail size={16} />
+                    Enviar Invitación
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
