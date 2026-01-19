@@ -116,10 +116,10 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId }
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Personal Information */}
-        <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-4">
+        <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-6 space-y-4">
           <div className="flex items-center gap-2 mb-4">
             <UserIcon className="text-indigo-600" size={20} />
-            <h3 className="text-lg font-semibold text-slate-900">Información Personal</h3>
+            <h3 className="text-base sm:text-lg font-semibold text-slate-900">Información Personal</h3>
           </div>
 
           <div>
@@ -185,10 +185,10 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId }
         </div>
 
         {/* Address Information */}
-        <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-4">
+        <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-6 space-y-4">
           <div className="flex items-center gap-2 mb-4">
             <MapPin className="text-indigo-600" size={20} />
-            <h3 className="text-lg font-semibold text-slate-900">Dirección</h3>
+            <h3 className="text-base sm:text-lg font-semibold text-slate-900">Dirección</h3>
           </div>
 
           <div>
@@ -245,10 +245,10 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId }
         </div>
 
         {/* Billing Information */}
-        <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-4">
+        <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-6 space-y-4">
           <div className="flex items-center gap-2 mb-4">
             <Building className="text-indigo-600" size={20} />
-            <h3 className="text-lg font-semibold text-slate-900">Datos de Facturación</h3>
+            <h3 className="text-base sm:text-lg font-semibold text-slate-900">Datos de Facturación</h3>
           </div>
 
           <div>
@@ -292,15 +292,15 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId }
         </div>
 
         {/* Session Pricing */}
-        <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-4">
+        <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-6 space-y-4">
           <div className="flex items-center gap-2 mb-4">
             <CreditCard className="text-indigo-600" size={20} />
-            <h3 className="text-lg font-semibold text-slate-900">Tarifas de Sesión</h3>
+            <h3 className="text-base sm:text-lg font-semibold text-slate-900">Tarifas de Sesión</h3>
           </div>
 
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">Precio por Sesión</label>
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
               <input
                 type="number"
                 value={profile.sessionPrice}
@@ -313,7 +313,7 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId }
               <select
                 value={profile.currency}
                 onChange={(e) => handleChange('currency', e.target.value)}
-                className="w-24 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                className="w-full sm:w-24 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
               >
                 <option value="EUR">EUR</option>
                 <option value="USD">USD</option>
@@ -325,20 +325,20 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId }
           </div>
 
           {/* Preview Card */}
-          <div className="mt-6 p-4 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-lg border border-indigo-200">
+          <div className="mt-6 p-3 sm:p-4 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-lg border border-indigo-200">
             <div className="text-xs text-indigo-700 uppercase font-semibold mb-2">Vista Previa de Factura</div>
-            <div className="bg-white rounded-lg p-4 space-y-2">
-              <div className="font-semibold text-slate-900">{profile.businessName || 'Nombre Fiscal'}</div>
-              <div className="text-xs text-slate-600">{profile.taxId || 'NIF/CIF'}</div>
-              <div className="text-xs text-slate-600">
+            <div className="bg-white rounded-lg p-3 sm:p-4 space-y-2">
+              <div className="font-semibold text-sm sm:text-base text-slate-900 break-words">{profile.businessName || 'Nombre Fiscal'}</div>
+              <div className="text-xs text-slate-600 break-words">{profile.taxId || 'NIF/CIF'}</div>
+              <div className="text-xs text-slate-600 break-words">
                 {profile.address && `${profile.address}, `}
                 {profile.postalCode && `${profile.postalCode} `}
                 {profile.city}
               </div>
               <div className="pt-2 border-t border-slate-200">
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-600">Sesión de terapia</span>
-                  <span className="font-semibold text-slate-900">
+                <div className="flex justify-between items-center gap-2 text-sm flex-wrap">
+                  <span className="text-slate-600 text-xs sm:text-sm">Sesión de terapia</span>
+                  <span className="font-semibold text-slate-900 text-sm sm:text-base whitespace-nowrap">
                     {profile.sessionPrice > 0 ? `${profile.sessionPrice.toFixed(2)} ${profile.currency}` : '—'}
                   </span>
                 </div>

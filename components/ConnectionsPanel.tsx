@@ -12,7 +12,6 @@ import {
   getPatientsForPsychologist,
   sendInvitation
 } from '../services/storageService';
-import { getUserByEmail } from '../services/authService';
 import { Shield, Loader2, Search, X, UserPlus, UserCheck, Trash2, Mail, Link2 } from 'lucide-react';
 
 interface ConnectionsPanelProps {
@@ -36,12 +35,6 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
   const [allPsychologists, setAllPsychologists] = useState<User[]>([]);
   const [inviteEmail, setInviteEmail] = useState('');
   const [isSendingInvite, setIsSendingInvite] = useState(false);
-  
-  // Nuevo estado para el modal de información del paciente
-  const [showPatientInfoModal, setShowPatientInfoModal] = useState(false);
-  const [patientFirstName, setPatientFirstName] = useState('');
-  const [patientLastName, setPatientLastName] = useState('');
-  const [pendingInviteEmail, setPendingInviteEmail] = useState('');
 
   useEffect(() => {
     if (!currentUser) return;
@@ -57,6 +50,7 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
 
   const loadConnections = async (showLoader = true) => {
     if (!currentUser) return;
+    console.log('🔄 [ConnectionsPanel] loadConnections iniciado para usuario:', currentUser.id, 'role:', currentUser.role);
     if (showLoader) {
       setIsLoading(true);
     }
@@ -65,6 +59,7 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
       const basePromise = getPsychologistsForPatient(currentUser.id);
 
       if (currentUser.role === 'PATIENT') {
+        console.log('👤 [ConnectionsPanel] Cargando datos para PACIENTE...');
         const [connected, pending] = await Promise.all([
           basePromise,
           getPendingInvitationsForEmail(currentUser.email)
@@ -73,14 +68,17 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
         setInvitations(pending);
         onPendingInvitesChange?.(pending.length > 0);
       } else {
+        console.log('👨‍⚕️ [ConnectionsPanel] Cargando datos para PSICÓLOGO...');
         const [connected, sent, patients] = await Promise.all([
           basePromise,
           getSentInvitationsForPsychologist(currentUser.id),
           getPatientsForPsychologist(currentUser.id)
         ]);
+        console.log('✅ [ConnectionsPanel] Datos recibidos - Conectados:', connected.length, 'Invitaciones enviadas:', sent.length, 'Pacientes:', patients.length);
         setMyPsychologists(connected);
         setSentInvitations(sent);
         setMyPatients(patients.filter(p => !p.isSelf));
+        console.log('📊 [ConnectionsPanel] Estado actualizado - sentInvitations:', sent);
       }
     } catch (err: any) {
       console.error('Error loading connections', err);
@@ -188,60 +186,17 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
       return;
     }
     
-    // Verificar si el usuario existe
-    try {
-      const existingUser = await getUserByEmail(targetEmail);
-      if (!existingUser) {
-        // Usuario no existe, abrir modal para pedir información del paciente
-        setPendingInviteEmail(targetEmail);
-        setShowPatientInfoModal(true);
-        return;
-      }
-    } catch (err) {
-      console.log('Usuario no existe, mostrar modal');
-      setPendingInviteEmail(targetEmail);
-      setShowPatientInfoModal(true);
+    // Verificar que no se esté invitando a sí mismo
+    if (targetEmail.toLowerCase() === currentUser.email.toLowerCase()) {
+      setToast({ type: 'error', text: 'No puedes enviarte una invitación a ti mismo' });
       return;
     }
     
-    // Usuario existe, enviar invitación directamente
     setIsSendingInvite(true);
     try {
       await sendInvitation(currentUser.id, currentUser.name || 'Psicólogo', targetEmail);
-      setToast({ type: 'success', text: 'Solicitud enviada correctamente' });
+      setToast({ type: 'success', text: 'Invitación enviada correctamente' });
       setInviteEmail('');
-      await loadConnections();
-    } catch (err: any) {
-      console.error('Error sending invitation', err);
-      setToast({ type: 'error', text: err?.message || 'No se pudo enviar la solicitud' });
-    } finally {
-      setIsSendingInvite(false);
-    }
-  };
-
-  const handleSendInvitationWithPatientInfo = async () => {
-    if (!currentUser) return;
-    if (!patientFirstName.trim() || !patientLastName.trim()) {
-      setToast({ type: 'error', text: 'Por favor completa nombre y apellidos del paciente' });
-      return;
-    }
-    
-    setIsSendingInvite(true);
-    try {
-      await sendInvitation(
-        currentUser.id, 
-        currentUser.name || 'Psicólogo', 
-        pendingInviteEmail,
-        patientFirstName.trim(),
-        patientLastName.trim()
-      );
-      
-      setToast({ type: 'success', text: `Invitación enviada a ${patientFirstName} ${patientLastName}. Se ha enviado un email de bienvenida.` });
-      setInviteEmail('');
-      setShowPatientInfoModal(false);
-      setPatientFirstName('');
-      setPatientLastName('');
-      setPendingInviteEmail('');
       await loadConnections();
     } catch (err: any) {
       console.error('Error sending invitation', err);
@@ -425,10 +380,10 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
 
           {currentUser.role === 'PSYCHOLOGIST' && (
             <>
-              <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+              <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6 shadow-sm">
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-6">
                   <div>
-                    <h3 className="text-lg font-semibold text-slate-900">Pacientes bajo tu cuidado</h3>
+                    <h3 className="text-lg font-semibold text-slate-900">Gestión de Pacientes</h3>
                     <p className="text-sm text-slate-500">Invita y gestiona tus pacientes en dygo.</p>
                   </div>
                 </div>
@@ -436,7 +391,7 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
                 {/* Invitar pacientes */}
                 <div className="mb-6 pb-6 border-b border-slate-100">
                   <h4 className="text-sm font-bold text-slate-600 uppercase tracking-wide flex items-center gap-2 mb-3">
-                    <UserPlus size={14} /> Invitar pacientes
+                    <UserPlus size={14} /> Invitar nuevo paciente
                   </h4>
                   <div className="flex flex-col gap-3 md:flex-row">
                     <input
@@ -460,22 +415,28 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
                 {/* Solicitudes pendientes enviadas */}
                 {sentInvitations.length > 0 && (
                   <div className="mb-6 pb-6 border-b border-slate-100">
-                    <h4 className="text-sm font-bold text-slate-600 uppercase tracking-wide mb-4 flex items-center gap-2">
-                      <Mail size={14} /> Solicitudes pendientes enviadas
-                    </h4>
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="text-sm font-bold text-amber-600 uppercase tracking-wide flex items-center gap-2">
+                        <Mail size={14} /> Invitaciones Pendientes
+                      </h4>
+                      <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded-full font-medium">
+                        {sentInvitations.length} pendiente{sentInvitations.length !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mb-3">Invitaciones enviadas que aún no han sido aceptadas</p>
                     <div className="space-y-3">
                       {sentInvitations.map(inv => (
-                        <div key={inv.id} className="p-4 rounded-xl border border-slate-100 bg-slate-50 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                        <div key={inv.id} className="p-4 rounded-xl border border-amber-100 bg-amber-50/30 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                           <div>
                             <p className="text-sm font-semibold text-slate-900">{inv.toUserEmail}</p>
-                            <p className="text-xs text-slate-500">Enviada por {inv.fromPsychologistName}</p>
+                            <p className="text-xs text-slate-500">Esperando aceptación</p>
                           </div>
                           <button 
                             onClick={() => handleRevokeSentInvitation(inv.id)} 
-                            className="px-4 py-2 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-sm flex items-center gap-1"
+                            className="px-4 py-2 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-sm flex items-center gap-1 justify-center"
                           >
                             <X size={14} />
-                            Revocar solicitud
+                            Revocar
                           </button>
                         </div>
                       ))}
@@ -486,23 +447,26 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
                 {/* Pacientes conectados */}
                 <div>
                   <div className="flex items-center justify-between mb-4">
-                    <h4 className="text-sm font-bold text-slate-600 uppercase tracking-wide flex items-center gap-2">
-                      <UserCheck size={14} /> Pacientes conectados
+                    <h4 className="text-sm font-bold text-green-700 uppercase tracking-wide flex items-center gap-2">
+                      <UserCheck size={14} /> Pacientes Conectados
                     </h4>
-                    <span className="text-xs text-slate-400">{myPatients.length} activos</span>
+                    <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-medium">
+                      {myPatients.length} activo{myPatients.length !== 1 ? 's' : ''}
+                    </span>
                   </div>
+                  <p className="text-xs text-slate-500 mb-3">Pacientes que han aceptado tu invitación y tienen acceso activo</p>
                   {myPatients.length === 0 ? (
-                    <p className="text-sm text-slate-500">Aún no tienes pacientes con acceso.</p>
+                    <p className="text-sm text-slate-500 italic">Aún no tienes pacientes conectados.</p>
                   ) : (
                     <div className="space-y-3">
                       {myPatients.map(patient => (
-                        <div key={patient.id} className="flex items-center justify-between border border-slate-100 rounded-xl p-4">
+                        <div key={patient.id} className="flex items-center justify-between border border-green-100 bg-green-50/30 rounded-xl p-4">
                           <div>
                             <p className="font-semibold text-slate-900">{patient.name}</p>
                             <p className="text-xs text-slate-500">{patient.email}</p>
                           </div>
                           <button onClick={() => handleRevoke(patient.id)} className="text-xs text-slate-400 hover:text-red-500 flex items-center gap-1">
-                            <Trash2 size={14} /> Revocar
+                            <Trash2 size={14} /> Revocar acceso
                           </button>
                         </div>
                       ))}
@@ -512,95 +476,6 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
               </div>
             </>
           )}
-        </div>
-      )}
-
-      {/* Modal para información del paciente */}
-      {showPatientInfoModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
-            <div className="mb-6">
-              <h3 className="text-xl font-bold text-slate-900 mb-2">
-                Información del Paciente
-              </h3>
-              <p className="text-sm text-slate-600">
-                El usuario <strong>{pendingInviteEmail}</strong> no existe aún en la plataforma.
-                Por favor, proporciona la información básica del paciente para enviar la invitación.
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Nombre <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={patientFirstName}
-                  onChange={(e) => setPatientFirstName(e.target.value)}
-                  placeholder="Ej: María"
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  autoFocus
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Apellidos <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={patientLastName}
-                  onChange={(e) => setPatientLastName(e.target.value)}
-                  placeholder="Ej: García López"
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                />
-              </div>
-
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                <p className="text-xs text-blue-800">
-                  <strong>📧 Email de bienvenida:</strong> Se enviará automáticamente un correo a {pendingInviteEmail} con:
-                </p>
-                <ul className="text-xs text-blue-700 mt-2 ml-4 list-disc space-y-1">
-                  <li>Instrucciones para registrarse</li>
-                  <li>Información sobre la plataforma</li>
-                  <li>Recordatorio del consentimiento informado</li>
-                </ul>
-              </div>
-            </div>
-
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => {
-                  setShowPatientInfoModal(false);
-                  setPatientFirstName('');
-                  setPatientLastName('');
-                  setPendingInviteEmail('');
-                }}
-                className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition"
-                disabled={isSendingInvite}
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleSendInvitationWithPatientInfo}
-                className="flex-1 px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                disabled={isSendingInvite || !patientFirstName.trim() || !patientLastName.trim()}
-              >
-                {isSendingInvite ? (
-                  <>
-                    <Loader2 size={16} className="animate-spin" />
-                    Enviando...
-                  </>
-                ) : (
-                  <>
-                    <Mail size={16} />
-                    Enviar Invitación
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
         </div>
       )}
     </div>

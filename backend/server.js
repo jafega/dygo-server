@@ -146,7 +146,7 @@ const corsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Id', 'X-UserId']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Id', 'X-UserId', 'Cache-Control', 'Pragma']
 };
 
 app.use(cors(corsOptions));
@@ -1991,6 +1991,11 @@ app.post('/api/goals-sync', handleGoalsSync);
 // --- RUTAS DE INVITACIONES ---
 app.get('/api/invitations', (_req, res) => {
   const db = getDb();
+  console.log(`📋 GET /api/invitations - Total: ${db.invitations.length}`);
+  db.invitations.forEach((inv, i) => {
+    console.log(`   ${i + 1}. ID: ${inv.id}, From: ${inv.fromPsychologistId}, To: ${inv.toUserEmail}, Status: ${inv.status || 'PENDING'}`);
+  });
+  
   // Prevenir caché del navegador
   res.set({
     'Cache-Control': 'no-store, no-cache, must-revalidate, private',
@@ -2001,6 +2006,7 @@ app.get('/api/invitations', (_req, res) => {
 });
 
 app.post('/api/invitations', async (req, res) => {
+  console.log('📥 POST /api/invitations - Body:', req.body);
   const db = getDb();
   const invitation = req.body;
 
@@ -2008,65 +2014,39 @@ app.post('/api/invitations', async (req, res) => {
     invitation.id = crypto.randomUUID();
   }
 
-  // Auto-create patient user if email doesn't exist
+  // Verificar que el psicólogo no se esté invitando a sí mismo
+  const psychologist = db.users.find(u => u.id === invitation.fromPsychologistId);
+  if (psychologist && normalizeEmail(psychologist.email) === normalizeEmail(invitation.toUserEmail)) {
+    console.log('❌ Intento de auto-invitación bloqueado:', psychologist.email);
+    return res.status(400).json({ error: 'No puedes enviarte una invitación a ti mismo' });
+  }
+
+  // Asegurar que status sea PENDING siempre (el usuario debe aceptar manualmente)
+  invitation.status = 'PENDING';
+
   const normalizedEmail = normalizeEmail(invitation.toUserEmail);
-  let existingUser = db.users.find(u => normalizeEmail(u.email) === normalizedEmail);
-  let userWasCreated = false;
-  let patientRecordId = existingUser?.id;
+  const existingUser = db.users.find(u => normalizeEmail(u.email) === normalizedEmail);
   
-  if (!existingUser) {
-    // Si se proporcionó información del paciente, no crear usuario automáticamente
-    // El usuario se creará cuando el paciente se registre
-    if (invitation.patientFirstName && invitation.patientLastName) {
-      console.log(`📧 Nueva invitación con información del paciente: ${invitation.patientFirstName} ${invitation.patientLastName} (${normalizedEmail})`);
-      
-      // Enviar email de bienvenida
-      try {
-        await sendWelcomeEmail(
-          normalizedEmail,
-          invitation.patientFirstName,
-          invitation.patientLastName,
-          invitation.fromPsychologistName
-        );
-        invitation.emailSent = true;
-        invitation.emailSentAt = Date.now();
-        console.log(`✅ Email de bienvenida enviado a ${normalizedEmail}`);
-      } catch (emailError) {
-        console.error('❌ Error enviando email de bienvenida:', emailError);
-        invitation.emailSent = false;
-      }
-    } else {
-      // Comportamiento antiguo: crear usuario automáticamente
-      const patientName = invitation.toUserEmail.split('@')[0];
-      const newPatient = {
-        id: crypto.randomUUID(),
-        name: patientName.charAt(0).toUpperCase() + patientName.slice(1),
-        email: normalizedEmail,
-        password: crypto.randomBytes(16).toString('hex'),
-        role: 'PATIENT',
-        isPsychologist: false
-      };
-      
-      db.users.push(newPatient);
-      existingUser = newPatient;
-      patientRecordId = newPatient.id;
-      userWasCreated = true;
-      console.log(`Auto-created patient user: ${newPatient.name} (${newPatient.email})`);
-    }
-  }
-
-  if (patientRecordId) {
-    ensureCareRelationship(db, invitation.fromPsychologistId, patientRecordId);
-  }
-
-  // If user was auto-created, mark invitation as ACCEPTED (already linked)
-  // If user already existed, keep as PENDING so they can accept/reject
-  if (userWasCreated) {
-    invitation.status = 'ACCEPTED';
+  if (existingUser) {
+    console.log(`✅ Usuario ${normalizedEmail} ya existe: ${existingUser.id}`);
+    invitation.toUserId = existingUser.id;
+    // NO crear relación automáticamente - esperar a que el usuario acepte
+  } else {
+    console.log(`📧 Usuario ${normalizedEmail} no existe - invitación queda PENDING`);
+    // No crear usuario ni relación - se hará cuando el usuario se registre
   }
 
   db.invitations.push(invitation);
+  console.log(`💾 Invitación guardada:`, {
+    id: invitation.id,
+    from: invitation.fromPsychologistId,
+    to: invitation.toUserEmail,
+    toUserId: invitation.toUserId,
+    status: invitation.status
+  });
+  
   saveDb(db);
+  console.log(`📊 Total invitaciones en DB: ${db.invitations.length}`);
   res.json(invitation);
 });
 
@@ -2076,6 +2056,16 @@ app.put('/api/invitations/:id', (req, res) => {
 
   if (idx === -1) {
     return res.status(404).json({ error: 'Invitación no encontrada' });
+  }
+
+  // Si la actualización incluye status='ACCEPTED', eliminar la invitación
+  // en lugar de actualizarla (solo deberían existir invitaciones PENDING)
+  if (req.body.status === 'ACCEPTED') {
+    const acceptedInvitation = db.invitations[idx];
+    db.invitations = db.invitations.filter((i) => i.id !== req.params.id);
+    console.log(`🗑️ Invitación ${req.params.id} eliminada al ser aceptada`);
+    saveDb(db);
+    return res.json({ ...acceptedInvitation, ...req.body, deleted: true });
   }
 
   db.invitations[idx] = { ...db.invitations[idx], ...req.body };
@@ -2092,6 +2082,16 @@ app.put('/api/invitations', (req, res) => {
 
   if (idx === -1) {
     return res.status(404).json({ error: 'Invitación no encontrada' });
+  }
+
+  // Si la actualización incluye status='ACCEPTED', eliminar la invitación
+  // en lugar de actualizarla (solo deberían existir invitaciones PENDING)
+  if (req.body.status === 'ACCEPTED') {
+    const acceptedInvitation = db.invitations[idx];
+    db.invitations = db.invitations.filter((i) => i.id !== id);
+    console.log(`🗑️ Invitación ${id} eliminada al ser aceptada`);
+    saveDb(db);
+    return res.json({ ...acceptedInvitation, ...req.body, deleted: true });
   }
 
   db.invitations[idx] = { ...db.invitations[idx], ...req.body };
@@ -2114,6 +2114,15 @@ app.delete('/api/invitations/:id', (req, res) => {
   }
 
   console.log('✅ [DELETE /api/invitations/:id] Invitación eliminada del cache:', deletedInvitation);
+  
+  // Eliminar también la care_relationship si existe
+  if (deletedInvitation && deletedInvitation.toUserId) {
+    const removedRel = removeCareRelationshipByPair(db, deletedInvitation.fromPsychologistId, deletedInvitation.toUserId);
+    if (removedRel) {
+      console.log('🔗 [DELETE /api/invitations/:id] Relación de cuidado eliminada también');
+    }
+  }
+  
   console.log('📊 [DELETE /api/invitations/:id] Invitaciones después:', db.invitations.length);
 
   // Pasar prevDb como segundo argumento para que deleteMissing funcione en Supabase
@@ -2161,6 +2170,15 @@ app.delete('/api/invitations', (req, res) => {
   }
 
   console.log('✅ [DELETE /api/invitations] Invitación eliminada del cache:', deletedInvitation);
+  
+  // Eliminar también la care_relationship si existe
+  if (deletedInvitation && deletedInvitation.toUserId) {
+    const removedRel = removeCareRelationshipByPair(db, deletedInvitation.fromPsychologistId, deletedInvitation.toUserId);
+    if (removedRel) {
+      console.log('🔗 [DELETE /api/invitations] Relación de cuidado eliminada también');
+    }
+  }
+  
   console.log('📊 [DELETE /api/invitations] Invitaciones después:', db.invitations.length);
 
   // Pasar prevDb como segundo argumento para que deleteMissing funcione en Supabase
@@ -2880,6 +2898,13 @@ app.get('/api/relationships', (req, res) => {
   });
   console.log('[GET /api/relationships] Filtered result:', relationships);
 
+  // Prevenir caché
+  res.set({
+    'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+    'Pragma': 'no-cache',
+    'Expires': '0'
+  });
+  
   res.json(relationships);
 });
 

@@ -44,8 +44,17 @@ const fetchRelationships = async (filter: RelationshipFilter): Promise<CareRelat
       const params = new URLSearchParams();
       if (filter.psychologistId) params.append('psychologistId', filter.psychologistId);
       if (filter.patientId) params.append('patientId', filter.patientId);
+      // Anti-caché: timestamp único en cada petición
+      params.append('_t', Date.now().toString());
+      
       try {
-          const res = await fetch(`${API_URL}/relationships?${params.toString()}`);
+          const res = await fetch(`${API_URL}/relationships?${params.toString()}`, {
+              headers: {
+                  'Cache-Control': 'no-cache, no-store, must-revalidate',
+                  'Pragma': 'no-cache',
+                  'Expires': '0'
+              }
+          });
           if (!res.ok) {
               let details = '';
               try {
@@ -59,14 +68,16 @@ const fetchRelationships = async (filter: RelationshipFilter): Promise<CareRelat
           return await res.json();
       } catch (err) {
           if (!ALLOW_LOCAL_FALLBACK) {
-              throw err instanceof Error ? err : new Error('Error obteniendo relaciones');
+              console.error('No se puede conectar con el servidor para obtener relaciones. Mostrando lista vacía.', err);
+              return [];
           }
           console.warn('Fetch relationships failed, using local fallback', err);
       }
   }
 
   if (USE_BACKEND && !ALLOW_LOCAL_FALLBACK) {
-      throw new Error('Persistencia local deshabilitada. El backend debe estar disponible.');
+      console.error('Persistencia local deshabilitada y backend no disponible. Mostrando lista vacía.');
+      return [];
   }
 
   return getLocalRelationships().filter(rel => matchesRelationshipFilter(rel, filter));
@@ -383,25 +394,33 @@ export const saveSettings = async (userId: string, settings: UserSettings): Prom
 
 // --- Invitations ---
 const getInvitations = async (): Promise<Invitation[]> => {
+    console.log('🔍 [getInvitations] Iniciando carga de invitaciones...', { USE_BACKEND, API_URL });
     if (USE_BACKEND) {
         try {
             // Agregar timestamp para evitar caché del navegador
-            const res = await fetch(`${API_URL}/invitations?_t=${Date.now()}`, {
+            const url = `${API_URL}/invitations?_t=${Date.now()}`;
+            console.log('📡 [getInvitations] Fetching:', url);
+            const res = await fetch(url, {
                 headers: {
                     'Cache-Control': 'no-cache',
                     'Pragma': 'no-cache'
                 }
             });
-            if (res.ok) return await res.json();
+            console.log('📨 [getInvitations] Response status:', res.status, res.ok);
+            if (res.ok) {
+                const data = await res.json();
+                console.log('✅ [getInvitations] Invitaciones recibidas:', data.length, data);
+                return data;
+            }
             throw new Error(`Server error: ${res.status}`);
         } catch(e) {
-            console.warn('Fetch invitations failed', e);
+            console.error('❌ [getInvitations] Fetch invitations failed', e);
             if (ALLOW_LOCAL_FALLBACK) { 
-                console.warn('Using local fallback');
+                console.warn('⚠️ [getInvitations] Using local fallback');
                 return JSON.parse(localStorage.getItem(INVITATIONS_KEY) || '[]');
             } else { 
                 // Devolver array vacío en lugar de lanzar error para evitar bloquear la UI
-                console.error('No se puede conectar con el servidor para obtener invitaciones. Mostrando lista vacía.');
+                console.error('❌ [getInvitations] No se puede conectar con el servidor para obtener invitaciones. Mostrando lista vacía.');
                 return [];
             }
         }
@@ -415,9 +434,7 @@ const getInvitations = async (): Promise<Invitation[]> => {
 export const sendInvitation = async (
     fromPsychId: string, 
     fromName: string, 
-    toEmail: string,
-    patientFirstName?: string,
-    patientLastName?: string
+    toEmail: string
 ) => {
     const invs = await getInvitations();
     if (invs.find(i => i.fromPsychologistId === fromPsychId && i.toUserEmail === toEmail && i.status === 'PENDING')) {
@@ -446,9 +463,7 @@ export const sendInvitation = async (
         fromPsychologistName: fromName,
         toUserEmail: toEmail,
         status: 'PENDING',
-        timestamp: Date.now(),
-        patientFirstName,
-        patientLastName
+        timestamp: Date.now()
     };
 
     if (USE_BACKEND) {
@@ -474,8 +489,12 @@ export const getPendingInvitationsForEmail = async (email: string): Promise<Invi
 };
 
 export const getSentInvitationsForPsychologist = async (psychId: string): Promise<Invitation[]> => {
+    console.log('📋 [getSentInvitationsForPsychologist] Buscando invitaciones enviadas por:', psychId);
     const invs = await getInvitations();
-    return invs.filter(i => i.fromPsychologistId === psychId && i.status === 'PENDING');
+    console.log('📊 [getSentInvitationsForPsychologist] Total invitaciones:', invs.length);
+    const filtered = invs.filter(i => i.fromPsychologistId === psychId && i.status === 'PENDING');
+    console.log('✅ [getSentInvitationsForPsychologist] Invitaciones PENDING de este psicólogo:', filtered.length, filtered);
+    return filtered;
 };
 
 export const acceptInvitation = async (invitationId: string, userId: string) => {
@@ -486,43 +505,42 @@ export const acceptInvitation = async (invitationId: string, userId: string) => 
         throw new Error('Invitación no encontrada');
     }
 
+    // Primero crear la relación de cuidado
+    try {
+        await ensureRelationship(inv.fromPsychologistId, userId);
+        console.log('✅ Relación de cuidado creada exitosamente');
+    } catch (e) {
+        console.error('Error creating care relationship:', e);
+        throw new Error('No se pudo crear la relación de cuidado');
+    }
+
+    // Después eliminar la invitación ya que la relación está creada
     if (USE_BACKEND) {
-        inv.status = 'ACCEPTED';
         try {
-            console.log('Accepting invitation:', inv);
+            console.log('🗑️ Eliminando invitación aceptada:', inv.id);
             const res = await fetch(`${API_URL}/invitations?id=${inv.id}`, { 
-                method: 'PUT', 
-                headers: {'Content-Type': 'application/json'}, 
-                body: JSON.stringify(inv) 
+                method: 'DELETE',
+                headers: {
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache'
+                }
             });
             
             if (!res.ok) {
                 const errorText = await res.text();
-                console.error('Error response:', res.status, errorText);
-                throw new Error(`Error accepting invitation (${res.status}): ${errorText}`);
+                console.error('Error eliminando invitación:', res.status, errorText);
+                // No lanzar error, la relación ya está creada
+            } else {
+                console.log('✅ Invitación eliminada después de aceptar');
             }
-            
-            console.log('Invitation accepted successfully');
         } catch (e) {
-            console.error('Error in acceptInvitation backend call:', e);
-            if (ALLOW_LOCAL_FALLBACK) { 
-                inv.status = 'ACCEPTED'; 
-                localStorage.setItem(INVITATIONS_KEY, JSON.stringify(invs)); 
-                console.warn('Accept invitation failed, saved locally', e); 
-            } else { 
-                throw new Error(`No se pudo aceptar la invitación: ${e instanceof Error ? e.message : 'Error desconocido'}`);
-            }
+            console.error('Error in delete invitation after accept:', e);
+            // No lanzar error, la relación ya está creada
         }
     } else {
-        inv.status = 'ACCEPTED';
-        localStorage.setItem(INVITATIONS_KEY, JSON.stringify(invs));
-    }
-
-    try {
-        await ensureRelationship(inv.fromPsychologistId, userId);
-    } catch (e) {
-        console.error('Error creating care relationship:', e);
-        throw new Error('La invitación fue aceptada pero hubo un error creando la relación de cuidado');
+        // Eliminar de localStorage
+        const filteredInvs = invs.filter(i => i.id !== invitationId);
+        localStorage.setItem(INVITATIONS_KEY, JSON.stringify(filteredInvs));
     }
 };
 
