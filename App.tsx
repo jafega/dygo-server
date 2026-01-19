@@ -1015,29 +1015,25 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
               </div>
             </header>
 
-            {/* Mobile Action Button */}
-            <div className="md:hidden fixed bottom-6 left-4 right-4 z-50">
-              <button
-                onClick={() => handleStartSession()}
-                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl shadow-2xl hover:shadow-indigo-500/50 transition-all flex items-center justify-center gap-2 font-medium"
-              >
-                <Mic size={20} />
-                Grabar entrada
-              </button>
-            </div>
+            {/* Mobile Action Button - Circular Floating Button */}
+            <button
+              onClick={() => handleStartSession()}
+              className="md:hidden fixed bottom-6 right-6 z-50 w-14 h-14 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full shadow-2xl hover:shadow-indigo-500/50 transition-all flex items-center justify-center"
+              aria-label="Grabar entrada"
+            >
+              <Mic size={24} />
+            </button>
 
             {activeTab === 'insights' && assignedGoals.length > 0 && (
-              <div className="bg-purple-50 rounded-2xl border border-purple-100 p-1">
+              <div className="bg-purple-50 rounded-2xl border border-purple-100">
                 <div className="px-4 py-3 flex items-center gap-2 border-b border-purple-100/50">
                   <CheckSquare className="text-purple-600" size={18} />
                   <h3 className="font-bold text-purple-800 text-sm uppercase tracking-wide">Plan</h3>
                 </div>
-                <div className="p-2">
-                  <GoalsPanel 
-                    title="" goals={assignedGoals} onAddGoal={() => {}} onToggleGoal={handleToggleGoal} onDeleteGoal={() => {}} 
-                    readOnly={true} showAdd={false}
-                  />
-                </div>
+                <GoalsPanel 
+                  title="" goals={assignedGoals} onAddGoal={() => {}} onToggleGoal={handleToggleGoal} onDeleteGoal={() => {}} 
+                  readOnly={true} showAdd={false}
+                />
               </div>
             )}
 

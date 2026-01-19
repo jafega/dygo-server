@@ -1939,7 +1939,8 @@ app.put('/api/invitations', (req, res) => {
 });
 
 app.delete('/api/invitations/:id', (req, res) => {
-  const db = getDb();
+  const prevDb = getDb();
+  const db = { ...prevDb };
   const before = db.invitations.length;
   db.invitations = db.invitations.filter((i) => i.id !== req.params.id);
 
@@ -1947,7 +1948,18 @@ app.delete('/api/invitations/:id', (req, res) => {
     return res.status(404).json({ error: 'Invitación no encontrada' });
   }
 
-  saveDb(db);
+  // Pasar prevDb como segundo argumento para que deleteMissing funcione en Supabase
+  if (supabaseAdmin) {
+    const prevCache = supabaseDbCache;
+    saveDb(db);
+    supabaseDbCache = db;
+    persistSupabaseData(db, prevCache).catch(err => {
+      console.error('❌ Error persistiendo eliminación de invitación en Supabase:', err);
+    });
+  } else {
+    saveDb(db);
+  }
+  
   res.json({ success: true });
 });
 
@@ -1955,7 +1967,8 @@ app.delete('/api/invitations', (req, res) => {
   const id = req.query.id;
   if (!id) return res.status(400).json({ error: 'Missing invitation id' });
 
-  const db = getDb();
+  const prevDb = getDb();
+  const db = { ...prevDb };
   const before = db.invitations.length;
   db.invitations = db.invitations.filter((i) => i.id !== id);
 
@@ -1963,7 +1976,18 @@ app.delete('/api/invitations', (req, res) => {
     return res.status(404).json({ error: 'Invitación no encontrada' });
   }
 
-  saveDb(db);
+  // Pasar prevDb como segundo argumento para que deleteMissing funcione en Supabase
+  if (supabaseAdmin) {
+    const prevCache = supabaseDbCache;
+    saveDb(db);
+    supabaseDbCache = db;
+    persistSupabaseData(db, prevCache).catch(err => {
+      console.error('❌ Error persistiendo eliminación de invitación en Supabase:', err);
+    });
+  } else {
+    saveDb(db);
+  }
+  
   res.json({ success: true });
 });
 

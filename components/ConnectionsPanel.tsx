@@ -184,9 +184,12 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
   };
 
   const handleRevokeSentInvitation = async (invId: string) => {
+    if (!window.confirm('¿Estás seguro de que quieres revocar esta invitación? Esta acción no se puede deshacer.')) {
+      return;
+    }
     try {
       await rejectInvitation(invId);
-      setToast({ type: 'success', text: 'Solicitud revocada' });
+      setToast({ type: 'success', text: 'Solicitud revocada correctamente' });
       await loadConnections();
     } catch (err: any) {
       console.error('Error revoking invitation', err);
