@@ -146,7 +146,7 @@ const corsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Id', 'X-UserId', 'Cache-Control', 'Pragma']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Id', 'X-UserId', 'Cache-Control', 'Pragma', 'Expires']
 };
 
 app.use(cors(corsOptions));
@@ -601,6 +601,15 @@ if (!pgPool && SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
     }
     supabaseDbCache = ensureDbShape(await loadSupabaseCache());
     console.log('ℹ️ Supabase data loaded into cache');
+    console.log('📊 Cache contents: users:', supabaseDbCache.users?.length || 0, 
+                'entries:', supabaseDbCache.entries?.length || 0,
+                'careRelationships:', supabaseDbCache.careRelationships?.length || 0);
+    if (supabaseDbCache.careRelationships && supabaseDbCache.careRelationships.length > 0) {
+      console.log('📋 Care relationships loaded:');
+      supabaseDbCache.careRelationships.forEach(rel => {
+        console.log(`   - ${rel.psychologistId} → ${rel.patientId}`);
+      });
+    }
     (async () => {
       try {
         await dedupeSupabaseUsers();
@@ -2076,6 +2085,17 @@ app.post('/api/invitations', async (req, res) => {
     return res.status(400).json({ error: 'No puedes enviarte una invitación a ti mismo' });
   }
 
+  // Verificar si ya existe una invitación pendiente con este mismo par psychologist-patient
+  const existingInv = db.invitations.find(i => 
+    normalizeEmail(i.psychologistEmail) === normalizedPsychEmail && 
+    normalizeEmail(i.patientEmail || i.toUserEmail) === normalizedPatientEmail && 
+    i.status === 'PENDING'
+  );
+  if (existingInv) {
+    console.log('❌ Ya existe invitación pendiente:', existingInv.id);
+    return res.status(400).json({ error: 'Ya existe una invitación pendiente entre este psicólogo y paciente' });
+  }
+
   // Asegurar que status sea PENDING siempre (el usuario debe aceptar manualmente)
   invitation.status = 'PENDING';
   invitation.timestamp = invitation.timestamp || Date.now();
@@ -2938,30 +2958,43 @@ app.put('/api/psychologist/:userId/profile', async (req, res) => {
 
 // --- RELACIONES PACIENTE / PSICÓLOGO ---
 app.get('/api/relationships', (req, res) => {
-  const { psychologistId, patientId } = req.query;
-  console.log('[GET /api/relationships] Request:', { psychologistId, patientId });
-  if (!psychologistId && !patientId) {
-    return res.status(400).json({ error: 'psychologistId o patientId requerido' });
+  try {
+    const { psychologistId, patientId } = req.query;
+    console.log('[GET /api/relationships] Request:', { psychologistId, patientId });
+    if (!psychologistId && !patientId) {
+      return res.status(400).json({ error: 'psychologistId o patientId requerido' });
+    }
+
+    const db = getDb();
+    console.log('[GET /api/relationships] Total careRelationships:', db.careRelationships?.length || 0);
+    if (db.careRelationships && db.careRelationships.length > 0) {
+      console.log('[GET /api/relationships] Sample relationship:', db.careRelationships[0]);
+    }
+    const relationships = (db.careRelationships || []).filter(rel => {
+      if (!rel) return false;
+      const matchesPsych = psychologistId ? rel.psychologistId === psychologistId : true;
+      const matchesPatient = patientId ? rel.patientId === patientId : true;
+      const matches = matchesPsych && matchesPatient;
+      if (matches) {
+        console.log('[GET /api/relationships] MATCH found:', { id: rel.id, psychologistId: rel.psychologistId, patientId: rel.patientId });
+      }
+      return matches;
+    });
+    console.log('[GET /api/relationships] Filtered count:', relationships.length);
+
+    // Prevenir caché
+    res.set({
+      'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    });
+    
+    console.log('[GET /api/relationships] Sending response with', relationships.length, 'relationships');
+    res.json(relationships);
+  } catch (error) {
+    console.error('[GET /api/relationships] ERROR:', error);
+    res.status(500).json({ error: error.message || 'Error interno del servidor' });
   }
-
-  const db = getDb();
-  console.log('[GET /api/relationships] Total careRelationships:', db.careRelationships?.length || 0);
-  const relationships = (db.careRelationships || []).filter(rel => {
-    if (!rel) return false;
-    const matchesPsych = psychologistId ? rel.psychologistId === psychologistId : true;
-    const matchesPatient = patientId ? rel.patientId === patientId : true;
-    return matchesPsych && matchesPatient;
-  });
-  console.log('[GET /api/relationships] Filtered result:', relationships);
-
-  // Prevenir caché
-  res.set({
-    'Cache-Control': 'no-store, no-cache, must-revalidate, private',
-    'Pragma': 'no-cache',
-    'Expires': '0'
-  });
-  
-  res.json(relationships);
 });
 
 app.post('/api/relationships', async (req, res) => {

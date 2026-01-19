@@ -11,102 +11,110 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 async function checkConnection() {
-  console.log('🔍 Buscando usuario psicólogo garryjavi@gmail.com...');
+  console.log('🔍 Buscando todos los usuarios...\n');
   
-  const { data: psychologist, error: psychError } = await supabase
+  const { data: allUsers, error: usersError } = await supabase
     .from('users')
-    .select('*')
-    .eq('email', 'garryjavi@gmail.com')
-    .single();
+    .select('*');
   
-  if (psychError) {
-    console.error('❌ Error buscando psicólogo:', psychError);
+  if (usersError) {
+    console.error('❌ Error buscando usuarios:', usersError);
     return;
   }
   
-  console.log('✅ Psicólogo encontrado:', {
-    id: psychologist.id,
-    name: psychologist.name,
-    email: psychologist.email,
-    role: psychologist.role
-  });
+  const daniel = allUsers.find(u => u.data?.email?.toLowerCase().includes('daniel.m.mendezv@gmail.com'));
+  const garry = allUsers.find(u => u.data?.email?.toLowerCase().includes('garryjavi@gmail.com'));
   
-  console.log('\n🔍 Buscando usuario paciente javier@ciudadela.eu...');
-  
-  const { data: patient, error: patientError } = await supabase
-    .from('users')
-    .select('*')
-    .eq('email', 'javier@ciudadela.eu')
-    .single();
-  
-  if (patientError) {
-    console.log('ℹ️ Usuario javier@ciudadela.eu no existe aún');
-  } else {
-    console.log('✅ Paciente encontrado:', {
-      id: patient.id,
-      name: patient.name,
-      email: patient.email,
-      role: patient.role
-    });
+  if (!daniel) {
+    console.log('❌ Psicólogo Daniel no encontrado');
+    return;
   }
   
-  console.log('\n🔍 Buscando invitaciones del psicólogo...');
+  console.log('✅ Psicólogo Daniel encontrado:', {
+    id: daniel.id,
+    name: daniel.data?.name,
+    email: daniel.data?.email,
+    role: daniel.data?.role
+  });
+  
+  if (!garry) {
+    console.log('❌ Paciente Garry no encontrado');
+    return;
+  }
+  
+  console.log('✅ Paciente Garry encontrado:', {
+    id: garry.id,
+    name: garry.data?.name,
+    email: garry.data?.email,
+    role: garry.data?.role
+  });
+  
+  console.log('\n🔍 Buscando invitaciones Daniel → Garry...');
   
   const { data: invitations, error: invError } = await supabase
     .from('invitations')
-    .select('*')
-    .eq('psychologist_id', psychologist.id);
+    .select('*');
   
   if (invError) {
     console.error('❌ Error buscando invitaciones:', invError);
   } else {
-    console.log(`📧 Invitaciones totales: ${invitations.length}`);
+    console.log(`📧 Invitaciones totales en Supabase: ${invitations.length}`);
     
-    const javierInvitation = invitations.find(inv => 
-      inv.patient_email === 'javier@ciudadela.eu' || 
-      (patient && inv.patient_id === patient.id)
-    );
-    
-    if (javierInvitation) {
-      console.log('\n⚠️ INVITACIÓN ENCONTRADA para javier@ciudadela.eu:');
-      console.log(JSON.stringify(javierInvitation, null, 2));
-    } else {
-      console.log('\n✅ NO hay invitación pendiente para javier@ciudadela.eu');
-    }
-    
-    console.log('\n📋 Todas las invitaciones:');
-    invitations.forEach((inv, i) => {
-      console.log(`${i + 1}. Email: ${inv.patient_email}, Status: ${inv.status}, ID: ${inv.id}`);
+    const danielToGarry = invitations.filter(inv => {
+      const invData = inv.data || inv;
+      return invData.psychologistId === daniel.id && 
+             (invData.patientId === garry.id || invData.patientEmail?.toLowerCase().includes('garryjavi@gmail.com'));
     });
+    
+    if (danielToGarry.length > 0) {
+      console.log(`\n📨 INVITACIONES Daniel → Garry: ${danielToGarry.length}`);
+      danielToGarry.forEach(inv => {
+        const invData = inv.data || inv;
+        console.log('  - ID:', inv.id);
+        console.log('    Status:', invData.status);
+        console.log('    PatientId:', invData.patientId || 'NO ASIGNADO');
+        console.log('    Created:', invData.createdAt);
+      });
+    } else {
+      console.log('\n✅ NO hay invitaciones Daniel → Garry');
+    }
   }
   
-  console.log('\n🔍 Buscando relaciones de cuidado...');
+  console.log('\n🔍 Buscando care_relationships Daniel → Garry...');
   
   const { data: relationships, error: relError } = await supabase
     .from('care_relationships')
-    .select('*')
-    .eq('psychologist_id', psychologist.id);
+    .select('*');
   
   if (relError) {
     console.error('❌ Error buscando relaciones:', relError);
   } else {
-    console.log(`👥 Relaciones totales: ${relationships.length}`);
+    console.log(`👥 Care relationships totales en Supabase: ${relationships.length}`);
     
-    if (patient) {
-      const javierRelationship = relationships.find(rel => rel.patient_id === patient.id);
-      
-      if (javierRelationship) {
-        console.log('\n⚠️ RELACIÓN ENCONTRADA con javier@ciudadela.eu:');
-        console.log(JSON.stringify(javierRelationship, null, 2));
-      } else {
-        console.log('\n✅ NO hay relación activa con javier@ciudadela.eu');
-      }
-    }
-    
-    console.log('\n📋 Todas las relaciones:');
-    relationships.forEach((rel, i) => {
-      console.log(`${i + 1}. Patient ID: ${rel.patient_id}, Status: ${rel.status}, ID: ${rel.id}`);
+    const danielGarryRel = relationships.filter(rel => {
+      const relData = rel.data || rel;
+      return relData.psychologistId === daniel.id && relData.patientId === garry.id;
     });
+    
+    if (danielGarryRel.length > 0) {
+      console.log(`\n✅ RELACIÓN ENCONTRADA Daniel → Garry: ${danielGarryRel.length}`);
+      danielGarryRel.forEach(rel => {
+        const relData = rel.data || rel;
+        console.log('  - ID:', rel.id);
+        console.log('    PsychologistId:', relData.psychologistId);
+        console.log('    PatientId:', relData.patientId);
+        console.log('    Created:', relData.createdAt);
+      });
+    } else {
+      console.log('\n❌ NO SE ENCONTRÓ RELACIÓN Daniel → Garry');
+      console.log('\nTodas las relaciones:');
+      relationships.forEach(rel => {
+        const relData = rel.data || rel;
+        const psych = allUsers.find(u => u.id === relData.psychologistId);
+        const patient = allUsers.find(u => u.id === relData.patientId);
+        console.log(`  - ${psych?.data?.email || relData.psychologistId} → ${patient?.data?.email || relData.patientId}`);
+      });
+    }
   }
 }
 

@@ -297,17 +297,17 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
       )}
 
       {isLoading ? (
-        <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center">
+        <div className="bg-white rounded-lg sm:rounded-2xl border border-slate-200 p-4 sm:p-8 text-center">
           <Loader2 className="animate-spin text-indigo-600 mx-auto mb-2" />
-          <p className="text-slate-500 text-sm">Cargando conexiones…</p>
+          <p className="text-slate-500 text-xs sm:text-sm">Cargando conexiones…</p>
         </div>
       ) : (
-        <div className="space-y-6">
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="space-y-3 sm:space-y-6">
+          <div className="bg-white rounded-lg sm:rounded-2xl border border-slate-200 p-3 sm:p-6 shadow-sm">
+            <div className="flex flex-col gap-2 sm:gap-3 md:flex-row md:items-center md:justify-between">
               <div>
-                <h3 className="text-lg font-semibold text-slate-900">Psicólogos con acceso a tu perfil</h3>
-                <p className="text-sm text-slate-500">Controla quién puede ver tu evolución y encuentra nuevos profesionales.</p>
+                <h3 className="text-base sm:text-lg font-semibold text-slate-900">Psicólogos con acceso a tu perfil</h3>
+                <p className="text-xs sm:text-sm text-slate-500">Controla quién puede ver tu evolución y encuentra nuevos profesionales.</p>
               </div>
               <button
                 onClick={async () => {
@@ -316,45 +316,47 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
                   }
                   setShowDirectory(!showDirectory);
                 }}
-                className="px-4 py-2 text-sm font-medium rounded-xl border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 flex items-center gap-2"
+                className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium rounded-lg sm:rounded-xl border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 flex items-center gap-2 whitespace-nowrap"
               >
-                <Search size={16} />
-                {showDirectory ? 'Cerrar directorio' : 'Buscar profesional'}
+                <Search size={14} className="sm:w-4 sm:h-4" />
+                <span className="hidden sm:inline">{showDirectory ? 'Cerrar' : 'Buscar profesional'}</span>
+                <span className="sm:hidden">{showDirectory ? 'Cerrar' : 'Buscar'}</span>
               </button>
             </div>
 
             {showDirectory && (
-              <div className="mt-4 border border-slate-100 rounded-2xl p-4 bg-slate-50">
+              <div className="mt-2 sm:mt-4 border border-slate-100 rounded-lg sm:rounded-2xl p-2 sm:p-4 bg-slate-50">
                 <div className="flex items-center gap-2">
                   <input
                     type="text"
                     value={directorySearch}
                     onChange={(e) => setDirectorySearch(e.target.value)}
                     placeholder="Nombre o email"
-                    className="flex-1 px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm"
+                    className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg sm:rounded-xl border border-slate-200 bg-white text-xs sm:text-sm"
                   />
-                  <button onClick={() => { setDirectorySearch(''); setShowDirectory(false); }} className="p-2 rounded-xl text-slate-500 hover:bg-white">
-                    <X size={16} />
+                  <button onClick={() => { setDirectorySearch(''); setShowDirectory(false); }} className="p-1.5 sm:p-2 rounded-lg sm:rounded-xl text-slate-500 hover:bg-white">
+                    <X size={14} className="sm:w-4 sm:h-4" />
                   </button>
                 </div>
-                <div className="mt-3 max-h-56 overflow-y-auto space-y-2">
+                <div className="mt-2 sm:mt-3 max-h-48 sm:max-h-56 overflow-y-auto space-y-1 sm:space-y-2">
                   {directoryLoading ? (
                     <div className="text-sm text-slate-500 flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" />Cargando directorio…</div>
                   ) : filteredDirectory.length === 0 ? (
                     <p className="text-sm text-slate-400 text-center py-6">No hay especialistas disponibles.</p>
                   ) : filteredDirectory.map(psych => (
-                    <div key={psych.id} className="bg-white rounded-xl border border-slate-100 p-3 flex items-center justify-between">
-                      <div>
-                        <p className="font-medium text-slate-900">{psych.name}</p>
-                        <p className="text-xs text-slate-500">{psych.email}</p>
+                    <div key={psych.id} className="bg-white rounded-lg border border-slate-100 p-2 sm:p-3 flex items-center justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-slate-900 text-xs sm:text-sm truncate">{psych.name}</p>
+                        <p className="text-[11px] sm:text-xs text-slate-500 truncate">{psych.email}</p>
                       </div>
                       <button
                         onClick={() => handleConnect(psych.id)}
-                        className="px-3 py-1.5 text-xs font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-1"
+                        className="px-2 sm:px-3 py-1 sm:py-1.5 text-[11px] sm:text-xs font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-1 whitespace-nowrap flex-shrink-0"
                         title="Enviar solicitud para que este psicólogo acceda a tu perfil"
                       >
-                        <Mail size={14} />
-                        Solicitar
+                        <Mail size={12} className="sm:w-3.5 sm:h-3.5" />
+                        <span className="hidden sm:inline">Solicitar</span>
+                        <span className="sm:hidden">Ir</span>
                       </button>
                     </div>
                   ))}
@@ -364,37 +366,39 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
 
             {/* Invitaciones pendientes recibidas */}
             {invitations.length > 0 && (
-              <div className="mt-6 pb-6 border-b border-slate-100">
-                <div className="flex items-center justify-between mb-4">
-                  <h4 className="text-sm font-bold text-amber-600 uppercase tracking-wide flex items-center gap-2">
-                    <Mail size={14} /> Invitaciones Pendientes
+              <div className="mt-3 sm:mt-6 pb-3 sm:pb-6 border-b border-slate-100">
+                <div className="flex items-center justify-between mb-2 sm:mb-4">
+                  <h4 className="text-xs sm:text-sm font-bold text-amber-600 uppercase tracking-wide flex items-center gap-1.5 sm:gap-2">
+                    <Mail size={12} className="sm:w-3.5 sm:h-3.5" /> Invitaciones Pendientes
                   </h4>
-                  <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded-full font-medium">
+                  <span className="text-[10px] sm:text-xs bg-amber-100 text-amber-700 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full font-medium">
                     {invitations.length} pendiente{invitations.length !== 1 ? 's' : ''}
                   </span>
                 </div>
-                <p className="text-xs text-slate-500 mb-3">Invitaciones de psicólogos que quieren acceder a tu perfil</p>
-                <div className="space-y-3">
+                <p className="text-[11px] sm:text-xs text-slate-500 mb-2 sm:mb-3">Invitaciones de psicólogos que quieren acceder a tu perfil</p>
+                <div className="space-y-2 sm:space-y-3">
                   {invitations.map(inv => (
-                    <div key={inv.id} className="p-4 rounded-xl border border-amber-100 bg-amber-50/30 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900">{inv.psychologistName || inv.fromPsychologistName || 'Psicólogo'}</p>
-                        <p className="text-xs text-slate-500">{inv.psychologistEmail || inv.patientEmail}</p>
+                    <div key={inv.id} className="p-2 sm:p-4 rounded-lg sm:rounded-xl border border-amber-100 bg-amber-50/30 flex flex-col gap-2 sm:gap-3 md:flex-row md:items-center md:justify-between">
+                      <div className="min-w-0">
+                        <p className="text-xs sm:text-sm font-semibold text-slate-900 truncate">{inv.psychologistName || inv.fromPsychologistName || 'Psicólogo'}</p>
+                        <p className="text-[11px] sm:text-xs text-slate-500 truncate">{inv.psychologistEmail || inv.patientEmail}</p>
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex gap-1.5 sm:gap-2 flex-shrink-0">
                         <button 
                           onClick={() => handleRejectInvitation(inv.id)} 
-                          className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-white text-sm flex items-center gap-1"
+                          className="px-2.5 sm:px-4 py-1 sm:py-2 rounded-lg sm:rounded-xl border border-slate-200 text-slate-600 hover:bg-white text-[11px] sm:text-sm flex items-center gap-1 whitespace-nowrap"
                         >
-                          <X size={14} />
-                          Rechazar
+                          <X size={12} className="sm:w-3.5 sm:h-3.5" />
+                          <span className="hidden sm:inline">Rechazar</span>
+                          <span className="sm:hidden">No</span>
                         </button>
                         <button 
                           onClick={() => handleAcceptInvitation(inv.id)} 
-                          className="px-4 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 text-sm flex items-center gap-1"
+                          className="px-2.5 sm:px-4 py-1 sm:py-2 rounded-lg sm:rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 text-[11px] sm:text-sm flex items-center gap-1 whitespace-nowrap"
                         >
-                          <UserPlus size={14} />
-                          Aceptar
+                          <UserPlus size={12} className="sm:w-3.5 sm:h-3.5" />
+                          <span className="hidden sm:inline">Aceptar</span>
+                          <span className="sm:hidden">Sí</span>
                         </button>
                       </div>
                     </div>
@@ -404,32 +408,33 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
             )}
 
             {/* Psicólogos conectados */}
-            <div className="mt-6">
-              <div className="flex items-center justify-between mb-4">
-                <h4 className="text-sm font-bold text-green-700 uppercase tracking-wide flex items-center gap-2">
-                  <UserCheck size={14} /> Psicólogos Conectados
+            <div className="mt-3 sm:mt-6">
+              <div className="flex items-center justify-between mb-2 sm:mb-4">
+                <h4 className="text-xs sm:text-sm font-bold text-green-700 uppercase tracking-wide flex items-center gap-1.5 sm:gap-2">
+                  <UserCheck size={12} className="sm:w-3.5 sm:h-3.5" /> Psicólogos Conectados
                 </h4>
-                <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-medium">
+                <span className="text-[10px] sm:text-xs bg-green-100 text-green-700 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full font-medium">
                   {myPsychologists.length} activo{myPsychologists.length !== 1 ? 's' : ''}
                 </span>
               </div>
-              <p className="text-xs text-slate-500 mb-3">Profesionales con acceso autorizado a tu perfil</p>
+              <p className="text-[11px] sm:text-xs text-slate-500 mb-2 sm:mb-3">Profesionales con acceso autorizado a tu perfil</p>
               {myPsychologists.length === 0 ? (
-                <p className="text-sm text-slate-500 py-4 text-center bg-slate-50 rounded-xl">Aún no has autorizado a ningún especialista.</p>
+                <p className="text-xs sm:text-sm text-slate-500 py-3 sm:py-4 text-center bg-slate-50 rounded-lg sm:rounded-xl">Aún no has autorizado a ningún especialista.</p>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-2 sm:space-y-3">
                   {myPsychologists.map(psych => (
-                    <div key={psych.id} className="flex items-center justify-between border border-green-100 bg-green-50/30 rounded-xl p-4">
-                      <div>
-                        <p className="font-semibold text-slate-900">{psych.name}</p>
-                        <p className="text-xs text-slate-500">{psych.email}</p>
+                    <div key={psych.id} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border border-green-100 bg-green-50/30 rounded-lg sm:rounded-xl p-2 sm:p-4">
+                      <div className="min-w-0">
+                        <p className="text-xs sm:text-sm font-semibold text-slate-900 truncate">{psych.name}</p>
+                        <p className="text-[11px] sm:text-xs text-slate-500 truncate">{psych.email}</p>
                       </div>
                       <button 
                         onClick={() => handleRevoke(psych.id)} 
-                        className="px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 text-xs flex items-center gap-1"
+                        className="px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 text-[11px] sm:text-xs flex items-center gap-1 whitespace-nowrap flex-shrink-0"
                       >
-                        <Trash2 size={14} /> 
-                        Revocar acceso
+                        <Trash2 size={12} className="sm:w-3.5 sm:h-3.5" /> 
+                        <span className="hidden sm:inline">Revocar acceso</span>
+                        <span className="sm:hidden">Revocar</span>
                       </button>
                     </div>
                   ))}
@@ -440,71 +445,74 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
 
           {currentUser.role === 'PSYCHOLOGIST' && (
             <>
-              <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6 shadow-sm">
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-6">
+              <div className="bg-white rounded-lg sm:rounded-2xl border border-slate-200 p-3 sm:p-6 shadow-sm">
+                <div className="flex flex-col gap-2 sm:gap-3 md:flex-row md:items-center md:justify-between mb-3 sm:mb-6">
                   <div>
-                    <h3 className="text-lg font-semibold text-slate-900">Gestión de Pacientes</h3>
-                    <p className="text-sm text-slate-500">Invita y gestiona tus pacientes en dygo.</p>
+                    <h3 className="text-base sm:text-lg font-semibold text-slate-900">Gestión de Pacientes</h3>
+                    <p className="text-xs sm:text-sm text-slate-500">Invita y gestiona tus pacientes en dygo.</p>
                   </div>
                 </div>
 
                 {/* Invitar pacientes */}
-                <div className="mb-6 pb-6 border-b border-slate-100">
-                  <h4 className="text-sm font-bold text-slate-600 uppercase tracking-wide flex items-center gap-2 mb-3">
-                    <UserPlus size={14} /> Invitar nuevo paciente
+                <div className="mb-3 sm:mb-6 pb-3 sm:pb-6 border-b border-slate-100">
+                  <h4 className="text-xs sm:text-sm font-bold text-slate-600 uppercase tracking-wide flex items-center gap-1.5 sm:gap-2 mb-2 sm:mb-3">
+                    <UserPlus size={12} className="sm:w-3.5 sm:h-3.5" /> Invitar nuevo paciente
                   </h4>
-                  <div className="flex flex-col gap-3 md:flex-row">
+                  <div className="flex flex-col gap-2 sm:gap-3 md:flex-row">
                     <input
                       type="email"
                       value={inviteEmail}
                       onChange={(e) => setInviteEmail(e.target.value)}
                       placeholder="correo@paciente.com"
-                      className="flex-1 px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      className="flex-1 px-2.5 sm:px-4 py-1.5 sm:py-2 border border-slate-300 rounded-lg sm:rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
                     />
                     <button
                       onClick={handleSendInvitation}
                       disabled={isSendingInvite || !inviteEmail.trim()}
-                      className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                      className="inline-flex items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap text-xs sm:text-sm font-medium"
                     >
-                      {isSendingInvite ? (<Loader2 size={16} className="animate-spin" />) : (<UserPlus size={16} />)}
-                      {isSendingInvite ? 'Enviando…' : 'Enviar invitación'}
+                      {isSendingInvite ? (<Loader2 size={12} className="animate-spin sm:w-4 sm:h-4" />) : (<UserPlus size={12} className="sm:w-4 sm:h-4" />)}
+                      <span className="hidden sm:inline">{isSendingInvite ? 'Enviando…' : 'Enviar invitación'}</span>
+                      <span className="sm:hidden">{isSendingInvite ? 'Enviando' : 'Invitar'}</span>
                     </button>
                   </div>
                 </div>
 
                 {/* Solicitudes de pacientes (donde me piden como psicólogo) */}
                 {psychologistRequests.length > 0 && (
-                  <div className="mb-6 pb-6 border-b border-slate-100">
-                    <div className="flex items-center justify-between mb-4">
-                      <h4 className="text-sm font-bold text-purple-600 uppercase tracking-wide flex items-center gap-2">
-                        <Mail size={14} /> Solicitudes de Pacientes
+                  <div className="mb-3 sm:mb-6 pb-3 sm:pb-6 border-b border-slate-100">
+                    <div className="flex items-center justify-between mb-2 sm:mb-4">
+                      <h4 className="text-xs sm:text-sm font-bold text-purple-600 uppercase tracking-wide flex items-center gap-1.5 sm:gap-2">
+                        <Mail size={12} className="sm:w-3.5 sm:h-3.5" /> Solicitudes de Pacientes
                       </h4>
-                      <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-full font-medium">
+                      <span className="text-[10px] sm:text-xs bg-purple-100 text-purple-700 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full font-medium">
                         {psychologistRequests.length} pendiente{psychologistRequests.length !== 1 ? 's' : ''}
                       </span>
                     </div>
-                    <p className="text-xs text-slate-500 mb-3">Usuarios que te han solicitado como psicólogo</p>
-                    <div className="space-y-3">
+                    <p className="text-[11px] sm:text-xs text-slate-500 mb-2 sm:mb-3">Usuarios que te han solicitado como psicólogo</p>
+                    <div className="space-y-2 sm:space-y-3">
                       {psychologistRequests.map(inv => (
-                        <div key={inv.id} className="p-4 rounded-xl border border-purple-100 bg-purple-50/30 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                          <div>
-                            <p className="text-sm font-semibold text-slate-900">{inv.patientName || inv.patientEmail}</p>
-                            <p className="text-xs text-slate-500">{inv.patientEmail}</p>
+                        <div key={inv.id} className="p-2 sm:p-4 rounded-lg sm:rounded-xl border border-purple-100 bg-purple-50/30 flex flex-col gap-2 sm:gap-3 md:flex-row md:items-center md:justify-between">
+                          <div className="min-w-0">
+                            <p className="text-xs sm:text-sm font-semibold text-slate-900 truncate">{inv.patientName || inv.patientEmail}</p>
+                            <p className="text-[11px] sm:text-xs text-slate-500 truncate">{inv.patientEmail}</p>
                           </div>
-                          <div className="flex gap-2">
+                          <div className="flex gap-1.5 sm:gap-2 flex-shrink-0">
                             <button 
                               onClick={() => handleRejectInvitation(inv.id)} 
-                              className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-white text-sm flex items-center gap-1"
+                              className="px-2.5 sm:px-4 py-1 sm:py-2 rounded-lg sm:rounded-xl border border-slate-200 text-slate-600 hover:bg-white text-[11px] sm:text-sm flex items-center gap-1 whitespace-nowrap"
                             >
-                              <X size={14} />
-                              Rechazar
+                              <X size={12} className="sm:w-3.5 sm:h-3.5" />
+                              <span className="hidden sm:inline">Rechazar</span>
+                              <span className="sm:hidden">No</span>
                             </button>
                             <button 
                               onClick={() => handleAcceptInvitation(inv.id)} 
-                              className="px-4 py-2 rounded-xl bg-purple-600 text-white hover:bg-purple-700 text-sm flex items-center gap-1"
+                              className="px-2.5 sm:px-4 py-1 sm:py-2 rounded-lg sm:rounded-xl bg-purple-600 text-white hover:bg-purple-700 text-[11px] sm:text-sm flex items-center gap-1 whitespace-nowrap"
                             >
-                              <UserPlus size={14} />
-                              Aceptar
+                              <UserPlus size={12} className="sm:w-3.5 sm:h-3.5" />
+                              <span className="hidden sm:inline">Aceptar</span>
+                              <span className="sm:hidden">Sí</span>
                             </button>
                           </div>
                         </div>
@@ -515,17 +523,17 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
 
                 {/* Invitaciones enviadas */}
                 {sentInvitations.length > 0 && (
-                  <div className="mb-6 pb-6 border-b border-slate-100">
-                    <div className="flex items-center justify-between mb-4">
-                      <h4 className="text-sm font-bold text-amber-600 uppercase tracking-wide flex items-center gap-2">
-                        <Mail size={14} /> Invitaciones Pendientes
+                  <div className="mb-3 sm:mb-6 pb-3 sm:pb-6 border-b border-slate-100">
+                    <div className="flex items-center justify-between mb-2 sm:mb-4">
+                      <h4 className="text-xs sm:text-sm font-bold text-amber-600 uppercase tracking-wide flex items-center gap-1.5 sm:gap-2">
+                        <Mail size={12} className="sm:w-3.5 sm:h-3.5" /> Invitaciones Pendientes
                       </h4>
-                      <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded-full font-medium">
+                      <span className="text-[10px] sm:text-xs bg-amber-100 text-amber-700 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full font-medium">
                         {sentInvitations.length} pendiente{sentInvitations.length !== 1 ? 's' : ''}
                       </span>
                     </div>
-                    <p className="text-xs text-slate-500 mb-3">Invitaciones enviadas que aún no han sido aceptadas</p>
-                    <div className="space-y-3">
+                    <p className="text-[11px] sm:text-xs text-slate-500 mb-2 sm:mb-3">Invitaciones enviadas que aún no han sido aceptadas</p>
+                    <div className="space-y-2 sm:space-y-3">
                       {sentInvitations.map(inv => {
                         // Obtener email del paciente (nueva estructura o retrocompat)
                         const patientEmail = inv.patientEmail || inv.toUserEmail;
@@ -571,26 +579,28 @@ ${currentUser.name || 'Tu psicólogo/a'}
                         const mailtoLink = `mailto:${patientEmail}?subject=${emailSubject}&body=${emailBody}`;
 
                         return (
-                          <div key={inv.id} className="p-4 rounded-xl border border-amber-100 bg-amber-50/30 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                            <div>
-                              <p className="text-sm font-semibold text-slate-900">{patientEmail}</p>
-                              <p className="text-xs text-slate-500">Esperando aceptación</p>
+                          <div key={inv.id} className="p-2 sm:p-4 rounded-lg sm:rounded-xl border border-amber-100 bg-amber-50/30 flex flex-col gap-2 sm:gap-3 md:flex-row md:items-center md:justify-between">
+                            <div className="min-w-0">
+                              <p className="text-xs sm:text-sm font-semibold text-slate-900 truncate">{patientEmail}</p>
+                              <p className="text-[11px] sm:text-xs text-slate-500 truncate">Esperando aceptación</p>
                             </div>
-                            <div className="flex gap-2">
+                            <div className="flex gap-1 sm:gap-2 flex-shrink-0">
                               <a 
                                 href={mailtoLink}
-                                className="px-4 py-2 rounded-xl border border-indigo-200 text-indigo-600 hover:bg-indigo-50 text-sm flex items-center gap-1 justify-center"
+                                className="px-2 sm:px-4 py-1 sm:py-2 rounded-lg sm:rounded-xl border border-indigo-200 text-indigo-600 hover:bg-indigo-50 text-[11px] sm:text-sm flex items-center gap-1 justify-center whitespace-nowrap"
                                 title="Enviar email de invitación"
                               >
-                                <Mail size={14} />
-                                Enviar Email
+                                <Mail size={12} className="sm:w-3.5 sm:h-3.5" />
+                                <span className="hidden sm:inline">Enviar Email</span>
+                                <span className="sm:hidden">Email</span>
                               </a>
                               <button 
                                 onClick={() => handleRevokeSentInvitation(inv.id)} 
-                                className="px-4 py-2 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-sm flex items-center gap-1 justify-center"
+                                className="px-2 sm:px-4 py-1 sm:py-2 rounded-lg sm:rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-[11px] sm:text-sm flex items-center gap-1 justify-center whitespace-nowrap"
                               >
-                                <X size={14} />
-                                Revocar
+                                <X size={12} className="sm:w-3.5 sm:h-3.5" />
+                                <span className="hidden sm:inline">Revocar</span>
+                                <span className="sm:hidden">Quitar</span>
                               </button>
                             </div>
                           </div>
@@ -602,27 +612,29 @@ ${currentUser.name || 'Tu psicólogo/a'}
 
                 {/* Pacientes conectados */}
                 <div>
-                  <div className="flex items-center justify-between mb-4">
-                    <h4 className="text-sm font-bold text-green-700 uppercase tracking-wide flex items-center gap-2">
-                      <UserCheck size={14} /> Pacientes Conectados
+                  <div className="flex items-center justify-between mb-2 sm:mb-4">
+                    <h4 className="text-xs sm:text-sm font-bold text-green-700 uppercase tracking-wide flex items-center gap-1.5 sm:gap-2">
+                      <UserCheck size={12} className="sm:w-3.5 sm:h-3.5" /> Pacientes Conectados
                     </h4>
-                    <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-medium">
+                    <span className="text-[10px] sm:text-xs bg-green-100 text-green-700 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full font-medium">
                       {myPatients.length} activo{myPatients.length !== 1 ? 's' : ''}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-500 mb-3">Pacientes que han aceptado tu invitación y tienen acceso activo</p>
+                  <p className="text-[11px] sm:text-xs text-slate-500 mb-2 sm:mb-3">Pacientes que han aceptado tu invitación y tienen acceso activo</p>
                   {myPatients.length === 0 ? (
-                    <p className="text-sm text-slate-500 italic">Aún no tienes pacientes conectados.</p>
+                    <p className="text-xs sm:text-sm text-slate-500 italic">Aún no tienes pacientes conectados.</p>
                   ) : (
-                    <div className="space-y-3">
+                    <div className="space-y-2 sm:space-y-3">
                       {myPatients.map(patient => (
-                        <div key={patient.id} className="flex items-center justify-between border border-green-100 bg-green-50/30 rounded-xl p-4">
-                          <div>
-                            <p className="font-semibold text-slate-900">{patient.name}</p>
-                            <p className="text-xs text-slate-500">{patient.email}</p>
+                        <div key={patient.id} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border border-green-100 bg-green-50/30 rounded-lg sm:rounded-xl p-2 sm:p-4">
+                          <div className="min-w-0">
+                            <p className="text-xs sm:text-sm font-semibold text-slate-900 truncate">{patient.name}</p>
+                            <p className="text-[11px] sm:text-xs text-slate-500 truncate">{patient.email}</p>
                           </div>
-                          <button onClick={() => handleRevoke(patient.id)} className="text-xs text-slate-400 hover:text-red-500 flex items-center gap-1">
-                            <Trash2 size={14} /> Revocar acceso
+                          <button onClick={() => handleRevoke(patient.id)} className="text-[11px] sm:text-xs text-slate-400 hover:text-red-500 flex items-center gap-1 whitespace-nowrap flex-shrink-0">
+                            <Trash2 size={12} className="sm:w-3.5 sm:h-3.5" /> 
+                            <span className="hidden sm:inline">Revocar acceso</span>
+                            <span className="sm:hidden">Revocar</span>
                           </button>
                         </div>
                       ))}

@@ -307,24 +307,25 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
             {last12Months.map((month, idx) => {
               const key = Object.keys(monthlyRevenue)[idx];
               const value = monthlyRevenue[key];
-              const percentage = (value / maxRevenue) * 100;
+              const percentage = maxRevenue > 0 ? (value / maxRevenue) * 100 : 0;
               
               return (
                 <div key={key} className="flex-1 flex flex-col items-center justify-end group relative min-w-0">
                   {/* Bar */}
                   <div className="w-full h-full flex flex-col items-center justify-end">
-                    {/* Tooltip on hover */}
+                    {/* Value label on top of bar */}
                     {value > 0 && (
-                      <div className="absolute -top-8 bg-slate-800 text-white text-[10px] px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
-                        {value.toFixed(0)}€
+                      <div className="absolute bg-slate-800 text-white text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0.5 rounded whitespace-nowrap z-10 font-semibold shadow-lg" 
+                           style={{ bottom: `calc(${Math.max(percentage, 12)}% + 4px)` }}>
+                        {value >= 1000 ? `${(value/1000).toFixed(1)}k€` : `${value.toFixed(0)}€`}
                       </div>
                     )}
                     
                     <div 
                       className="w-full bg-gradient-to-t from-green-600 via-green-500 to-emerald-400 rounded-t transition-all duration-500 hover:opacity-90 cursor-pointer shadow-sm"
                       style={{ 
-                        height: `${Math.max(percentage, 2)}%`,
-                        minHeight: value > 0 ? '4px' : '0'
+                        height: `${Math.max(percentage, 12)}%`,
+                        minHeight: value > 0 ? '12px' : '0'
                       }}
                     />
                   </div>

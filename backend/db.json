@@ -19,16 +19,8 @@
   ],
   "entries": [],
   "goals": [],
-  "invitations": [
-    {
-      "id": "b2aea701-8062-4a68-a42a-a3a328f9057e",
-      "fromPsychologistId": "patient-001",
-      "fromPsychologistName": "Garrido Javier Fernandez",
-      "toUserEmail": "garryjavi@gmail.com",
-      "status": "PENDING",
-      "createdAt": "2026-01-19T16:29:35.685Z"
-    }
-  ],
+  "invitations": [],
   "settings": {},
-  "sessions": []
+  "sessions": [],
+  "careRelationships": []
 }

@@ -449,14 +449,21 @@ export const sendInvitation = async (
     const patientEmail = isPsychologistInvite ? fromUserEmail : toEmail;
     const patientName = isPsychologistInvite ? fromUserName : '';
 
-    // Verificar si ya existe invitación pendiente
-    const existingInv = invs.find(i => 
-        (i.psychologistEmail?.toLowerCase().trim() === psychologistEmail.toLowerCase().trim() || i.fromPsychologistId) && 
-        (i.patientEmail?.toLowerCase().trim() === patientEmail.toLowerCase().trim() || i.toUserEmail?.toLowerCase().trim() === patientEmail.toLowerCase().trim()) && 
-        i.status === 'PENDING'
-    );
+    // Verificar si ya existe invitación pendiente con el mismo par psychologist-patient
+    const normalizedPsychEmail = psychologistEmail.toLowerCase().trim();
+    const normalizedPatientEmail = patientEmail.toLowerCase().trim();
+    
+    const existingInv = invs.find(i => {
+        const invPsychEmail = (i.psychologistEmail || '').toLowerCase().trim();
+        const invPatientEmail = (i.patientEmail || i.toUserEmail || '').toLowerCase().trim();
+        
+        return invPsychEmail === normalizedPsychEmail && 
+               invPatientEmail === normalizedPatientEmail && 
+               i.status === 'PENDING';
+    });
+    
     if (existingInv) {
-        throw new Error("Invitación ya pendiente.");
+        throw new Error("Ya existe una invitación pendiente entre este psicólogo y paciente.");
     }
 
     // Prevent sending an invitation if relationship already exists
@@ -561,7 +568,7 @@ export const acceptInvitation = async (invitationId: string, userId: string) => 
 
     // Primero crear la relación de cuidado
     try {
-        await ensureRelationship(inv.fromPsychologistId, userId);
+        await ensureRelationship(inv.psychologistId, userId);
         console.log('✅ Relación de cuidado creada exitosamente');
     } catch (e) {
         console.error('Error creating care relationship:', e);
