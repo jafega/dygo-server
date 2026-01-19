@@ -104,8 +104,11 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
 
   const futureSessions = sessions.filter(s => {
     const sessionDate = new Date(s.date);
-    return sessionDate >= today;
+    return sessionDate >= today && s.status !== 'available' && s.status !== 'cancelled';
   });
+
+  // Total sessions excluding available and cancelled
+  const totalRealSessions = sessions.filter(s => s.status !== 'available' && s.status !== 'cancelled').length;
 
   const scheduledSessions = sessions.filter(s => s.status === 'scheduled');
   const completedSessions = sessions.filter(s => s.status === 'completed');
@@ -237,47 +240,47 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
       </div>
 
       {/* Financial Overview */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
         {/* Total Revenue */}
-        <div className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl p-2.5 sm:p-4 text-white shadow-lg">
-          <div className="flex items-center justify-between mb-1.5">
-            <div className="p-1.5 sm:p-2 bg-white/20 rounded-lg backdrop-blur-sm">
-              <DollarSign size={18} className="sm:w-5 sm:h-5" />
+        <div className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl p-4 sm:p-4 text-white shadow-lg">
+          <div className="flex items-center justify-between mb-2 sm:mb-1.5">
+            <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
+              <DollarSign size={20} className="sm:w-5 sm:h-5" />
             </div>
-            <span className="text-[10px] sm:text-xs font-semibold bg-white/20 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full backdrop-blur-sm">
+            <span className="text-xs font-semibold bg-white/20 px-2 py-1 rounded-full backdrop-blur-sm">
               Total
             </span>
           </div>
-          <div className="text-lg sm:text-2xl font-bold mb-0.5">{totalRevenue.toFixed(2)}€</div>
-          <div className="text-[10px] sm:text-xs text-green-100">Facturación Total</div>
+          <div className="text-2xl sm:text-2xl font-bold mb-1">{totalRevenue.toFixed(2)}€</div>
+          <div className="text-xs text-green-100">Facturación Total</div>
         </div>
 
         {/* Revenue in Range */}
-        <div className="bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl p-2.5 sm:p-4 text-white shadow-lg">
-          <div className="flex items-center justify-between mb-1.5">
-            <div className="p-1.5 sm:p-2 bg-white/20 rounded-lg backdrop-blur-sm">
-              <TrendingUp size={18} className="sm:w-5 sm:h-5" />
+        <div className="bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl p-4 sm:p-4 text-white shadow-lg">
+          <div className="flex items-center justify-between mb-2 sm:mb-1.5">
+            <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
+              <TrendingUp size={20} className="sm:w-5 sm:h-5" />
             </div>
-            <span className="text-[10px] sm:text-xs font-semibold bg-white/20 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full backdrop-blur-sm">
+            <span className="text-xs font-semibold bg-white/20 px-2 py-1 rounded-full backdrop-blur-sm">
               Rango
             </span>
           </div>
-          <div className="text-lg sm:text-2xl font-bold mb-0.5">{revenueInRange.toFixed(2)}€</div>
-          <div className="text-[10px] sm:text-xs text-blue-100">Facturado en Período</div>
+          <div className="text-2xl sm:text-2xl font-bold mb-1">{revenueInRange.toFixed(2)}€</div>
+          <div className="text-xs text-blue-100">Facturado en Período</div>
         </div>
 
         {/* Paid Invoices */}
-        <div className="bg-gradient-to-br from-purple-500 to-pink-600 rounded-xl p-2.5 sm:p-4 text-white shadow-lg">
-          <div className="flex items-center justify-between mb-1.5">
-            <div className="p-1.5 sm:p-2 bg-white/20 rounded-lg backdrop-blur-sm">
-              <CheckCircle size={18} className="sm:w-5 sm:h-5" />
+        <div className="bg-gradient-to-br from-purple-500 to-pink-600 rounded-xl p-4 sm:p-4 text-white shadow-lg sm:col-span-2 lg:col-span-1">
+          <div className="flex items-center justify-between mb-2 sm:mb-1.5">
+            <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
+              <CheckCircle size={20} className="sm:w-5 sm:h-5" />
             </div>
-            <span className="text-[10px] sm:text-xs font-semibold bg-white/20 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full backdrop-blur-sm">
+            <span className="text-xs font-semibold bg-white/20 px-2 py-1 rounded-full backdrop-blur-sm">
               Pagadas
             </span>
           </div>
-          <div className="text-lg sm:text-2xl font-bold mb-0.5">{paidInvoices.length}</div>
-          <div className="text-[10px] sm:text-xs text-purple-100">Facturas Cobradas</div>
+          <div className="text-2xl sm:text-2xl font-bold mb-1">{paidInvoices.length}</div>
+          <div className="text-xs text-purple-100">Facturas Cobradas</div>
         </div>
       </div>
 
@@ -512,7 +515,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
           <div className="space-y-4">
             <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
               <span className="text-sm font-medium text-slate-700">Total Sesiones</span>
-              <span className="text-lg font-bold text-slate-900">{sessions.length}</span>
+              <span className="text-lg font-bold text-slate-900">{totalRealSessions}</span>
             </div>
 
             <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
