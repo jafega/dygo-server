@@ -13,6 +13,9 @@ interface Invoice {
   date: string;
   dueDate: string;
   amount: number;
+  tax?: number; // IVA
+  total?: number; // Total con IVA
+  taxRate?: number; // Porcentaje de IVA aplicado
   status: 'pending' | 'paid' | 'overdue' | 'cancelled';
   description?: string;
   stripePaymentLink?: string;
@@ -151,7 +154,7 @@ export default function PatientBillingPanel() {
                       {new Date(invoice.dueDate).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })}
                     </td>
                     <td className={`px-6 py-4 text-sm font-bold text-slate-900 text-right ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>
-                      €{invoice.amount.toFixed(2)}
+                      €{(invoice.total || invoice.amount).toFixed(2)}
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex justify-center">
@@ -222,7 +225,7 @@ export default function PatientBillingPanel() {
 
                 <div className="flex items-center justify-between pt-3 border-t border-slate-100">
                   <p className={`text-lg font-bold text-slate-900 ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>
-                    €{invoice.amount.toFixed(2)}
+                    €{(invoice.total || invoice.amount).toFixed(2)}
                   </p>
                   <button
                     onClick={() => handleDownloadPDF(invoice.id)}

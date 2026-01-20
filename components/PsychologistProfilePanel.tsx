@@ -67,7 +67,22 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
       const response = await fetch(`${API_URL}/psychologist/${userId}/profile`);
       if (response.ok) {
         const data = await response.json();
-        setProfile({ ...data, email: userEmail });
+        setProfile({
+          name: data.name || '',
+          professionalId: data.professionalId || '',
+          specialty: data.specialty || '',
+          phone: data.phone || '',
+          email: userEmail,
+          address: data.address || '',
+          city: data.city || '',
+          postalCode: data.postalCode || '',
+          country: data.country || 'España',
+          businessName: data.businessName || '',
+          taxId: data.taxId || '',
+          iban: data.iban || '',
+          sessionPrice: data.sessionPrice || 0,
+          currency: data.currency || 'EUR'
+        });
       }
     } catch (error) {
       console.error('Error loading profile:', error);

@@ -9,6 +9,9 @@ interface Invoice {
   patient_user_id?: string;
   patientName: string;
   amount: number;
+  tax?: number; // IVA
+  total?: number; // Total con IVA
+  taxRate?: number; // Porcentaje de IVA aplicado
   date: string;
   dueDate: string;
   status: 'paid' | 'pending' | 'overdue' | 'cancelled';
@@ -80,7 +83,16 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       if (response.ok) {
         const data = await response.json();
         console.log('[BillingPanel] Invoices loaded:', data.length, 'invoices');
-        console.log('[BillingPanel] Invoices data:', data);
+        if (data.length > 0) {
+          console.log('[BillingPanel] Primera factura:', {
+            id: data[0].id,
+            invoiceNumber: data[0].invoiceNumber,
+            amount: data[0].amount,
+            tax: data[0].tax,
+            total: data[0].total,
+            status: data[0].status
+          });
+        }
         setInvoices(data);
       } else {
         console.error('[BillingPanel] Error response:', response.status, response.statusText);
@@ -414,7 +426,13 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
   };
 
   const handleDownloadPDF = (invoiceId: string, invoiceNumber: string) => {
-    window.open(`${API_URL}/invoices/${invoiceId}/pdf`, '_blank');
+    const url = `${API_URL}/invoices/${invoiceId}/pdf`;
+    console.log('[BillingPanel] Descargando PDF:', {
+      invoiceId,
+      invoiceNumber,
+      url
+    });
+    window.open(url, '_blank');
   };
 
   return (
@@ -457,7 +475,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
         <div className="bg-white rounded-xl border border-slate-200 p-4">
           <div className="text-xs text-slate-500 uppercase font-semibold">Total Ingresos</div>
           <div className="text-2xl font-bold text-slate-900 mt-2">
-            €{invoices.filter(inv => inv.status === 'paid').reduce((sum, inv) => sum + inv.amount, 0).toFixed(2)}
+            €{invoices.filter(inv => inv.status === 'paid').reduce((sum, inv) => sum + (inv.total || inv.amount), 0).toFixed(2)}
           </div>
         </div>
       </div>
@@ -562,7 +580,10 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                           <Eye size={16} />
                         </button>
                         <button
-                          onClick={() => handleDownloadPDF(invoice.id, invoice.invoiceNumber)}
+                          onClick={() => {
+                            console.log('[BillingPanel] Click en descarga, invoice:', { id: invoice.id, invoiceNumber: invoice.invoiceNumber });
+                            handleDownloadPDF(invoice.id, invoice.invoiceNumber);
+                          }}
                           className="p-1.5 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                           title="Descargar PDF"
                         >
@@ -829,10 +850,18 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                 </div>
               </div>
 
-              <div className="pt-4 border-t border-slate-200">
-                <div className="flex justify-between items-center">
+              <div className="pt-4 border-t border-slate-200 space-y-2">
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-slate-600">Subtotal (Base imponible):</span>
+                  <span className="font-semibold text-slate-900">€{selectedInvoice.amount.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-slate-600">IVA ({selectedInvoice.taxRate || 21}%):</span>
+                  <span className="font-semibold text-slate-900">€{(selectedInvoice.tax || (selectedInvoice.amount * 0.21)).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between items-center pt-2 border-t border-slate-100">
                   <span className="text-lg font-semibold text-slate-900">Total:</span>
-                  <span className="text-2xl font-bold text-indigo-600">€{selectedInvoice.amount.toFixed(2)}</span>
+                  <span className="text-2xl font-bold text-indigo-600">€{(selectedInvoice.total || (selectedInvoice.amount * 1.21)).toFixed(2)}</span>
                 </div>
               </div>
 

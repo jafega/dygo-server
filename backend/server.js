@@ -597,6 +597,7 @@ function normalizeSupabaseRow(row) {
     delete cleanData.target_user_id;       // Usar columna de tabla (entries)
     delete cleanData.patient_user_id;      // Usar columna de tabla (goals/invoices)
     delete cleanData.psychologist_user_id; // Usar columna de tabla (invoices)
+    // No eliminar amount, tax, total, status porque pueden estar solo en JSONB si no hay columnas
     
     // Combinar: primero data limpia, luego columnas de tabla
     const merged = { ...cleanData, ...base };
@@ -647,6 +648,38 @@ function normalizeSupabaseRow(row) {
     if (base.patient_user_id !== undefined) {
       merged.patient_user_id = base.patient_user_id;
       merged.patientId = base.patient_user_id; // Compatibilidad frontend
+    }
+    
+    // Para invoices: mapear amount, tax, total, status, taxRate
+    // Priorizar columnas directas, luego valores del JSONB
+    if (base.amount !== undefined && base.amount !== null) {
+      merged.amount = parseFloat(base.amount);
+    } else if (cleanData.amount !== undefined && cleanData.amount !== null) {
+      merged.amount = parseFloat(cleanData.amount);
+    }
+    
+    if (base.tax !== undefined && base.tax !== null) {
+      merged.tax = parseFloat(base.tax);
+    } else if (cleanData.tax !== undefined && cleanData.tax !== null) {
+      merged.tax = parseFloat(cleanData.tax);
+    }
+    
+    if (base.total !== undefined && base.total !== null) {
+      merged.total = parseFloat(base.total);
+    } else if (cleanData.total !== undefined && cleanData.total !== null) {
+      merged.total = parseFloat(cleanData.total);
+    }
+    
+    if (base.status !== undefined && base.status !== null) {
+      merged.status = base.status;
+    } else if (cleanData.status !== undefined && cleanData.status !== null) {
+      merged.status = cleanData.status;
+    }
+    
+    if (base.taxRate !== undefined && base.taxRate !== null) {
+      merged.taxRate = parseFloat(base.taxRate);
+    } else if (cleanData.taxRate !== undefined && cleanData.taxRate !== null) {
+      merged.taxRate = parseFloat(cleanData.taxRate);
     }
     
     return merged;
@@ -748,18 +781,55 @@ async function trySupabaseUpsert(table, payloads) {
   let lastError = null;
   for (const payload of payloads) {
     console.log(`[trySupabaseUpsert] 🔄 Intentando upsert en ${table}:`, JSON.stringify(payload, null, 2).substring(0, 1000));
-    const { error } = await supabaseAdmin.from(table).upsert(payload, { onConflict: 'id' });
-    if (!error) {
-      console.log(`[trySupabaseUpsert] ✅ Upsert exitoso en ${table}`);
-      return;
+    
+    // Para invoices, si falla con columnas que no existen, intentar solo con las columnas básicas
+    if (table === 'invoices') {
+      const { error } = await supabaseAdmin.from(table).upsert(payload, { onConflict: 'id' });
+      if (!error) {
+        console.log(`[trySupabaseUpsert] ✅ Upsert exitoso en ${table}`);
+        return;
+      }
+      
+      // Si el error es sobre columnas que no existen, intentar solo con id, data, psychologist_user_id, patient_user_id, created_at
+      if (error.message && (error.message.includes('column') || error.code === '42703')) {
+        console.warn(`[trySupabaseUpsert] ⚠️ Columnas directas no existen, usando solo JSONB:`, error.message);
+        const fallbackPayload = {
+          id: payload.id,
+          psychologist_user_id: payload.psychologist_user_id,
+          patient_user_id: payload.patient_user_id,
+          created_at: payload.created_at,
+          data: payload.data
+        };
+        const { error: fallbackError } = await supabaseAdmin.from(table).upsert(fallbackPayload, { onConflict: 'id' });
+        if (!fallbackError) {
+          console.log(`[trySupabaseUpsert] ✅ Upsert exitoso en ${table} (fallback a JSONB)`);
+          return;
+        }
+        console.error(`[trySupabaseUpsert] ❌ Error en fallback:`, fallbackError);
+        lastError = fallbackError;
+      } else {
+        console.error(`[trySupabaseUpsert] ❌ Error en upsert de ${table}:`, {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code
+        });
+        lastError = error;
+      }
+    } else {
+      const { error } = await supabaseAdmin.from(table).upsert(payload, { onConflict: 'id' });
+      if (!error) {
+        console.log(`[trySupabaseUpsert] ✅ Upsert exitoso en ${table}`);
+        return;
+      }
+      console.error(`[trySupabaseUpsert] ❌ Error en upsert de ${table}:`, {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      });
+      lastError = error;
     }
-    console.error(`[trySupabaseUpsert] ❌ Error en upsert de ${table}:`, {
-      message: error.message,
-      details: error.details,
-      hint: error.hint,
-      code: error.code
-    });
-    lastError = error;
   }
   if (lastError) throw lastError;
 }
@@ -3700,6 +3770,8 @@ app.get('/api/invoices', async (req, res) => {
     const startDate = req.query.startDate;
     const endDate = req.query.endDate;
     
+    console.log('📋 [GET /api/invoices] Parámetros:', { psychologistId, patientId, startDate, endDate });
+    
     if (!psychologistId && !patientId) {
       return res.status(400).json({ error: 'Missing psychologistId or patientId' });
     }
@@ -3710,7 +3782,21 @@ app.get('/api/invoices', async (req, res) => {
     if (supabaseAdmin) {
       try {
         const invoicesRows = await readTable('invoices');
+        console.log(`📋 [GET /api/invoices] Filas leídas de Supabase: ${invoicesRows.length}`);
+        if (invoicesRows.length > 0) {
+          console.log('📋 [GET /api/invoices] Primera fila raw:', JSON.stringify(invoicesRows[0], null, 2).substring(0, 500));
+        }
         invoices = invoicesRows.map(normalizeSupabaseRow);
+        console.log(`📊 [GET /api/invoices] Encontradas ${invoices.length} facturas en Supabase después de normalizar`);
+        if (invoices.length > 0) {
+          console.log('📊 [GET /api/invoices] Primera factura normalizada:', {
+            id: invoices[0].id,
+            psychologist_user_id: invoices[0].psychologist_user_id,
+            psychologistId: invoices[0].psychologistId,
+            patient_user_id: invoices[0].patient_user_id,
+            invoiceNumber: invoices[0].invoiceNumber
+          });
+        }
       } catch (err) {
         console.error('Error reading invoices from Supabase:', err);
         // Fallback a DB local si falla Supabase
@@ -3725,11 +3811,23 @@ app.get('/api/invoices', async (req, res) => {
       invoices = db.invoices;
     }
     
+    console.log(`📋 [GET /api/invoices] Facturas antes de filtrar: ${invoices.length}`);
+    
     // Filtrar por psychologist_user_id (nuevo esquema) o psychologistId (compatibilidad)
     if (psychologistId) {
-      invoices = invoices.filter(inv => 
-        inv.psychologist_user_id === psychologistId || inv.psychologistId === psychologistId
-      );
+      invoices = invoices.filter(inv => {
+        const match = inv.psychologist_user_id === psychologistId || inv.psychologistId === psychologistId;
+        if (!match && invoices.length < 5) {
+          console.log('📋 [GET /api/invoices] Factura no coincide:', {
+            id: inv.id,
+            psychologist_user_id: inv.psychologist_user_id,
+            psychologistId: inv.psychologistId,
+            buscando: psychologistId
+          });
+        }
+        return match;
+      });
+      console.log(`📋 [GET /api/invoices] Facturas después de filtrar por psychologist: ${invoices.length}`);
     }
     
     // Filtrar por patient_user_id (nuevo esquema) o patientId (compatibilidad)
@@ -3737,6 +3835,7 @@ app.get('/api/invoices', async (req, res) => {
       invoices = invoices.filter(inv => 
         inv.patient_user_id === patientId || inv.patientId === patientId
       );
+      console.log(`📋 [GET /api/invoices] Facturas después de filtrar por patient: ${invoices.length}`);
     }
     
     // Filter by date range
@@ -3750,6 +3849,7 @@ app.get('/api/invoices', async (req, res) => {
       });
     }
     
+    console.log(`✅ [GET /api/invoices] Devolviendo ${invoices.length} facturas`);
     res.json(invoices);
   } catch (error) {
     console.error('Error in GET /api/invoices:', error);
@@ -3783,7 +3883,20 @@ app.post('/api/invoices', async (req, res) => {
         const supabasePayload = buildSupabaseInvoiceRow(invoice);
         console.log('📦 [POST /api/invoices] Payload para Supabase:', JSON.stringify(supabasePayload, null, 2));
         await trySupabaseUpsert('invoices', [supabasePayload]);
-        console.log('✅ Factura guardada en Supabase:', invoice.id);
+        console.log('✅ Factura guardada en Supabase con ID:', invoice.id);
+        
+        // Verificar que se guardó correctamente leyendo desde Supabase
+        const { data: verifyData, error: verifyError } = await supabaseAdmin
+          .from('invoices')
+          .select('id, data')
+          .eq('id', invoice.id)
+          .single();
+        
+        if (verifyError) {
+          console.error('⚠️ No se pudo verificar la factura guardada:', verifyError);
+        } else {
+          console.log('✅ Verificación exitosa - Factura existe en Supabase:', verifyData?.id);
+        }
         
         // Devolver el invoice con los campos normalizados de Supabase
         return res.json({
@@ -3795,7 +3908,8 @@ app.post('/api/invoices', async (req, res) => {
         });
       } catch (err) {
         console.error('❌ Error guardando factura en Supabase:', err);
-        return res.status(500).json({ error: 'Error guardando factura en Supabase' });
+        console.error('❌ Stack trace:', err.stack);
+        return res.status(500).json({ error: 'Error guardando factura en Supabase', details: err.message });
       }
     }
     
@@ -3954,11 +4068,61 @@ app.post('/api/invoices/:id/cancel', async (req, res) => {
 app.get('/api/invoices/:id/pdf', async (req, res) => {
   const { id } = req.params;
   
-  const db = getDb();
-  if (!db.invoices) db.invoices = [];
+  console.log('🔍 [PDF] Solicitud de PDF para factura ID:', id);
   
-  const invoice = db.invoices.find(inv => inv.id === id);
-  if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+  let invoice = null;
+
+  // SIEMPRE obtener desde Supabase
+  if (!supabaseAdmin) {
+    console.error('❌ [PDF] Supabase no está configurado');
+    return res.status(500).json({ error: 'Supabase no está configurado' });
+  }
+
+  try {
+    console.log('🔍 [PDF] Consultando Supabase para factura ID:', id);
+    const { data: invoiceRows, error } = await supabaseAdmin
+      .from('invoices')
+      .select('*')
+      .eq('id', id)
+      .limit(1);
+    
+    console.log('📋 [PDF] Resultado de consulta - rows:', invoiceRows?.length || 0);
+    
+    if (error) {
+      console.error('❌ [PDF] Error consultando Supabase:', error);
+      return res.status(500).json({ error: 'Error consultando base de datos', details: error.message });
+    }
+    
+    if (!invoiceRows || invoiceRows.length === 0) {
+      console.error('❌ [PDF] Factura no encontrada en Supabase para ID:', id);
+      // Intentar listar algunas facturas para debug
+      const { data: allInvoices } = await supabaseAdmin
+        .from('invoices')
+        .select('id, data->invoiceNumber')
+        .limit(10);
+      console.log('📋 [PDF] Facturas disponibles:', allInvoices?.map(i => ({ id: i.id, invoiceNumber: i.data?.invoiceNumber })));
+      return res.status(404).json({ error: 'Invoice not found' });
+    }
+    
+    invoice = normalizeSupabaseRow(invoiceRows[0]);
+    console.log('✅ [PDF] Factura obtenida desde Supabase:', id);
+    console.log('📊 [PDF] Datos de factura:', { 
+      amount: invoice.amount, 
+      tax: invoice.tax, 
+      total: invoice.total, 
+      taxRate: invoice.taxRate,
+      status: invoice.status,
+      invoiceNumber: invoice.invoiceNumber
+    });
+  } catch (err) {
+    console.error('❌ [PDF] Error obteniendo factura desde Supabase:', err);
+    return res.status(500).json({ error: 'Error interno del servidor', details: err.message });
+  }
+  
+  if (!invoice) {
+    console.error('❌ [PDF] Factura no encontrada:', id);
+    return res.status(404).json({ error: 'Invoice not found' });
+  }
 
   // Obtener perfil del psicólogo para datos de la empresa
   const psychologistUserId = invoice.psychologist_user_id || invoice.psychologistId;
@@ -4064,9 +4228,43 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
     }
   }
 
-  // Calcular subtotal e IVA (21% en España)
-  const subtotal = invoice.amount / 1.21;
-  const iva = invoice.amount - subtotal;
+  // Usar los campos directos del nuevo schema, con fallback al cálculo antiguo
+  console.log('📊 [PDF] Invoice raw data:', { 
+    amount: invoice.amount, 
+    tax: invoice.tax, 
+    total: invoice.total, 
+    taxRate: invoice.taxRate,
+    items: invoice.items 
+  });
+  
+  // amount debe ser el subtotal (sin IVA)
+  const subtotal = parseFloat(invoice.amount) || 0;
+  
+  // tax debe ser el IVA ya calculado
+  let iva = 0;
+  if (invoice.tax !== undefined && invoice.tax !== null) {
+    iva = parseFloat(invoice.tax);
+  } else {
+    // Fallback: calcular IVA con taxRate o 21% por defecto
+    const taxRate = parseFloat(invoice.taxRate) || 21;
+    iva = subtotal * (taxRate / 100);
+  }
+  
+  // total debe ser subtotal + IVA
+  let totalAmount = 0;
+  if (invoice.total !== undefined && invoice.total !== null) {
+    totalAmount = parseFloat(invoice.total);
+  } else {
+    // Fallback: calcular total
+    totalAmount = subtotal + iva;
+  }
+  
+  console.log('📊 [PDF] Calculated values:', { 
+    subtotal: subtotal.toFixed(2), 
+    iva: iva.toFixed(2), 
+    totalAmount: totalAmount.toFixed(2),
+    taxRate: invoice.taxRate || 21
+  });
   
   // Generate professional PDF HTML
   const html = `
@@ -4392,7 +4590,7 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
         </tr>
       </thead>
       <tbody>
-        ${(invoice.items || [{description: 'Servicio de psicología', quantity: 1, unitPrice: invoice.amount / 1.21}]).map(item => `
+        ${(invoice.items || [{description: 'Servicio de psicología', quantity: 1, unitPrice: subtotal}]).map(item => `
           <tr ${invoice.status === 'cancelled' ? 'class="line-through"' : ''}>
             <td>${item.description}</td>
             <td style="text-align: center;">${item.quantity}</td>
@@ -4411,12 +4609,12 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
           <span class="total-value">${subtotal.toFixed(2)} €</span>
         </div>
         <div class="total-row">
-          <span class="total-label">IVA (21%):</span>
+          <span class="total-label">IVA (${invoice.taxRate || 21}%):</span>
           <span class="total-value">${iva.toFixed(2)} €</span>
         </div>
         <div class="total-row">
           <span class="total-label">TOTAL:</span>
-          <span class="total-value">${invoice.amount.toFixed(2)} €</span>
+          <span class="total-value">${totalAmount.toFixed(2)} €</span>
         </div>
       </div>
     </div>
