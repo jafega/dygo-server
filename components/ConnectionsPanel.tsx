@@ -266,10 +266,19 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
       if (psych.id === currentUser?.id) return false;
       const alreadyLinked = myPsychologists.some(p => p.id === psych.id);
       if (alreadyLinked) return false;
+      
+      // Filtrar psicólogos con los que ya tengo una invitación pendiente
+      // (donde yo soy paciente y ellos son psicólogos)
+      const hasPendingInvitation = invitations.some(inv => {
+        const invPsychEmail = inv.psych_user_email || inv.psychologistEmail || '';
+        return invPsychEmail.toLowerCase().trim() === psych.email.toLowerCase().trim();
+      });
+      if (hasPendingInvitation) return false;
+      
       if (!query) return true;
       return psych.name.toLowerCase().includes(query) || psych.email.toLowerCase().includes(query);
     });
-  }, [allPsychologists, directorySearch, myPsychologists, currentUser?.id]);
+  }, [allPsychologists, directorySearch, myPsychologists, currentUser?.id, invitations]);
 
   if (!currentUser) {
     return (
