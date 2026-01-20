@@ -6,6 +6,7 @@ interface Invoice {
   id: string;
   invoiceNumber: string;
   patientId: string;
+  patient_user_id?: string;
   patientName: string;
   amount: number;
   date: string;
@@ -15,6 +16,17 @@ interface Invoice {
   description: string;
   items: InvoiceItem[];
   cancelledAt?: string;
+  psychologist_user_id?: string;
+  psychologistId?: string; // Compatibilidad legacy
+  psychologist_user?: {
+    id: string;
+    name?: string;
+    email?: string;
+    is_psychologist?: boolean;
+    isPsychologist?: boolean;
+    role?: string;
+    avatarUrl?: string;
+  };
 }
 
 interface InvoiceItem {
@@ -57,8 +69,8 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
     setIsLoading(true);
     try {
       const url = patientId 
-        ? `${API_URL}/invoices?psychologistId=${psychologistId}&patientId=${patientId}`
-        : `${API_URL}/invoices?psychologistId=${psychologistId}`;
+        ? `${API_URL}/invoices?psychologist_user_id=${psychologistId}&patient_user_id=${patientId}`
+        : `${API_URL}/invoices?psychologist_user_id=${psychologistId}`;
       console.log('[BillingPanel] Loading invoices from:', url);
       console.log('[BillingPanel] psychologistId:', psychologistId);
       console.log('[BillingPanel] patientId:', patientId);
@@ -96,7 +108,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
   const generateInvoiceNumber = async () => {
     try {
       // Fetch ALL invoices for this psychologist (not filtered by patient) to get correct numbering
-      const response = await fetch(`${API_URL}/invoices?psychologistId=${psychologistId}`);
+      const response = await fetch(`${API_URL}/invoices?psychologist_user_id=${psychologistId}`);
       if (!response.ok) {
         throw new Error('Failed to fetch invoices for numbering');
       }
@@ -138,6 +150,12 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       return;
     }
 
+    const activePsychologistId = psychologistId || localStorage.getItem('ai_diary_current_user_id') || '';
+    if (!activePsychologistId) {
+      alert('No se pudo determinar el usuario activo (psychologist_user_id)');
+      return;
+    }
+
     // Validar que la fecha de factura sea anterior a la fecha de vencimiento
     const invoiceDate = new Date(formData.date);
     const dueDate = new Date(formData.dueDate);
@@ -157,20 +175,26 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       id: Date.now().toString(),
       invoiceNumber,
       patientId: formData.patientId,
+      patient_user_id: formData.patientId, // Campo canónico para schema
       patientName: patient.name,
       amount: calculateTotal(),
       date: formData.date,
       dueDate: formData.dueDate,
       status: 'pending',
       description: formData.description,
-      items: formData.items
+      items: formData.items,
+      psychologist_user_id: activePsychologistId,
+      psychologistId: activePsychologistId
     };
 
     try {
       const response = await fetch(`${API_URL}/invoices`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...newInvoice, psychologistId })
+        headers: { 'Content-Type': 'application/json', 'X-User-Id': activePsychologistId },
+        body: JSON.stringify({ 
+          ...newInvoice, 
+          psychologist_user_id: activePsychologistId // Campo canónico para schema
+        })
       });
 
       if (response.ok) {

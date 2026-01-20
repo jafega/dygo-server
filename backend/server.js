@@ -592,6 +592,10 @@ function normalizeSupabaseRow(row) {
     delete cleanData.role;                 // DEPRECATED - no usar
     delete cleanData.user_email;           // Usar columna de tabla
     delete cleanData.psychologist_profile_id; // Usar columna de tabla
+    delete cleanData.creator_user_id;      // Usar columna de tabla (entries)
+    delete cleanData.target_user_id;       // Usar columna de tabla (entries)
+    delete cleanData.patient_user_id;      // Usar columna de tabla (goals/invoices)
+    delete cleanData.psychologist_user_id; // Usar columna de tabla (invoices)
     
     // Combinar: primero data limpia, luego columnas de tabla
     const merged = { ...cleanData, ...base };
@@ -611,6 +615,37 @@ function normalizeSupabaseRow(row) {
     // Asegurar que psychologist_profile_id venga de la columna
     if (base.psychologist_profile_id !== undefined) {
       merged.psychologist_profile_id = base.psychologist_profile_id;
+    }
+    
+    // Para entries: mapear creator_user_id y target_user_id
+    if (base.creator_user_id !== undefined) {
+      merged.creator_user_id = base.creator_user_id;
+      // Mantener compatibilidad: si createdBy es PSYCHOLOGIST, creator_user_id es el psicólogo
+      if (merged.createdBy === 'PSYCHOLOGIST') {
+        merged.createdByPsychologistId = base.creator_user_id;
+      }
+    }
+    
+    if (base.target_user_id !== undefined) {
+      merged.target_user_id = base.target_user_id;
+      // Mantener compatibilidad: target_user_id es siempre el paciente
+      merged.userId = base.target_user_id;
+    }
+    
+    // Para goals: mapear patient_user_id
+    if (base.patient_user_id !== undefined) {
+      merged.patient_user_id = base.patient_user_id;
+      merged.userId = base.patient_user_id; // Compatibilidad
+    }
+
+    // Para invoices: mapear psychologist_user_id/patient_user_id
+    if (base.psychologist_user_id !== undefined) {
+      merged.psychologist_user_id = base.psychologist_user_id;
+      merged.psychologistId = base.psychologist_user_id; // Compatibilidad frontend
+    }
+    if (base.patient_user_id !== undefined) {
+      merged.patient_user_id = base.patient_user_id;
+      merged.patientId = base.patient_user_id; // Compatibilidad frontend
     }
     
     return merged;
@@ -639,11 +674,45 @@ function buildSupabaseRowFromEntity(originalRow, entity) {
 
 // Función específica para entries que maneja creator_user_id y target_user_id correctamente
 function buildSupabaseEntryRow(entry) {
-  const { id, creator_user_id, target_user_id, ...restData } = entry;
+  const { id, creator_user_id, target_user_id, userId, createdByPsychologistId, ...restData } = entry;
+  
+  // Determinar creator_user_id y target_user_id
+  // Si la entrada es del psicólogo (createdBy === 'PSYCHOLOGIST'):
+  //   creator_user_id = createdByPsychologistId (quien la creó)
+  //   target_user_id = userId (paciente al que va dirigida)
+  // Si es del paciente:
+  //   creator_user_id = userId (paciente que la creó)
+  //   target_user_id = userId (misma persona)
+  
+  let finalCreatorId = creator_user_id;
+  let finalTargetId = target_user_id;
+  
+  if (!finalCreatorId || !finalTargetId) {
+    // Compatibilidad hacia atrás
+    if (entry.createdBy === 'PSYCHOLOGIST') {
+      finalCreatorId = finalCreatorId || createdByPsychologistId;
+      finalTargetId = finalTargetId || userId;
+    } else {
+      // Entrada del usuario paciente
+      finalCreatorId = finalCreatorId || userId;
+      finalTargetId = finalTargetId || userId;
+    }
+  }
+  
+  if (!finalCreatorId || !finalTargetId) {
+    console.error('[buildSupabaseEntryRow] ⚠️ Missing creator_user_id or target_user_id:', { 
+      creator_user_id: finalCreatorId, 
+      target_user_id: finalTargetId,
+      userId,
+      createdBy: entry.createdBy,
+      createdByPsychologistId
+    });
+  }
+  
   return {
     id,
-    creator_user_id,
-    target_user_id,
+    creator_user_id: finalCreatorId,
+    target_user_id: finalTargetId,
     data: restData
   };
 }
@@ -1008,7 +1077,8 @@ async function saveSupabaseDb(data, prevCache = null) {
   const invoicesRows = (data.invoices || []).map(inv => ({
     id: inv.id,
     data: inv,
-    psychologist_user_id: inv.psychologist_user_id || null,
+    // Fallbacks: nuevo schema -> legacy -> creador (por si se guardó así)
+    psychologist_user_id: inv.psychologist_user_id || inv.psychologistId || inv.creator_user_id || null,
     patient_user_id: inv.patient_user_id || inv.patientId || null
   }));
   
@@ -1037,7 +1107,13 @@ async function saveSupabaseDb(data, prevCache = null) {
   await upsertTable('settings', settingsRows);
   await upsertTable('sessions', sessionsRows);
   await upsertTable('care_relationships', relationshipsRows);
-  await upsertTable('invoices', invoicesRows);
+  // Filtrar facturas sin psychologist_user_id para evitar constraint NOT NULL
+  const invoicesValid = invoicesRows.filter(r => !!r.psychologist_user_id);
+  if (invoicesValid.length === 0) {
+    console.log('⏭️ [saveSupabaseDb] No hay invoices válidas para guardar');
+  } else {
+    await upsertTable('invoices', invoicesValid);
+  }
   
   // Solo hacer upsert de profiles si hay alguno válido
   if (profilesRows.length > 0) {
@@ -1738,11 +1814,18 @@ const handleAdminDeleteUser = (req, res) => {
     // Prevent removing the superadmin account itself
     if (String(user.email).toLowerCase() === 'garryjavi@gmail.com') return res.status(403).json({ error: 'Cannot delete superadmin' });
 
-    // 1) Remove user's entries
-    db.entries = db.entries.filter((e) => String(e.userId) !== String(user.id));
+    // 1) Remove user's entries (filter by userId, target_user_id, creator_user_id)
+    db.entries = db.entries.filter((e) => {
+      return String(e.userId) !== String(user.id) && 
+             String(e.target_user_id) !== String(user.id) && 
+             String(e.creator_user_id) !== String(user.id);
+    });
 
-    // 2) Remove user's goals
-    db.goals = db.goals.filter((g) => String(g.userId) !== String(user.id));
+    // 2) Remove user's goals (filter by userId and patient_user_id)
+    db.goals = db.goals.filter((g) => {
+      return String(g.userId) !== String(user.id) && 
+             String(g.patient_user_id) !== String(user.id);
+    });
 
     // 3) Remove invitations sent by or for this user
     db.invitations = db.invitations.filter((i) => {
@@ -2100,8 +2183,8 @@ app.get('/api/users', async (req, res) => {
       if (!user) {
         console.log(`⚠️ Usuario con ID ${id} no encontrado, verificando si fue eliminado...`);
         // Si el usuario no existe, buscar si hay datos asociados (entradas, goals, etc)
-        const userEntries = db.entries?.filter(e => e.userId === id) || [];
-        const userGoals = db.goals?.filter(g => g.userId === id) || [];
+        const userEntries = db.entries?.filter(e => e.userId === id || e.target_user_id === id || e.creator_user_id === id) || [];
+        const userGoals = db.goals?.filter(g => g.userId === id || g.patient_user_id === id) || [];
         
         // Si hay datos del usuario antiguo, crear un nuevo usuario y migrar los datos
         if (userEntries.length > 0 || userGoals.length > 0) {
@@ -2124,12 +2207,15 @@ app.get('/api/users', async (req, res) => {
           
           // Migrar entradas
           userEntries.forEach(entry => {
-            entry.userId = newUser.id;
+            if (entry.userId === id) entry.userId = newUser.id;
+            if (entry.target_user_id === id) entry.target_user_id = newUser.id;
+            if (entry.creator_user_id === id) entry.creator_user_id = newUser.id;
           });
           
           // Migrar objetivos
           userGoals.forEach(goal => {
-            goal.userId = newUser.id;
+            if (goal.userId === id) goal.userId = newUser.id;
+            if (goal.patient_user_id === id) goal.patient_user_id = newUser.id;
           });
           
           // Migrar settings si existen
@@ -2561,7 +2647,14 @@ app.get('/api/entries', async (req, res) => {
         } catch (e) {
           // ignore lookup errors
         }
+        
+        // Filtrar por target_user_id (nuevo esquema) o userId (compatibilidad)
         let filtered = entries.filter((e) => {
+          // Priorizar target_user_id si existe
+          if (e.target_user_id) {
+            return ids.has(String(e.target_user_id).trim());
+          }
+          // Fallback a userId para compatibilidad
           const uid = String(e.userId || '').trim();
           const uemail = String(e.userEmail || e.email || '').trim().toLowerCase();
           return ids.has(uid) || (uemail && ids.has(uemail));
@@ -2581,18 +2674,22 @@ app.get('/api/entries', async (req, res) => {
           if (relationship?.endedAt) {
             console.log('[GET /api/entries] Relación finalizada - mostrando solo entradas del psicólogo:', viewerId);
             filtered = filtered.filter(e => {
-              // Solo incluir entradas donde el createdByPsychologistId es el viewerId
-              return e.createdByPsychologistId === String(viewerId);
+              // Usar creator_user_id si existe, sino createdByPsychologistId
+              const creatorId = e.creator_user_id || e.createdByPsychologistId;
+              return creatorId === String(viewerId);
             });
           } else {
             // Relación activa: mostrar entradas del paciente + entradas del psicólogo
             console.log('[GET /api/entries] Relación activa - mostrando entradas del paciente y del psicólogo:', viewerId);
             filtered = filtered.filter(e => {
+              // Usar creator_user_id si existe, sino createdByPsychologistId
+              const creatorId = e.creator_user_id || e.createdByPsychologistId;
+              
               // Incluir:
               // 1. Entradas creadas por el psicólogo (viewer)
-              if (e.createdByPsychologistId === String(viewerId)) return true;
+              if (creatorId === String(viewerId)) return true;
               // 2. Entradas del paciente que no tienen createdByPsychologistId (son propias del paciente)
-              if (!e.createdByPsychologistId && e.createdBy !== 'PSYCHOLOGIST') return true;
+              if (!creatorId && e.createdBy !== 'PSYCHOLOGIST') return true;
               // 3. Excluir entradas creadas por OTROS psicólogos
               return false;
             });
@@ -2624,7 +2721,10 @@ app.get('/api/entries', async (req, res) => {
     const db = getDb();
 
     let entries = userId
-      ? db.entries.filter((e) => String(e.userId) === String(userId))
+      ? db.entries.filter((e) => {
+          // Filtrar por target_user_id (nuevo esquema) o userId (compatibilidad)
+          return String(e.target_user_id) === String(userId) || String(e.userId) === String(userId);
+        })
       : db.entries;
     
     // Aplicar filtros de fecha para db.json
@@ -2677,29 +2777,32 @@ app.post('/api/entries', (req, res) => {
 
   // Si la entrada la crea un psicólogo para un paciente, validar que la relación esté activa
   try {
-    const authorPsychId = entry?.createdByPsychologistId;
-    const targetUserId = entry?.userId;
-    if (authorPsychId && targetUserId && String(authorPsychId) !== String(targetUserId)) {
+    // Determinar quién crea y a quién va dirigida la entrada
+    const creatorId = entry?.creator_user_id || (entry.createdBy === 'PSYCHOLOGIST' ? entry.createdByPsychologistId : entry.userId);
+    const targetId = entry?.target_user_id || entry.userId;
+    
+    // Si el creador y el objetivo son diferentes (psicólogo creando para paciente)
+    if (creatorId && targetId && String(creatorId) !== String(targetId)) {
       const findRelationship = () => {
         if (supabaseDbCache?.careRelationships) {
           return supabaseDbCache.careRelationships.find(rel => 
-            rel.psychologist_user_id === String(authorPsychId) && rel.patient_user_id === String(targetUserId)
+            rel.psychologist_user_id === String(creatorId) && rel.patient_user_id === String(targetId)
           );
         }
         const db = getDb();
         if (!Array.isArray(db.careRelationships)) return null;
         return db.careRelationships.find(rel => 
-          rel.psychologist_user_id === String(authorPsychId) && rel.patient_user_id === String(targetUserId)
+          rel.psychologist_user_id === String(creatorId) && rel.patient_user_id === String(targetId)
         );
       };
 
       const relationship = findRelationship();
       if (!relationship) {
-        console.warn('[POST /api/entries] ❌ Relación no encontrada para crear entrada clínica', { authorPsychId, targetUserId });
+        console.warn('[POST /api/entries] ❌ Relación no encontrada para crear entrada clínica', { creatorId, targetId });
         return res.status(403).json({ error: 'No existe una relación activa con este paciente' });
       }
       if (relationship.endedAt) {
-        console.warn('[POST /api/entries] ❌ Relación finalizada, bloqueo de creación de entrada', { authorPsychId, targetUserId, endedAt: relationship.endedAt });
+        console.warn('[POST /api/entries] ❌ Relación finalizada, bloqueo de creación de entrada', { creatorId, targetId, endedAt: relationship.endedAt });
         return res.status(403).json({ error: 'La relación está finalizada. No se pueden crear nuevas entradas.' });
       }
     }
@@ -2711,6 +2814,14 @@ app.post('/api/entries', (req, res) => {
   // Si no viene id, generamos uno
   if (!entry.id) {
     entry.id = crypto.randomUUID();
+  }
+  
+  // Asegurar que creator_user_id y target_user_id estén definidos
+  if (!entry.creator_user_id) {
+    entry.creator_user_id = entry.createdBy === 'PSYCHOLOGIST' ? entry.createdByPsychologistId : entry.userId;
+  }
+  if (!entry.target_user_id) {
+    entry.target_user_id = entry.userId;
   }
 
   if (supabaseAdmin) {
@@ -3494,8 +3605,8 @@ app.get('/api/dbinfo', async (_req, res) => {
 
 // --- INVOICES ---
 app.get('/api/invoices', (req, res) => {
-  const psychologistId = req.query.psychologistId;
-  const patientId = req.query.patientId;
+  const psychologistId = req.query.psychologist_user_id || req.query.psych_user_id || req.query.psychologistId;
+  const patientId = req.query.patient_user_id || req.query.patientId;
   const startDate = req.query.startDate;
   const endDate = req.query.endDate;
   
@@ -3507,11 +3618,19 @@ app.get('/api/invoices', (req, res) => {
   if (!db.invoices) db.invoices = [];
   
   let invoices = db.invoices;
+  
+  // Filtrar por psychologist_user_id (nuevo esquema) o psychologistId (compatibilidad)
   if (psychologistId) {
-    invoices = invoices.filter(inv => inv.psychologistId === psychologistId);
+    invoices = invoices.filter(inv => 
+      inv.psychologist_user_id === psychologistId || inv.psychologistId === psychologistId
+    );
   }
+  
+  // Filtrar por patient_user_id (nuevo esquema) o patientId (compatibilidad)
   if (patientId) {
-    invoices = invoices.filter(inv => inv.patientId === patientId);
+    invoices = invoices.filter(inv => 
+      inv.patient_user_id === patientId || inv.patientId === patientId
+    );
   }
   
   // Filter by date range
@@ -3533,6 +3652,34 @@ app.post('/api/invoices', (req, res) => {
   if (!db.invoices) db.invoices = [];
   
   const invoice = { ...req.body, id: req.body.id || Date.now().toString() };
+
+  const headerUserId = req.headers['x-user-id'] || req.headers['x-userid'];
+  const psychologistUserId = invoice.psychologist_user_id || invoice.psych_user_id || invoice.psychologistId || headerUserId;
+  if (!psychologistUserId) {
+    return res.status(400).json({ error: 'psychologist_user_id es obligatorio para crear la factura' });
+  }
+
+  // Canonical ID for schema; mantener campo legacy para compatibilidad
+  invoice.psychologist_user_id = psychologistUserId;
+  invoice.psychologistId = invoice.psychologistId || psychologistUserId;
+
+  // Asegurar patient_user_id
+  if (!invoice.patient_user_id && invoice.patientId) {
+    invoice.patient_user_id = invoice.patientId;
+  }
+
+  // Adjuntar información del usuario que genera la factura (sin contraseña)
+  const dbUser = (db.users || []).find(u => String(u.id) === String(psychologistUserId));
+  if (dbUser) {
+    const { password, ...safeUser } = dbUser;
+    const normalizedUser = {
+      ...safeUser,
+      is_psychologist: safeUser.is_psychologist ?? (safeUser.isPsychologist ?? (safeUser.role === 'PSYCHOLOGIST')),
+      isPsychologist: safeUser.is_psychologist ?? (safeUser.isPsychologist ?? (safeUser.role === 'PSYCHOLOGIST'))
+    };
+    invoice.psychologist_user = normalizedUser;
+  }
+  
   db.invoices.push(invoice);
   saveDb(db);
   res.json(invoice);

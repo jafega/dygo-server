@@ -91,9 +91,10 @@ export interface JournalEntry {
   id: string;
   // Columnas de tabla según el nuevo schema
   creator_user_id: string; // FK a users(id) - Usuario que creó la entrada
-  target_user_id: string; // FK a users(id) - Usuario objetivo de la entrada
+  target_user_id: string; // FK a users(id) - Usuario objetivo de la entrada (paciente)
   
   // Campos en data JSONB
+  userId?: string; // DEPRECATED: usar target_user_id en su lugar (mantener para compatibilidad)
   date: string; // ISO string YYYY-MM-DD
   timestamp: number;
   transcript: string;
@@ -119,6 +120,7 @@ export interface JournalEntry {
   createdBy?: 'USER' | 'PSYCHOLOGIST';
   
   // ID del psicólogo que creó esta entrada (para filtrar en relaciones finalizadas)
+  // DEPRECATED: usar creator_user_id en su lugar cuando createdBy === 'PSYCHOLOGIST'
   createdByPsychologistId?: string;
 }
 

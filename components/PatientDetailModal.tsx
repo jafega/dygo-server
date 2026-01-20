@@ -367,6 +367,8 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                 const feedbackText = (feedback.text || '').trim();
                 const newPsychEntry: JournalEntry = {
                     id: crypto.randomUUID(),
+                    creator_user_id: psychologistId,
+                    target_user_id: patient.id,
                     userId: patient.id,
                     date: entry.date,
                     timestamp: Date.now(),
@@ -528,6 +530,8 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                   };
                   const newEntry: JournalEntry = {
                       id: crypto.randomUUID(),
+                      creator_user_id: psychId,
+                      target_user_id: patient.id,
                       userId: patient.id,
                       date: newEntryDate,
                       timestamp: Date.now(),
@@ -582,6 +586,8 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
       const hasFeedback = hasFeedbackContent(feedback);
       const newEntry: JournalEntry = {
           id: crypto.randomUUID(),
+          creator_user_id: psychId,
+          target_user_id: patient.id,
           userId: patient.id,
           date: newEntryDate,
           timestamp: Date.now(),
