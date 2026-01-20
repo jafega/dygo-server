@@ -215,11 +215,11 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
   const revenueValues = Object.keys(monthlyRevenue).map(key => monthlyRevenue[key] + monthlyPending[key]);
   const maxRevenue = Math.max(...revenueValues, 1); // Use highest value as max for auto-scaling
   
-  // Revenue in selected date range
-  const revenueInRange = paidInvoices
+  // Revenue in selected date range - incluye pagadas + pendientes
+  const revenueInRange = invoices
     .filter(inv => {
       const invDate = new Date(inv.date || inv.created_at);
-      return invDate >= rangeStart && invDate <= rangeEnd;
+      return invDate >= rangeStart && invDate <= rangeEnd && (inv.status === 'paid' || inv.status === 'pending');
     })
     .reduce((sum, inv) => sum + (inv.total || inv.amount || 0), 0);
 

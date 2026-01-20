@@ -1167,15 +1167,11 @@ async function saveSupabaseDb(data, prevCache = null) {
     patient_user_id: s.patient_user_id || s.patientId || null
   }));
   
-  // Invoices: extraer campos psychologist_user_id y patient_user_id
-  const invoicesRows = (data.invoices || []).map(inv => ({
-    id: inv.id,
-    data: inv,
-    // Fallbacks: nuevo schema -> legacy -> creador (por si se guardó así)
-    psychologist_user_id: inv.psychologist_user_id || inv.psychologistId || inv.creator_user_id || null,
-    patient_user_id: inv.patient_user_id || inv.patientId || null
-  }));
-  
+  // Invoices: usar buildSupabaseInvoiceRow para incluir amount, tax, total, status
+  const invoicesRows = (data.invoices || [])
+    .filter(inv => inv.psychologist_user_id || inv.psychologistId) // Filtrar facturas sin psicólogo
+    .map(inv => buildSupabaseInvoiceRow(inv));
+
   // Care relationships: extraer campos según el nuevo schema (psychologist_user_id, patient_user_id)
   const relationshipsRows = (data.careRelationships || []).map(rel => ({
     id: rel.id,
@@ -1201,12 +1197,11 @@ async function saveSupabaseDb(data, prevCache = null) {
   await upsertTable('settings', settingsRows);
   await upsertTable('sessions', sessionsRows);
   await upsertTable('care_relationships', relationshipsRows);
-  // Filtrar facturas sin psychologist_user_id para evitar constraint NOT NULL
-  const invoicesValid = invoicesRows.filter(r => !!r.psychologist_user_id);
-  if (invoicesValid.length === 0) {
+  
+  if (invoicesRows.length === 0) {
     console.log('⏭️ [saveSupabaseDb] No hay invoices válidas para guardar');
   } else {
-    await upsertTable('invoices', invoicesValid);
+    await upsertTable('invoices', invoicesRows);
   }
   
   // Solo hacer upsert de profiles si hay alguno válido

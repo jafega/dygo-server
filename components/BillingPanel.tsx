@@ -542,7 +542,6 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                           >
                             <option value="pending">⏱️ Pendiente</option>
                             <option value="paid">✅ Pagada</option>
-                            <option value="overdue">⚠️ Vencida</option>
                             <option value="cancelled">❌ Cancelada</option>
                           </select>
                           <div className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
