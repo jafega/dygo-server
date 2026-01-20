@@ -103,7 +103,7 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
     if (allPsychologists.length > 0) return;
     setDirectoryLoading(true);
     try {
-      const list = await getAllPsychologists();
+      const list = await getAllPsychologists(currentUser?.id);
       setAllPsychologists(list);
     } catch (err: any) {
       console.error('Error loading psychologists directory', err);

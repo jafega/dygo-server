@@ -2212,21 +2212,27 @@ app.put('/api/users', async (req, res) => {
     const id = req.query.id || req.query.userId;
     if (!id) return res.status(400).json({ error: 'Missing user id' });
 
-    const db = getDb();
-    const idx = db.users.findIndex((u) => u.id === id);
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: 'Supabase no está configurado' });
+    }
 
-    if (idx === -1) return res.status(404).json({ error: 'Usuario no encontrado' });
+    const existingUser = await readSupabaseRowById('users', String(id));
+    if (!existingUser) {
+      console.log(`⚠️ Usuario con ID ${id} no encontrado en Supabase`);
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
 
     if (req.body?.email) {
       const normalizedEmail = normalizeEmail(req.body.email);
-      const duplicate = db.users.find((u, i) => i !== idx && normalizeEmail(u.email) === normalizedEmail);
+      const users = (await readSupabaseTable('users')) || [];
+      const duplicate = users.find(u => u.id !== id && normalizeEmail(u.email) === normalizedEmail);
       if (duplicate) return res.status(400).json({ error: 'Email ya en uso' });
     }
 
-    const updated = { ...db.users[idx], ...req.body };
+    const updated = { ...existingUser, ...req.body };
     if (updated.email) updated.email = normalizeEmail(updated.email);
     
-    // Si el usuario se está convirtiendo en psicólogo (basado en is_psychologist)
+    // Si el usuario se está convirtiendo en psicólogo
     const isBecomingPsychologist = updated.is_psychologist === true || updated.isPsychologist === true;
     
     // Sincronizar ambos campos
@@ -2237,41 +2243,7 @@ app.put('/api/users', async (req, res) => {
     if (isBecomingPsychologist && !updated.psychologist_profile_id) {
       const profileId = crypto.randomUUID();
       
-      // Crear perfil en Supabase si está disponible
-      if (supabaseAdmin) {
-        const newProfile = {
-          id: profileId,
-          user_id: id,
-          license: '',
-          specialties: [],
-          bio: '',
-          hourly_rate: 0,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        };
-        
-        // Separar user_id como columna de tabla
-        const { user_id, ...profileData } = newProfile;
-        
-        const { error: profileError } = await supabaseAdmin
-          .from('psychologist_profiles')
-          .insert([{ 
-            id: profileId,
-            user_id: user_id,  // Columna de tabla
-            data: profileData 
-          }]);
-        
-        if (profileError) {
-          console.error('❌ Error creando perfil de psicólogo en Supabase:', profileError);
-          throw new Error(`Error creando perfil: ${profileError.message}`);
-        }
-        
-        console.log(`✓ Nuevo perfil de psicólogo creado en Supabase: ${profileId}`);
-      }
-      
-      // También guardar en db.json local
-      if (!db.psychologistProfiles) db.psychologistProfiles = {};
-      db.psychologistProfiles[profileId] = {
+      const newProfile = {
         id: profileId,
         user_id: id,
         license: '',
@@ -2282,44 +2254,47 @@ app.put('/api/users', async (req, res) => {
         updated_at: new Date().toISOString()
       };
       
+      const { user_id, ...profileData } = newProfile;
+      
+      const { error: profileError } = await supabaseAdmin
+        .from('psychologist_profiles')
+        .insert([{ 
+          id: profileId,
+          user_id: user_id,
+          data: profileData 
+        }]);
+      
+      if (profileError) {
+        console.error('❌ Error creando perfil de psicólogo en Supabase:', profileError);
+        throw new Error(`Error creando perfil: ${profileError.message}`);
+      }
+      
+      console.log(`✓ Nuevo perfil de psicólogo creado en Supabase: ${profileId}`);
       updated.psychologist_profile_id = profileId;
     }
     
     if (updated.email && !updated.user_email) updated.user_email = updated.email;
     
-    // Actualizar en db.json
-    db.users[idx] = updated;
-    await saveDb(db, { awaitPersistence: true });
+    // Actualizar en Supabase
+    const { is_psychologist, isPsychologist, role, user_email, psychologist_profile_id, auth_user_id, ...dataFields } = updated;
     
-    // Actualizar en Supabase si está disponible
-    if (supabaseAdmin) {
-      try {
-        // Preparar datos para Supabase: separar columnas de data
-        const { is_psychologist, isPsychologist, role, user_email, psychologist_profile_id, auth_user_id, ...dataFields } = updated;
-        
-        const { error: updateError } = await supabaseAdmin
-          .from('users')
-          .update({
-            user_email: user_email || updated.email,
-            is_psychologist: is_psychologist || false,
-            psychologist_profile_id: psychologist_profile_id || null,
-            data: dataFields
-          })
-          .eq('id', id);
-        
-        if (updateError) {
-          console.error('❌ Error actualizando usuario en Supabase:', updateError);
-          // No fallar la request, ya se guardó en db.json
-          console.warn('⚠️ Usuario actualizado en db.json pero no en Supabase');
-        } else {
-          console.log('✅ Usuario actualizado en Supabase:', id);
-        }
-      } catch (supabaseErr) {
-        console.error('❌ Error actualizando en Supabase:', supabaseErr);
-      }
+    const { error: updateError } = await supabaseAdmin
+      .from('users')
+      .update({
+        user_email: user_email || updated.email,
+        is_psychologist: is_psychologist || false,
+        psychologist_profile_id: psychologist_profile_id || null,
+        data: dataFields
+      })
+      .eq('id', id);
+    
+    if (updateError) {
+      console.error('❌ Error actualizando usuario en Supabase:', updateError);
+      throw new Error(`Error actualizando usuario: ${updateError.message}`);
     }
     
-    return res.json(db.users[idx]);
+    console.log('✅ Usuario actualizado en Supabase:', id);
+    return res.json(updated);
   } catch (err) {
     console.error('Error in PUT /api/users', err);
     return res.status(500).json({ error: err?.message || 'Error actualizando el usuario' });

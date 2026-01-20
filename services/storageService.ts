@@ -944,9 +944,28 @@ export const getPsychologistsForPatient = async (patientId: string): Promise<Use
     return psychs.filter((u): u is User => Boolean(u));
 };
 
-export const getAllPsychologists = async (): Promise<User[]> => {
+export const getAllPsychologists = async (currentUserId?: string): Promise<User[]> => {
     const users = await AuthService.getUsers();
-    return users.filter(u => u.role && u.role.trim().toUpperCase() === 'PSYCHOLOGIST');
+    
+    // Filtrar por is_psychologist === true
+    let psychologists = users.filter(u => u.is_psychologist === true || u.isPsychologist === true);
+    
+    // Si se proporciona currentUserId, excluir psicólogos con los que ya tiene relación
+    if (currentUserId) {
+        const relationships = await fetchRelationships({ patient_user_id: currentUserId });
+        const connectedPsychIds = new Set(
+            relationships
+                .map(rel => rel.psych_user_id || rel.psychologistId)
+                .filter((id): id is string => Boolean(id))
+        );
+        
+        // También excluir al mismo usuario
+        psychologists = psychologists.filter(p => 
+            p.id !== currentUserId && !connectedPsychIds.has(p.id)
+        );
+    }
+    
+    return psychologists;
 };
 
 export const hasCareRelationship = async (psychologistId: string, patientId: string): Promise<boolean> => {
