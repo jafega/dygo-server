@@ -1779,8 +1779,6 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                     </button>
                                 </div>
 
-                                <div className="absolute top-0 bottom-0 left-4 w-px bg-gradient-to-b from-transparent via-slate-200 to-transparent"></div>
-
                                 <div className="space-y-4">
                                     {entries.filter(entry => {
                                         if (entryFilter === 'ALL') return true;
@@ -1811,9 +1809,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                                             : ((feedbackDisplayText.length > 0) || (pFeed.attachments?.length || 0) > 0);
 
                                         return (
-                                            <div key={entry.id} className="relative pl-10">
-                                                <div className={`absolute left-0 top-6 w-3 h-3 rounded-full border-4 border-white shadow-sm ${isPsychEntry ? 'bg-purple-400' : 'bg-indigo-400'}`}></div>
-
+                                            <div key={entry.id} className="relative">
                                                 <div className={`bg-white rounded-2xl border shadow-sm p-4 md:p-6 ${isPsychEntry ? 'border-purple-100 ring-1 ring-purple-50' : 'border-slate-200'} relative overflow-hidden`}>
                                                     <div className={`absolute inset-x-0 top-0 h-1 ${isPsychEntry ? 'bg-gradient-to-r from-purple-400 to-indigo-400' : 'bg-gradient-to-r from-indigo-400 to-sky-400'}`}></div>
 
