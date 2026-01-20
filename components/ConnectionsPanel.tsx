@@ -284,7 +284,10 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
       return [];
     }
     
-    return allPsychologists.filter(psych => {
+    console.log('[ConnectionsPanel] Filtrando directorio. Query:', query);
+    console.log('[ConnectionsPanel] Total psicólogos:', allPsychologists.length);
+    
+    const filtered = allPsychologists.filter(psych => {
       if (psych.id === currentUser?.id) return false;
       const alreadyLinked = connectedPsychologists.some(p => p.id === psych.id);
       if (alreadyLinked) return false;
@@ -296,25 +299,20 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
       });
       if (hasPendingInvitation) return false;
       
-      // Excluir psicólogos que me tienen a mí como paciente
-      // Si soy paciente de un psicólogo, no debería aparecer en mi búsqueda
-      const isPsychologistOfCurrentUser = connectedPatients.some(patient => {
-        return patient.id === currentUser?.id;
-      });
+      // Buscar en nombre y email
+      const psychName = (psych.name || '').toLowerCase();
+      const psychEmail = (psych.email || psych.user_email || '').toLowerCase();
       
-      // Si este psicólogo está en la lista de pacientes conectados, significa que el usuario actual
-      // es paciente de alguien. Necesitamos verificar si este psych específico me tiene como paciente.
-      // Esto se hace comparando si psych.id coincide con alguno de mis psicólogos conectados
-      // Pero eso ya lo verificamos arriba con alreadyLinked.
+      const matchesName = psychName.includes(query);
+      const matchesEmail = psychEmail.includes(query);
       
-      // Lo que realmente necesitamos es: si el psicólogo que estoy mirando (psych)
-      // tiene al usuario actual como paciente. Para eso necesitaríamos consultar
-      // los pacientes de ese psicólogo, pero no tenemos esa información aquí.
-      // Por simplicidad, podemos asumir que si ya estamos conectados, no aparece (ya cubierto arriba).
+      console.log('[ConnectionsPanel] Psych:', psych.name, 'Email:', psychEmail, 'Matches:', matchesName || matchesEmail);
       
-      if (!query) return true;
-      return psych.name.toLowerCase().includes(query) || psych.email.toLowerCase().includes(query);
+      return matchesName || matchesEmail;
     });
+    
+    console.log('[ConnectionsPanel] Resultados filtrados:', filtered.length);
+    return filtered;
   }, [allPsychologists, directorySearch, connectedPsychologists, connectedPatients, currentUser?.id, receivedInvitations, sentInvitationsAsPatient]);
 
   if (!currentUser) {
