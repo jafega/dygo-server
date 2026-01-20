@@ -718,6 +718,28 @@ function buildSupabaseEntryRow(entry) {
   };
 }
 
+// Función específica para invoices que maneja columnas directas + JSONB
+function buildSupabaseInvoiceRow(invoice) {
+  const { id, psychologist_user_id, patient_user_id, amount, status, created_at, ...restData } = invoice;
+  
+  // Calcular tax y total
+  const finalAmount = amount || 0;
+  const tax = finalAmount * 0.21;
+  const total = finalAmount + tax;
+  
+  return {
+    id,
+    psychologist_user_id,
+    patient_user_id: patient_user_id || null,
+    amount: finalAmount,
+    status: status || 'pending',
+    tax,
+    total,
+    created_at: created_at || new Date().toISOString(),
+    data: { ...invoice } // Todo el objeto completo en data para compatibilidad
+  };
+}
+
 async function trySupabaseUpsert(table, payloads) {
   let lastError = null;
   for (const payload of payloads) {
@@ -3841,8 +3863,12 @@ app.patch('/api/invoices/:id', async (req, res) => {
         
         console.log('📤 [PATCH /api/invoices/:id] Actualizando en Supabase:', updatedInvoice);
         
+        // Construir payload correcto para Supabase con columnas directas + JSONB
+        const supabasePayload = buildSupabaseInvoiceRow(updatedInvoice);
+        console.log('📦 [PATCH /api/invoices/:id] Payload para Supabase:', supabasePayload);
+        
         // Actualizar en Supabase
-        await trySupabaseUpsert('invoices', [updatedInvoice]);
+        await trySupabaseUpsert('invoices', [supabasePayload]);
         
         // Actualizar el caché local
         const db = getDb();
