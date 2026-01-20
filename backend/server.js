@@ -959,12 +959,14 @@ async function saveSupabaseDb(data, prevCache = null) {
     patient_user_id: g.patient_user_id || null
   }));
   
-  // Invitations: extraer campos según el nuevo schema (psychologist_user_id, patient_user_id)
+  // Invitations: extraer campos según el nuevo schema (psychologist_user_id, patient_user_id, invited_patient_email, psychologist_email)
   const invitationsRows = (data.invitations || []).map(i => ({
     id: i.id,
     data: i,
     psychologist_user_id: i.psychologist_user_id || i.psych_user_id || i.psychologistId || null,
-    patient_user_id: i.patient_user_id || null
+    patient_user_id: i.patient_user_id || null,
+    invited_patient_email: i.patient_user_email || i.patientEmail || i.toUserEmail || null,
+    psychologist_email: i.psych_user_email || i.psychologistEmail || null
   }));
   
   // Settings: extraer campo user_id
