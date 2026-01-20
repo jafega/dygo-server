@@ -53,7 +53,7 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
 
   const loadConnections = async (showLoader = true) => {
     if (!currentUser) return;
-    console.log('🔄 [ConnectionsPanel] loadConnections iniciado para usuario:', currentUser.id, 'role:', currentUser.role);
+    console.log('🔄 [ConnectionsPanel] loadConnections iniciado para usuario:', currentUser.id, 'is_psychologist:', currentUser.is_psychologist);
     if (showLoader) {
       setIsLoading(true);
     }
@@ -61,7 +61,7 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
     try {
       const basePromise = getPsychologistsForPatient(currentUser.id);
 
-      if (currentUser.role === 'PATIENT') {
+      if (!currentUser.is_psychologist) {
         console.log('👤 [ConnectionsPanel] Cargando datos para PACIENTE...');
         const [connected, pending] = await Promise.all([
           basePromise,
@@ -444,7 +444,7 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
             </div>
           </div>
 
-          {currentUser.role === 'PSYCHOLOGIST' && (
+          {currentUser.is_psychologist === true && (
             <>
               <div className="bg-white rounded-lg sm:rounded-2xl border border-slate-200 p-3 sm:p-6 shadow-sm">
                 <div className="flex flex-col gap-2 sm:gap-3 md:flex-row md:items-center md:justify-between mb-3 sm:mb-6">

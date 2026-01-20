@@ -38,28 +38,27 @@ export const getUsers = async (): Promise<User[]> => {
 
 export const initializeDemoData = async () => {
     const users = await getUsers();
-    const hasPsych = users.some(u => u.role === 'PSYCHOLOGIST');
+    const hasPsych = users.some(u => u.is_psychologist === true);
     
     if (!hasPsych && !USE_BACKEND) {
         const demoPsychs: User[] = [
-            { id: 'psych-demo-1', name: 'Dra. Elena Foster', email: 'elena@dygo.health', password: '123', role: 'PSYCHOLOGIST' },
-            { id: 'psych-demo-2', name: 'Dr. Marc Spector', email: 'marc@dygo.health', password: '123', role: 'PSYCHOLOGIST' }
+            { id: 'psych-demo-1', name: 'Dra. Elena Foster', email: 'elena@dygo.health', password: '123', is_psychologist: true, isPsychologist: true },
+            { id: 'psych-demo-2', name: 'Dr. Marc Spector', email: 'marc@dygo.health', password: '123', is_psychologist: true, isPsychologist: true }
         ];
         const updated = [...users, ...demoPsychs];
         saveLocalUsers(updated);
     }
 };
 
-export const register = async (name: string, email: string, password: string, role: 'PATIENT' | 'PSYCHOLOGIST'): Promise<User> => {
+export const register = async (name: string, email: string, password: string, isPsychologist: boolean = false): Promise<User> => {
   const normalizedEmail = email.trim().toLowerCase();
-  const normalizedRole = role.trim().toUpperCase() as 'PATIENT' | 'PSYCHOLOGIST';
 
   if (USE_BACKEND) {
       try {
           const res = await fetch(`${API_URL}/auth/register`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ name, email: normalizedEmail, password, role: normalizedRole })
+              body: JSON.stringify({ name, email: normalizedEmail, password, is_psychologist: isPsychologist, isPsychologist })
           });
           
           if (!res.ok) {
@@ -82,7 +81,7 @@ export const register = async (name: string, email: string, password: string, ro
           if (ALLOW_LOCAL_FALLBACK) {
               const users = getLocalUsers();
               if (users.find(u => u.email === normalizedEmail)) throw new Error("El email ya está registrado (Local fallback).");
-              const newUser: User = { id: crypto.randomUUID(), name, email: normalizedEmail, password, role: normalizedRole };
+              const newUser: User = { id: crypto.randomUUID(), name, email: normalizedEmail, password, is_psychologist: isPsychologist, isPsychologist };
               users.push(newUser); saveLocalUsers(users); localStorage.setItem(CURRENT_USER_KEY, newUser.id); return newUser;
           }
           if (e instanceof Error && (e.message.includes('Failed to fetch') || e.message.includes('NetworkError'))) {
@@ -98,7 +97,7 @@ export const register = async (name: string, email: string, password: string, ro
   
   const newUser: User = {
         id: crypto.randomUUID(),
-        name, email: normalizedEmail, password, role: normalizedRole
+        name, email: normalizedEmail, password, is_psychologist: isPsychologist, isPsychologist
   };
   users.push(newUser);
   saveLocalUsers(users);
@@ -150,20 +149,55 @@ export const login = async (email: string, password: string): Promise<User> => {
 // Sign in with Supabase (exchange Supabase access token with backend)
 export const signInWithSupabase = async (accessToken: string): Promise<User> => {
     if (USE_BACKEND) {
-        const res = await fetch(`${API_URL}/supabase-auth`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ access_token: accessToken })
-        });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            console.error('❌ Supabase auth failed:', err);
-            throw new Error(err.error || 'Error signing in with Supabase');
+        try {
+            const res = await fetch(`${API_URL}/supabase-auth`, {
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' }, 
+                body: JSON.stringify({ access_token: accessToken })
+            });
+            
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({ error: 'Error desconocido del servidor' }));
+                console.error('❌ Supabase auth failed:', err);
+                
+                // Propagar el error con detalles específicos
+                throw new Error(err.error || err.details || `Error del servidor (${res.status})`);
+            }
+            
+            const user = await res.json();
+            
+            // Validar que recibimos un usuario válido
+            if (!user || !user.id) {
+                console.error('❌ Respuesta inválida del servidor:', user);
+                throw new Error('El servidor no devolvió un usuario válido');
+            }
+            
+            console.log('✅ Usuario autenticado con Supabase:', {
+                email: user.email,
+                id: user.id,
+                is_psychologist: user.is_psychologist,
+                isPsychologist: user.isPsychologist
+            });
+            
+            // Guardar ID del usuario en localStorage
+            // Los datos frescos siempre se obtienen del servidor en getCurrentUser()
+            localStorage.setItem(CURRENT_USER_KEY, user.id);
+            
+            return user;
+        } catch (error) {
+            // Si el error ya es un Error, propagarlo directamente
+            if (error instanceof Error) {
+                throw error;
+            }
+            // Error de red u otro tipo de error
+            if (String(error).includes('Failed to fetch') || String(error).includes('NetworkError')) {
+                throw new Error('No se puede conectar con el servidor. Verifica tu conexión.');
+            }
+            throw new Error('Error inesperado durante la autenticación');
         }
-        const user = await res.json();
-        localStorage.setItem(CURRENT_USER_KEY, user.id);
-        return user;
     }
 
-    throw new Error('Supabase Sign-in is only supported when USE_BACKEND is true');
+    throw new Error('La autenticación con Supabase requiere que el backend esté habilitado');
 };
 
 export const logout = () => {
@@ -173,22 +207,35 @@ export const logout = () => {
 export const getCurrentUser = async (): Promise<User | null> => {
   const id = localStorage.getItem(CURRENT_USER_KEY);
   if (!id) return null;
-  return await getUserById(id);
+  
+  // Siempre obtener datos frescos del backend/Supabase
+  const user = await getUserById(id);
+  
+  // Si el usuario no existe (fue eliminado), limpiar localStorage
+  if (!user) {
+    localStorage.removeItem(CURRENT_USER_KEY);
+    return null;
+  }
+  
+  console.log('🔄 Usuario obtenido desde servidor:', {
+    email: user.email,
+    is_psychologist: user.is_psychologist,
+    isPsychologist: user.isPsychologist
+  });
+  
+  return user;
 };
 
 export const getUserById = async (id: string): Promise<User | undefined> => {
   if (USE_BACKEND) {
       try {
-          console.log('Fetching user by ID:', id);
           const res = await fetch(`${API_URL}/users?id=${id}`);
-          console.log('getUserById response:', res.status);
           if (res.ok) {
               const user = await res.json();
-              console.log('User found:', user);
               return user;
           }
           if (res.status === 404) {
-              console.warn('User not found:', id);
+              // Usuario no encontrado - fue eliminado
               return undefined;
           }
           throw new Error(`Server error: ${res.status}`);

@@ -164,7 +164,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                                 </div>
                             )}
                         </div>
-                        {currentUser?.role === 'PATIENT' && (
+                        {!currentUser?.is_psychologist && (
                             <div className={`rounded-2xl border ${feedbackEnabled ? 'border-indigo-200 bg-indigo-50/60' : 'border-slate-100 bg-white'} p-4 transition-colors`}
                             >
                                 <div className="flex items-start justify-between gap-3">
@@ -278,7 +278,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                             </div>
                         </div>
 
-                        {currentUser?.role !== 'PSYCHOLOGIST' && !currentUser?.is_psychologist && (
+                        {!currentUser?.is_psychologist && (
                             <div className="bg-white border border-slate-100 rounded-2xl p-4">
                                 <h4 className="text-sm font-bold text-slate-800">¿Eres psicólogo/a?</h4>
                                 <p className="text-xs text-slate-500 mt-1">Convierte tu perfil para gestionar pacientes y ver su progreso.</p>
@@ -287,12 +287,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                                         if (!currentUser) return;
                                         if (!window.confirm('¿Quieres convertir tu perfil en psicólogo/a?')) return;
                                         try {
-                                            const updated = { ...currentUser, role: 'PSYCHOLOGIST', is_psychologist: true } as User;
+                                            const updated = { ...currentUser, is_psychologist: true, isPsychologist: true } as User;
                                             await updateUser(updated);
                                             setCurrentUser(updated);
                                             if (onUserUpdate) onUserUpdate(updated);
                                         } catch (err:any) {
-                                            console.error('Error updating role', err);
+                                            console.error('Error updating to psychologist', err);
                                             alert(err?.message || 'Error actualizando el perfil.');
                                         }
                                     }}

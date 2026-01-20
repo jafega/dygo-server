@@ -839,34 +839,55 @@ export const endRelationship = async (psychUserId: string, patientUserId: string
 
 export const getPatientsForPsychologist = async (psychId: string): Promise<PatientSummary[]> => {
     try {
-        // Cargar todo en paralelo para reducir llamadas al servidor
-        const [psych, relationships, allUsers, allEntries] = await Promise.all([
+        console.log('[getPatientsForPsychologist] Iniciando con psychId:', psychId);
+        
+        // Cargar usuarios y relaciones primero
+        const [psych, relationships, allUsers] = await Promise.all([
             AuthService.getUserById(psychId),
             fetchRelationships({ psych_user_id: psychId }),
-            AuthService.getUsers(),
-            getEntries() // Cargar todas las entradas una sola vez
+            AuthService.getUsers()
         ]);
         
-        if (!psych) return [];
+        console.log('[getPatientsForPsychologist] Datos cargados:', {
+            psych: psych?.email,
+            relationshipsCount: relationships.length,
+            relationships: relationships,
+            allUsersCount: allUsers.length
+        });
+        
+        if (!psych) {
+            console.log('[getPatientsForPsychologist] No se encontró el psicólogo');
+            return [];
+        }
 
         const patientsData: PatientSummary[] = [];
         
         // Crear índice de usuarios para búsqueda rápida
         const userMap = new Map(allUsers.map(u => [u.id, u]));
         
-        // Crear índice de entradas por usuario
-        const entriesByUser = new Map<string, any[]>();
-        allEntries.forEach(entry => {
-            if (!entriesByUser.has(entry.userId)) {
-                entriesByUser.set(entry.userId, []);
-            }
-            entriesByUser.get(entry.userId)!.push(entry);
-        });
+        // Obtener IDs únicos de pacientes
+        const patientIds = relationships
+            .map(rel => rel.patient_user_id || rel.patientId)
+            .filter((id): id is string => Boolean(id));
+        const uniquePatientIds = Array.from(new Set(patientIds));
         
-        // Ordenar entradas por fecha (más recientes primero)
-        entriesByUser.forEach(entries => {
-            entries.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        console.log('[getPatientsForPsychologist] Patient IDs encontrados:', uniquePatientIds);
+        
+        // Agregar el ID del psicólogo para cargar sus propias entradas
+        const userIdsToLoad = [psychId, ...uniquePatientIds];
+        
+        // Cargar entradas de todos los usuarios relevantes en paralelo
+        const entriesArrays = await Promise.all(
+            userIdsToLoad.map(userId => getEntriesForUser(userId, psychId).catch(() => []))
+        );
+        
+        // Crear índice de entradas por usuario (ya vienen ordenadas de getEntriesForUser)
+        const entriesByUser = new Map<string, any[]>();
+        entriesArrays.forEach((entries, index) => {
+            const userId = userIdsToLoad[index];
+            entriesByUser.set(userId, entries);
         });
+
 
         const processUser = (user: User, isSelf: boolean = false): PatientSummary => {
             const userEntries = entriesByUser.get(user.id) || [];
@@ -890,14 +911,10 @@ export const getPatientsForPsychologist = async (psychId: string): Promise<Patie
             } as PatientSummary;
         };
         
-        const patientIds = relationships
-            .map(rel => rel.patient_user_id || rel.patientId)
-            .filter((id): id is string => Boolean(id));
-        const uniquePatientIds = Array.from(new Set(patientIds));
-
         // Procesar pacientes usando el mapa (sin llamadas adicionales al servidor)
         uniquePatientIds.forEach(pid => {
             const patient = userMap.get(pid);
+            console.log('[getPatientsForPsychologist] Procesando paciente:', pid, 'encontrado:', !!patient);
             if (patient) {
                 patientsData.push(processUser(patient));
             }
@@ -906,6 +923,7 @@ export const getPatientsForPsychologist = async (psychId: string): Promise<Patie
         // Agregar el psicólogo al principio
         patientsData.unshift(processUser(psych, true));
 
+        console.log('[getPatientsForPsychologist] Total pacientes devueltos:', patientsData.length);
         return patientsData;
     } catch (error) {
         console.error('[getPatientsForPsychologist] Error:', error);

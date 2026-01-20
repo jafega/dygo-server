@@ -180,7 +180,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
               return (
                 <button
                   key={entry.id}
-                  onClick={() => (onSelectEntry ? onSelectEntry(entry) : onSelectDate(dateStr))}
+                  onClick={() => onSelectEntry ? onSelectEntry(entry) : (onSelectDate && onSelectDate(dateStr))}
                   className="w-full text-left bg-white border border-slate-200 rounded-2xl p-4 hover:shadow-md transition-shadow"
                 >
                   <div className="flex items-center justify-between gap-3">
@@ -249,7 +249,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
               return (
                   <div 
                     key={`${dateStr}-${i}`}
-                    onClick={() => onSelectDate(dateStr)}
+                    onClick={() => onSelectDate && onSelectDate(dateStr)}
                     className={`
                         relative w-full flex flex-row items-stretch rounded-xl border transition-all cursor-pointer group hover:shadow-md min-h-[100px]
                         ${isToday ? 'border-indigo-400 ring-1 ring-indigo-400 bg-indigo-50/20' : 'border-slate-200 bg-white'}
@@ -314,7 +314,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
           return (
             <div 
               key={`${dateStr}-${i}`}
-              onClick={() => onSelectDate(dateStr)}
+              onClick={() => onSelectDate && onSelectDate(dateStr)}
               className={`
                 relative flex flex-col justify-between transition-all cursor-pointer overflow-hidden group rounded-xl border h-24 md:h-32
                 ${isToday ? 'border-indigo-400 ring-1 ring-indigo-400 bg-indigo-50/30' : 'border-slate-100 hover:border-slate-300 hover:shadow-md bg-white'}

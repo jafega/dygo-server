@@ -4,15 +4,18 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  user_email?: string; // Email en columna de tabla
+  user_email?: string; // Email en columna de tabla Supabase
   password?: string; // In a real app, this would be hashed
-  role: UserRole;
+  role?: UserRole; // DEPRECATED: usar is_psychologist en su lugar
   isPsychologist?: boolean;
-  is_psychologist?: boolean; // Columna de tabla Supabase
+  is_psychologist?: boolean; // Columna de tabla Supabase (boolean NOT NULL DEFAULT false) - USAR ESTE
   avatarUrl?: string; // Profile picture (Base64)
-  // Optional OAuth fields
-  googleId?: string;
-  supabaseId?: string;
+  
+  // OAuth field según el nuevo schema
+  auth_user_id?: string; // UUID que referencia auth.users(id) - columna de tabla Supabase
+  
+  // Psychologist profile reference según el nuevo schema
+  psycologist_profile_id?: string; // FK a psychologist_profiles(id) - columna de tabla Supabase
 
   // Premium subscription fields
   isPremium?: boolean;
@@ -34,25 +37,26 @@ export interface User {
 
 export interface CareRelationship {
   id: string;
-  psych_user_id: string; // ID del usuario con rol de psicólogo en esta relación
-  patient_user_id: string; // ID del usuario con rol de paciente en esta relación
-  createdAt: number;
-  endedAt?: number; // Timestamp cuando se finalizó la relación
+  // Columnas de tabla según el nuevo schema (minúsculas)
+  psychologist_user_id: string; // FK a users(id) - ID del usuario con rol de psicólogo
+  patient_user_id: string; // FK a users(id) - ID del usuario con rol de paciente
+  created_at?: string; // timestamp with time zone (ISO string)
   
-  // DEPRECATED: Mantener temporalmente para compatibilidad
-  psychologistId?: string;
-  patientId?: string;
+  // Campos adicionales en data JSONB
+  createdAt?: number; // timestamp en ms (puede estar en data)
+  endedAt?: number; // Timestamp cuando se finalizó la relación (puede estar en data)
 }
 
 export interface Invitation {
   id: string;
-  // El psicólogo en esta relación (quien dará tratamiento)
-  psych_user_id: string; // ID del usuario que actúa como psicólogo
-  psych_user_email: string;
-  psych_user_name: string;
-  // El paciente en esta relación (quien recibirá tratamiento)
-  patient_user_id?: string; // Se rellena al aceptar si el usuario ya existe
-  patient_user_email: string;
+  // Columnas de tabla según el nuevo schema
+  psychologist_user_id: string; // FK a users(id) - ID del usuario que actúa como psicólogo
+  patient_user_id?: string; // FK a users(id) - Se rellena al aceptar si el usuario ya existe
+  
+  // Campos adicionales en data JSONB
+  psych_user_email?: string;
+  psych_user_name?: string;
+  patient_user_email?: string;
   patient_user_name?: string;
   status: 'PENDING' | 'ACCEPTED' | 'REJECTED';
   timestamp: number;
@@ -63,19 +67,6 @@ export interface Invitation {
   patient_last_name?: string;
   emailSent?: boolean; // Indica si se envió el email de bienvenida
   emailSentAt?: number; // Timestamp del envío
-  
-  // DEPRECATED: Mantener temporalmente para compatibilidad
-  psychologistId?: string;
-  psychologistEmail?: string;
-  psychologistName?: string;
-  patientId?: string;
-  patientEmail?: string;
-  patientName?: string;
-  patientFirstName?: string;
-  patientLastName?: string;
-  fromPsychologistId?: string;
-  fromPsychologistName?: string;
-  toUserEmail?: string;
 }
 
 export interface Attachment {
@@ -98,7 +89,11 @@ export interface EmotionStructure {
 
 export interface JournalEntry {
   id: string;
-  userId: string; // Added owner ID
+  // Columnas de tabla según el nuevo schema
+  creator_user_id: string; // FK a users(id) - Usuario que creó la entrada
+  target_user_id: string; // FK a users(id) - Usuario objetivo de la entrada
+  
+  // Campos en data JSONB
   date: string; // ISO string YYYY-MM-DD
   timestamp: number;
   transcript: string;
@@ -129,7 +124,10 @@ export interface JournalEntry {
 
 export interface Goal {
   id: string;
-  userId: string; // Added owner ID
+  // Columna de tabla según el nuevo schema
+  patient_user_id: string; // FK a users(id) - Usuario paciente dueño del objetivo
+  
+  // Campos en data JSONB
   description: string;
   createdAt: number;
   completed: boolean;

@@ -79,6 +79,7 @@ const App: React.FC = () => {
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReport | null>(null);
   const [hasPendingInvites, setHasPendingInvites] = useState(false);
   const [isProfileIncomplete, setIsProfileIncomplete] = useState(false);
+  const [error, setError] = useState('');
 
   const getFeedbackText = (entry: JournalEntry) => {
     if (typeof entry.psychologistFeedback === 'string') return entry.psychologistFeedback;
@@ -112,18 +113,14 @@ const App: React.FC = () => {
         const user = await AuthService.getCurrentUser();
         if (user) {
             setCurrentUser(user);
-        const hasValidRole = user.role === 'PATIENT' || user.role === 'PSYCHOLOGIST';
-        if (!hasValidRole) {
-          setShowRolePrompt(true);
-          setIsLoadingData(false);
-          return;
-        }
             // If backend is available, try to migrate any local data for this user
             if (USE_BACKEND) {
                 try { await StorageService.migrateLocalToBackend(user.id); } catch (e) { console.warn('Migration skipped', e); }
             }
             await refreshUserData(user.id);
-            setViewState(user.role === 'PSYCHOLOGIST' ? ViewState.PATIENTS : ViewState.CALENDAR);
+            // Solo permitir vista de psicólogo si is_psychologist es true
+            const canAccessPsychologistView = user.is_psychologist === true;
+            setViewState(canAccessPsychologistView ? ViewState.PATIENTS : ViewState.CALENDAR);
         } else {
             setViewState(ViewState.AUTH);
         }
@@ -131,6 +128,48 @@ const App: React.FC = () => {
     };
     init();
   }, []);
+
+  // Efecto para forzar vista de paciente si is_psychologist es false
+  useEffect(() => {
+    if (currentUser) {
+      console.log('🔍 [App] Estado del usuario:', {
+        email: currentUser.email,
+        is_psychologist: currentUser.is_psychologist,
+        isPsychologist: currentUser.isPsychologist,
+        psychViewMode,
+        viewState
+      });
+      
+      if (currentUser.is_psychologist === false && psychViewMode === 'DASHBOARD') {
+        console.log('⚠️ is_psychologist es false, forzando vista de paciente');
+        setPsychViewMode('PERSONAL');
+        setViewState(ViewState.CALENDAR);
+      }
+    }
+  }, [currentUser?.is_psychologist, psychViewMode]);
+  
+  // Refrescar usuario cada vez que cambia de pantalla (psychViewMode)
+  useEffect(() => {
+    const refreshOnViewChange = async () => {
+      if (currentUser?.id) {
+        try {
+          const freshUser = await AuthService.getUserById(currentUser.id);
+          if (freshUser) {
+            setCurrentUser(freshUser);
+            console.log('🔄 Usuario refrescado al cambiar de vista:', {
+              email: freshUser.email,
+              is_psychologist: freshUser.is_psychologist,
+              psychViewMode
+            });
+          }
+        } catch (err) {
+          console.warn('Error refrescando usuario al cambiar vista:', err);
+        }
+      }
+    };
+    
+    refreshOnViewChange();
+  }, [psychViewMode]);
 
   const loadUserData = async (userId: string) => {
     // Optimización: Solo cargar últimas 50 entradas por defecto
@@ -169,7 +208,7 @@ const App: React.FC = () => {
     }
 
     try {
-      const endpoint = currentUser.role === 'PSYCHOLOGIST' 
+      const endpoint = currentUser.is_psychologist === true
         ? `${API_URL}/psychologist/${userId}/profile`
         : `${API_URL}/patient/${userId}/profile`;
       
@@ -178,7 +217,7 @@ const App: React.FC = () => {
         const profile = await response.json();
         
         // Campos esenciales según el rol
-        const requiredFields = currentUser.role === 'PSYCHOLOGIST' 
+        const requiredFields = currentUser.is_psychologist === true 
           ? [
               profile.name,
               profile.phone,
@@ -201,19 +240,34 @@ const App: React.FC = () => {
     }
   };
 
-  const handleAuthSuccess = async () => {
-      const user = await AuthService.getCurrentUser();
-      if (user) {
-          setCurrentUser(user);
-        const hasValidRole = user.role === 'PATIENT' || user.role === 'PSYCHOLOGIST';
-        if (!hasValidRole) {
-          setShowRolePrompt(true);
-          return;
-        }
-          await refreshUserData(user.id);
-          setViewState(user.role === 'PSYCHOLOGIST' ? ViewState.PATIENTS : ViewState.INSIGHTS);
-          setPsychViewMode('DASHBOARD'); 
+  const handleAuthSuccess = async (providedUser?: User) => {
+      console.log('📍 handleAuthSuccess llamado con:', providedUser ? 'usuario proporcionado' : 'sin usuario');
+      
+      // Si ya tenemos el usuario (ej: desde signInWithSupabase), usarlo directamente
+      let user = providedUser;
+      
+      if (!user) {
+          user = await AuthService.getCurrentUser();
       }
+      
+      if (!user) {
+          console.error('❌ No se pudo obtener el usuario después de autenticación');
+          setCurrentUser(null);
+          setViewState(ViewState.AUTH);
+          setError('Error al cargar usuario. Por favor, intenta de nuevo.');
+          return;
+      }
+      
+      console.log('✅ Usuario obtenido:', user.email || user.id);
+      setCurrentUser(user);
+      
+      // Solo permitir vista de psicólogo si is_psychologist es true
+      const canAccessPsychologistView = user.is_psychologist === true;
+      setViewState(canAccessPsychologistView ? ViewState.PATIENTS : ViewState.INSIGHTS);
+      setPsychViewMode(canAccessPsychologistView ? 'DASHBOARD' : 'PERSONAL');
+      
+      // Cargar datos en segundo plano (no bloquear la UI)
+      refreshUserData(user.id).catch(err => console.warn('Error cargando datos iniciales:', err));
   };
 
   const handleLogout = () => {
@@ -227,13 +281,34 @@ const App: React.FC = () => {
       setViewState(ViewState.AUTH);
   };
 
-  const handleUserUpdate = (updatedUser: User) => {
+  const handleUserUpdate = async (updatedUser: User) => {
       setCurrentUser(updatedUser);
-      if (updatedUser.role === 'PSYCHOLOGIST') {
+      
+      // Refrescar datos del usuario desde el servidor
+      if (updatedUser.id) {
+        try {
+          const freshUser = await AuthService.getUserById(updatedUser.id);
+          if (freshUser) {
+            setCurrentUser(freshUser);
+            console.log('🔄 Usuario refrescado desde servidor:', {
+              email: freshUser.email,
+              is_psychologist: freshUser.is_psychologist
+            });
+            updatedUser = freshUser;
+          }
+        } catch (err) {
+          console.warn('No se pudo refrescar usuario:', err);
+        }
+      }
+      
+      // Solo permitir acceso a vista de psicólogo si is_psychologist es true
+      if (updatedUser.is_psychologist === true) {
         setViewState(ViewState.PATIENTS);
         setPsychViewMode('DASHBOARD');
-      } else if (updatedUser.role === 'PATIENT') {
+      } else {
+        // Si is_psychologist es false O es un paciente, forzar vista de paciente
         setViewState(ViewState.CALENDAR);
+        setPsychViewMode('PERSONAL');
       }
   };
 
@@ -247,7 +322,7 @@ const App: React.FC = () => {
 
     const handleConfirmRole = async () => {
       if (!currentUser || !pendingRole) return;
-      const updated = { ...currentUser, role: pendingRole } as User;
+      const updated = { ...currentUser, is_psychologist: pendingRole === 'PSYCHOLOGIST', isPsychologist: pendingRole === 'PSYCHOLOGIST' } as User;
       try {
         await AuthService.updateUser(updated);
         setCurrentUser(updated);
@@ -255,7 +330,7 @@ const App: React.FC = () => {
         setPendingRole(null);
         await loadUserData(updated.id);
         await checkInvitations(updated.email);
-        setViewState(updated.role === 'PSYCHOLOGIST' ? ViewState.PATIENTS : ViewState.CALENDAR);
+        setViewState(updated.is_psychologist === true ? ViewState.PATIENTS : ViewState.CALENDAR);
       } catch (err:any) {
         console.error('Error updating role', err);
         alert(err?.message || 'Error guardando el rol.');
@@ -292,7 +367,7 @@ const App: React.FC = () => {
   }, [settings, currentUser]);
 
   useEffect(() => {
-    if (!currentUser || currentUser.role !== 'PATIENT') return;
+    if (!currentUser) return;
     const params = new URLSearchParams(window.location.search);
     if (params.get('start') !== 'voice') return;
     setSelectedDate(null);
@@ -318,7 +393,7 @@ const App: React.FC = () => {
   // Note: feedback is marked as read when the user opens the entry detail.
 
   useEffect(() => {
-    if (!currentUser || currentUser.role !== 'PATIENT') return;
+    if (!currentUser) return;
     if (!settings.feedbackNotificationsEnabled) return;
     if (Notification.permission !== 'granted') return;
 
@@ -348,7 +423,7 @@ const App: React.FC = () => {
   }, [currentUser, settings.feedbackNotificationsEnabled, entries]);
 
   useEffect(() => {
-    if (!currentUser || currentUser.role !== 'PATIENT') return;
+    if (!currentUser) return;
     if (!selectedEntryId) return;
     const entry = entries.find(e => e.id === selectedEntryId);
     if (!entry) return;
@@ -583,14 +658,6 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
     </button>
   );
 
-  if (viewState === ViewState.AUTH) {
-      return <AuthScreen onAuthSuccess={handleAuthSuccess} />;
-  }
-
-  if (isLoadingData) {
-      return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-indigo-600"><Loader2 className="animate-spin w-10 h-10" /></div>;
-  }
-
   // Superadmin view
   if (currentUser && viewState === ViewState.SUPERADMIN) {
     return (
@@ -620,8 +687,9 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
     );
   }
 
-  // Psychologist View
-  if (currentUser?.role === 'PSYCHOLOGIST' && psychViewMode === 'DASHBOARD') {
+  // Psychologist View - Solo accesible si is_psychologist es true
+  if (currentUser?.is_psychologist === true && psychViewMode === 'DASHBOARD') {
+      console.log('✅ [App] Mostrando vista de psicólogo - is_psychologist:', currentUser.is_psychologist);
       return (
           <div className="h-screen bg-slate-50 text-slate-900 flex overflow-hidden">
                {/* Sidebar */}
@@ -750,6 +818,23 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                </div>
           </div>
       );
+  }
+
+  if (viewState === ViewState.AUTH) {
+      return (
+        <>
+          <AuthScreen onAuthSuccess={handleAuthSuccess} />
+          {error && (
+            <div className="fixed bottom-4 right-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg shadow-lg max-w-md">
+              {error}
+            </div>
+          )}
+        </>
+      );
+  }
+
+  if (isLoadingData) {
+      return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-indigo-600"><Loader2 className="animate-spin w-10 h-10" /></div>;
   }
 
   // Patient View
@@ -999,9 +1084,14 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                 <p className="text-xs text-slate-500 truncate">{currentUser?.email}</p>
               </div>
             </button>
-            {currentUser?.role === 'PSYCHOLOGIST' && (
+            {currentUser?.is_psychologist === true && (
               <button
-                onClick={() => setPsychViewMode('DASHBOARD')}
+                onClick={() => {
+                  // Doble verificación antes de cambiar a vista profesional
+                  if (currentUser?.is_psychologist === true) {
+                    setPsychViewMode('DASHBOARD');
+                  }
+                }}
                 className="w-full px-3 py-2 text-sm font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors text-left flex items-center gap-2 border border-purple-100"
               >
                 <Briefcase size={16} />
@@ -1377,8 +1467,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
               <div className="animate-in fade-in">
                 <CalendarView
                   entries={entries}
-                  selectedDate={selectedDate}
-                  onDateSelect={(date) => { setSelectedDate(date); setSelectedEntryMode('day'); }}
+                  onSelectDate={(date) => { setSelectedDate(date); setSelectedEntryMode('day'); }}
                 />
               </div>
             )}

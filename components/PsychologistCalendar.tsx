@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar as CalendarIcon, Clock, Plus, X, Users, Video, MapPin, ChevronLeft, ChevronRight, MessageCircle, Trash2 } from 'lucide-react';
 import { API_URL } from '../services/config';
+import { getCurrentUser } from '../services/authService';
 
 interface Session {
   id: string;
@@ -299,9 +300,19 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
     console.log('Creating availability with slots:', allSlots);
 
     try {
+      // Obtener el usuario actual para enviar el header de autenticación
+      const currentUser = await getCurrentUser();
+      if (!currentUser) {
+        alert('Error: Usuario no autenticado');
+        return;
+      }
+
       const response = await fetch(`${API_URL}/sessions/availability`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-id': currentUser.id
+        },
         body: JSON.stringify({ slots: allSlots, psychologistId })
       });
 

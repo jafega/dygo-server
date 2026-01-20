@@ -149,7 +149,7 @@ const InsightsPanel: React.FC<InsightsPanelProps> = ({ entries, mode = 'PERSONAL
               </div>
             </div>
             <div className="h-52 w-full rounded-xl bg-gradient-to-b from-slate-50 via-white to-white border border-slate-100 p-2 shadow-inner">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" aspect={2.5}>
                 <LineChart data={chartData} margin={{ top: 8, right: 12, left: -10, bottom: 0 }}>
                   <defs>
                     <linearGradient id="moodGradient" x1="0" y1="0" x2="1" y2="0">
@@ -224,12 +224,12 @@ const InsightsPanel: React.FC<InsightsPanelProps> = ({ entries, mode = 'PERSONAL
           {emotionChartData.length === 0 ? (
             <div className="text-sm text-slate-500">Aún no hay emociones registradas.</div>
           ) : (
-            <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={emotionChartData} layout="vertical" margin={{ top: 8, right: 12, left: 12, bottom: 8 }}>
+            <div className="w-full overflow-hidden">
+              <ResponsiveContainer width="100%" height={Math.max(200, emotionChartData.length * 25)}>
+                <BarChart data={emotionChartData} layout="vertical" margin={{ top: 8, right: 12, left: 8, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="6 6" horizontal={false} stroke="#e5e7eb" />
                   <XAxis type="number" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                  <YAxis dataKey="name" type="category" width={110} tick={{ fontSize: 10, fill: '#475569' }} axisLine={false} tickLine={false} />
+                  <YAxis dataKey="name" type="category" width={100} tick={{ fontSize: 9, fill: '#475569' }} axisLine={false} tickLine={false} />
                   <Tooltip
                     contentStyle={{ borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.08)' }}
                     itemStyle={{ color: '#7c3aed', fontSize: '12px', fontWeight: 600 }}

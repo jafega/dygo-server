@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import * as AuthService from '../services/authService';
 import { Loader2, Server, WifiOff, CheckCircle } from 'lucide-react';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_REDIRECT_URL, API_URL, getSupabaseClient } from '../services/config';
@@ -18,7 +18,7 @@ const DygoLogoAuth: React.FC = () => (
 );
 
 interface AuthScreenProps {
-    onAuthSuccess: () => void;
+    onAuthSuccess: (user?: any) => void;
 }
 
 const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
@@ -26,6 +26,9 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [isAuthenticating, setIsAuthenticating] = useState(false);
     const [serverStatus, setServerStatus] = useState<'checking' | 'online' | 'offline'>('checking');
+    
+    // Bandera para evitar múltiples ejecuciones del callback
+    const authCallbackExecutedRef = useRef(false);
 
     useEffect(() => {
         const checkServer = async () => {
@@ -42,6 +45,12 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         const supabaseClient = getSupabaseClient();
 
         const handleSupabaseCallback = async () => {
+            // Prevenir ejecuciones múltiples
+            if (authCallbackExecutedRef.current) {
+                console.log('⏭️ Callback ya ejecutado, saltando...');
+                return;
+            }
+            
             try {
                 if (!supabaseClient) return;
                 const url = new URL(window.location.href);
@@ -52,33 +61,89 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
 
                 if (!hasCode && !hasSupabaseAuth && !hasHashToken) return;
 
+                // Marcar como ejecutado ANTES de hacer la autenticación
+                authCallbackExecutedRef.current = true;
+                console.log('🔐 Iniciando callback de autenticación...');
+
                 let accessToken: string | null = null;
+
+                setIsAuthenticating(true);
+                setError('');
 
                 if (hasCode) {
                     const { data, error } = await supabaseClient.auth.exchangeCodeForSession(window.location.href);
-                    if (error) throw error;
+                    if (error) {
+                        console.error('❌ Error intercambiando código por sesión:', error);
+                        authCallbackExecutedRef.current = false; // Permitir reintentar
+                        throw new Error(`Error de autenticación: ${error.message}`);
+                    }
                     accessToken = data?.session?.access_token || null;
                 } else if (hasHashToken) {
                     const params = new URLSearchParams(hash.replace('#', '?'));
                     accessToken = params.get('access_token');
                 }
 
-                if (!accessToken) return;
+                if (!accessToken) {
+                    console.error('❌ No se obtuvo access token de Supabase');
+                    authCallbackExecutedRef.current = false; // Permitir reintentar
+                    throw new Error('No se pudo obtener el token de acceso');
+                }
 
-                setIsAuthenticating(true);
-                await AuthService.signInWithSupabase(accessToken);
+                // Intentar autenticar con el backend
+                try {
+                    console.log('🔐 Autenticando con el backend...');
+                    const user = await AuthService.signInWithSupabase(accessToken);
+                    
+                    // signInWithSupabase ya valida y devuelve el usuario
+                    if (!user || !user.id) {
+                        console.error('❌ signInWithSupabase no devolvió un usuario válido');
+                        authCallbackExecutedRef.current = false; // Permitir reintentar
+                        throw new Error('No se pudo crear o recuperar el usuario. Intenta de nuevo.');
+                    }
+                    
+                    console.log('✅ Autenticación exitosa:', user.email || user.id);
+                    
+                    // Limpiar parámetros de la URL
+                    url.searchParams.delete('code');
+                    url.searchParams.delete('supabase_auth');
+                    window.location.hash = '';
+                    history.replaceState(null, '', url.pathname + url.search);
+                    
+                    setIsAuthenticating(false);
+                    // Pasar el usuario directamente para evitar una segunda llamada al backend
+                    onAuthSuccess(user);
+                } catch (signInErr: any) {
+                    // NO recargar la página, mostrar el error
+                    console.error('❌ Error en sign-in de Supabase:', signInErr);
+                    
+                    // Limpiar la URL pero mantener la página para mostrar el error
+                    url.searchParams.delete('code');
+                    url.searchParams.delete('supabase_auth');
+                    window.location.hash = '';
+                    history.replaceState(null, '', url.pathname + url.search);
+                    
+                    setIsAuthenticating(false);
+                    authCallbackExecutedRef.current = false; // Permitir reintentar
+                    setError(signInErr?.message || 'Error al autenticar con el servidor');
+                }
+            } catch (err: any) {
+                console.error('❌ Error general en callback de Supabase:', err);
+                
+                // Limpiar la URL
+                const url = new URL(window.location.href);
                 url.searchParams.delete('code');
                 url.searchParams.delete('supabase_auth');
+                window.location.hash = '';
                 history.replaceState(null, '', url.pathname + url.search);
-                onAuthSuccess();
-            } catch (err: any) {
+                
                 setIsAuthenticating(false);
-                setError(err?.message || 'Error con Supabase Sign-In');
+                authCallbackExecutedRef.current = false; // Permitir reintentar
+                setError(err?.message || 'Error durante la autenticación con Google');
             }
         };
 
         handleSupabaseCallback();
-    }, [onAuthSuccess]);
+    }, []); // Array vacío - solo ejecutar una vez al montar
 
     const handleSupabaseGoogle = async () => {
         try {

@@ -113,15 +113,8 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
               if (!isMounted) return;
               setStatus('connected');
               
-              // Trigger AI to speak first by sending a hidden text prompt
-              sessionPromise.then(session => {
-                  session.send({ 
-                      clientContent: { 
-                          turns: [{ role: "user", parts: [{ text: "La sesión ha comenzado. Saluda al usuario cálidamente (pero breve) para iniciar." }] }], 
-                          turnComplete: true 
-                      } 
-                  });
-              });
+              // La IA comenzará a hablar automáticamente basándose en las instrucciones del sistema
+              // No necesitamos enviar un mensaje inicial porque el systemInstruction ya lo cubre
 
               // Start Timer
               timerRef.current = window.setInterval(() => {
@@ -204,6 +197,8 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
             responseModalities: [Modality.AUDIO],
             systemInstruction: `
               Eres "dygo", un compañero de diario inteligente, empático y curioso.
+              
+              SALUDO INICIAL: Cuando comience la sesión, saluda brevemente al usuario de forma cálida y pregunta cómo le fue el día. Usa máximo 1-2 frases.
               
               DIRECTRIZ SUPREMA: FEEDBACK CLÍNICO
               Revisa el contexto proporcionado abajo. Si el psicólogo ha dejado notas (especialmente las del ÚLTIMO día), TUS PREGUNTAS DEBEN DARLE PRIORIDAD A ESOS TEMAS.

@@ -108,6 +108,8 @@ export async function analyzeJournalEntry(transcript: string, date: string, user
   return {
     id: crypto.randomUUID(),
     userId: userId,
+    creator_user_id: userId,  // El creador es el mismo usuario
+    target_user_id: userId,   // El objetivo es el mismo usuario (diario personal)
     date: date,
     timestamp: Date.now(),
     transcript: transcript,
