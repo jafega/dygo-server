@@ -4178,16 +4178,16 @@ app.put('/api/patient/:userId/profile', async (req, res) => {
 // --- RELACIONES PACIENTE / PSICÓLOGO ---
 app.get('/api/relationships', (req, res) => {
   try {
-    const { psychologistId, patientId, psych_user_id, patient_user_id, includeEnded } = req.query;
+    const { psychologistId, patientId, psych_user_id, psychologist_user_id, patient_user_id, includeEnded } = req.query;
     
-    // Soportar tanto campos nuevos como legacy
-    const psychId = psych_user_id || psychologistId;
+    // Soportar tanto campos nuevos como legacy y ambos nombres (psych_user_id y psychologist_user_id)
+    const psychId = psychologist_user_id || psych_user_id || psychologistId;
     const patId = patient_user_id || patientId;
     
     console.log('[GET /api/relationships] Request:', { psychId, patId, includeEnded });
     
     if (!psychId && !patId) {
-      return res.status(400).json({ error: 'psych_user_id o patient_user_id requerido' });
+      return res.status(400).json({ error: 'psychologist_user_id o patient_user_id requerido' });
     }
 
     const db = getDb();
@@ -4253,15 +4253,15 @@ app.get('/api/relationships', (req, res) => {
 
 app.post('/api/relationships', async (req, res) => {
   try {
-    // Soportar tanto campos nuevos como legacy
-    const psychId = req.body.psych_user_id || req.body.psychologistId;
+    // Soportar tanto campos nuevos como legacy y ambos nombres
+    const psychId = req.body.psychologist_user_id || req.body.psych_user_id || req.body.psychologistId;
     const patId = req.body.patient_user_id || req.body.patientId;
     
     console.log('[POST /api/relationships] Request:', { psychId, patId });
     
     if (!psychId || !patId) {
       console.error('[POST /api/relationships] ❌ Missing required fields');
-      return res.status(400).json({ error: 'psych_user_id y patient_user_id son obligatorios' });
+      return res.status(400).json({ error: 'psychologist_user_id y patient_user_id son obligatorios' });
     }
     
     if (psychId === patId) {
@@ -4323,15 +4323,15 @@ app.delete('/api/relationships/:id', async (req, res) => {
 
 app.delete('/api/relationships', async (req, res) => {
   try {
-    // Soportar tanto campos nuevos como legacy
-    const psychId = req.query.psych_user_id || req.query.psychologistId;
+    // Soportar tanto campos nuevos como legacy y ambos nombres
+    const psychId = req.query.psychologist_user_id || req.query.psych_user_id || req.query.psychologistId;
     const patId = req.query.patient_user_id || req.query.patientId;
     
     console.log('[DELETE /api/relationships] Request:', { psychId, patId });
     
     if (!psychId || !patId) {
       console.error('[DELETE /api/relationships] ❌ Missing required fields');
-      return res.status(400).json({ error: 'psych_user_id y patient_user_id son obligatorios' });
+      return res.status(400).json({ error: 'psychologist_user_id y patient_user_id son obligatorios' });
     }
 
     const db = getDb();
@@ -4351,15 +4351,15 @@ app.delete('/api/relationships', async (req, res) => {
 // Finalizar relación (marcar con endedAt en lugar de eliminar)
 app.patch('/api/relationships/end', async (req, res) => {
   try {
-    // Soportar tanto campos nuevos como legacy
-    const psychId = req.body.psych_user_id || req.body.psychologistId;
+    // Soportar tanto campos nuevos como legacy y ambos nombres
+    const psychId = req.body.psychologist_user_id || req.body.psych_user_id || req.body.psychologistId;
     const patId = req.body.patient_user_id || req.body.patientId;
     
     console.log('[PATCH /api/relationships/end] Request:', { psychId, patId });
     
     if (!psychId || !patId) {
       console.error('[PATCH /api/relationships/end] ❌ Missing required fields');
-      return res.status(400).json({ error: 'psych_user_id y patient_user_id son obligatorios' });
+      return res.status(400).json({ error: 'psychologist_user_id y patient_user_id son obligatorios' });
     }
 
     const db = getDb();
