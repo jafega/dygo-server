@@ -4335,16 +4335,19 @@ app.post('/api/sessions', async (req, res) => {
 app.post('/api/sessions/availability', async (req, res) => {
   try {
     const { slots, psychologistId } = req.body;
-    console.log('📅 Creating availability slots:', { slotsCount: slots?.length, psychologistId });
+    // Obtener el user_id de la sesión del usuario autenticado
+    const userId = req.headers['x-user-id'] || req.headers['x-userid'];
+    
+    console.log('📅 Creating availability slots:', { slotsCount: slots?.length, psychologistId, userId });
     
     if (!slots || !Array.isArray(slots) || slots.length === 0) {
       console.error('❌ Invalid slots data:', slots);
       return res.status(400).json({ error: 'Se requiere un array de slots válido' });
     }
     
-    if (!psychologistId) {
-      console.error('❌ Missing psychologistId');
-      return res.status(400).json({ error: 'Se requiere el ID del psicólogo' });
+    if (!userId) {
+      console.error('❌ Missing userId from session');
+      return res.status(401).json({ error: 'Usuario no autenticado' });
     }
     
     const db = getDb();
@@ -4352,7 +4355,12 @@ app.post('/api/sessions/availability', async (req, res) => {
     
     const newSlots = [];
     slots.forEach(slot => {
-      const newSlot = { ...slot, psychologistId };
+      // Usar el userId de la sesión como psychologist_user_id
+      const newSlot = { 
+        ...slot, 
+        psychologistId,
+        psychologist_user_id: userId
+      };
       db.sessions.push(newSlot);
       newSlots.push(newSlot);
     });
