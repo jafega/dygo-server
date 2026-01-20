@@ -202,6 +202,12 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
       monthlyPending[key] += invoice.amount;
     }
   });
+  
+  console.log('[PsychologistDashboard] Total invoices:', invoices.length);
+  console.log('[PsychologistDashboard] Paid invoices:', paidInvoices.length, 'Total:', totalRevenue);
+  console.log('[PsychologistDashboard] Pending invoices:', pendingInvoices.length, 'Total:', totalPending);
+  console.log('[PsychologistDashboard] Monthly pending data:', monthlyPending);
+  console.log('[PsychologistDashboard] Monthly revenue data:', monthlyRevenue);
 
   const revenueValues = Object.keys(monthlyRevenue).map(key => monthlyRevenue[key] + monthlyPending[key]);
   const maxRevenue = Math.max(...revenueValues, 1); // Use highest value as max for auto-scaling
@@ -343,8 +349,11 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
               const paidPercentage = maxRevenue > 0 ? (paidValue / maxRevenue) * 100 : 0;
               const pendingPercentage = maxRevenue > 0 ? (pendingValue / maxRevenue) * 100 : 0;
               const totalPercentage = paidPercentage + pendingPercentage;
-              
-              return (
+                            // Debug log para ver valores
+              if (idx === 0 || totalValue > 0) {
+                console.log(`[Chart] ${month} (${key}): paid=${paidValue}€, pending=${pendingValue}€, total=${totalValue}€`);
+              }
+                            return (
                 <div key={key} className="flex-1 flex flex-col items-center justify-end group relative min-w-0">
                   {/* Bar */}
                   <div className="w-full h-full flex flex-col items-center justify-end">
