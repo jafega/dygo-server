@@ -32,9 +32,8 @@ const GoalsPanel: React.FC<GoalsPanelProps> = ({
   };
 
   return (
-    <div className="space-y-6">
-      <div className="bg-white p-5 sm:p-6 rounded-2xl shadow-sm border border-slate-100">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+    <div className="bg-white p-5 sm:p-6 rounded-2xl shadow-sm border border-slate-100">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
           <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
               <Target className="w-5 h-5 text-indigo-500"/>
               {title}
@@ -103,7 +102,6 @@ const GoalsPanel: React.FC<GoalsPanelProps> = ({
             })}
         </div>
       </div>
-    </div>
   );
 };
 

@@ -74,7 +74,7 @@ const App: React.FC = () => {
   const [sessionDate, setSessionDate] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
-  const [activeTab, setActiveTab] = useState<'insights' | 'feedback' | 'sessions' | 'appointments' | 'calendar' | 'billing' | 'connections' | 'profile' | 'admin'>('insights');
+  const [activeTab, setActiveTab] = useState<'insights' | 'feedback' | 'sessions' | 'appointments' | 'calendar' | 'billing' | 'connections' | 'profile' | 'admin'>('calendar');
   const [showSettings, setShowSettings] = useState(false);
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReport | null>(null);
   const [hasPendingInvites, setHasPendingInvites] = useState(false);
@@ -970,18 +970,6 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
 
           <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
             <button
-              onClick={() => { setActiveTab('insights'); if (window.innerWidth < 768) setSidebarOpen(false); }}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium ${
-                activeTab === 'insights'
-                  ? 'bg-indigo-50 text-indigo-700 shadow-sm'
-                  : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-              }`}
-            >
-              <LayoutDashboard size={18} />
-              <span className={`${sidebarOpen ? 'inline' : 'hidden'} md:inline`}>Resumen</span>
-            </button>
-
-            <button
               onClick={() => { setActiveTab('calendar'); if (window.innerWidth < 768) setSidebarOpen(false); }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium ${
                 activeTab === 'calendar'
@@ -994,6 +982,18 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
             </button>
 
             <button
+              onClick={() => { setActiveTab('insights'); if (window.innerWidth < 768) setSidebarOpen(false); }}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium ${
+                activeTab === 'insights'
+                  ? 'bg-indigo-50 text-indigo-700 shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+              }`}
+            >
+              <LayoutDashboard size={18} />
+              <span className={`${sidebarOpen ? 'inline' : 'hidden'} md:inline`}>Resumen</span>
+            </button>
+
+            <button
               onClick={() => { setActiveTab('appointments'); if (window.innerWidth < 768) setSidebarOpen(false); }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium ${
                 activeTab === 'appointments'
@@ -1003,18 +1003,6 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
             >
               <CalendarIcon size={18} />
               <span className={`${sidebarOpen ? 'inline' : 'hidden'} md:inline`}>Citas</span>
-            </button>
-
-            <button
-              onClick={() => { setActiveTab('sessions'); if (window.innerWidth < 768) setSidebarOpen(false); }}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium ${
-                activeTab === 'sessions'
-                  ? 'bg-indigo-50 text-indigo-700 shadow-sm'
-                  : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-              }`}
-            >
-              <Stethoscope size={18} />
-              <span className={`${sidebarOpen ? 'inline' : 'hidden'} md:inline`}>Sesiones</span>
             </button>
 
             <button
