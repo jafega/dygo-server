@@ -3892,44 +3892,158 @@ app.get('/api/invoices/:id/pdf', (req, res) => {
 });
 
 // --- PSYCHOLOGIST PROFILE ---
-app.get('/api/psychologist/:userId/profile', (req, res) => {
-  const { userId } = req.params;
-  const db = getDb();
-  if (!db.psychologistProfiles) db.psychologistProfiles = {};
-  
-  const profile = db.psychologistProfiles[userId] || {
-    name: '',
-    professionalId: '',
-    specialty: '',
-    phone: '',
-    email: '',
-    address: '',
-    city: '',
-    postalCode: '',
-    country: 'España',
-    businessName: '',
-    taxId: '',
-    iban: '',
-    sessionPrice: 0,
-    currency: 'EUR'
-  };
-  
-  res.json(profile);
+app.get('/api/psychologist/:userId/profile', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    const defaultProfile = {
+      name: '',
+      professionalId: '',
+      specialty: '',
+      phone: '',
+      email: '',
+      address: '',
+      city: '',
+      postalCode: '',
+      country: 'España',
+      businessName: '',
+      taxId: '',
+      iban: '',
+      sessionPrice: 0,
+      currency: 'EUR'
+    };
+
+    // Si usamos Supabase, leer de Supabase
+    if (supabaseAdmin) {
+      // Obtener el psychologist_profile_id del usuario
+      const { data: userData, error: userError } = await supabaseAdmin
+        .from('users')
+        .select('psychologist_profile_id')
+        .eq('id', userId)
+        .single();
+
+      if (userError || !userData?.psychologist_profile_id) {
+        console.log('[API] Usuario sin perfil de psicólogo, devolviendo perfil vacío');
+        return res.json(defaultProfile);
+      }
+
+      // Obtener el perfil de psicólogo
+      const { data: profileData, error: profileError } = await supabaseAdmin
+        .from('psychologist_profiles')
+        .select('data')
+        .eq('id', userData.psychologist_profile_id)
+        .single();
+
+      if (profileError) {
+        console.error('❌ Error obteniendo perfil de psicólogo:', profileError);
+        return res.json(defaultProfile);
+      }
+
+      return res.json(profileData.data || defaultProfile);
+    }
+
+    // Fallback a DB local
+    const db = getDb();
+    if (!db.psychologistProfiles) db.psychologistProfiles = {};
+    const profile = db.psychologistProfiles[userId] || defaultProfile;
+    res.json(profile);
+  } catch (err) {
+    console.error('❌ Error loading psychologist profile', err);
+    res.json({
+      name: '',
+      professionalId: '',
+      specialty: '',
+      phone: '',
+      email: '',
+      address: '',
+      city: '',
+      postalCode: '',
+      country: 'España',
+      businessName: '',
+      taxId: '',
+      iban: '',
+      sessionPrice: 0,
+      currency: 'EUR'
+    });
+  }
 });
 
 app.put('/api/psychologist/:userId/profile', async (req, res) => {
   try {
     const { userId } = req.params;
-    const db = getDb();
-    if (!db.psychologistProfiles) db.psychologistProfiles = {};
-
+    
     console.log('[API] Saving psychologist profile for:', userId);
     console.log('[API] Profile data:', req.body);
 
+    // Si usamos Supabase, guardar en Supabase
+    if (supabaseAdmin) {
+      // Primero obtener el usuario para verificar que existe y obtener su psychologist_profile_id
+      const { data: userData, error: userError } = await supabaseAdmin
+        .from('users')
+        .select('id, psychologist_profile_id')
+        .eq('id', userId)
+        .single();
+
+      if (userError) {
+        console.error('❌ Error obteniendo usuario:', userError);
+        return res.status(404).json({ error: 'Usuario no encontrado' });
+      }
+
+      let profileId = userData.psychologist_profile_id;
+
+      // Si el usuario no tiene un perfil de psicólogo, crear uno
+      if (!profileId) {
+        profileId = crypto.randomUUID();
+        
+        const { error: createError } = await supabaseAdmin
+          .from('psychologist_profiles')
+          .insert([{
+            id: profileId,
+            user_id: userId,
+            data: req.body
+          }]);
+
+        if (createError) {
+          console.error('❌ Error creando perfil de psicólogo:', createError);
+          return res.status(500).json({ error: `Error creando perfil: ${createError.message}` });
+        }
+
+        // Actualizar el usuario con el psychologist_profile_id
+        const { error: updateUserError } = await supabaseAdmin
+          .from('users')
+          .update({ psychologist_profile_id: profileId })
+          .eq('id', userId);
+
+        if (updateUserError) {
+          console.error('❌ Error actualizando usuario con psychologist_profile_id:', updateUserError);
+        }
+
+        console.log('✓ Perfil de psicólogo creado en Supabase:', profileId);
+      } else {
+        // Si ya existe, actualizar
+        const { error: updateError } = await supabaseAdmin
+          .from('psychologist_profiles')
+          .update({ data: req.body, updated_at: new Date().toISOString() })
+          .eq('id', profileId);
+
+        if (updateError) {
+          console.error('❌ Error actualizando perfil de psicólogo:', updateError);
+          return res.status(500).json({ error: `Error actualizando perfil: ${updateError.message}` });
+        }
+
+        console.log('✓ Perfil de psicólogo actualizado en Supabase:', profileId);
+      }
+
+      return res.json(req.body);
+    }
+
+    // Fallback a DB local si no hay Supabase
+    const db = getDb();
+    if (!db.psychologistProfiles) db.psychologistProfiles = {};
     db.psychologistProfiles[userId] = req.body;
     await saveDb(db, { awaitPersistence: true });
 
-    console.log('[API] Profile saved successfully');
+    console.log('[API] Profile saved successfully (local DB)');
     return res.json(req.body);
   } catch (err) {
     console.error('❌ Error saving psychologist profile', err);
