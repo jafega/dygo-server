@@ -375,7 +375,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
                         <div 
                           className="w-full bg-gradient-to-t from-green-600 via-green-500 to-green-400 transition-all duration-500 hover:opacity-90 cursor-pointer shadow-sm"
                           style={{ 
-                            height: `${(paidPercentage / totalPercentage) * 100}%`,
+                            height: totalPercentage > 0 ? `${(paidPercentage / totalPercentage) * 100}%` : '100%',
                             borderRadius: pendingValue > 0 ? '0' : '0.5rem 0.5rem 0 0',
                             minHeight: '12px'
                           }}
@@ -387,7 +387,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
                         <div 
                           className="w-full bg-gradient-to-t from-amber-500 via-amber-400 to-yellow-400 transition-all duration-500 hover:opacity-90 cursor-pointer shadow-sm rounded-t"
                           style={{ 
-                            height: `${(pendingPercentage / totalPercentage) * 100}%`,
+                            height: totalPercentage > 0 ? `${(pendingPercentage / totalPercentage) * 100}%` : '100%',
                             minHeight: '12px'
                           }}
                           title={`Pendiente: ${pendingValue.toFixed(2)}€`}
