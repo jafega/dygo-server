@@ -963,7 +963,7 @@ async function saveSupabaseDb(data, prevCache = null) {
   const invitationsRows = (data.invitations || []).map(i => ({
     id: i.id,
     data: i,
-    psychologist_user_id: i.psychologist_user_id || null,
+    psychologist_user_id: i.psychologist_user_id || i.psych_user_id || i.psychologistId || null,
     patient_user_id: i.patient_user_id || null
   }));
   

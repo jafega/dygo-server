@@ -669,10 +669,10 @@ export const sendInvitation = async (
 export const getPendingInvitationsForEmail = async (email: string): Promise<Invitation[]> => {
     const invs = await getInvitations();
     const normalizedEmail = email.toLowerCase().trim();
-    return invs.filter(i => 
-        (i.patientEmail?.toLowerCase().trim() === normalizedEmail || i.toUserEmail?.toLowerCase().trim() === normalizedEmail) && 
-        i.status === 'PENDING'
-    );
+    return invs.filter(i => {
+        const patientEmail = i.patient_user_email || i.patientEmail || i.toUserEmail || '';
+        return patientEmail.toLowerCase().trim() === normalizedEmail && i.status === 'PENDING';
+    });
 };
 
 // Obtener invitaciones enviadas donde este usuario es el PSICÓLOGO (invitó a pacientes)
