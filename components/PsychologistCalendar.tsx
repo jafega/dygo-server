@@ -358,6 +358,13 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
           );
           
           if (createAvailability) {
+            // Obtener el usuario actual para autenticación
+            const currentUser = await getCurrentUser();
+            if (!currentUser) {
+              alert('Error: Usuario no autenticado');
+              return;
+            }
+
             // Crear nueva sesión disponible con los mismos datos
             const newAvailableSlot = {
               id: `${Date.now()}`,
@@ -374,12 +381,17 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
             // Crear la disponibilidad
             const availabilityResponse = await fetch(`${API_URL}/sessions`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 
+                'Content-Type': 'application/json',
+                'x-user-id': currentUser.id
+              },
               body: JSON.stringify(newAvailableSlot)
             });
 
             if (!availabilityResponse.ok) {
-              console.warn('No se pudo recrear la disponibilidad para la sesión cancelada');
+              const error = await availabilityResponse.json();
+              console.warn('No se pudo recrear la disponibilidad para la sesión cancelada:', error);
+              alert('No se pudo crear la disponibilidad: ' + (error.error || 'Error desconocido'));
             }
           }
         }

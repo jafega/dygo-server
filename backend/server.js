@@ -4393,10 +4393,11 @@ app.get('/api/sessions', (req, res) => {
   
   // Filter by psychologistId or patientId
   if (psychologistId) {
-    sessions = sessions.filter(s => s.psychologistId === psychologistId);
+    sessions = sessions.filter(s => s.psychologistId === psychologistId || s.psychologist_user_id === psychologistId);
   }
   if (patientId) {
-    sessions = sessions.filter(s => s.patientId === patientId);
+    // Filtrar tanto por patientId (legacy) como por patient_user_id (Supabase)
+    sessions = sessions.filter(s => s.patientId === patientId || s.patient_user_id === patientId);
   }
   
   // Filter by year and month if provided (legacy support)
