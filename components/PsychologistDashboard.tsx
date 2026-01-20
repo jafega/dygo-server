@@ -167,10 +167,14 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
 
   // Financial metrics
   const paidInvoices = invoices.filter(inv => inv.status === 'paid');
+  const pendingInvoices = invoices.filter(inv => inv.status === 'pending');
   const totalRevenue = paidInvoices.reduce((sum, inv) => sum + inv.amount, 0);
+  const totalPending = pendingInvoices.reduce((sum, inv) => sum + inv.amount, 0);
+  const totalBilling = totalRevenue + totalPending; // Total incluye pagadas + pendientes
   
   // Monthly revenue breakdown - last 12 months
   const monthlyRevenue: { [key: string]: number } = {};
+  const monthlyPending: { [key: string]: number } = {};
   const last12Months: string[] = [];
   
   for (let i = 11; i >= 0; i--) {
@@ -180,6 +184,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
     const label = `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getFullYear()).slice(-2)}`;
     last12Months.push(label);
     monthlyRevenue[key] = 0;
+    monthlyPending[key] = 0;
   }
   
   paidInvoices.forEach(invoice => {
@@ -189,8 +194,16 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
       monthlyRevenue[key] += invoice.amount;
     }
   });
+  
+  pendingInvoices.forEach(invoice => {
+    const invoiceDate = new Date(invoice.date || invoice.created_at);
+    const key = `${invoiceDate.getFullYear()}-${String(invoiceDate.getMonth() + 1).padStart(2, '0')}`;
+    if (monthlyPending.hasOwnProperty(key)) {
+      monthlyPending[key] += invoice.amount;
+    }
+  });
 
-  const revenueValues = Object.values(monthlyRevenue);
+  const revenueValues = Object.keys(monthlyRevenue).map(key => monthlyRevenue[key] + monthlyPending[key]);
   const maxRevenue = Math.max(...revenueValues, 1); // Use highest value as max for auto-scaling
   
   // Revenue in selected date range
@@ -263,8 +276,13 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
               Total
             </span>
           </div>
-          <div className="text-2xl sm:text-2xl font-bold mb-1">{totalRevenue.toFixed(2)}€</div>
+          <div className="text-2xl sm:text-2xl font-bold mb-1">{totalBilling.toFixed(2)}€</div>
           <div className="text-xs text-green-100">Facturación Total</div>
+          {totalPending > 0 && (
+            <div className="text-[10px] text-green-200 mt-1">
+              ({totalRevenue.toFixed(2)}€ cobrado + {totalPending.toFixed(2)}€ pendiente)
+            </div>
+          )}
         </div>
 
         {/* Revenue in Range */}
@@ -318,28 +336,53 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
           <div className="relative h-full flex items-end justify-between gap-0.5 sm:gap-1 pb-8">
             {last12Months.map((month, idx) => {
               const key = Object.keys(monthlyRevenue)[idx];
-              const value = monthlyRevenue[key];
-              const percentage = maxRevenue > 0 ? (value / maxRevenue) * 100 : 0;
+              const paidValue = monthlyRevenue[key];
+              const pendingValue = monthlyPending[key];
+              const totalValue = paidValue + pendingValue;
+              
+              const paidPercentage = maxRevenue > 0 ? (paidValue / maxRevenue) * 100 : 0;
+              const pendingPercentage = maxRevenue > 0 ? (pendingValue / maxRevenue) * 100 : 0;
+              const totalPercentage = paidPercentage + pendingPercentage;
               
               return (
                 <div key={key} className="flex-1 flex flex-col items-center justify-end group relative min-w-0">
                   {/* Bar */}
                   <div className="w-full h-full flex flex-col items-center justify-end">
                     {/* Value label on top of bar */}
-                    {value > 0 && (
+                    {totalValue > 0 && (
                       <div className="absolute bg-slate-800 text-white text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0.5 rounded whitespace-nowrap z-10 font-semibold shadow-lg" 
-                           style={{ bottom: `calc(${Math.max(percentage, 12)}% + 4px)` }}>
-                        {value >= 1000 ? `${(value/1000).toFixed(1)}k€` : `${value.toFixed(0)}€`}
+                           style={{ bottom: `calc(${Math.max(totalPercentage, 12)}% + 4px)` }}>
+                        {totalValue >= 1000 ? `${(totalValue/1000).toFixed(1)}k€` : `${totalValue.toFixed(0)}€`}
                       </div>
                     )}
                     
-                    <div 
-                      className="w-full bg-gradient-to-t from-green-600 via-green-500 to-emerald-400 rounded-t transition-all duration-500 hover:opacity-90 cursor-pointer shadow-sm"
-                      style={{ 
-                        height: `${Math.max(percentage, 12)}%`,
-                        minHeight: value > 0 ? '12px' : '0'
-                      }}
-                    />
+                    {/* Stacked bars - Paid (bottom) + Pending (top) */}
+                    <div className="w-full flex flex-col-reverse" style={{ 
+                      height: `${Math.max(totalPercentage, totalValue > 0 ? 12 : 0)}%`,
+                      minHeight: totalValue > 0 ? '12px' : '0'
+                    }}>
+                      {/* Paid portion (green) */}
+                      {paidValue > 0 && (
+                        <div 
+                          className="w-full bg-gradient-to-t from-green-600 via-green-500 to-green-400 transition-all duration-500 hover:opacity-90 cursor-pointer shadow-sm"
+                          style={{ 
+                            height: `${(paidPercentage / totalPercentage) * 100}%`,
+                            borderRadius: pendingValue > 0 ? '0' : '0.5rem 0.5rem 0 0'
+                          }}
+                          title={`Cobrado: ${paidValue.toFixed(2)}€`}
+                        />
+                      )}
+                      {/* Pending portion (orange/amber) */}
+                      {pendingValue > 0 && (
+                        <div 
+                          className="w-full bg-gradient-to-t from-amber-500 via-amber-400 to-yellow-400 transition-all duration-500 hover:opacity-90 cursor-pointer shadow-sm rounded-t"
+                          style={{ 
+                            height: `${(pendingPercentage / totalPercentage) * 100}%`
+                          }}
+                          title={`Pendiente: ${pendingValue.toFixed(2)}€`}
+                        />
+                      )}
+                    </div>
                   </div>
                   
                   {/* Month label */}
@@ -361,9 +404,18 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
         
         {/* Legend/Summary */}
         <div className="mt-6 sm:mt-8 pt-3 sm:pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs">
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded bg-gradient-to-t from-green-600 to-emerald-400"></div>
-            <span className="text-slate-600">Ingresos mensuales</span>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded bg-gradient-to-t from-green-600 to-green-400"></div>
+              <span className="text-slate-600">Cobrado</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded bg-gradient-to-t from-amber-500 to-yellow-400"></div>
+              <span className="text-slate-600">Pendiente</span>
+            </div>
+          </div>
+          <div className="text-slate-500">
+            Total: {totalBilling.toFixed(2)}€
           </div>
         </div>
       </div>

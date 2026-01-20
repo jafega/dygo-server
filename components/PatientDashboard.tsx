@@ -12,11 +12,22 @@ const PatientDashboard: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [showInactive, setShowInactive] = useState(false);
 
+  // Mantener referencia al paciente seleccionado incluso si no está en la lista filtrada actual
+  const [selectedPatientData, setSelectedPatientData] = useState<PatientSummary | null>(null);
+  
   // Buscar el paciente seleccionado por ID (useMemo mantiene referencia estable)
   const selectedPatient = useMemo(() => {
     if (!selectedPatientId) return null;
-    return patients.find(p => p.id === selectedPatientId) || null;
-  }, [selectedPatientId, patients]);
+    const found = patients.find(p => p.id === selectedPatientId);
+    // Si se encuentra en la lista actual, actualizar y retornar
+    if (found) {
+      setSelectedPatientData(found);
+      return found;
+    }
+    // Si no se encuentra pero tenemos datos previos, mantener esos datos
+    // Esto previene que el modal se cierre al cambiar filtros o recargar datos
+    return selectedPatientData;
+  }, [selectedPatientId, patients, selectedPatientData]);
 
   const loadData = async (showLoader = true) => {
     // Solo mostrar loader si no hay datos previos y se solicita
@@ -143,7 +154,10 @@ const PatientDashboard: React.FC = () => {
          <PatientDetailModal 
            key={selectedPatient.id}
            patient={selectedPatient} 
-           onClose={() => setSelectedPatientId(null)} 
+           onClose={() => {
+             setSelectedPatientId(null);
+             setSelectedPatientData(null);
+           }} 
            psychologistId={currentUser.id}
          />
        )}

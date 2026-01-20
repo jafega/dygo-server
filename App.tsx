@@ -1203,13 +1203,13 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
             </header>
 
             {/* Mobile Action Button - Circular Floating Button */}
-            {/* <button
+            <button
               onClick={() => handleStartSession()}
               className="md:hidden fixed bottom-6 right-6 z-50 w-14 h-14 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full shadow-2xl hover:shadow-indigo-500/50 transition-all flex items-center justify-center"
               aria-label="Grabar entrada"
             >
               <Mic size={24} />
-            </button> */}
+            </button>
 
             {activeTab === 'insights' && assignedGoals.length > 0 && (
               <div className="bg-purple-50 rounded-2xl border border-purple-100">
