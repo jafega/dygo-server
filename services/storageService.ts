@@ -8,6 +8,16 @@ const SETTINGS_KEY = 'ai_diary_settings_v3';
 const INVITATIONS_KEY = 'ai_diary_invitations_v1';
 const RELATIONSHIPS_KEY = 'ai_diary_care_relationships_v1';
 
+// Cache para relationships - expira después de 30 segundos
+interface RelationshipsCache {
+  data: CareRelationship[];
+  timestamp: number;
+  filter: string; // stringify del filtro usado
+}
+
+const relationshipsCache = new Map<string, RelationshipsCache>();
+const CACHE_TTL = 30000; // 30 segundos
+
 type RelationshipFilter = {
   psychologistId?: string;
   patientId?: string;
@@ -35,9 +45,21 @@ const matchesRelationshipFilter = (rel: CareRelationship, filter: RelationshipFi
   return true;
 };
 
-const fetchRelationships = async (filter: RelationshipFilter): Promise<CareRelationship[]> => {
+const fetchRelationships = async (filter: RelationshipFilter, skipCache = false): Promise<CareRelationship[]> => {
   if (!filter.psychologistId && !filter.patientId) {
       throw new Error('psychologistId o patientId requerido');
+  }
+
+  // Crear clave de caché basada en el filtro
+  const cacheKey = JSON.stringify(filter);
+  
+  // Verificar caché si no se solicita saltar
+  if (!skipCache) {
+    const cached = relationshipsCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp) < CACHE_TTL) {
+      console.log('[fetchRelationships] Usando datos en caché', { filter, age: Date.now() - cached.timestamp });
+      return cached.data;
+    }
   }
 
   if (USE_BACKEND) {
@@ -65,7 +87,16 @@ const fetchRelationships = async (filter: RelationshipFilter): Promise<CareRelat
               }
               throw new Error(`Error fetching relationships (${res.status})${details}`);
           }
-          return await res.json();
+          const data = await res.json();
+          
+          // Guardar en caché
+          relationshipsCache.set(cacheKey, {
+            data,
+            timestamp: Date.now(),
+            filter: cacheKey
+          });
+          
+          return data;
       } catch (err) {
           if (!ALLOW_LOCAL_FALLBACK) {
               console.error('No se puede conectar con el servidor para obtener relaciones. Mostrando lista vacía.', err);
@@ -80,7 +111,16 @@ const fetchRelationships = async (filter: RelationshipFilter): Promise<CareRelat
       return [];
   }
 
-  return getLocalRelationships().filter(rel => matchesRelationshipFilter(rel, filter));
+  const localData = getLocalRelationships().filter(rel => matchesRelationshipFilter(rel, filter));
+  
+  // Guardar en caché también los datos locales
+  relationshipsCache.set(cacheKey, {
+    data: localData,
+    timestamp: Date.now(),
+    filter: cacheKey
+  });
+  
+  return localData;
 };
 
 const ensureLocalRelationship = (psychologistId: string, patientId: string): CareRelationship => {
@@ -115,6 +155,10 @@ const ensureRelationship = async (psychologistId: string, patientId: string): Pr
               const err = await res.json().catch(() => ({}));
               throw new Error(err.error || `Error creating relationship (${res.status})`);
           }
+          
+          // Invalidar caché después de crear relación
+          relationshipsCache.clear();
+          
           return await res.json();
       } catch (err) {
           if (!ALLOW_LOCAL_FALLBACK) {
@@ -128,6 +172,9 @@ const ensureRelationship = async (psychologistId: string, patientId: string): Pr
       throw new Error('Persistencia local deshabilitada. El backend debe estar disponible.');
   }
 
+  // Invalidar caché local también
+  relationshipsCache.clear();
+  
   return ensureLocalRelationship(psychologistId, patientId);
 };
 
@@ -144,6 +191,10 @@ const removeRelationship = async (psychologistId: string, patientId: string): Pr
               const err = await res.json().catch(() => ({}));
               throw new Error(err.error || `Error removing relationship (${res.status})`);
           }
+          
+          // Invalidar caché después de eliminar relación
+          relationshipsCache.clear();
+          
           return;
       } catch (err) {
           if (!ALLOW_LOCAL_FALLBACK) {
@@ -157,6 +208,9 @@ const removeRelationship = async (psychologistId: string, patientId: string): Pr
       throw new Error('Persistencia local deshabilitada. El backend debe estar disponible.');
   }
 
+  // Invalidar caché local también
+  relationshipsCache.clear();
+  
   removeLocalRelationship(psychologistId, patientId);
 };
 
@@ -166,12 +220,26 @@ const relationshipExists = async (psychologistId: string, patientId: string): Pr
 };
 
 // --- Entries ---
-export const getEntriesForUser = async (userId: string, viewerId?: string): Promise<JournalEntry[]> => {
+export interface GetEntriesOptions {
+  startDate?: string; // YYYY-MM-DD
+  endDate?: string;   // YYYY-MM-DD
+  limit?: number;     // Máximo número de entradas a retornar
+}
+
+export const getEntriesForUser = async (
+  userId: string, 
+  viewerId?: string, 
+  options?: GetEntriesOptions
+): Promise<JournalEntry[]> => {
   if (USE_BACKEND) {
       try {
-          const url = viewerId 
-            ? `${API_URL}/entries?userId=${userId}&viewerId=${viewerId}`
-            : `${API_URL}/entries?userId=${userId}`;
+          const params = new URLSearchParams({ userId });
+          if (viewerId) params.append('viewerId', viewerId);
+          if (options?.startDate) params.append('startDate', options.startDate);
+          if (options?.endDate) params.append('endDate', options.endDate);
+          if (options?.limit) params.append('limit', String(options.limit));
+          
+          const url = `${API_URL}/entries?${params.toString()}`;
           const res = await fetch(url);
           if (res.ok) return (await res.json()).sort((a: any, b: any) => b.timestamp - a.timestamp);
           throw new Error(`Server error: ${res.status}`);
@@ -185,8 +253,28 @@ export const getEntriesForUser = async (userId: string, viewerId?: string): Prom
   }
     // Local Fallback (solo si USE_BACKEND es false)
   const stored = localStorage.getItem(ENTRIES_KEY);
-  const all: JournalEntry[] = stored ? JSON.parse(stored) : [];
-  return all.filter(e => e.userId === userId).sort((a, b) => b.timestamp - a.timestamp);
+  let all: JournalEntry[] = stored ? JSON.parse(stored) : [];
+  
+  // Aplicar filtros locales
+  all = all.filter(e => e.userId === userId);
+  
+  if (options?.startDate || options?.endDate) {
+    all = all.filter(e => {
+      if (!e.timestamp && !e.date) return true;
+      const entryDate = e.date || new Date(e.timestamp).toISOString().split('T')[0];
+      if (options.startDate && entryDate < options.startDate) return false;
+      if (options.endDate && entryDate > options.endDate) return false;
+      return true;
+    });
+  }
+  
+  all = all.sort((a, b) => b.timestamp - a.timestamp);
+  
+  if (options?.limit && options.limit > 0) {
+    all = all.slice(0, options.limit);
+  }
+  
+  return all;
 };
 
 export const saveEntry = async (entry: JournalEntry): Promise<void> => {
@@ -684,8 +772,6 @@ export const endRelationship = async (psychologistId: string, patientId: string)
 };
 
 export const getPatientsForPsychologist = async (psychId: string): Promise<PatientSummary[]> => {
-    console.log('[getPatientsForPsychologist]', { psychId });
-    
     try {
         // Cargar todo en paralelo para reducir llamadas al servidor
         const [psych, relationships, allUsers, allEntries] = await Promise.all([
@@ -737,14 +823,11 @@ export const getPatientsForPsychologist = async (psychId: string): Promise<Patie
                 isSelf: isSelf
             } as PatientSummary;
         };
-
-        console.log('[getPatientsForPsychologist] relationships:', relationships);
         
         const patientIds = relationships
             .map(rel => rel.patientId)
             .filter((id): id is string => Boolean(id));
         const uniquePatientIds = Array.from(new Set(patientIds));
-        console.log('[getPatientsForPsychologist] uniquePatientIds:', uniquePatientIds);
 
         // Procesar pacientes usando el mapa (sin llamadas adicionales al servidor)
         uniquePatientIds.forEach(pid => {
@@ -757,7 +840,6 @@ export const getPatientsForPsychologist = async (psychId: string): Promise<Patie
         // Agregar el psicólogo al principio
         patientsData.unshift(processUser(psych, true));
 
-        console.log('[getPatientsForPsychologist] result:', patientsData.map(p => ({ id: p.id, name: p.name })));
         return patientsData;
     } catch (error) {
         console.error('[getPatientsForPsychologist] Error:', error);
@@ -766,9 +848,7 @@ export const getPatientsForPsychologist = async (psychId: string): Promise<Patie
 };
 
 export const getPsychologistsForPatient = async (patientId: string): Promise<User[]> => {
-    console.log('[getPsychologistsForPatient]', { patientId });
     const relationships = await fetchRelationships({ patientId });
-    console.log('[getPsychologistsForPatient] relationships:', relationships);
     if (relationships.length === 0) return [];
 
     const psychIds = Array.from(new Set(
@@ -776,11 +856,8 @@ export const getPsychologistsForPatient = async (patientId: string): Promise<Use
             .map(rel => rel.psychologistId)
             .filter((id): id is string => Boolean(id))
     ));
-    console.log('[getPsychologistsForPatient] psychIds:', psychIds);
     const psychs = await Promise.all(psychIds.map(id => AuthService.getUserById(id)));
-    const result = psychs.filter((u): u is User => Boolean(u));
-    console.log('[getPsychologistsForPatient] result:', result.map(u => ({ id: u.id, name: u.name })));
-    return result;
+    return psychs.filter((u): u is User => Boolean(u));
 };
 
 export const getAllPsychologists = async (): Promise<User[]> => {

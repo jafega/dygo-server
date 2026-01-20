@@ -13,7 +13,7 @@
       "name": "Garrido Javier Fernandez",
       "email": "garridojavierfernandez@gmail.com",
       "password": "123",
-      "role": "PSYCHOLOGIST",
+      "role": "PATIENT",
       "isPsychologist": false
     }
   ],
@@ -22,5 +22,12 @@
   "invitations": [],
   "settings": {},
   "sessions": [],
-  "careRelationships": []
+  "careRelationships": [
+    {
+      "id": "rel-001",
+      "psychologistId": "psych-001",
+      "patientId": "patient-001",
+      "createdAt": 1737398400000
+    }
+  ]
 }

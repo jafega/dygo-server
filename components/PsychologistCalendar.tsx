@@ -66,12 +66,57 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
     loadSessions();
     loadPatients();
   }, [psychologistId]);
+  
+  // Recargar sesiones cuando cambia la vista o el rango de fechas
+  useEffect(() => {
+    if (psychologistId) {
+      loadSessions();
+    }
+  }, [viewMode, currentDate]);
 
   const loadSessions = async () => {
     setIsLoading(true);
     try {
-      // Para la vista de lista, cargar todas las sesiones sin filtrar por mes
-      const response = await fetch(`${API_URL}/sessions?psychologistId=${psychologistId}`);
+      // Optimización: Para vista de lista, cargar solo últimos 3 meses y próximos 6 meses
+      // Para vistas de mes/semana, cargar el rango específico
+      let startDate: string | undefined;
+      let endDate: string | undefined;
+      
+      if (viewMode === 'LIST') {
+        // Últimos 3 meses hasta próximos 6 meses
+        const today = new Date();
+        const past = new Date(today);
+        past.setMonth(past.getMonth() - 3);
+        const future = new Date(today);
+        future.setMonth(future.getMonth() + 6);
+        
+        startDate = past.toISOString().split('T')[0];
+        endDate = future.toISOString().split('T')[0];
+      } else if (viewMode === 'MONTH') {
+        // Solo el mes actual más 1 mes antes y después
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth();
+        const firstDay = new Date(year, month - 1, 1);
+        const lastDay = new Date(year, month + 2, 0);
+        
+        startDate = firstDay.toISOString().split('T')[0];
+        endDate = lastDay.toISOString().split('T')[0];
+      } else if (viewMode === 'WEEK') {
+        // La semana actual más 2 semanas antes y después
+        const weekStart = new Date(currentDate);
+        weekStart.setDate(weekStart.getDate() - weekStart.getDay() - 14);
+        const weekEnd = new Date(currentDate);
+        weekEnd.setDate(weekEnd.getDate() + (6 - weekEnd.getDay()) + 14);
+        
+        startDate = weekStart.toISOString().split('T')[0];
+        endDate = weekEnd.toISOString().split('T')[0];
+      }
+      
+      const params = new URLSearchParams({ psychologistId });
+      if (startDate) params.append('startDate', startDate);
+      if (endDate) params.append('endDate', endDate);
+      
+      const response = await fetch(`${API_URL}/sessions?${params.toString()}`);
       if (response.ok) {
         const data = await response.json();
         setSessions(data);

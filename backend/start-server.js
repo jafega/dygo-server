@@ -10,7 +10,7 @@ const serverPath = join(__dirname, 'server.js');
 console.log('🚀 Iniciando servidor dygo...');
 console.log('📁 Ruta:', serverPath);
 
-const env = { ...process.env, PORT: '3005' };
+const env = { ...process.env, PORT: '3001' };
 
 const child = spawn('node', [serverPath], {
   cwd: __dirname,

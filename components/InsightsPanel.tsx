@@ -50,8 +50,11 @@ const InsightsPanel: React.FC<InsightsPanelProps> = ({ entries, mode = 'PERSONAL
 
       setLoading(true);
       try {
-        // Take last 7 entries for analysis
-        const recent = [...entries].sort((a, b) => b.timestamp - a.timestamp).slice(0, 7);
+        // Optimización: Tomar solo las últimas 7 entradas necesarias
+        // Ya filtradas desde entries prop (limitadas en el componente padre)
+        const recent = [...entries]
+          .sort((a, b) => b.timestamp - a.timestamp)
+          .slice(0, 7);
 
         let text = '';
         if (mode === 'CLINICAL') {

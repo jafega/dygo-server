@@ -24,6 +24,7 @@ interface AuthScreenProps {
 const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [isAuthenticating, setIsAuthenticating] = useState(false);
     const [serverStatus, setServerStatus] = useState<'checking' | 'online' | 'offline'>('checking');
 
     useEffect(() => {
@@ -64,16 +65,15 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
 
                 if (!accessToken) return;
 
-                setIsLoading(true);
+                setIsAuthenticating(true);
                 await AuthService.signInWithSupabase(accessToken);
                 url.searchParams.delete('code');
                 url.searchParams.delete('supabase_auth');
                 history.replaceState(null, '', url.pathname + url.search);
                 onAuthSuccess();
             } catch (err: any) {
+                setIsAuthenticating(false);
                 setError(err?.message || 'Error con Supabase Sign-In');
-            } finally {
-                setIsLoading(false);
             }
         };
 
@@ -103,6 +103,31 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
             setIsLoading(false);
         }
     };
+
+    // Loading screen durante autenticación
+    if (isAuthenticating) {
+        return (
+            <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-slate-100 flex items-center justify-center p-4">
+                <div className="text-center">
+                    <div className="mb-6 flex justify-center">
+                        <DygoLogoAuth />
+                    </div>
+                    <h1 className="text-4xl font-bold text-indigo-600 tracking-tight mb-4 font-dygo">dygo</h1>
+                    <div className="relative w-64 h-2 bg-indigo-100 rounded-full overflow-hidden mx-auto mb-3">
+                        <div className="absolute top-0 left-0 h-full bg-indigo-600 rounded-full animate-[loading_1.5s_ease-in-out_infinite]"></div>
+                    </div>
+                    <p className="text-slate-500 text-sm">Iniciando sesión...</p>
+                </div>
+                <style>{`
+                    @keyframes loading {
+                        0% { width: 0%; }
+                        50% { width: 70%; }
+                        100% { width: 100%; }
+                    }
+                `}</style>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-slate-100 flex items-center justify-center p-4 relative">

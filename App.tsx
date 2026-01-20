@@ -133,8 +133,9 @@ const App: React.FC = () => {
   }, []);
 
   const loadUserData = async (userId: string) => {
+    // Optimización: Solo cargar últimas 50 entradas por defecto
     const [e, g, s] = await Promise.all([
-        StorageService.getEntriesForUser(userId),
+        StorageService.getEntriesForUser(userId, undefined, { limit: 50 }),
         StorageService.getGoalsForUser(userId),
         StorageService.getSettings(userId)
     ]);

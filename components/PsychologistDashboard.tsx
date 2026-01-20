@@ -49,27 +49,39 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
 
   useEffect(() => {
     loadData();
-  }, [psychologistId]);
+  }, [psychologistId, dateRange]);
 
   const loadData = async () => {
     setIsLoading(true);
     try {
+      // Optimización: Solo cargar sesiones e invoices del rango de fechas visible
+      const params = new URLSearchParams({
+        psychologistId,
+        startDate: dateRange.start,
+        endDate: dateRange.end
+      });
+      
       // Load sessions
-      const sessionsResponse = await fetch(`${API_URL}/sessions?psychologistId=${psychologistId}`);
+      const sessionsResponse = await fetch(`${API_URL}/sessions?${params.toString()}`);
       if (sessionsResponse.ok) {
         const sessionsData = await sessionsResponse.json();
         setSessions(sessionsData);
       }
 
-      // Load patients
+      // Load patients (siempre necesarios para el conteo)
       const patientsResponse = await fetch(`${API_URL}/psychologist/${psychologistId}/patients`);
       if (patientsResponse.ok) {
         const patientsData = await patientsResponse.json();
         setPatients(patientsData);
       }
 
-      // Load invoices
-      const invoicesResponse = await fetch(`${API_URL}/invoices?psychologistId=${psychologistId}`);
+      // Load invoices con filtro de fecha
+      const invoicesParams = new URLSearchParams({
+        psychologistId,
+        startDate: dateRange.start,
+        endDate: dateRange.end
+      });
+      const invoicesResponse = await fetch(`${API_URL}/invoices?${invoicesParams.toString()}`);
       if (invoicesResponse.ok) {
         const invoicesData = await invoicesResponse.json();
         setInvoices(invoicesData);

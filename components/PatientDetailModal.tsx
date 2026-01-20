@@ -179,8 +179,16 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
           setCurrentPsychologistId(psychId);
         }
         
+        // Optimización: Solo cargar entradas de los últimos 90 días inicialmente
+        const today = new Date();
+        const past90Days = new Date(today);
+        past90Days.setDate(past90Days.getDate() - 90);
+        
         const [e, g] = await Promise.all([
-          getEntriesForUser(patient.id, psychId),
+          getEntriesForUser(patient.id, psychId, {
+            startDate: past90Days.toISOString().split('T')[0],
+            limit: 100 // Máximo 100 entradas inicialmente
+          }),
           getGoalsForUser(patient.id)
         ]);
         if (!cancelled) {

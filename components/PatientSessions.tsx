@@ -51,9 +51,23 @@ const PatientSessions: React.FC = () => {
       }
 
       console.log('[PatientSessions] Fetching psychologists and sessions...');
+      
+      // Optimización: Solo cargar sesiones desde 30 días atrás hasta 6 meses en el futuro
+      const today = new Date();
+      const past = new Date(today);
+      past.setDate(past.getDate() - 30);
+      const future = new Date(today);
+      future.setMonth(future.getMonth() + 6);
+      
+      const params = new URLSearchParams({
+        patientId: user.id,
+        startDate: past.toISOString().split('T')[0],
+        endDate: future.toISOString().split('T')[0]
+      });
+      
       const [psychologists, response] = await Promise.all([
         getPsychologistsForPatient(user.id),
-        fetch(`${API_URL}/sessions?patientId=${user.id}`)
+        fetch(`${API_URL}/sessions?${params.toString()}`)
       ]);
       
       console.log('[PatientSessions] psychologists from getPsychologistsForPatient:', psychologists);

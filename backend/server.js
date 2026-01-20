@@ -587,43 +587,70 @@ if (USE_POSTGRES) {
   }
 }
 
-if (!pgPool && SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
-  (async () => {
+async function initializeSupabase() {
+  if (!pgPool && SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
     try {
+      console.log('🔄 Importing Supabase client...');
       const { createClient } = await import('@supabase/supabase-js');
+      console.log('🔄 Creating Supabase client...');
       supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
         auth: { persistSession: false }
       });
       console.log('✅ Supabase REST persistence enabled (service role)');
+      
       try {
-        await ensureSupabaseTablesExist();
+        console.log('🔄 Ensuring Supabase tables exist...');
+        await Promise.race([
+          ensureSupabaseTablesExist(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('ensureSupabaseTablesExist timeout')), 30000))
+        ]);
+        console.log('✅ Supabase tables verified');
       } catch (schemaErr) {
         console.error('❌ Error ensuring Supabase schema', schemaErr?.message || schemaErr);
       }
-      supabaseDbCache = ensureDbShape(await loadSupabaseCache());
-      console.log('ℹ️ Supabase data loaded into cache');
-      console.log('📊 Cache contents: users:', supabaseDbCache.users?.length || 0, 
-                  'entries:', supabaseDbCache.entries?.length || 0,
-                  'careRelationships:', supabaseDbCache.careRelationships?.length || 0);
-      if (supabaseDbCache.careRelationships && supabaseDbCache.careRelationships.length > 0) {
-        console.log('📋 Care relationships loaded:');
-        supabaseDbCache.careRelationships.forEach(rel => {
-          console.log(`   - ${rel.psychologistId} → ${rel.patientId}`);
-        });
-      }
-      (async () => {
-        try {
-          await dedupeSupabaseUsers();
-        } catch (err) {
-          console.error('❌ Supabase dedupe failed', err);
+      
+      try {
+        console.log('🔄 Loading Supabase cache...');
+        const cacheData = await Promise.race([
+          loadSupabaseCache(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('loadSupabaseCache timeout')), 30000))
+        ]);
+        supabaseDbCache = ensureDbShape(cacheData);
+        console.log('ℹ️ Supabase data loaded into cache');
+        console.log('📊 Cache contents: users:', supabaseDbCache.users?.length || 0, 
+                    'entries:', supabaseDbCache.entries?.length || 0,
+                    'careRelationships:', supabaseDbCache.careRelationships?.length || 0);
+        
+        // Limpiar relaciones con IDs antiguos o usuarios inexistentes
+        if (supabaseDbCache.careRelationships && supabaseDbCache.careRelationships.length > 0) {
+          console.log('📋 Care relationships loaded:');
+          supabaseDbCache.careRelationships.forEach(rel => {
+            console.log(`   - ${rel.psychologistId} → ${rel.patientId} (${rel.endedAt ? 'FINALIZADA' : 'ACTIVA'})`);
+          });
+        } else {
+          console.log('⚠️ No care_relationships found in cache');
         }
-      })();
+      } catch (cacheErr) {
+        console.error('❌ Error loading Supabase cache', cacheErr?.message || cacheErr);
+        supabaseDbCache = ensureDbShape({});
+      }
+      
+      try {
+        console.log('🔄 Deduplicating Supabase users...');
+        await Promise.race([
+          dedupeSupabaseUsers(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('dedupeSupabaseUsers timeout')), 30000))
+        ]);
+        console.log('✅ Supabase users deduplicated');
+      } catch (err) {
+        console.error('❌ Supabase dedupe failed', err?.message || err);
+      }
     } catch (err) {
-      console.error('❌ Unable to enable Supabase REST persistence', err);
+      console.error('❌ Unable to enable Supabase REST persistence', err?.message || err, err?.stack);
       supabaseAdmin = null;
       supabaseDbCache = null;
     }
-  })();
+  }
 }
 
 function normalizeSupabaseRow(row) {
@@ -660,7 +687,53 @@ async function loadSupabaseCache() {
 
   const readTable = async (table) => {
     try {
-      const { data, error } = await supabaseAdmin.from(table).select('*');
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error(`Timeout reading table ${table}`)), 10000)
+      );
+      
+      // Para tablas grandes como entries, usar paginación
+      const isLargeTable = ['entries', 'sessions'].includes(table);
+      
+      if (isLargeTable) {
+        console.log(`📄 Loading ${table} with pagination...`);
+        let allData = [];
+        let page = 0;
+        const pageSize = 1000;
+        let hasMore = true;
+        
+        while (hasMore) {
+          const { data, error } = await Promise.race([
+            supabaseAdmin.from(table).select('*').range(page * pageSize, (page + 1) * pageSize - 1),
+            timeoutPromise
+          ]);
+          
+          if (error) {
+            console.warn(`⚠️ Could not load table '${table}' page ${page}:`, error.message);
+            break;
+          }
+          
+          if (data && data.length > 0) {
+            allData = allData.concat(data);
+            console.log(`   Loaded ${data.length} rows from ${table} (page ${page + 1})`);
+          }
+          
+          hasMore = data && data.length === pageSize;
+          page++;
+          
+          // Límite de seguridad: máximo 10 páginas (10,000 registros)
+          if (page >= 10) {
+            console.warn(`⚠️ Reached pagination limit for ${table}`);
+            break;
+          }
+        }
+        
+        return allData;
+      }
+      
+      const readPromise = supabaseAdmin.from(table).select('*');
+      
+      const { data, error } = await Promise.race([readPromise, timeoutPromise]);
+      
       if (error) {
         console.warn(`⚠️ Could not load table '${table}':`, error.message);
         return [];
@@ -673,7 +746,7 @@ async function loadSupabaseCache() {
   };
 
   const usersRows = await readTable('users');
-  const entriesRows = await readTable('entries');
+  // No cargar entries durante la inicialización - se cargan bajo demanda
   const goalsRows = await readTable('goals');
   const invitationsRows = await readTable('invitations');
   const settingsRows = await readTable('settings');
@@ -683,7 +756,7 @@ async function loadSupabaseCache() {
   const profilesRows = await readTable('psychologist_profiles');
 
   const users = usersRows.map(normalizeSupabaseRow);
-  const entries = entriesRows.map(normalizeSupabaseRow);
+  const entries = []; // No cargar entries aquí - lazy loading
   const goals = goalsRows.map(normalizeSupabaseRow);
   const invitations = invitationsRows.map(normalizeSupabaseRow);
   const sessions = sessionsRows.map(normalizeSupabaseRow);
@@ -700,6 +773,29 @@ async function readSupabaseTable(table) {
   const { data, error } = await supabaseAdmin.from(table).select('*');
   if (error) throw error;
   return (data || []).map(normalizeSupabaseRow);
+}
+
+async function loadEntriesForUser(userId) {
+  if (!supabaseAdmin) return [];
+  try {
+    console.log(`🔄 Cargando entries para usuario: ${userId}`);
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error(`Timeout loading entries for user ${userId}`)), 10000)
+    );
+    
+    const readPromise = supabaseAdmin.from('entries').select('*').eq('userId', userId);
+    const { data, error } = await Promise.race([readPromise, timeoutPromise]);
+    
+    if (error) {
+      console.warn(`⚠️ Could not load entries for user '${userId}':`, error.message);
+      return [];
+    }
+    console.log(`✅ Cargadas ${data?.length || 0} entries para usuario ${userId}`);
+    return (data || []).map(normalizeSupabaseRow);
+  } catch (err) {
+    console.warn(`⚠️ Error loading entries for user '${userId}':`, err.message);
+    return [];
+  }
 }
 
 async function readSupabaseRowById(table, id) {
@@ -1982,10 +2078,30 @@ app.post('/api/upload-session-file', async (req, res) => {
 // --- RUTAS DE ENTRADAS (ENTRIES) ---
 app.get('/api/entries', async (req, res) => {
   try {
-    const { userId, viewerId } = req.query;
+    const { userId, viewerId, startDate, endDate, limit } = req.query;
 
     if (supabaseAdmin) {
-      const entries = (await readSupabaseTable('entries')) || [];
+      // Si se solicita un userId específico, cargar solo sus entries
+      let entries = [];
+      if (userId) {
+        entries = await loadEntriesForUser(String(userId));
+      } else {
+        // Sin userId, no cargar nada (evitar cargar toda la tabla)
+        console.warn('⚠️ GET /api/entries sin userId - no se cargan entries');
+        return res.json([]);
+      }
+      
+      // Aplicar filtros de fecha si están presentes
+      if (startDate || endDate) {
+        entries = entries.filter(e => {
+          if (!e.timestamp && !e.date) return true;
+          const entryDate = e.date || new Date(e.timestamp).toISOString().split('T')[0];
+          if (startDate && entryDate < startDate) return false;
+          if (endDate && entryDate > endDate) return false;
+          return true;
+        });
+      }
+      
       if (userId) {
         const ids = new Set([String(userId)]);
         try {
@@ -2033,8 +2149,25 @@ app.get('/api/entries', async (req, res) => {
           }
         }
         
+        // Aplicar límite si está especificado
+        if (limit) {
+          const limitNum = parseInt(limit);
+          if (!isNaN(limitNum) && limitNum > 0) {
+            filtered = filtered.slice(0, limitNum);
+          }
+        }
+        
         return res.json(filtered);
       }
+      
+      // Aplicar límite si está especificado
+      if (limit) {
+        const limitNum = parseInt(limit);
+        if (!isNaN(limitNum) && limitNum > 0) {
+          entries = entries.slice(0, limitNum);
+        }
+      }
+      
       return res.json(entries);
     }
 
@@ -2043,6 +2176,17 @@ app.get('/api/entries', async (req, res) => {
     let entries = userId
       ? db.entries.filter((e) => String(e.userId) === String(userId))
       : db.entries;
+    
+    // Aplicar filtros de fecha para db.json
+    if (startDate || endDate) {
+      entries = entries.filter(e => {
+        if (!e.timestamp && !e.date) return true;
+        const entryDate = e.date || new Date(e.timestamp).toISOString().split('T')[0];
+        if (startDate && entryDate < startDate) return false;
+        if (endDate && entryDate > endDate) return false;
+        return true;
+      });
+    }
     
     // Si viewerId está presente, verificar si la relación está finalizada
     if (userId && viewerId && String(viewerId) !== String(userId)) {
@@ -2060,6 +2204,14 @@ app.get('/api/entries', async (req, res) => {
           }
           return false;
         });
+      }
+    }
+    
+    // Aplicar límite si está especificado
+    if (limit) {
+      const limitNum = parseInt(limit);
+      if (!isNaN(limitNum) && limitNum > 0) {
+        entries = entries.slice(0, limitNum);
       }
     }
 
@@ -2749,6 +2901,8 @@ app.get('/api/dbinfo', async (_req, res) => {
 app.get('/api/invoices', (req, res) => {
   const psychologistId = req.query.psychologistId;
   const patientId = req.query.patientId;
+  const startDate = req.query.startDate;
+  const endDate = req.query.endDate;
   
   if (!psychologistId && !patientId) {
     return res.status(400).json({ error: 'Missing psychologistId or patientId' });
@@ -2763,6 +2917,17 @@ app.get('/api/invoices', (req, res) => {
   }
   if (patientId) {
     invoices = invoices.filter(inv => inv.patientId === patientId);
+  }
+  
+  // Filter by date range
+  if (startDate || endDate) {
+    invoices = invoices.filter(inv => {
+      const invDate = inv.date || inv.created_at?.split('T')[0];
+      if (!invDate) return true;
+      if (startDate && invDate < startDate) return false;
+      if (endDate && invDate > endDate) return false;
+      return true;
+    });
   }
   
   res.json(invoices);
@@ -3487,8 +3652,7 @@ app.patch('/api/relationships/end', async (req, res) => {
 
 // --- SESSIONS / CALENDAR ---
 app.get('/api/sessions', (req, res) => {
-  const { psychologistId, patientId, year, month } = req.query;
-  console.log('📥 GET /api/sessions', { psychologistId, patientId, year, month });
+  const { psychologistId, patientId, year, month, startDate, endDate, status, futureOnly } = req.query;
   if (!psychologistId && !patientId) {
     return res.status(400).json({ error: 'Missing psychologistId or patientId' });
   }
@@ -3496,8 +3660,7 @@ app.get('/api/sessions', (req, res) => {
   const db = getDb();
   if (!db.sessions) db.sessions = [];
   if (!Array.isArray(db.users)) db.users = [];
-  console.log('[GET /api/sessions] Total sessions in DB:', db.sessions.length);
-  console.log('[GET /api/sessions] Sessions:', db.sessions.map(s => ({ id: s.id, psychologistId: s.psychologistId, patientId: s.patientId, status: s.status, date: s.date })));
+  
   const userIndex = new Map(
     db.users
       .filter(user => user && user.id)
@@ -3509,14 +3672,12 @@ app.get('/api/sessions', (req, res) => {
   // Filter by psychologistId or patientId
   if (psychologistId) {
     sessions = sessions.filter(s => s.psychologistId === psychologistId);
-    console.log('[GET /api/sessions] After filtering by psychologistId:', sessions.length);
   }
   if (patientId) {
     sessions = sessions.filter(s => s.patientId === patientId);
-    console.log('[GET /api/sessions] After filtering by patientId:', sessions.length);
   }
   
-  // Filter by year and month if provided
+  // Filter by year and month if provided (legacy support)
   if (year && month) {
     const yearNum = parseInt(year);
     const monthNum = parseInt(month);
@@ -3524,6 +3685,23 @@ app.get('/api/sessions', (req, res) => {
       const date = new Date(s.date);
       return date.getFullYear() === yearNum && date.getMonth() + 1 === monthNum;
     });
+  }
+  
+  // Filter by date range (more flexible than year/month)
+  if (startDate || endDate || futureOnly === 'true') {
+    const now = new Date().toISOString().split('T')[0];
+    sessions = sessions.filter(s => {
+      if (futureOnly === 'true' && s.date < now) return false;
+      if (startDate && s.date < startDate) return false;
+      if (endDate && s.date > endDate) return false;
+      return true;
+    });
+  }
+  
+  // Filter by status if provided
+  if (status) {
+    const statuses = status.split(',');
+    sessions = sessions.filter(s => statuses.includes(s.status));
   }
 
   const sessionsWithDetails = sessions.map(session => {
@@ -3738,20 +3916,29 @@ console.log('🔧 Attempting to start server...');
 console.log('   VERCEL:', process.env.VERCEL);
 console.log('   VERCEL_ENV:', process.env.VERCEL_ENV);
 
-if (!process.env.VERCEL && !process.env.VERCEL_ENV) {
-  const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log('\n🚀 SERVIDOR DYGO (ES MODULES) LISTO');
-    console.log(`📡 URL: http://localhost:${PORT}`);
-    console.log(`📂 DB: ${DB_FILE}\n`);
-  });
+// Initialize database connections before starting server
+(async () => {
+  try {
+    await initializeSupabase();
+  } catch (err) {
+    console.error('❌ Database initialization error:', err);
+  }
 
-  server.on('error', (err) => {
-    console.error('❌ Server error:', err);
-    process.exit(1);
-  });
-} else {
-  console.log('⏭️  Skipping app.listen() because VERCEL env detected');
-}
+  if (!process.env.VERCEL && !process.env.VERCEL_ENV) {
+    const server = app.listen(PORT, '0.0.0.0', () => {
+      console.log('\n🚀 SERVIDOR DYGO (ES MODULES) LISTO');
+      console.log(`📡 URL: http://localhost:${PORT}`);
+      console.log(`📂 DB: ${DB_FILE}\n`);
+    });
+
+    server.on('error', (err) => {
+      console.error('❌ Server error:', err);
+      process.exit(1);
+    });
+  } else {
+    console.log('⏭️  Skipping app.listen() because VERCEL env detected');
+  }
+})();
 
 // (Opcional) export para tests
 export default app;
