@@ -358,8 +358,8 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
                     
                     {/* Stacked bars - Paid (bottom) + Pending (top) */}
                     <div className="w-full flex flex-col-reverse" style={{ 
-                      height: `${Math.max(totalPercentage, totalValue > 0 ? 12 : 0)}%`,
-                      minHeight: totalValue > 0 ? '12px' : '0'
+                      height: `${Math.max(totalPercentage, totalValue > 0 ? 18 : 0)}%`,
+                      minHeight: totalValue > 0 ? '24px' : '0'
                     }}>
                       {/* Paid portion (green) */}
                       {paidValue > 0 && (
@@ -367,7 +367,8 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
                           className="w-full bg-gradient-to-t from-green-600 via-green-500 to-green-400 transition-all duration-500 hover:opacity-90 cursor-pointer shadow-sm"
                           style={{ 
                             height: `${(paidPercentage / totalPercentage) * 100}%`,
-                            borderRadius: pendingValue > 0 ? '0' : '0.5rem 0.5rem 0 0'
+                            borderRadius: pendingValue > 0 ? '0' : '0.5rem 0.5rem 0 0',
+                            minHeight: '12px'
                           }}
                           title={`Cobrado: ${paidValue.toFixed(2)}€`}
                         />
@@ -377,7 +378,8 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
                         <div 
                           className="w-full bg-gradient-to-t from-amber-500 via-amber-400 to-yellow-400 transition-all duration-500 hover:opacity-90 cursor-pointer shadow-sm rounded-t"
                           style={{ 
-                            height: `${(pendingPercentage / totalPercentage) * 100}%`
+                            height: `${(pendingPercentage / totalPercentage) * 100}%`,
+                            minHeight: '12px'
                           }}
                           title={`Pendiente: ${pendingValue.toFixed(2)}€`}
                         />
