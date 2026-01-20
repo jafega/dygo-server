@@ -25,7 +25,8 @@ const IS_SERVERLESS = !!(process.env.VERCEL || process.env.VERCEL_ENV);
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const SUPABASE_REST_ONLY = String(process.env.SUPABASE_REST_ONLY || '').toLowerCase() === 'true';
-const DISALLOW_LOCAL_PERSISTENCE = String(process.env.DISALLOW_LOCAL_PERSISTENCE || 'true').toLowerCase() === 'true';
+// Permitir persistencia local por defecto en desarrollo; usa DISALLOW_LOCAL_PERSISTENCE=true para forzar remoto
+const DISALLOW_LOCAL_PERSISTENCE = String(process.env.DISALLOW_LOCAL_PERSISTENCE || 'false').toLowerCase() === 'true';
 const SUPABASE_SQL_ENDPOINT = SUPABASE_URL ? `${SUPABASE_URL.replace(/\/$/, '')}/rest/v1/rpc/exec_sql` : '';
 const SUPABASE_TABLES_TO_ENSURE = [
   'users',
@@ -992,6 +993,10 @@ async function saveSupabaseDb(data, prevCache = null) {
   };
 
   const deleteMissing = async (table, prevIds, nextIds) => {
+    if (table === 'psychologist_profiles') {
+      console.log('⏭️ [deleteMissing] Omitiendo eliminaciones en psychologist_profiles (FK con users)');
+      return;
+    }
     console.log(`🔍 [deleteMissing] Tabla: ${table}, prevIds: ${prevIds?.length || 0}, nextIds: ${nextIds?.length || 0}`);
     if (!prevIds || !prevIds.length) {
       console.log(`⏭️ [deleteMissing] No hay IDs previos para ${table}, saltando eliminación`);
@@ -3734,7 +3739,7 @@ app.post('/api/invoices/:id/cancel', (req, res) => {
 });
 
 // Generate PDF invoice
-app.get('/api/invoices/:id/pdf', (req, res) => {
+app.get('/api/invoices/:id/pdf', async (req, res) => {
   const { id } = req.params;
   
   const db = getDb();
@@ -3744,17 +3749,108 @@ app.get('/api/invoices/:id/pdf', (req, res) => {
   if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
 
   // Obtener perfil del psicólogo para datos de la empresa
-  const psychProfile = (db.psychologistProfiles && db.psychologistProfiles[invoice.psychologistId]) || {
+  const psychologistUserId = invoice.psychologist_user_id || invoice.psychologistId;
+  let psychProfile = {
     name: 'Psicólogo',
     businessName: 'Servicios Profesionales de Psicología',
-    taxId: 'B-12345678',
-    address: 'Calle Principal, 123',
-    city: 'Madrid',
-    postalCode: '28001',
+    taxId: '',
+    address: '',
+    city: '',
+    postalCode: '',
     country: 'España',
-    phone: '+34 600 000 000',
-    email: 'contacto@psicologo.es'
+    phone: '',
+    email: ''
   };
+
+  // Intentar obtener el perfil real del psicólogo desde Supabase o DB local
+  if (psychologistUserId) {
+    if (supabaseAdmin) {
+      try {
+        // Obtener el psychologist_profile_id del usuario
+        const { data: userData, error: userError } = await supabaseAdmin
+          .from('users')
+          .select('psychologist_profile_id, name, email')
+          .eq('id', psychologistUserId)
+          .single();
+
+        if (userData?.psychologist_profile_id) {
+          // Obtener el perfil de psicólogo
+          const { data: profileData, error: profileError } = await supabaseAdmin
+            .from('psychologist_profiles')
+            .select('data')
+            .eq('id', userData.psychologist_profile_id)
+            .single();
+
+          if (profileData?.data) {
+            psychProfile = {
+              ...psychProfile,
+              ...profileData.data,
+              // Usar datos del usuario si no están en el perfil
+              name: profileData.data.name || userData.name || psychProfile.name,
+              email: profileData.data.email || userData.email || psychProfile.email
+            };
+          }
+        } else if (userData) {
+          // Si no tiene perfil, al menos usar nombre y email del usuario
+          psychProfile.name = userData.name || psychProfile.name;
+          psychProfile.email = userData.email || psychProfile.email;
+        }
+      } catch (err) {
+        console.error('Error obteniendo perfil del psicólogo para factura:', err);
+      }
+    } else {
+      // Fallback a DB local
+      if (db.psychologistProfiles && db.psychologistProfiles[psychologistUserId]) {
+        psychProfile = { ...psychProfile, ...db.psychologistProfiles[psychologistUserId] };
+      }
+      // Intentar obtener datos del usuario si no hay perfil
+      const psychUser = (db.users || []).find(u => u.id === psychologistUserId);
+      if (psychUser) {
+        psychProfile.name = psychProfile.name || psychUser.name || 'Psicólogo';
+        psychProfile.email = psychProfile.email || psychUser.email || '';
+      }
+    }
+  }
+
+  // Obtener datos del paciente
+  const patientUserId = invoice.patient_user_id || invoice.patientId;
+  let patientData = {
+    name: invoice.patientName || 'Paciente',
+    email: '',
+    phone: ''
+  };
+
+  if (patientUserId) {
+    if (supabaseAdmin) {
+      try {
+        const { data: patientUser, error: patientError } = await supabaseAdmin
+          .from('users')
+          .select('name, email')
+          .eq('id', patientUserId)
+          .single();
+
+        if (patientUser) {
+          patientData = {
+            name: patientUser.name || invoice.patientName || 'Paciente',
+            email: patientUser.email || '',
+            phone: ''
+          };
+        }
+      } catch (err) {
+        console.error('Error obteniendo datos del paciente para factura:', err);
+      }
+    } else {
+      // Fallback a DB local
+      const patient = (db.users || []).find(u => u.id === patientUserId);
+      if (patient) {
+        patientData = {
+          name: patient.name || invoice.patientName || 'Paciente',
+          email: patient.email || '',
+          phone: patient.phone || ''
+        };
+      }
+    }
+  }
 
   // Calcular subtotal e IVA (21% en España)
   const subtotal = invoice.amount / 1.21;
@@ -4029,8 +4125,20 @@ app.get('/api/invoices/:id/pdf', (req, res) => {
         <h3>Cliente</h3>
         <div class="info-row">
           <span class="info-label">Nombre:</span>
-          <span class="info-value">${invoice.patientName}</span>
+          <span class="info-value">${patientData.name}</span>
         </div>
+        ${patientData.email ? `
+        <div class="info-row">
+          <span class="info-label">Email:</span>
+          <span class="info-value">${patientData.email}</span>
+        </div>
+        ` : ''}
+        ${patientData.phone ? `
+        <div class="info-row">
+          <span class="info-label">Teléfono:</span>
+          <span class="info-value">${patientData.phone}</span>
+        </div>
+        ` : ''}
         ${invoice.description ? `
         <div class="info-row">
           <span class="info-label">Concepto:</span>
