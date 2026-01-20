@@ -4155,12 +4155,15 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
       <div class="company-info">
         <div class="company-name">${psychProfile.businessName || psychProfile.name}</div>
         <div class="company-details">
-          ${psychProfile.taxId ? `<div>NIF/CIF: ${psychProfile.taxId}</div>` : ''}
+          ${psychProfile.name && psychProfile.businessName ? `<div><strong>Profesional:</strong> ${psychProfile.name}</div>` : ''}
+          ${psychProfile.professionalId ? `<div><strong>Nº Colegiado:</strong> ${psychProfile.professionalId}</div>` : ''}
+          ${psychProfile.specialty ? `<div><strong>Especialidad:</strong> ${psychProfile.specialty}</div>` : ''}
+          ${psychProfile.taxId ? `<div><strong>NIF/CIF:</strong> ${psychProfile.taxId}</div>` : ''}
           ${psychProfile.address ? `<div>${psychProfile.address}</div>` : ''}
-          ${psychProfile.postalCode || psychProfile.city ? `<div>${psychProfile.postalCode} ${psychProfile.city}</div>` : ''}
+          ${psychProfile.postalCode || psychProfile.city ? `<div>${psychProfile.postalCode || ''} ${psychProfile.city || ''}</div>` : ''}
           ${psychProfile.country ? `<div>${psychProfile.country}</div>` : ''}
-          ${psychProfile.phone ? `<div>Tel: ${psychProfile.phone}</div>` : ''}
-          ${psychProfile.email ? `<div>Email: ${psychProfile.email}</div>` : ''}
+          ${psychProfile.phone ? `<div><strong>Tel:</strong> ${psychProfile.phone}</div>` : ''}
+          ${psychProfile.email ? `<div><strong>Email:</strong> ${psychProfile.email}</div>` : ''}
         </div>
       </div>
       <div class="invoice-title">
@@ -4198,6 +4201,24 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
           <span class="info-label">Nombre:</span>
           <span class="info-value">${patientData.name}</span>
         </div>
+        ${patientData.taxId || patientData.dni ? `
+        <div class="info-row">
+          <span class="info-label">DNI/NIF:</span>
+          <span class="info-value">${patientData.taxId || patientData.dni}</span>
+        </div>
+        ` : ''}
+        ${patientData.address ? `
+        <div class="info-row">
+          <span class="info-label">Dirección:</span>
+          <span class="info-value">${patientData.address}</span>
+        </div>
+        ` : ''}
+        ${patientData.postalCode || patientData.city ? `
+        <div class="info-row">
+          <span class="info-label"></span>
+          <span class="info-value">${patientData.postalCode || ''} ${patientData.city || ''}</span>
+        </div>
+        ` : ''}
         ${patientData.email ? `
         <div class="info-row">
           <span class="info-label">Email:</span>
@@ -4272,16 +4293,22 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
         <div class="payment-info">
           <h4>Información de Pago</h4>
           <div style="color: #475569;">
-            ${psychProfile.iban ? `<div>IBAN: ${psychProfile.iban}</div>` : ''}
-            <div style="margin-top: 8px;">Por favor, incluya el número de factura ${invoice.invoiceNumber} como referencia en su pago.</div>
+            ${psychProfile.iban ? `<div><strong>IBAN:</strong> ${psychProfile.iban}</div>` : ''}
+            ${psychProfile.businessName || psychProfile.name ? `<div><strong>Titular:</strong> ${psychProfile.businessName || psychProfile.name}</div>` : ''}
+            <div style="margin-top: 8px;">Por favor, incluya el número de factura <strong>${invoice.invoiceNumber}</strong> como referencia en su pago.</div>
           </div>
         </div>
       ` : ''}
       
       <div style="margin-top: 30px;">
-        <div class="footer-title">Términos y Condiciones</div>
-        <div>Los servicios profesionales de psicología están exentos de retención de IRPF según la normativa vigente.</div>
-        <div>Esta factura es válida sin necesidad de firma según el Real Decreto 1496/2003.</div>
+        <div class="footer-title">Datos Profesionales</div>
+        ${psychProfile.professionalId ? `<div>Número de Colegiado: ${psychProfile.professionalId}</div>` : ''}
+        ${psychProfile.specialty ? `<div>Especialidad: ${psychProfile.specialty}</div>` : ''}
+        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e2e8f0;">
+          <div class="footer-title">Términos y Condiciones</div>
+          <div>Los servicios profesionales de psicología están exentos de retención de IRPF según la normativa vigente.</div>
+          <div>Esta factura es válida sin necesidad de firma según el Real Decreto 1496/2003.</div>
+        </div>
       </div>
     </div>
   </div>
