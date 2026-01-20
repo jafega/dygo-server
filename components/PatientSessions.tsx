@@ -304,7 +304,7 @@ const PatientSessions: React.FC = () => {
       <div className="p-6 border-b border-slate-200">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h2 className="text-2xl font-bold text-slate-900">Mis Sesiones</h2>
+            <h2 className="text-xl font-bold text-slate-900">Gestiona tus Citas</h2>
             <p className="text-sm text-slate-500 mt-1">Gestiona tus citas con el psicólogo</p>
           </div>
           <button

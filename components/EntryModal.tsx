@@ -9,10 +9,10 @@ interface EntryModalProps {
     onStartSession: (dateStr: string) => void;
   onDeleteEntry: (id: string) => void;
   onUpdateEntry: (entry: JournalEntry) => void;
-  currentUserRole?: 'PATIENT' | 'PSYCHOLOGIST';
+  currentUserId?: string;
 }
 
-const EntryModal: React.FC<EntryModalProps> = ({ entries, dateStr, onClose, onStartSession, onDeleteEntry, onUpdateEntry, currentUserRole = 'PATIENT' }) => {
+const EntryModal: React.FC<EntryModalProps> = ({ entries, dateStr, onClose, onStartSession, onDeleteEntry, onUpdateEntry, currentUserId }) => {
   const now = new Date();
   const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const isPastOrToday = dateStr <= todayStr;
@@ -70,16 +70,27 @@ const EntryModal: React.FC<EntryModalProps> = ({ entries, dateStr, onClose, onSt
 
           {/* List of Entries */}
           <div className="p-6 overflow-y-auto flex-1 space-y-8 bg-slate-50">
-             {entries.map((entry, index) => (
-                <EntryCard 
-                    key={entry.id} 
-                    entry={entry} 
-                    index={entries.length - index} // Show reverse chronological number
-                    onDelete={() => onDeleteEntry(entry.id)}
-                    onUpdate={onUpdateEntry}
-                    currentUserRole={currentUserRole}
-                />
-             ))}
+             {entries
+                .filter(entry => {
+                    // Filtrar notas internas que no fueron creadas por el usuario actual
+                    const isInternalNote = entry.createdBy === 'PSYCHOLOGIST' && 
+                                          !entry.psychologistEntryType;
+                    if (isInternalNote && entry.creator_user_id !== currentUserId) {
+                        return false; // No mostrar esta entrada
+                    }
+                    return true;
+                })
+                .map((entry, index) => (
+                    <EntryCard 
+                        key={entry.id} 
+                        entry={entry} 
+                        index={entries.length - index} // Show reverse chronological number
+                        onDelete={() => onDeleteEntry(entry.id)}
+                        onUpdate={onUpdateEntry}
+                        currentUserId={currentUserId}
+                    />
+                ))
+             }
           </div>
        </div>
     </div>
@@ -92,8 +103,8 @@ const EntryCard: React.FC<{
     index: number;
     onDelete: () => void;
     onUpdate: (entry: JournalEntry) => void;
-    currentUserRole?: 'PATIENT' | 'PSYCHOLOGIST';
-}> = ({ entry, index, onDelete, onUpdate, currentUserRole = 'PATIENT' }) => {
+    currentUserId: string;
+}> = ({ entry, index, onDelete, onUpdate, currentUserId }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [editSummary, setEditSummary] = useState(entry.summary);
     
@@ -314,10 +325,21 @@ const EntryCard: React.FC<{
                     </div>
                  )}
 
-                 {isPsychEntry && !isSession && (
+                 {/* Notas del psicólogo - solo mostrar si hay contenido visible para el usuario actual */}
+                 {isPsychEntry && !isSession && (() => {
+                   const canSeeInternalNote = entry.creator_user_id === currentUserId && (internalNote?.text || (internalNote?.attachments?.length || 0) > 0);
+                   const hasFeedback = feedback?.text || (feedback?.attachments?.length || 0) > 0;
+                   const hasFallback = !internalNote?.text && !feedback?.text && fallbackPsychText;
+                   
+                   // Solo mostrar el bloque si hay algo visible
+                   const hasVisibleContent = canSeeInternalNote || hasFeedback || hasFallback;
+                   
+                   if (!hasVisibleContent) return null;
+                   
+                   return (
                      <div className="space-y-3">
-                         {/* Solo mostrar notas internas si el usuario actual es psicólogo */}
-                         {currentUserRole === 'PSYCHOLOGIST' && (internalNote?.text || (internalNote?.attachments?.length || 0) > 0) && (
+                         {/* Solo mostrar notas internas si el usuario actual es el creador */}
+                         {canSeeInternalNote && (
                              <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
                                  <h4 className="text-[10px] font-bold uppercase text-amber-700 mb-1 flex items-center gap-1">
                                      <FileText size={11} /> Nota interna
@@ -328,7 +350,7 @@ const EntryCard: React.FC<{
                              </div>
                          )}
 
-                         {(feedback?.text || (feedback?.attachments?.length || 0) > 0) && (
+                         {hasFeedback && (
                              <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3">
                                  <h4 className="text-[10px] font-bold uppercase text-indigo-700 mb-1 flex items-center gap-1">
                                      <MessageCircle size={11} /> Feedback
@@ -339,14 +361,15 @@ const EntryCard: React.FC<{
                              </div>
                          )}
 
-                         {!internalNote?.text && !feedback?.text && fallbackPsychText && (
+                         {hasFallback && (
                              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
                                  <h4 className="text-[10px] font-bold uppercase text-slate-400 mb-1">Detalle</h4>
                                  <p className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">{fallbackPsychText}</p>
                              </div>
                          )}
                      </div>
-                 )}
+                   );
+                 })()}
 
                  {/* Stats Bar (Only for User Entries) */}
                  {!isPsychEntry && (

@@ -1,18 +1,28 @@
 import React, { useState } from 'react';
 import { JournalEntry } from '../types';
-import { ChevronLeft, ChevronRight, Layers, Plus, Calendar as CalendarIcon, LayoutGrid, Clock } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Layers, Plus, Calendar as CalendarIcon, LayoutGrid, Clock, Lightbulb, FileText, MessageCircle } from 'lucide-react';
 
 interface CalendarViewProps {
   entries: JournalEntry[];
   onSelectDate: (date: string) => void;
   onSelectEntry?: (entry: JournalEntry) => void;
+  currentUserId?: string;
 }
 
 type ViewMode = 'MONTH' | 'WEEK' | 'LIST';
 
-const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSelectEntry }) => {
+const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSelectEntry, currentUserId }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<ViewMode>('LIST');
+  const [expandedTranscripts, setExpandedTranscripts] = useState<{ [key: string]: boolean }>({});
+
+  // Toggle transcript visibility for a specific entry
+  const toggleTranscript = (entryId: string) => {
+    setExpandedTranscripts(prev => ({
+      ...prev,
+      [entryId]: !prev[entryId]
+    }));
+  };
 
   // Helpers
   const getDaysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
@@ -89,14 +99,25 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
 
   const getEntriesForDate = (date: Date) => {
     const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-    return entries.filter(e => e.date === dateStr).sort((a, b) => b.timestamp - a.timestamp);
+    return entries
+      .filter(e => e.date === dateStr)
+      .filter(e => {
+        // Mostrar entradas del usuario (diario)
+        if (e.createdBy !== 'PSYCHOLOGIST') return true;
+        // Mostrar sesiones y feedback del psicólogo
+        if (e.psychologistEntryType === 'SESSION' || e.psychologistEntryType === 'FEEDBACK') return true;
+        // NO mostrar notas internas
+        return false;
+      })
+      .sort((a, b) => b.timestamp - a.timestamp);
   };
 
   const getEntryLabel = (entry: JournalEntry) => {
     if (entry.createdBy === 'PSYCHOLOGIST') {
       if (entry.psychologistEntryType === 'SESSION') return 'Sesión';
       if (entry.psychologistEntryType === 'FEEDBACK') return 'Feedback';
-      return 'Nota interna';
+      // Solo mostrar "Nota interna" si el usuario actual es el creador
+      return entry.creator_user_id === currentUserId ? 'Nota interna' : null;
     }
     return 'Diario';
   };
@@ -119,7 +140,15 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
     };
 
     const listEntries = [...entries]
-      .filter(e => e.createdBy !== 'PSYCHOLOGIST' || e.psychologistEntryType === 'SESSION')
+      .filter(e => {
+        // Mostrar entradas del usuario (diario)
+        if (e.createdBy !== 'PSYCHOLOGIST') return true;
+        // Mostrar sesiones y feedback del psicólogo
+        if (e.psychologistEntryType === 'SESSION' || e.psychologistEntryType === 'FEEDBACK') return true;
+        // Mostrar notas internas solo si el usuario actual es el creador
+        if (e.creator_user_id === currentUserId) return true;
+        return false;
+      })
       .sort((a, b) => b.timestamp - a.timestamp);
 
   return (
@@ -170,52 +199,157 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
 
       {/* Content Container */}
       {viewMode === 'LIST' ? (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-6">
           {listEntries.length === 0 ? (
             <div className="text-center py-10 text-slate-400">Aún no hay entradas.</div>
           ) : (
             listEntries.map((entry) => {
               const entryDate = new Date(entry.timestamp);
-              const dateStr = entry.date;
+              const isPsychEntry = entry.createdBy === 'PSYCHOLOGIST';
+              const isSession = entry.psychologistEntryType === 'SESSION';
+              const isFeedback = entry.psychologistEntryType === 'FEEDBACK';
+              const psychEntryLabel = isSession ? 'Sesión Clínica' : isFeedback ? 'Feedback Clínico' : 'Nota Clínica';
+              
+              // Parse psychologist note and feedback
+              const internalNote = typeof entry.psychologistNote === 'string' 
+                ? { text: entry.psychologistNote, attachments: [] } 
+                : entry.psychologistNote;
+              const feedback = typeof entry.psychologistFeedback === 'string' 
+                ? { text: entry.psychologistFeedback, attachments: [] } 
+                : entry.psychologistFeedback;
+
+              const showTranscript = expandedTranscripts[entry.id] || false;
+
               return (
-                <button
+                <div
                   key={entry.id}
-                  onClick={() => onSelectEntry ? onSelectEntry(entry) : (onSelectDate && onSelectDate(dateStr))}
-                  className="w-full text-left bg-white border border-slate-200 rounded-2xl p-4 hover:shadow-md transition-shadow"
+                  className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm"
                 >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-sm font-semibold text-slate-800">
-                      {entryDate.toLocaleDateString()}
+                  {/* Header */}
+                  <div className="flex items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-100">
+                    <div className="flex items-center gap-3">
+                      <div className="text-sm font-semibold text-slate-800">
+                        {entryDate.toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                      </div>
                     </div>
                     <div className="text-xs text-slate-400 flex items-center gap-1">
                       <Clock size={12} /> {entryDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </div>
                   </div>
-                  <div className="mt-2">
-                    {entry.createdBy === 'PSYCHOLOGIST' && entry.psychologistEntryType === 'SESSION' ? (
-                      <span className="text-[10px] font-semibold text-purple-700 bg-purple-50 border border-purple-100 px-2 py-0.5 rounded-full">
-                        Sesión clínica
+
+                  {/* Entry Type Badge */}
+                  <div className="mb-4">
+                    {isPsychEntry ? (
+                      <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${
+                        isSession 
+                          ? 'bg-purple-50 text-purple-700 border-purple-200' 
+                          : isFeedback
+                          ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                          : 'bg-amber-50 text-amber-700 border-amber-200'
+                      }`}>
+                        {psychEntryLabel}
                       </span>
                     ) : (
-                      <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">
-                        Diario
+                      <span className="text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-3 py-1 rounded-full">
+                        Entrada de Diario
                       </span>
                     )}
                   </div>
-                  <p className="mt-2 text-sm text-slate-600 line-clamp-3">{entry.summary}</p>
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    {typeof entry.sentimentScore === 'number' && (
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${entry.sentimentScore >= 7 ? 'bg-green-50 text-green-700 border-green-200' : entry.sentimentScore >= 4 ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
-                        {entry.sentimentScore}/10
-                      </span>
-                    )}
-                    {entry.emotions?.length > 0 && entry.emotions.slice(0, 5).map((em) => (
-                      <span key={em} className="text-[10px] px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded border border-indigo-100 font-medium">
-                        {em}
-                      </span>
-                    ))}
-                  </div>
-                </button>
+
+                  {/* Para Feedback Clínico: solo mostrar el feedback */}
+                  {isFeedback ? (
+                    <>
+                      {/* Psychologist Feedback */}
+                      {feedback?.text && (
+                        <div className="mb-4">
+                          <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
+                            <h4 className="text-xs font-bold uppercase text-indigo-700 mb-2 flex items-center gap-1">
+                              <MessageCircle size={12} /> Feedback del Psicólogo
+                            </h4>
+                            <p className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">{feedback.text}</p>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      {/* Sentiment Score (no mostrar para feedback) */}
+                      {typeof entry.sentimentScore === 'number' && (
+                        <div className="mb-3">
+                          <span className={`text-xs font-bold px-3 py-1 rounded-full border ${
+                            entry.sentimentScore >= 7 
+                              ? 'bg-green-50 text-green-700 border-green-200' 
+                              : entry.sentimentScore >= 4 
+                              ? 'bg-yellow-50 text-yellow-700 border-yellow-200' 
+                              : 'bg-red-50 text-red-700 border-red-200'
+                          }`}>
+                            Estado de ánimo: {entry.sentimentScore}/10
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Summary (no mostrar para feedback) */}
+                      <div className="mb-4">
+                        <h4 className="text-xs font-bold uppercase text-slate-400 mb-2">Resumen</h4>
+                        <p className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">{entry.summary}</p>
+                      </div>
+
+                      {/* Emotions (no mostrar para feedback) */}
+                      {entry.emotions && entry.emotions.length > 0 && (
+                        <div className="mb-4">
+                          <h4 className="text-xs font-bold uppercase text-slate-400 mb-2">Emociones</h4>
+                          <div className="flex flex-wrap gap-2">
+                            {entry.emotions.map((em) => (
+                              <span key={em} className="text-xs px-2 py-1 bg-indigo-50 text-indigo-700 rounded-lg border border-indigo-100 font-medium">
+                                {em}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Advice (no mostrar para feedback) */}
+                      {entry.advice && (
+                        <div className="mb-4">
+                          <h4 className="text-xs font-bold uppercase text-slate-400 mb-2 flex items-center gap-1">
+                            <Lightbulb size={12} /> Consejo
+                          </h4>
+                          <p className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">{entry.advice}</p>
+                        </div>
+                      )}
+
+                      {/* Psychologist Feedback (para otros tipos de entrada) */}
+                      {feedback?.text && (
+                        <div className="mb-4">
+                          <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
+                            <h4 className="text-xs font-bold uppercase text-indigo-700 mb-2 flex items-center gap-1">
+                              <MessageCircle size={12} /> Feedback del Psicólogo
+                            </h4>
+                            <p className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">{feedback.text}</p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Transcript con botón toggle para sesiones clínicas */}
+                      {entry.transcript && entry.transcript.length > 50 && (
+                        <div>
+                          <button
+                            onClick={() => toggleTranscript(entry.id)}
+                            className="text-xs font-semibold text-slate-600 hover:text-slate-800 flex items-center gap-2 mb-2 transition-colors"
+                          >
+                            {showTranscript ? '▼' : '▶'} {showTranscript ? 'Ocultar' : 'Mostrar'} transcripción
+                          </button>
+                          {showTranscript && (
+                            <>
+                              <h4 className="text-xs font-bold uppercase text-slate-400 mb-2">Transcripción</h4>
+                              <p className="text-sm text-slate-600 whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto">{entry.transcript}</p>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
               );
             })
           )}

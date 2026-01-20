@@ -738,10 +738,73 @@ async function trySupabaseUpsert(table, payloads) {
   if (lastError) throw lastError;
 }
 
+// Función global para leer tablas de Supabase
+async function readTable(table) {
+  if (!supabaseAdmin) return [];
+  
+  try {
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error(`Timeout reading table ${table}`)), 10000)
+    );
+    
+    // Para tablas grandes como entries, usar paginación
+    const isLargeTable = ['entries', 'sessions'].includes(table);
+    
+    if (isLargeTable) {
+      console.log(`📄 Loading ${table} with pagination...`);
+      let allData = [];
+      let page = 0;
+      const pageSize = 1000;
+      let hasMore = true;
+      
+      while (hasMore) {
+        const { data, error } = await Promise.race([
+          supabaseAdmin.from(table).select('*').range(page * pageSize, (page + 1) * pageSize - 1),
+          timeoutPromise
+        ]);
+        
+        if (error) {
+          console.warn(`⚠️ Could not load table '${table}' page ${page}:`, error.message);
+          break;
+        }
+        
+        if (data && data.length > 0) {
+          allData = allData.concat(data);
+          console.log(`   Loaded ${data.length} rows from ${table} (page ${page + 1})`);
+        }
+        
+        hasMore = data && data.length === pageSize;
+        page++;
+        
+        // Límite de seguridad: máximo 10 páginas (10,000 registros)
+        if (page >= 10) {
+          console.warn(`⚠️ Reached pagination limit for ${table}`);
+          break;
+        }
+      }
+      
+      return allData;
+    }
+    
+    const readPromise = supabaseAdmin.from(table).select('*');
+    
+    const { data, error } = await Promise.race([readPromise, timeoutPromise]);
+    
+    if (error) {
+      console.warn(`⚠️ Could not load table '${table}':`, error.message);
+      return [];
+    }
+    return data || [];
+  } catch (err) {
+    console.warn(`⚠️ Error reading table '${table}':`, err.message);
+    return [];
+  }
+}
+
 async function loadSupabaseCache() {
   if (!supabaseAdmin) return null;
 
-  const readTable = async (table) => {
+  const readTableLocal = async (table) => {
     try {
       const timeoutPromise = new Promise((_, reject) => 
         setTimeout(() => reject(new Error(`Timeout reading table ${table}`)), 10000)
@@ -801,15 +864,15 @@ async function loadSupabaseCache() {
     }
   };
 
-  const usersRows = await readTable('users');
+  const usersRows = await readTableLocal('users');
   // No cargar entries durante la inicialización - se cargan bajo demanda
-  const goalsRows = await readTable('goals');
-  const invitationsRows = await readTable('invitations');
-  const settingsRows = await readTable('settings');
-  const sessionsRows = await readTable('sessions');
-  const invoicesRows = await readTable('invoices');
-  const relationshipsRows = await readTable('care_relationships');
-  const profilesRows = await readTable('psychologist_profiles');
+  const goalsRows = await readTableLocal('goals');
+  const invitationsRows = await readTableLocal('invitations');
+  const settingsRows = await readTableLocal('settings');
+  const sessionsRows = await readTableLocal('sessions');
+  const invoicesRows = await readTableLocal('invoices');
+  const relationshipsRows = await readTableLocal('care_relationships');
+  const profilesRows = await readTableLocal('psychologist_profiles');
 
   const users = usersRows.map(normalizeSupabaseRow);
   const entries = []; // No cargar entries aquí - lazy loading

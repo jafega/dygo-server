@@ -639,6 +639,14 @@ const safeEntries = Array.isArray(entries) ? entries : [];
 
 const dayEntries = selectedDate
   ? safeEntries.filter(e => e.date === selectedDate)
+      .filter(e => {
+        // Mostrar entradas del usuario (diario)
+        if (e.createdBy !== 'PSYCHOLOGIST') return true;
+        // Mostrar sesiones y feedback del psicólogo
+        if (e.psychologistEntryType === 'SESSION' || e.psychologistEntryType === 'FEEDBACK') return true;
+        // NO mostrar notas internas
+        return false;
+      })
   : [];
 
 const entriesForModal = selectedEntryMode === 'single' && selectedEntryId
@@ -1152,7 +1160,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
 
         {/* Main Content */}
         <main className="flex-1 overflow-y-auto">
-          <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
+          <div className="w-full px-4 md:px-8 py-4 md:py-8 space-y-6">
             {/* Mobile Header - Now visible with page title */}
             <header className="md:hidden mb-6">
               <div className="flex items-center gap-3 mb-2">
@@ -1216,7 +1224,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   {activeTab === 'admin' && 'Gestión de usuarios del sistema'}
                 </p>
               </div>
-              <div className="flex gap-3">
+              {/* <div className="flex gap-3">
                 <button
                   onClick={() => handleStartSession()}
                   className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-lg font-medium flex items-center gap-2 transition-all shadow-lg hover:shadow-indigo-500/30"
@@ -1224,17 +1232,17 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   <Mic size={18} />
                   Grabar entrada
                 </button>
-              </div>
+              </div> */}
             </header>
 
             {/* Mobile Action Button - Circular Floating Button */}
-            <button
+            {/* <button
               onClick={() => handleStartSession()}
               className="md:hidden fixed bottom-6 right-6 z-50 w-14 h-14 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full shadow-2xl hover:shadow-indigo-500/50 transition-all flex items-center justify-center"
               aria-label="Grabar entrada"
             >
               <Mic size={24} />
-            </button>
+            </button> */}
 
             {activeTab === 'insights' && assignedGoals.length > 0 && (
               <div className="bg-purple-50 rounded-2xl border border-purple-100">
@@ -1527,6 +1535,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                 <CalendarView
                   entries={entries}
                   onSelectDate={(date) => { setSelectedDate(date); setSelectedEntryMode('day'); }}
+                  currentUserId={currentUser?.id}
                 />
               </div>
             )}
@@ -1568,7 +1577,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
           onStartSession={(dateStr) => handleStartSession(dateStr)} 
           onDeleteEntry={handleDeleteEntry} 
           onUpdateEntry={handleUpdateEntry}
-          currentUserRole={currentUser?.is_psychologist ? 'PSYCHOLOGIST' : 'PATIENT'}
+          currentUserId={currentUser?.id}
         />
       )}
       {weeklyReport && <WeeklyReportModal report={weeklyReport} onClose={() => setWeeklyReport(null)} />}
