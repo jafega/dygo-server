@@ -212,8 +212,9 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
   console.log('[PsychologistDashboard] Monthly pending data:', monthlyPending);
   console.log('[PsychologistDashboard] Monthly revenue data:', monthlyRevenue);
 
+  // El máximo siempre es el total mensual más alto (pagado + pendiente) de los últimos 12 meses
   const revenueValues = Object.keys(monthlyRevenue).map(key => monthlyRevenue[key] + monthlyPending[key]);
-  const maxRevenue = Math.max(...revenueValues, 1); // Use highest value as max for auto-scaling
+  const maxRevenue = Math.max(...revenueValues, 1); // La barra más alta define la escala al 100%
   
   // Revenue in selected date range - incluye pagadas + pendientes
   const revenueInRange = invoices

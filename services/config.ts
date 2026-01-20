@@ -10,13 +10,13 @@ const getDefaultApiUrl = () => {
 
 	// Local dev on desktop
 	if (host === 'localhost' || host === '127.0.0.1') {
-		return 'http://localhost:3005/api';
+		return 'http://localhost:3001/api';
 	}
 
 	// Dev en red local (ej. 192.168.x.x:3000) para usar el backend del mismo host
 	const isLan = /^\d+\.\d+\.\d+\.\d+$/.test(host) || host.endsWith('.local');
 	if (isLan && port === '3000') {
-		return `http://${host}:3005/api`;
+		return `http://${host}:3001/api`;
 	}
 
 	// If frontend is on Vercel without API proxy, default to the known backend.
