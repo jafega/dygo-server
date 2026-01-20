@@ -4,12 +4,15 @@ export interface User {
   id: string;
   name: string;
   email: string;
+  user_email?: string; // Email en columna de tabla
   password?: string; // In a real app, this would be hashed
   role: UserRole;
   isPsychologist?: boolean;
+  is_psychologist?: boolean; // Columna de tabla Supabase
   avatarUrl?: string; // Profile picture (Base64)
   // Optional OAuth fields
   googleId?: string;
+  supabaseId?: string;
 
   // Premium subscription fields
   isPremium?: boolean;
@@ -31,31 +34,48 @@ export interface User {
 
 export interface CareRelationship {
   id: string;
-  psychologistId: string;
-  patientId: string;
+  psych_user_id: string; // ID del usuario con rol de psicólogo en esta relación
+  patient_user_id: string; // ID del usuario con rol de paciente en esta relación
   createdAt: number;
   endedAt?: number; // Timestamp cuando se finalizó la relación
+  
+  // DEPRECATED: Mantener temporalmente para compatibilidad
+  psychologistId?: string;
+  patientId?: string;
 }
 
 export interface Invitation {
   id: string;
   // El psicólogo en esta relación (quien dará tratamiento)
-  psychologistId: string;
-  psychologistEmail: string;
-  psychologistName: string;
+  psych_user_id: string; // ID del usuario que actúa como psicólogo
+  psych_user_email: string;
+  psych_user_name: string;
   // El paciente en esta relación (quien recibirá tratamiento)
-  patientId?: string; // Se rellena al aceptar si el usuario ya existe
-  patientEmail: string;
-  patientName?: string;
+  patient_user_id?: string; // Se rellena al aceptar si el usuario ya existe
+  patient_user_email: string;
+  patient_user_name?: string;
   status: 'PENDING' | 'ACCEPTED' | 'REJECTED';
   timestamp: number;
   createdAt?: string; // ISO string
   initiatorEmail?: string; // Email de quien inició la invitación
   // Información adicional del paciente proporcionada por el psicólogo
-  patientFirstName?: string;
-  patientLastName?: string;
+  patient_first_name?: string;
+  patient_last_name?: string;
   emailSent?: boolean; // Indica si se envió el email de bienvenida
   emailSentAt?: number; // Timestamp del envío
+  
+  // DEPRECATED: Mantener temporalmente para compatibilidad
+  psychologistId?: string;
+  psychologistEmail?: string;
+  psychologistName?: string;
+  patientId?: string;
+  patientEmail?: string;
+  patientName?: string;
+  patientFirstName?: string;
+  patientLastName?: string;
+  fromPsychologistId?: string;
+  fromPsychologistName?: string;
+  toUserEmail?: string;
 }
 
 export interface Attachment {

@@ -19,8 +19,10 @@ const relationshipsCache = new Map<string, RelationshipsCache>();
 const CACHE_TTL = 30000; // 30 segundos
 
 type RelationshipFilter = {
-  psychologistId?: string;
-  patientId?: string;
+  psychologistId?: string; // Legacy
+  patientId?: string; // Legacy
+  psych_user_id?: string;
+  patient_user_id?: string;
 };
 
 const getLocalRelationships = (): CareRelationship[] => {
@@ -40,14 +42,24 @@ const saveLocalRelationships = (relationships: CareRelationship[]) => {
 
 const matchesRelationshipFilter = (rel: CareRelationship, filter: RelationshipFilter) => {
   if (!rel) return false;
-  if (filter.psychologistId && rel.psychologistId !== filter.psychologistId) return false;
-  if (filter.patientId && rel.patientId !== filter.patientId) return false;
+  
+  // Soportar tanto campos nuevos como legacy
+  const relPsychId = rel.psych_user_id || rel.psychologistId;
+  const relPatId = rel.patient_user_id || rel.patientId;
+  const filterPsychId = filter.psych_user_id || filter.psychologistId;
+  const filterPatId = filter.patient_user_id || filter.patientId;
+  
+  if (filterPsychId && relPsychId !== filterPsychId) return false;
+  if (filterPatId && relPatId !== filterPatId) return false;
   return true;
 };
 
 const fetchRelationships = async (filter: RelationshipFilter, skipCache = false): Promise<CareRelationship[]> => {
-  if (!filter.psychologistId && !filter.patientId) {
-      throw new Error('psychologistId o patientId requerido');
+  const hasPsych = filter.psych_user_id || filter.psychologistId;
+  const hasPat = filter.patient_user_id || filter.patientId;
+  
+  if (!hasPsych && !hasPat) {
+      throw new Error('psych_user_id o patient_user_id requerido');
   }
 
   // Crear clave de caché basada en el filtro
@@ -64,8 +76,17 @@ const fetchRelationships = async (filter: RelationshipFilter, skipCache = false)
 
   if (USE_BACKEND) {
       const params = new URLSearchParams();
-      if (filter.psychologistId) params.append('psychologistId', filter.psychologistId);
-      if (filter.patientId) params.append('patientId', filter.patientId);
+      // Preferir nuevos campos sobre legacy
+      if (filter.psych_user_id) {
+        params.append('psych_user_id', filter.psych_user_id);
+      } else if (filter.psychologistId) {
+        params.append('psychologistId', filter.psychologistId);
+      }
+      if (filter.patient_user_id) {
+        params.append('patient_user_id', filter.patient_user_id);
+      } else if (filter.patientId) {
+        params.append('patientId', filter.patientId);
+      }
       // Anti-caché: timestamp único en cada petición
       params.append('_t', Date.now().toString());
       
@@ -123,33 +144,50 @@ const fetchRelationships = async (filter: RelationshipFilter, skipCache = false)
   return localData;
 };
 
-const ensureLocalRelationship = (psychologistId: string, patientId: string): CareRelationship => {
+const ensureLocalRelationship = (psychUserId: string, patientUserId: string): CareRelationship => {
   const relationships = getLocalRelationships();
-  const existing = relationships.find(rel => rel.psychologistId === psychologistId && rel.patientId === patientId);
+  const existing = relationships.find(rel => {
+    const relPsychId = rel.psych_user_id || rel.psychologistId;
+    const relPatId = rel.patient_user_id || rel.patientId;
+    return relPsychId === psychUserId && relPatId === patientUserId;
+  });
   if (existing) return existing;
-  const relationship: CareRelationship = { id: crypto.randomUUID(), psychologistId, patientId, createdAt: Date.now() };
+  
+  const relationship: CareRelationship = { 
+    id: crypto.randomUUID(), 
+    psych_user_id: psychUserId, 
+    patient_user_id: patientUserId, 
+    createdAt: Date.now() 
+  };
   relationships.push(relationship);
   saveLocalRelationships(relationships);
   return relationship;
 };
 
-const removeLocalRelationship = (psychologistId: string, patientId: string) => {
+const removeLocalRelationship = (psychUserId: string, patientUserId: string) => {
   const relationships = getLocalRelationships();
-  const filtered = relationships.filter(rel => !(rel.psychologistId === psychologistId && rel.patientId === patientId));
+  const filtered = relationships.filter(rel => {
+    const relPsychId = rel.psych_user_id || rel.psychologistId;
+    const relPatId = rel.patient_user_id || rel.patientId;
+    return !(relPsychId === psychUserId && relPatId === patientUserId);
+  });
   saveLocalRelationships(filtered);
 };
 
-const ensureRelationship = async (psychologistId: string, patientId: string): Promise<CareRelationship> => {
-  if (!psychologistId || !patientId) {
-      throw new Error('psychologistId y patientId son obligatorios');
+const ensureRelationship = async (psychUserId: string, patientUserId: string): Promise<CareRelationship> => {
+  if (!psychUserId || !patientUserId) {
+      throw new Error('psych_user_id y patient_user_id son obligatorios');
   }
   if (USE_BACKEND) {
       try {
-          console.log('[ensureRelationship]', { psychologistId, patientId });
+          console.log('[ensureRelationship]', { psychUserId, patientUserId });
           const res = await fetch(`${API_URL}/relationships`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ psychologistId, patientId })
+              body: JSON.stringify({ 
+                psych_user_id: psychUserId, 
+                patient_user_id: patientUserId 
+              })
           });
           if (!res.ok) {
               const err = await res.json().catch(() => ({}));
@@ -175,16 +213,19 @@ const ensureRelationship = async (psychologistId: string, patientId: string): Pr
   // Invalidar caché local también
   relationshipsCache.clear();
   
-  return ensureLocalRelationship(psychologistId, patientId);
+  return ensureLocalRelationship(psychUserId, patientUserId);
 };
 
-const removeRelationship = async (psychologistId: string, patientId: string): Promise<void> => {
-  if (!psychologistId || !patientId) {
-      throw new Error('psychologistId y patientId son obligatorios para eliminar relación');
+const removeRelationship = async (psychUserId: string, patientUserId: string): Promise<void> => {
+  if (!psychUserId || !patientUserId) {
+      throw new Error('psych_user_id y patient_user_id son obligatorios para eliminar relación');
   }
   if (USE_BACKEND) {
-      console.log('[removeRelationship]', { psychologistId, patientId });
-      const params = new URLSearchParams({ psychologistId, patientId });
+      console.log('[removeRelationship]', { psychUserId, patientUserId });
+      const params = new URLSearchParams({ 
+        psych_user_id: psychUserId, 
+        patient_user_id: patientUserId 
+      });
       try {
           const res = await fetch(`${API_URL}/relationships?${params.toString()}`, { method: 'DELETE' });
           if (!res.ok) {
@@ -211,11 +252,11 @@ const removeRelationship = async (psychologistId: string, patientId: string): Pr
   // Invalidar caché local también
   relationshipsCache.clear();
   
-  removeLocalRelationship(psychologistId, patientId);
+  removeLocalRelationship(psychUserId, patientUserId);
 };
 
-const relationshipExists = async (psychologistId: string, patientId: string): Promise<boolean> => {
-  const rels = await fetchRelationships({ psychologistId, patientId });
+const relationshipExists = async (psychUserId: string, patientUserId: string): Promise<boolean> => {
+  const rels = await fetchRelationships({ psych_user_id: psychUserId, patient_user_id: patientUserId });
   return rels.length > 0;
 };
 
@@ -387,16 +428,24 @@ export const migrateLocalToBackend = async (userId: string) => {
             try { await sendInvitation(inv.fromPsychologistId, inv.fromPsychologistName, inv.toUserEmail); } catch (err) { console.warn('Failed to migrate invitation', inv.id, err); }
         }
 
-        const relationshipsToMigrate = getLocalRelationships().filter(rel => rel.patientId === userId || rel.psychologistId === userId);
+        const relationshipsToMigrate = getLocalRelationships().filter(rel => {
+            const relPsychId = rel.psych_user_id || rel.psychologistId;
+            const relPatId = rel.patient_user_id || rel.patientId;
+            return relPatId === userId || relPsychId === userId;
+        });
         for (const rel of relationshipsToMigrate) {
             try {
+                const psychId = rel.psych_user_id || rel.psychologistId;
+                const patId = rel.patient_user_id || rel.patientId;
                 await fetch(`${API_URL}/relationships`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ psychologistId: rel.psychologistId, patientId: rel.patientId })
+                    body: JSON.stringify({ psych_user_id: psychId, patient_user_id: patId })
                 });
             } catch (err) {
-                console.warn('Failed to migrate relationship', `${rel.psychologistId}-${rel.patientId}`, err);
+                const psychId = rel.psych_user_id || rel.psychologistId;
+                const patId = rel.patient_user_id || rel.patientId;
+                console.warn('Failed to migrate relationship', `${psychId}-${patId}`, err);
             }
         }
 
@@ -534,19 +583,19 @@ export const sendInvitation = async (
     
     // Determinar quién es psicólogo y quién paciente según el rol deseado
     const isPsychologistInvite = role === 'PSYCHOLOGIST'; // Estás invitando a un psicólogo
-    const psychologistId = isPsychologistInvite ? '' : fromUserId; // Se llenará con el ID del invitado si es psych
-    const psychologistEmail = isPsychologistInvite ? toEmail : fromUserEmail;
-    const psychologistName = isPsychologistInvite ? '' : fromUserName; // Se llenará después
-    const patientEmail = isPsychologistInvite ? fromUserEmail : toEmail;
-    const patientName = isPsychologistInvite ? fromUserName : '';
+    const psychUserId = isPsychologistInvite ? '' : fromUserId; // Se llenará con el ID del invitado si es psych
+    const psychUserEmail = isPsychologistInvite ? toEmail : fromUserEmail;
+    const psychUserName = isPsychologistInvite ? '' : fromUserName; // Se llenará después
+    const patientUserEmail = isPsychologistInvite ? fromUserEmail : toEmail;
+    const patientUserName = isPsychologistInvite ? fromUserName : '';
 
     // Verificar si ya existe invitación pendiente con el mismo par psychologist-patient
-    const normalizedPsychEmail = psychologistEmail.toLowerCase().trim();
-    const normalizedPatientEmail = patientEmail.toLowerCase().trim();
+    const normalizedPsychEmail = psychUserEmail.toLowerCase().trim();
+    const normalizedPatientEmail = patientUserEmail.toLowerCase().trim();
     
     const existingInv = invs.find(i => {
-        const invPsychEmail = (i.psychologistEmail || '').toLowerCase().trim();
-        const invPatientEmail = (i.patientEmail || i.toUserEmail || '').toLowerCase().trim();
+        const invPsychEmail = (i.psych_user_email || i.psychologistEmail || '').toLowerCase().trim();
+        const invPatientEmail = (i.patient_user_email || i.patientEmail || i.toUserEmail || '').toLowerCase().trim();
         
         return invPsychEmail === normalizedPsychEmail && 
                invPatientEmail === normalizedPatientEmail && 
@@ -577,16 +626,23 @@ export const sendInvitation = async (
 
     const newInv: Invitation = {
         id: crypto.randomUUID(),
-        psychologistId: psychologistId || (existingUser && isPsychologistInvite ? existingUser.id : ''),
-        psychologistEmail,
-        psychologistName,
-        patientEmail,
-        patientName,
-        patientId: existingUser && !isPsychologistInvite ? existingUser.id : undefined,
+        psych_user_id: psychUserId || (existingUser && isPsychologistInvite ? existingUser.id : ''),
+        psych_user_email: psychUserEmail,
+        psych_user_name: psychUserName,
+        patient_user_email: patientUserEmail,
+        patient_user_name: patientUserName,
+        patient_user_id: existingUser && !isPsychologistInvite ? existingUser.id : undefined,
         status: 'PENDING',
         timestamp: Date.now(),
         createdAt: new Date().toISOString(),
-        initiatorEmail: fromUserEmail // Email de quien inició la invitación
+        initiatorEmail: fromUserEmail, // Email de quien inició la invitación
+        // Campos legacy para compatibilidad
+        psychologistId: psychUserId || (existingUser && isPsychologistInvite ? existingUser.id : ''),
+        psychologistEmail: psychUserEmail,
+        psychologistName: psychUserName,
+        patientEmail: patientUserEmail,
+        patientName: patientUserName,
+        patientId: existingUser && !isPsychologistInvite ? existingUser.id : undefined
     };
 
     if (USE_BACKEND) {
@@ -625,12 +681,13 @@ export const getSentInvitationsForPsychologist = async (psychId: string, psychEm
     const invs = await getInvitations();
     console.log('📊 [getSentInvitationsForPsychologist] Total invitaciones:', invs.length);
     const normalizedEmail = psychEmail?.toLowerCase().trim();
-    const filtered = invs.filter(i => 
-        (i.psychologistId === psychId || 
-         (normalizedEmail && i.psychologistEmail?.toLowerCase().trim() === normalizedEmail) ||
-         i.fromPsychologistId === psychId) && 
-        i.status === 'PENDING'
-    );
+    const filtered = invs.filter(i => {
+        const iPsychId = i.psych_user_id || i.psychologistId || i.fromPsychologistId;
+        const iPsychEmail = i.psych_user_email || i.psychologistEmail;
+        return (iPsychId === psychId || 
+         (normalizedEmail && iPsychEmail?.toLowerCase().trim() === normalizedEmail)) && 
+        i.status === 'PENDING';
+    });
     console.log('✅ [getSentInvitationsForPsychologist] Invitaciones PENDING de este psicólogo:', filtered.length, filtered);
     return filtered;
 };
@@ -640,11 +697,13 @@ export const getPendingPsychologistInvitationsForEmail = async (email: string): 
     console.log('📋 [getPendingPsychologistInvitationsForEmail] Buscando solicitudes para:', email);
     const invs = await getInvitations();
     const normalizedEmail = email.toLowerCase().trim();
-    const filtered = invs.filter(i => 
-        i.psychologistEmail?.toLowerCase().trim() === normalizedEmail && 
+    const filtered = invs.filter(i => {
+        const iPsychEmail = i.psych_user_email || i.psychologistEmail;
+        const iInitiatorEmail = i.initiatorEmail;
+        return iPsychEmail?.toLowerCase().trim() === normalizedEmail && 
         i.status === 'PENDING' &&
-        i.initiatorEmail?.toLowerCase().trim() !== normalizedEmail // Excluir las que el psicólogo inició
-    );
+        iInitiatorEmail?.toLowerCase().trim() !== normalizedEmail; // Excluir las que el psicólogo inició
+    });
     console.log('✅ [getPendingPsychologistInvitationsForEmail] Solicitudes PENDING iniciadas por pacientes:', filtered.length, filtered);
     return filtered;
 };
@@ -659,7 +718,11 @@ export const acceptInvitation = async (invitationId: string, userId: string) => 
 
     // Primero crear la relación de cuidado
     try {
-        await ensureRelationship(inv.psychologistId, userId);
+        const psychId = inv.psych_user_id || inv.psychologistId;
+        if (!psychId) {
+            throw new Error('No se encontró el ID del psicólogo en la invitación');
+        }
+        await ensureRelationship(psychId, userId);
         console.log('✅ Relación de cuidado creada exitosamente');
     } catch (e) {
         console.error('Error creating care relationship:', e);
@@ -728,19 +791,19 @@ export const rejectInvitation = async (invitationId: string) => {
     localStorage.setItem(INVITATIONS_KEY, JSON.stringify(invs));
 };
 
-export const linkPatientToPsychologist = async (patientId: string, psychId: string) => {
-     // Nota: patientId/psychId se refieren a la posición en esta relación específica,
+export const linkPatientToPsychologist = async (patientUserId: string, psychUserId: string) => {
+     // Nota: patientUserId/psychUserId se refieren a la posición en esta relación específica,
      // no al rol general del usuario. Un psicólogo puede ser paciente de otro.
-     await ensureRelationship(psychId, patientId);
+     await ensureRelationship(psychUserId, patientUserId);
 };
 
-export const revokeAccess = async (patientId: string, psychId: string) => {
-    // Nota: patientId/psychId se refieren a la posición en esta relación específica,
+export const revokeAccess = async (patientUserId: string, psychUserId: string) => {
+    // Nota: patientUserId/psychUserId se refieren a la posición en esta relación específica,
     // no al rol general del usuario. Un psicólogo puede ser paciente de otro.
-    await removeRelationship(psychId, patientId);
+    await removeRelationship(psychUserId, patientUserId);
 };
 
-export const endRelationship = async (psychologistId: string, patientId: string) => {
+export const endRelationship = async (psychUserId: string, patientUserId: string) => {
     // Finalizar relación (marcar con endedAt) en lugar de eliminarla
     if (!USE_BACKEND) {
         throw new Error('La finalización de relaciones solo está disponible con backend');
@@ -754,7 +817,10 @@ export const endRelationship = async (psychologistId: string, patientId: string)
                 'Cache-Control': 'no-cache',
                 'Pragma': 'no-cache'
             },
-            body: JSON.stringify({ psychologistId, patientId })
+            body: JSON.stringify({ 
+              psych_user_id: psychUserId, 
+              patient_user_id: patientUserId 
+            })
         });
         
         if (!res.ok) {
@@ -776,7 +842,7 @@ export const getPatientsForPsychologist = async (psychId: string): Promise<Patie
         // Cargar todo en paralelo para reducir llamadas al servidor
         const [psych, relationships, allUsers, allEntries] = await Promise.all([
             AuthService.getUserById(psychId),
-            fetchRelationships({ psychologistId: psychId }),
+            fetchRelationships({ psych_user_id: psychId }),
             AuthService.getUsers(),
             getEntries() // Cargar todas las entradas una sola vez
         ]);
@@ -825,7 +891,7 @@ export const getPatientsForPsychologist = async (psychId: string): Promise<Patie
         };
         
         const patientIds = relationships
-            .map(rel => rel.patientId)
+            .map(rel => rel.patient_user_id || rel.patientId)
             .filter((id): id is string => Boolean(id));
         const uniquePatientIds = Array.from(new Set(patientIds));
 
@@ -848,12 +914,12 @@ export const getPatientsForPsychologist = async (psychId: string): Promise<Patie
 };
 
 export const getPsychologistsForPatient = async (patientId: string): Promise<User[]> => {
-    const relationships = await fetchRelationships({ patientId });
+    const relationships = await fetchRelationships({ patient_user_id: patientId });
     if (relationships.length === 0) return [];
 
     const psychIds = Array.from(new Set(
         relationships
-            .map(rel => rel.psychologistId)
+            .map(rel => rel.psych_user_id || rel.psychologistId)
             .filter((id): id is string => Boolean(id))
     ));
     const psychs = await Promise.all(psychIds.map(id => AuthService.getUserById(id)));
