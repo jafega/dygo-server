@@ -127,13 +127,10 @@ const App: React.FC = () => {
               setViewState(ViewState.AUTH);
           }
         } catch (error) {
-          // Si hay un error de conexión con Supabase, redirigir al login
-          if (error instanceof Error && error.message === 'SUPABASE_DISCONNECTED') {
-            console.error('❌ Supabase no está conectado. Redirigiendo a login...');
-            setError('La base de datos no está disponible. Por favor, inicia sesión de nuevo.');
-            setViewState(ViewState.AUTH);
-          } else {
-            console.error('Error inicializando usuario:', error);
+          console.error('Error inicializando usuario:', error);
+          // Don't force logout on initialization errors - might be temporary network issue
+          // Only redirect to auth if there's no user data at all
+          if (!currentUser) {
             setViewState(ViewState.AUTH);
           }
         }
@@ -143,31 +140,8 @@ const App: React.FC = () => {
     init();
   }, []);
 
-  // Verificación periódica de la conexión a Supabase cada 30 segundos
-  useEffect(() => {
-    if (!USE_BACKEND || !currentUser) return;
-
-    const checkConnection = async () => {
-      try {
-        const isConnected = await AuthService.checkSupabaseConnection();
-        if (!isConnected) {
-          console.error('❌ Supabase se ha desconectado. Redirigiendo a login...');
-          setError('Se ha perdido la conexión con la base de datos. Por favor, inicia sesión de nuevo.');
-          AuthService.logout();
-          setCurrentUser(null);
-          setViewState(ViewState.AUTH);
-        }
-      } catch (error) {
-        console.error('Error verificando conexión a Supabase:', error);
-      }
-    };
-
-    // Verificar inmediatamente y luego cada 30 segundos
-    checkConnection();
-    const interval = setInterval(checkConnection, 30000);
-
-    return () => clearInterval(interval);
-  }, [currentUser]);
+  // Removed: Aggressive periodic connection check that was logging users out unnecessarily
+  // Connection issues are now handled gracefully at the operation level
 
   // Efecto para forzar vista de paciente si is_psychologist es false
   useEffect(() => {
@@ -232,15 +206,8 @@ const App: React.FC = () => {
       // Check profile for both psychologists and patients
       await checkProfileComplete(userId);
     } catch (e) {
-      if (e instanceof Error && e.message === 'SUPABASE_DISCONNECTED') {
-        console.error('❌ Supabase desconectado durante refreshUserData');
-        setError('Se ha perdido la conexión con la base de datos. Por favor, inicia sesión de nuevo.');
-        AuthService.logout();
-        setCurrentUser(null);
-        setViewState(ViewState.AUTH);
-        return;
-      }
-      console.warn('No se pudo refrescar el perfil desde el servidor.', e);
+      console.warn('No se pudo refrescar el perfil desde el servidor (probablemente error temporal de red):', e);
+      // Don't logout on refresh errors - user can continue with cached data
     }
   };
 

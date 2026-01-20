@@ -1,8 +1,10 @@
 import { User } from '../types';
 import { API_URL, USE_BACKEND, ALLOW_LOCAL_FALLBACK } from './config';
+import { fetchWithRetry } from './retryUtils';
 
 const USERS_KEY = 'ai_diary_users_v1';
 const CURRENT_USER_KEY = 'ai_diary_current_user_id';
+const USER_CACHE_KEY = 'ai_diary_user_cache'; // Cache for user data to handle network issues
 
 // --- Helper for LocalStorage Fallback ---
 const getLocalUsers = (): User[] => {
@@ -202,44 +204,79 @@ export const signInWithSupabase = async (accessToken: string): Promise<User> => 
 
 export const logout = () => {
   localStorage.removeItem(CURRENT_USER_KEY);
+  localStorage.removeItem(USER_CACHE_KEY);
 };
 
 export const getCurrentUser = async (): Promise<User | null> => {
   const id = localStorage.getItem(CURRENT_USER_KEY);
   if (!id) return null;
   
-  // Verificar primero que Supabase esté conectado
-  if (USE_BACKEND) {
-    const isConnected = await checkSupabaseConnection();
-    if (!isConnected) {
-      console.error('❌ Supabase no está conectado. Limpiando sesión...');
+  // Removed aggressive connection check that was forcing logout on temporary network issues
+  // Now we try to get user data and handle errors gracefully
+  
+  try {
+    // Siempre obtener datos frescos del backend/Supabase
+    const user = await getUserById(id);
+    
+    // Si el usuario no existe (fue eliminado), limpiar localStorage
+    if (!user) {
+      // Check cache before giving up
+      const cached = localStorage.getItem(USER_CACHE_KEY);
+      if (cached) {
+        try {
+          const cachedUser = JSON.parse(cached);
+          if (cachedUser.id === id) {
+            console.log('⚠️ Using cached user data due to connection issue');
+            return cachedUser;
+          }
+        } catch (e) {
+          console.warn('Failed to parse cached user', e);
+        }
+      }
       localStorage.removeItem(CURRENT_USER_KEY);
-      throw new Error('SUPABASE_DISCONNECTED');
+      return null;
     }
-  }
   
-  // Siempre obtener datos frescos del backend/Supabase
-  const user = await getUserById(id);
-  
-  // Si el usuario no existe (fue eliminado), limpiar localStorage
-  if (!user) {
-    localStorage.removeItem(CURRENT_USER_KEY);
+    // Cache the user data for offline access
+    localStorage.setItem(USER_CACHE_KEY, JSON.stringify(user));
+    
+    console.log('🔄 Usuario obtenido desde servidor:', {
+      email: user.email,
+      is_psychologist: user.is_psychologist,
+      isPsychologist: user.isPsychologist
+    });
+    
+    return user;
+  } catch (error) {
+    console.warn('⚠️ Error obteniendo usuario (probablemente temporal):', error);
+    // Try to use cached data
+    const cached = localStorage.getItem(USER_CACHE_KEY);
+    if (cached) {
+      try {
+        const cachedUser = JSON.parse(cached);
+        if (cachedUser.id === id) {
+          console.log('⚠️ Using cached user data due to connection issue');
+          return cachedUser;
+        }
+      } catch (e) {
+        console.warn('Failed to parse cached user', e);
+      }
+    }
+    // Don't clear session on temporary errors - return null and let the app retry
     return null;
   }
-  
-  console.log('🔄 Usuario obtenido desde servidor:', {
-    email: user.email,
-    is_psychologist: user.is_psychologist,
-    isPsychologist: user.isPsychologist
-  });
-  
-  return user;
 };
 
 export const getUserById = async (id: string): Promise<User | undefined> => {
   if (USE_BACKEND) {
       try {
-          const res = await fetch(`${API_URL}/users?id=${id}`);
+          // Use retry mechanism for critical user data fetch
+          const res = await fetchWithRetry(`${API_URL}/users?id=${id}`, undefined, {
+            maxRetries: 2,
+            initialDelay: 500,
+            maxDelay: 2000
+          });
+          
           if (res.ok) {
               const user = await res.json();
               return user;
@@ -250,12 +287,13 @@ export const getUserById = async (id: string): Promise<User | undefined> => {
           }
           throw new Error(`Server error: ${res.status}`);
       } catch(e) {
-          console.error('Error in getUserById:', e);
+          console.warn('⚠️ Error in getUserById (could be temporary network issue):', e);
           if (ALLOW_LOCAL_FALLBACK) { 
               console.warn("Fetch error, using local fallback.", e); 
               return getLocalUsers().find(u => u.id === id); 
           }
-          throw new Error(`No se puede conectar con el servidor para obtener el usuario: ${e instanceof Error ? e.message : 'Error desconocido'}`);
+          // Don't throw - return undefined to allow app to continue with cached data
+          return undefined;
       }
   }
   return getLocalUsers().find(u => u.id === id);
@@ -543,7 +581,7 @@ export const uploadSessionFile = async (file: File, userId: string): Promise<str
     });
 };
 
-// Verificar conexión con Supabase
+// Verificar conexión con Supabase (ahora con timeout más largo y manejo mejorado)
 export const checkSupabaseConnection = async (): Promise<boolean> => {
   if (!USE_BACKEND) {
     // Sin backend, asumimos que está "conectado" (modo local)
@@ -553,19 +591,19 @@ export const checkSupabaseConnection = async (): Promise<boolean> => {
   try {
     const res = await fetch(`${API_URL}/health/supabase`, {
       method: 'GET',
-      // Timeout de 5 segundos
-      signal: AbortSignal.timeout(5000)
+      // Timeout de 10 segundos (aumentado desde 5s para conexiones más lentas)
+      signal: AbortSignal.timeout(10000)
     });
 
     if (!res.ok) {
-      console.error('❌ Supabase no está conectado:', res.status);
+      console.warn('⚠️ Supabase health check falló:', res.status);
       return false;
     }
 
     const data = await res.json();
     return data.connected === true;
   } catch (error) {
-    console.error('❌ Error verificando conexión a Supabase:', error);
+    console.warn('⚠️ Error verificando conexión a Supabase:', error);
     return false;
   }
 };
