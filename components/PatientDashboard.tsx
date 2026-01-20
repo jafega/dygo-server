@@ -22,45 +22,32 @@ const PatientDashboard: React.FC = () => {
     if (showLoader && patients.length === 0) {
       setIsLoading(true);
     }
-    const user = await getCurrentUser();
-    if (user) {
+    try {
+      const user = await getCurrentUser();
+      if (user) {
         setCurrentUser(user);
         const pts = await getPatientsForPsychologist(user.id);
-        // Solo actualizar si hay cambios significativos para evitar re-renders innecesarios
-        setPatients(prevPatients => {
-          const patientsChanged = JSON.stringify(prevPatients) !== JSON.stringify(pts);
-          return patientsChanged ? pts : prevPatients;
-        });
+        setPatients(pts);
+      }
+    } catch (error) {
+      console.error('Error loading patients:', error);
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
   useEffect(() => {
     loadData();
-  }, []);
+    
+    // Refrescar cada 30 segundos solo si no hay modal abierto
+    const intervalId = setInterval(() => {
+      if (!selectedPatientId && document.visibilityState === 'visible') {
+        loadData(false);
+      }
+    }, 30000);
 
-    useEffect(() => {
-        const handleFocus = () => {
-            // No recargar si hay un paciente seleccionado (modal abierto)
-            if (!selectedPatientId) {
-                loadData();
-            }
-        };
-        const handleVisibility = () => {
-            // No recargar si hay un paciente seleccionado (modal abierto)
-            if (document.visibilityState === 'visible' && !selectedPatientId) {
-                loadData();
-            }
-        };
-
-        window.addEventListener('focus', handleFocus);
-        document.addEventListener('visibilitychange', handleVisibility);
-
-        return () => {
-            window.removeEventListener('focus', handleFocus);
-            document.removeEventListener('visibilitychange', handleVisibility);
-        };
-    }, [selectedPatientId]);
+    return () => clearInterval(intervalId);
+  }, [selectedPatientId]);
 
   // Las invitaciones y conexiones con pacientes se manejan desde la pestaña Conexiones
 

@@ -155,6 +155,7 @@ export const signInWithSupabase = async (accessToken: string): Promise<User> => 
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
+            console.error('❌ Supabase auth failed:', err);
             throw new Error(err.error || 'Error signing in with Supabase');
         }
         const user = await res.json();

@@ -33,7 +33,19 @@ export const API_URL = ENV_API_URL || getDefaultApiUrl();
 export const USE_BACKEND = true; 
 export const ALLOW_LOCAL_FALLBACK = false;
 
+import { createClient } from '@supabase/supabase-js';
+
 // Supabase client env (frontend)
 export const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || '';
 export const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
 export const SUPABASE_REDIRECT_URL = (import.meta as any).env?.VITE_SUPABASE_REDIRECT_URL || '';
+
+// Singleton Supabase client instance
+let supabaseClient: any = null;
+
+export const getSupabaseClient = () => {
+  if (!supabaseClient && SUPABASE_URL && SUPABASE_ANON_KEY) {
+    supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  }
+  return supabaseClient;
+};

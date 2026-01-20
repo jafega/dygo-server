@@ -2380,32 +2380,45 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
 // Mini Component for Displaying Attachment Thumbnails
 const AttachmentThumb: React.FC<{ att: Attachment }> = ({ att }) => (
     att.type === 'AUDIO' ? (
-        <div className="block group shrink-0 relative" title={att.name}>
-            <div className="w-16 h-16 rounded-lg bg-white border border-slate-200 flex flex-col items-center justify-center hover:border-indigo-400 transition-colors p-1">
-                <audio controls src={att.url} className="w-full" />
+        <a href={att.url} download={att.name} className="block group shrink-0 relative" title={att.name}>
+            <div className="w-20 h-20 rounded-xl bg-gradient-to-br from-purple-50 to-purple-100 border-2 border-purple-200 flex flex-col items-center justify-center hover:border-purple-400 hover:shadow-lg transition-all gap-1">
+                <Mic size={28} className="text-purple-600" />
+                <span className="text-[9px] text-purple-700 font-semibold">Audio</span>
             </div>
-            <a href={att.url} download={att.name} className="block text-[9px] text-indigo-600 mt-1 text-center">Descargar</a>
-        </div>
+            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 rounded-xl flex items-center justify-center transition-opacity text-white">
+                <Download size={18} />
+            </div>
+        </a>
     ) : att.type === 'VIDEO' ? (
-        <div className="block group shrink-0 relative" title={att.name}>
-            <div className="w-16 h-16 rounded-lg bg-white border border-slate-200 flex flex-col items-center justify-center hover:border-indigo-400 transition-colors p-1">
-                <video controls src={att.url} className="w-full" />
+        <a href={att.url} download={att.name} className="block group shrink-0 relative" title={att.name}>
+            <div className="w-20 h-20 rounded-xl bg-gradient-to-br from-pink-50 to-pink-100 border-2 border-pink-200 flex flex-col items-center justify-center hover:border-pink-400 hover:shadow-lg transition-all gap-1">
+                <Video size={28} className="text-pink-600" />
+                <span className="text-[9px] text-pink-700 font-semibold">Video</span>
             </div>
-            <a href={att.url} download={att.name} className="block text-[9px] text-indigo-600 mt-1 text-center">Descargar</a>
-        </div>
+            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 rounded-xl flex items-center justify-center transition-opacity text-white">
+                <Download size={18} />
+            </div>
+        </a>
     ) : (
         <a href={att.url} download={att.name} className="block group shrink-0 relative" title={att.name}>
             {att.type === 'IMAGE' ? (
-                <img src={att.url} alt="adjunto" className="w-16 h-16 rounded-lg object-cover border border-slate-200 hover:border-indigo-400 transition-colors" />
+                <>
+                    <img src={att.url} alt="adjunto" className="w-20 h-20 rounded-xl object-cover border-2 border-slate-200 hover:border-indigo-400 hover:shadow-lg transition-all" />
+                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 rounded-xl flex items-center justify-center transition-opacity text-white">
+                        <Download size={18} />
+                    </div>
+                </>
             ) : (
-                <div className="w-16 h-16 rounded-lg bg-white border border-slate-200 flex flex-col items-center justify-center hover:border-indigo-400 transition-colors">
-                    <FileText size={20} className="text-slate-400" />
-                    <span className="text-[8px] text-slate-500 mt-1 max-w-full truncate px-1">{att.name}</span>
-                </div>
+                <>
+                    <div className="w-20 h-20 rounded-xl bg-gradient-to-br from-blue-50 to-blue-100 border-2 border-blue-200 flex flex-col items-center justify-center hover:border-blue-400 hover:shadow-lg transition-all gap-1">
+                        <FileText size={28} className="text-blue-600" />
+                        <span className="text-[9px] text-blue-700 font-semibold max-w-full truncate px-1">Documento</span>
+                    </div>
+                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 rounded-xl flex items-center justify-center transition-opacity text-white">
+                        <Download size={18} />
+                    </div>
+                </>
             )}
-            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 rounded-lg flex items-center justify-center transition-opacity text-white">
-                <Download size={16} />
-            </div>
         </a>
     )
 );

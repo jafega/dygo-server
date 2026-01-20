@@ -588,40 +588,42 @@ if (USE_POSTGRES) {
 }
 
 if (!pgPool && SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
-  try {
-    const { createClient } = await import('@supabase/supabase-js');
-    supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-      auth: { persistSession: false }
-    });
-    console.log('✅ Supabase REST persistence enabled (service role)');
+  (async () => {
     try {
-      await ensureSupabaseTablesExist();
-    } catch (schemaErr) {
-      console.error('❌ Error ensuring Supabase schema', schemaErr?.message || schemaErr);
-    }
-    supabaseDbCache = ensureDbShape(await loadSupabaseCache());
-    console.log('ℹ️ Supabase data loaded into cache');
-    console.log('📊 Cache contents: users:', supabaseDbCache.users?.length || 0, 
-                'entries:', supabaseDbCache.entries?.length || 0,
-                'careRelationships:', supabaseDbCache.careRelationships?.length || 0);
-    if (supabaseDbCache.careRelationships && supabaseDbCache.careRelationships.length > 0) {
-      console.log('📋 Care relationships loaded:');
-      supabaseDbCache.careRelationships.forEach(rel => {
-        console.log(`   - ${rel.psychologistId} → ${rel.patientId}`);
+      const { createClient } = await import('@supabase/supabase-js');
+      supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+        auth: { persistSession: false }
       });
-    }
-    (async () => {
+      console.log('✅ Supabase REST persistence enabled (service role)');
       try {
-        await dedupeSupabaseUsers();
-      } catch (err) {
-        console.error('❌ Supabase dedupe failed', err);
+        await ensureSupabaseTablesExist();
+      } catch (schemaErr) {
+        console.error('❌ Error ensuring Supabase schema', schemaErr?.message || schemaErr);
       }
-    })();
-  } catch (err) {
-    console.error('❌ Unable to enable Supabase REST persistence', err);
-    supabaseAdmin = null;
-    supabaseDbCache = null;
-  }
+      supabaseDbCache = ensureDbShape(await loadSupabaseCache());
+      console.log('ℹ️ Supabase data loaded into cache');
+      console.log('📊 Cache contents: users:', supabaseDbCache.users?.length || 0, 
+                  'entries:', supabaseDbCache.entries?.length || 0,
+                  'careRelationships:', supabaseDbCache.careRelationships?.length || 0);
+      if (supabaseDbCache.careRelationships && supabaseDbCache.careRelationships.length > 0) {
+        console.log('📋 Care relationships loaded:');
+        supabaseDbCache.careRelationships.forEach(rel => {
+          console.log(`   - ${rel.psychologistId} → ${rel.patientId}`);
+        });
+      }
+      (async () => {
+        try {
+          await dedupeSupabaseUsers();
+        } catch (err) {
+          console.error('❌ Supabase dedupe failed', err);
+        }
+      })();
+    } catch (err) {
+      console.error('❌ Unable to enable Supabase REST persistence', err);
+      supabaseAdmin = null;
+      supabaseDbCache = null;
+    }
+  })();
 }
 
 function normalizeSupabaseRow(row) {
@@ -1205,8 +1207,12 @@ const handleSupabaseAuth = async (req, res) => {
 
     return res.json(user);
   } catch (err) {
-    console.error('Error in supabase auth handler', err);
-    return res.status(500).json({ error: 'Supabase auth failed' });
+    console.error('❌ Error in supabase auth handler:', err);
+    return res.status(500).json({ 
+      error: 'Supabase auth failed',
+      details: err.message || 'Unknown error',
+      configured: !!process.env.SUPABASE_URL
+    });
   }
 };
 
@@ -3700,6 +3706,13 @@ app.get('/', (_req, res) => {
   res.send('DYGO API OK ✅ Usa /api/users, /api/entries, etc.');
 });
 
+// --- ERROR HANDLER MIDDLEWARE ---
+app.use((err, req, res, next) => {
+  console.error('❌❌❌ Global error handler caught:', err);
+  console.error('Stack:', err.stack);
+  res.status(500).json({ error: 'Error interno del servidor', details: err.message });
+});
+
 // --- INICIO DEL SERVIDOR ---
 // Warn in production if persistence is likely ephemeral
 if (process.env.NODE_ENV === 'production' && !USE_SQLITE && !pgPool && !supabaseAdmin) {
@@ -3712,12 +3725,32 @@ if (USE_SQLITE) {
   }
 }
 
+// Capturar errores no manejados
+process.on('uncaughtException', (err) => {
+  console.error('❌ Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+console.log('🔧 Attempting to start server...');
+console.log('   VERCEL:', process.env.VERCEL);
+console.log('   VERCEL_ENV:', process.env.VERCEL_ENV);
+
 if (!process.env.VERCEL && !process.env.VERCEL_ENV) {
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log('\n🚀 SERVIDOR DYGO (ES MODULES) LISTO');
     console.log(`📡 URL: http://localhost:${PORT}`);
     console.log(`📂 DB: ${DB_FILE}\n`);
   });
+
+  server.on('error', (err) => {
+    console.error('❌ Server error:', err);
+    process.exit(1);
+  });
+} else {
+  console.log('⏭️  Skipping app.listen() because VERCEL env detected');
 }
 
 // (Opcional) export para tests

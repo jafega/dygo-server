@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import * as AuthService from '../services/authService';
 import { Loader2, Server, WifiOff, CheckCircle } from 'lucide-react';
-import { SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_REDIRECT_URL, API_URL } from '../services/config';
-import { createClient } from '@supabase/supabase-js';
+import { SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_REDIRECT_URL, API_URL, getSupabaseClient } from '../services/config';
 
 // Custom Dygo Logo Component for Auth
 const DygoLogoAuth: React.FC = () => (
@@ -39,9 +38,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         };
         checkServer();
 
-        const supabaseClient = (SUPABASE_URL && SUPABASE_ANON_KEY)
-            ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-            : null;
+        const supabaseClient = getSupabaseClient();
 
         const handleSupabaseCallback = async () => {
             try {
@@ -86,7 +83,10 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
     const handleSupabaseGoogle = async () => {
         try {
             setIsLoading(true);
-            const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            const supabase = getSupabaseClient();
+            if (!supabase) {
+                throw new Error('Supabase client not available');
+            }
             const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
             const redirectTo = isLocalhost
                 ? 'http://localhost:3000/?supabase_auth=1'

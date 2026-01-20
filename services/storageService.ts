@@ -685,54 +685,84 @@ export const endRelationship = async (psychologistId: string, patientId: string)
 
 export const getPatientsForPsychologist = async (psychId: string): Promise<PatientSummary[]> => {
     console.log('[getPatientsForPsychologist]', { psychId });
-    const psych = await AuthService.getUserById(psychId);
-    if (!psych) return [];
-
-    const patientsData: PatientSummary[] = [];
-
-    const processUser = async (user: User, isSelf: boolean = false) => {
-        const entries = await getEntriesForUser(user.id);
-        const lastEntry = entries[0];
+    
+    try {
+        // Cargar todo en paralelo para reducir llamadas al servidor
+        const [psych, relationships, allUsers, allEntries] = await Promise.all([
+            AuthService.getUserById(psychId),
+            fetchRelationships({ psychologistId: psychId }),
+            AuthService.getUsers(),
+            getEntries() // Cargar todas las entradas una sola vez
+        ]);
         
-        const last7 = entries.slice(0, 7);
-        const avgSentiment = last7.length > 0 
-            ? (last7.reduce((acc, curr) => acc + curr.sentimentScore, 0) / last7.length)
-            : 0;
+        if (!psych) return [];
 
-        return {
-            id: user.id,
-            name: isSelf ? `${user.name} (Tú)` : user.name,
-            email: user.email,
-            avatarUrl: user.avatarUrl,
-            lastUpdate: lastEntry ? lastEntry.date : 'Sin datos',
-            averageSentiment: parseFloat(avgSentiment.toFixed(1)),
-            recentSummary: lastEntry ? lastEntry.summary : 'No hay registros recientes.',
-            riskLevel: avgSentiment < 4 ? 'HIGH' : avgSentiment < 6 ? 'MEDIUM' : 'LOW',
-            isSelf: isSelf
-        } as PatientSummary;
-    };
+        const patientsData: PatientSummary[] = [];
+        
+        // Crear índice de usuarios para búsqueda rápida
+        const userMap = new Map(allUsers.map(u => [u.id, u]));
+        
+        // Crear índice de entradas por usuario
+        const entriesByUser = new Map<string, any[]>();
+        allEntries.forEach(entry => {
+            if (!entriesByUser.has(entry.userId)) {
+                entriesByUser.set(entry.userId, []);
+            }
+            entriesByUser.get(entry.userId)!.push(entry);
+        });
+        
+        // Ordenar entradas por fecha (más recientes primero)
+        entriesByUser.forEach(entries => {
+            entries.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        });
 
-    const relationships = await fetchRelationships({ psychologistId: psychId });
-    console.log('[getPatientsForPsychologist] relationships:', relationships);
-    const patientIds = relationships
-        .map(rel => rel.patientId)
-        .filter((id): id is string => Boolean(id));
-    const uniquePatientIds = Array.from(new Set(patientIds));
-    console.log('[getPatientsForPsychologist] uniquePatientIds:', uniquePatientIds);
+        const processUser = (user: User, isSelf: boolean = false): PatientSummary => {
+            const userEntries = entriesByUser.get(user.id) || [];
+            const lastEntry = userEntries[0];
+            
+            const last7 = userEntries.slice(0, 7);
+            const avgSentiment = last7.length > 0 
+                ? (last7.reduce((acc, curr) => acc + curr.sentimentScore, 0) / last7.length)
+                : 0;
 
-    const patientPromises = uniquePatientIds.map(async (pid) => {
-        const p = await AuthService.getUserById(pid);
-        if (p) return await processUser(p);
-        return null;
-    });
+            return {
+                id: user.id,
+                name: isSelf ? `${user.name} (Tú)` : user.name,
+                email: user.email,
+                avatarUrl: user.avatarUrl,
+                lastUpdate: lastEntry ? lastEntry.date : 'Sin datos',
+                averageSentiment: parseFloat(avgSentiment.toFixed(1)),
+                recentSummary: lastEntry ? lastEntry.summary : 'No hay registros recientes.',
+                riskLevel: avgSentiment < 4 ? 'HIGH' : avgSentiment < 6 ? 'MEDIUM' : 'LOW',
+                isSelf: isSelf
+            } as PatientSummary;
+        };
 
-    const results = await Promise.all(patientPromises);
-    results.forEach(r => { if (r) patientsData.push(r); });
+        console.log('[getPatientsForPsychologist] relationships:', relationships);
+        
+        const patientIds = relationships
+            .map(rel => rel.patientId)
+            .filter((id): id is string => Boolean(id));
+        const uniquePatientIds = Array.from(new Set(patientIds));
+        console.log('[getPatientsForPsychologist] uniquePatientIds:', uniquePatientIds);
 
-    patientsData.unshift(await processUser(psych, true));
+        // Procesar pacientes usando el mapa (sin llamadas adicionales al servidor)
+        uniquePatientIds.forEach(pid => {
+            const patient = userMap.get(pid);
+            if (patient) {
+                patientsData.push(processUser(patient));
+            }
+        });
 
-    console.log('[getPatientsForPsychologist] result:', patientsData.map(p => ({ id: p.id, name: p.name })));
-    return patientsData;
+        // Agregar el psicólogo al principio
+        patientsData.unshift(processUser(psych, true));
+
+        console.log('[getPatientsForPsychologist] result:', patientsData.map(p => ({ id: p.id, name: p.name })));
+        return patientsData;
+    } catch (error) {
+        console.error('[getPatientsForPsychologist] Error:', error);
+        return [];
+    }
 };
 
 export const getPsychologistsForPatient = async (patientId: string): Promise<User[]> => {
