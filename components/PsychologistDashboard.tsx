@@ -35,6 +35,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
   const [patients, setPatients] = useState<any[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [showTotalBilling, setShowTotalBilling] = useState(true); // Toggle para mostrar total vs solo cobrado
   
   // Date range state - default to last 30 days
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>(() => {
@@ -166,8 +167,10 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
   const activePatients = activePatientsSet.size;
 
   // Financial metrics
+  console.log('[PsychologistDashboard] All invoices:', invoices.map(inv => ({ id: inv.id, status: inv.status, amount: inv.amount, date: inv.date })));
   const paidInvoices = invoices.filter(inv => inv.status === 'paid');
   const pendingInvoices = invoices.filter(inv => inv.status === 'pending');
+  console.log('[PsychologistDashboard] Filtered paid:', paidInvoices.length, 'pending:', pendingInvoices.length);
   const totalRevenue = paidInvoices.reduce((sum, inv) => sum + inv.amount, 0);
   const totalPending = pendingInvoices.reduce((sum, inv) => sum + inv.amount, 0);
   const totalBilling = totalRevenue + totalPending; // Total incluye pagadas + pendientes
@@ -271,7 +274,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
       </div>
 
       {/* Financial Overview */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {/* Total Revenue */}
         <div className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl p-4 sm:p-4 text-white shadow-lg">
           <div className="flex items-center justify-between mb-2 sm:mb-1.5">
@@ -306,7 +309,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
         </div>
 
         {/* Paid Invoices */}
-        <div className="bg-gradient-to-br from-purple-500 to-pink-600 rounded-xl p-4 sm:p-4 text-white shadow-lg sm:col-span-2 lg:col-span-1">
+        <div className="bg-gradient-to-br from-purple-500 to-pink-600 rounded-xl p-4 sm:p-4 text-white shadow-lg">
           <div className="flex items-center justify-between mb-2 sm:mb-1.5">
             <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
               <CheckCircle size={20} className="sm:w-5 sm:h-5" />
@@ -315,18 +318,58 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
               Pagadas
             </span>
           </div>
-          <div className="text-2xl sm:text-2xl font-bold mb-1">{paidInvoices.length}</div>
-          <div className="text-xs text-purple-100">Facturas Cobradas</div>
+          <div className="text-2xl sm:text-2xl font-bold mb-1">{totalRevenue.toFixed(2)}€</div>
+          <div className="text-xs text-purple-100">Cobrado ({paidInvoices.length} facturas)</div>
+        </div>
+
+        {/* Pending Invoices */}
+        <div className="bg-gradient-to-br from-amber-500 to-yellow-500 rounded-xl p-4 sm:p-4 text-white shadow-lg">
+          <div className="flex items-center justify-between mb-2 sm:mb-1.5">
+            <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
+              <Clock size={20} className="sm:w-5 sm:h-5" />
+            </div>
+            <span className="text-xs font-semibold bg-white/20 px-2 py-1 rounded-full backdrop-blur-sm">
+              Pendientes
+            </span>
+          </div>
+          <div className="text-2xl sm:text-2xl font-bold mb-1">{totalPending.toFixed(2)}€</div>
+          <div className="text-xs text-amber-100">Por Cobrar ({pendingInvoices.length} facturas)</div>
         </div>
       </div>
 
       {/* Monthly Revenue Chart */}
       <div className="bg-white rounded-xl border border-slate-200 p-2 sm:p-4">
-        <div className="flex items-center gap-2 mb-2 sm:mb-4">
-          <div className="p-2 bg-green-100 rounded-lg">
-            <BarChart3 className="text-green-600" size={16} />
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mb-2 sm:mb-4">
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-green-100 rounded-lg">
+              <BarChart3 className="text-green-600" size={16} />
+            </div>
+            <h2 className="text-sm sm:text-lg font-bold text-slate-900">Facturación Mensual (12 Meses)</h2>
           </div>
-          <h2 className="text-sm sm:text-lg font-bold text-slate-900">Facturación Mensual (12 Meses)</h2>
+          
+          {/* Toggle para cambiar vista */}
+          <div className="flex items-center gap-2 bg-slate-100 rounded-lg p-1">
+            <button
+              onClick={() => setShowTotalBilling(true)}
+              className={`px-2 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-semibold rounded-md transition-all ${
+                showTotalBilling 
+                  ? 'bg-white text-slate-900 shadow-sm' 
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              Total
+            </button>
+            <button
+              onClick={() => setShowTotalBilling(false)}
+              className={`px-2 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-semibold rounded-md transition-all ${
+                !showTotalBilling 
+                  ? 'bg-white text-slate-900 shadow-sm' 
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              Solo Cobrado
+            </button>
+          </div>
         </div>
         
         {/* Vertical Bar Chart */}
@@ -343,7 +386,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
             {last12Months.map((month, idx) => {
               const key = Object.keys(monthlyRevenue)[idx];
               const paidValue = monthlyRevenue[key];
-              const pendingValue = monthlyPending[key];
+              const pendingValue = showTotalBilling ? monthlyPending[key] : 0; // Solo mostrar pendientes si el toggle está activo
               const totalValue = paidValue + pendingValue;
               
               const paidPercentage = maxRevenue > 0 ? (paidValue / maxRevenue) * 100 : 0;
@@ -351,7 +394,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
               const totalPercentage = paidPercentage + pendingPercentage;
                             // Debug log para ver valores
               if (idx === 0 || totalValue > 0) {
-                console.log(`[Chart] ${month} (${key}): paid=${paidValue}€, pending=${pendingValue}€, total=${totalValue}€`);
+                console.log(`[Chart] ${month} (${key}): paid=${paidValue}€, pending=${pendingValue}€, total=${totalValue}€, showTotal=${showTotalBilling}`);
               }
                             return (
                 <div key={key} className="flex-1 flex flex-col items-center justify-end group relative min-w-0">
@@ -420,13 +463,15 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
               <div className="w-3 h-3 rounded bg-gradient-to-t from-green-600 to-green-400"></div>
               <span className="text-slate-600">Cobrado</span>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded bg-gradient-to-t from-amber-500 to-yellow-400"></div>
-              <span className="text-slate-600">Pendiente</span>
-            </div>
+            {showTotalBilling && (
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded bg-gradient-to-t from-amber-500 to-yellow-400"></div>
+                <span className="text-slate-600">Pendiente</span>
+              </div>
+            )}
           </div>
           <div className="text-slate-500">
-            Total: {totalBilling.toFixed(2)}€
+            {showTotalBilling ? `Total: ${totalBilling.toFixed(2)}€` : `Cobrado: ${totalRevenue.toFixed(2)}€`}
           </div>
         </div>
       </div>
