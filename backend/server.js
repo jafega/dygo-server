@@ -3814,6 +3814,57 @@ app.patch('/api/invoices/:id', async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
     
+    console.log(`📝 [PATCH /api/invoices/${id}] Actualizando factura con:`, req.body);
+    
+    // SIEMPRE consultar desde Supabase primero si está disponible
+    if (supabaseAdmin) {
+      try {
+        // Leer la factura actual desde Supabase
+        const { data: currentInvoices, error: readError } = await supabaseAdmin
+          .from('invoices')
+          .select('*')
+          .eq('id', id)
+          .limit(1);
+        
+        if (readError) {
+          console.error('❌ Error leyendo factura desde Supabase:', readError);
+          throw readError;
+        }
+        
+        if (!currentInvoices || currentInvoices.length === 0) {
+          console.error('❌ Factura no encontrada en Supabase:', id);
+          return res.status(404).json({ error: 'Invoice not found in Supabase' });
+        }
+        
+        const currentInvoice = normalizeSupabaseRow(currentInvoices[0]);
+        const updatedInvoice = { ...currentInvoice, ...req.body };
+        
+        console.log('📤 [PATCH /api/invoices/:id] Actualizando en Supabase:', updatedInvoice);
+        
+        // Actualizar en Supabase
+        await upsertTable('invoices', [updatedInvoice]);
+        
+        // Actualizar el caché local
+        const db = getDb();
+        if (!db.invoices) db.invoices = [];
+        const idx = db.invoices.findIndex(inv => inv.id === id);
+        if (idx >= 0) {
+          db.invoices[idx] = updatedInvoice;
+        } else {
+          db.invoices.push(updatedInvoice);
+        }
+        saveDb(db);
+        
+        console.log('✅ Factura actualizada correctamente en Supabase y caché local:', id);
+        return res.json(updatedInvoice);
+        
+      } catch (err) {
+        console.error('❌ Error actualizando factura en Supabase:', err);
+        return res.status(500).json({ error: 'Error actualizando factura en Supabase' });
+      }
+    }
+    
+    // Fallback a DB local si no hay Supabase
     const db = getDb();
     if (!db.invoices) db.invoices = [];
     
@@ -3822,16 +3873,6 @@ app.patch('/api/invoices/:id', async (req, res) => {
     
     db.invoices[idx] = { ...db.invoices[idx], ...req.body };
     saveDb(db);
-
-    // Actualizar en Supabase si está disponible
-    if (supabaseAdmin) {
-      try {
-        await upsertTable('invoices', [db.invoices[idx]]);
-        console.log('✅ Factura actualizada en Supabase:', id);
-      } catch (err) {
-        console.error('❌ Error actualizando factura en Supabase:', err);
-      }
-    }
 
     res.json(db.invoices[idx]);
   } catch (error) {
