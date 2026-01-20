@@ -160,9 +160,9 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
         
         {/* Title & Arrows */}
         <div className="flex items-center justify-between w-full sm:w-auto gap-4">
-          <button onClick={handlePrev} disabled={viewMode === 'LIST'} className={`p-2 rounded-full text-slate-600 transition-colors ${viewMode === 'LIST' ? 'opacity-40 cursor-not-allowed' : 'hover:bg-slate-100'}`}><ChevronLeft size={20}/></button>
+          {viewMode !== 'LIST' && <button onClick={handlePrev} className="p-2 rounded-full text-slate-600 transition-colors hover:bg-slate-100"><ChevronLeft size={20}/></button>}
           <h2 className="text-lg md:text-xl font-bold text-slate-800 w-32 md:w-48 text-center capitalize">{getHeaderText()}</h2>
-          <button onClick={handleNext} disabled={viewMode === 'LIST'} className={`p-2 rounded-full text-slate-600 transition-colors ${viewMode === 'LIST' ? 'opacity-40 cursor-not-allowed' : 'hover:bg-slate-100'}`}><ChevronRight size={20}/></button>
+          {viewMode !== 'LIST' && <button onClick={handleNext} className="p-2 rounded-full text-slate-600 transition-colors hover:bg-slate-100"><ChevronRight size={20}/></button>}
         </div>
 
         {/* View Toggle */}
