@@ -6,9 +6,19 @@ const ENV_API_URL = (import.meta as any).env?.VITE_API_URL as string | undefined
 const getDefaultApiUrl = () => {
 	if (typeof window === 'undefined') return '/api';
 	const host = window.location.hostname;
+	const port = window.location.port;
+
+	// Local dev on desktop
 	if (host === 'localhost' || host === '127.0.0.1') {
-		return 'http://localhost:3001/api';
+		return 'http://localhost:3005/api';
 	}
+
+	// Dev en red local (ej. 192.168.x.x:3000) para usar el backend del mismo host
+	const isLan = /^\d+\.\d+\.\d+\.\d+$/.test(host) || host.endsWith('.local');
+	if (isLan && port === '3000') {
+		return `http://${host}:3005/api`;
+	}
+
 	// If frontend is on Vercel without API proxy, default to the known backend.
 	if (host.endsWith('.vercel.app') && !host.includes('dygo-server')) {
 		return 'https://dygo-server.vercel.app/api';

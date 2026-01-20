@@ -1891,6 +1891,88 @@ app.post('/api/upload-avatar', async (req, res) => {
   }
 });
 
+// --- RUTA PARA SUBIR ARCHIVOS DE SESIÓN ---
+app.post('/api/upload-session-file', async (req, res) => {
+  try {
+    const { userId, base64File, fileName, fileType } = req.body;
+    
+    if (!userId || !base64File || !fileName) {
+      return res.status(400).json({ error: 'userId, base64File y fileName son requeridos' });
+    }
+
+    // Check if Supabase is configured
+    if (!supabaseAdmin) {
+      console.warn('⚠️ Supabase no configurado, usando base64 directamente');
+      return res.json({ url: base64File });
+    }
+
+    try {
+      // Verificar que el bucket 'session-files' existe, si no crearlo
+      const { data: buckets } = await supabaseAdmin.storage.listBuckets();
+      const sessionBucketExists = buckets?.some(b => b.name === 'session-files');
+      
+      if (!sessionBucketExists) {
+        console.log('📦 Creando bucket session-files...');
+        const { error: createError } = await supabaseAdmin.storage.createBucket('session-files', {
+          public: false, // Archivos privados por defecto
+          fileSizeLimit: 100 * 1024 * 1024 // 100MB limit
+        });
+        
+        if (createError && !createError.message.includes('already exists')) {
+          console.error('Error creando bucket:', createError);
+          throw createError;
+        }
+      }
+
+      // Extraer el tipo MIME y los datos del base64
+      const matches = base64File.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+      if (!matches || matches.length !== 3) {
+        throw new Error('Formato de archivo base64 inválido');
+      }
+
+      const contentType = matches[1] || fileType || 'application/octet-stream';
+      const base64Data = matches[2];
+      const buffer = Buffer.from(base64Data, 'base64');
+
+      // Generar nombre único para el archivo
+      const timestamp = Date.now();
+      const safeFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
+      const filePath = `${userId}/${timestamp}_${safeFileName}`;
+
+      // Subir a Supabase Storage
+      const { data, error } = await supabaseAdmin.storage
+        .from('session-files')
+        .upload(filePath, buffer, {
+          contentType,
+          upsert: false,
+          cacheControl: '3600'
+        });
+
+      if (error) {
+        console.error('Error subiendo a Supabase Storage:', error);
+        throw error;
+      }
+
+      // Obtener URL pública (o signed URL si es privado)
+      const { data: urlData } = await supabaseAdmin.storage
+        .from('session-files')
+        .createSignedUrl(filePath, 60 * 60 * 24 * 365); // 1 year expiration
+
+      const fileUrl = urlData?.signedUrl || base64File;
+
+      console.log('✅ Archivo de sesión subido:', filePath);
+      return res.json({ url: fileUrl, path: filePath });
+    } catch (storageError) {
+      console.error('Error con Supabase Storage, usando base64:', storageError);
+      // Fallback a base64 si falla Supabase Storage
+      return res.json({ url: base64File });
+    }
+  } catch (err) {
+    console.error('Error in POST /api/upload-session-file', err);
+    return res.status(500).json({ error: err?.message || 'Error subiendo archivo de sesión' });
+  }
+});
+
 // --- RUTAS DE ENTRADAS (ENTRIES) ---
 app.get('/api/entries', async (req, res) => {
   try {
@@ -1913,7 +1995,7 @@ app.get('/api/entries', async (req, res) => {
           return ids.has(uid) || (uemail && ids.has(uemail));
         });
         
-        // Si viewerId está presente, verificar si la relación está finalizada
+        // Si viewerId está presente, aplicar filtrado según estado de relación
         if (viewerId && String(viewerId) !== String(userId)) {
           const relationshipsSource = (supabaseDbCache?.careRelationships && supabaseDbCache.careRelationships.length > 0)
             ? supabaseDbCache.careRelationships
@@ -1923,16 +2005,23 @@ app.get('/api/entries', async (req, res) => {
             (rel.psychologistId === String(userId) && rel.patientId === String(viewerId))
           );
           
-          // Si la relación está finalizada, solo mostrar entradas creadas por el viewer
+          // Si la relación está finalizada, solo mostrar entradas creadas por el psicólogo (viewer)
           if (relationship?.endedAt) {
-            console.log('[GET /api/entries] Relación finalizada - filtrando entradas creadas por viewer:', viewerId);
+            console.log('[GET /api/entries] Relación finalizada - mostrando solo entradas del psicólogo:', viewerId);
             filtered = filtered.filter(e => {
               // Solo incluir entradas donde el createdByPsychologistId es el viewerId
-              // O entradas del usuario que no tienen createdByPsychologistId (son del paciente)
-              if (e.createdByPsychologistId) {
-                return e.createdByPsychologistId === String(viewerId);
-              }
-              // Si no tiene createdByPsychologistId, es una entrada del paciente - no mostrar
+              return e.createdByPsychologistId === String(viewerId);
+            });
+          } else {
+            // Relación activa: mostrar entradas del paciente + entradas del psicólogo
+            console.log('[GET /api/entries] Relación activa - mostrando entradas del paciente y del psicólogo:', viewerId);
+            filtered = filtered.filter(e => {
+              // Incluir:
+              // 1. Entradas creadas por el psicólogo (viewer)
+              if (e.createdByPsychologistId === String(viewerId)) return true;
+              // 2. Entradas del paciente que no tienen createdByPsychologistId (son propias del paciente)
+              if (!e.createdByPsychologistId && e.createdBy !== 'PSYCHOLOGIST') return true;
+              // 3. Excluir entradas creadas por OTROS psicólogos
               return false;
             });
           }
@@ -2020,6 +2109,15 @@ app.post('/api/entries', (req, res) => {
   if (supabaseAdmin) {
     (async () => {
       try {
+        console.log('[POST /api/entries] 💾 Guardando entrada en Supabase:', {
+          id: entry.id,
+          userId: entry.userId,
+          hasTranscript: !!entry.transcript,
+          transcriptLength: entry.transcript?.length || 0,
+          summary: entry.summary?.substring(0, 50) + '...',
+          entryType: entry.psychologistEntryType || entry.createdBy
+        });
+        
         let sampleRow = null;
         const { data: sample, error: sampleErr } = await supabaseAdmin.from('entries').select('*').limit(1);
         if (!sampleErr && Array.isArray(sample) && sample.length > 0) sampleRow = sample[0];
@@ -2035,9 +2133,11 @@ app.post('/api/entries', (req, res) => {
           if (idx >= 0) supabaseDbCache.entries[idx] = entry;
           else supabaseDbCache.entries.unshift(entry);
         }
+        
+        console.log('[POST /api/entries] ✅ Entrada guardada exitosamente en Supabase');
         return res.json(entry);
       } catch (err) {
-        console.error('Error saving entry (supabase)', err);
+        console.error('[POST /api/entries] ❌ Error saving entry (supabase)', err);
         return res.status(500).json({ error: 'Error saving entry' });
       }
     })();

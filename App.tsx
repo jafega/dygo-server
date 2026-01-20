@@ -236,12 +236,13 @@ const App: React.FC = () => {
       }
   };
 
-  const handleOpenSettings = async () => {
-      if (currentUser) {
-          await refreshUserData(currentUser.id);
-      }
+    const handleOpenSettings = () => {
+      // Abrimos rápido y refrescamos datos en segundo plano para evitar bloqueo de la UI
       setShowSettings(true);
-  };
+      if (currentUser) {
+        refreshUserData(currentUser.id).catch(err => console.warn('No se pudo refrescar antes de ajustes', err));
+      }
+    };
 
     const handleConfirmRole = async () => {
       if (!currentUser || !pendingRole) return;

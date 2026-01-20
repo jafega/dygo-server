@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { PatientSummary } from '../types';
 import { getPatientsForPsychologist } from '../services/storageService';
 import { getCurrentUser } from '../services/authService';
@@ -7,17 +7,30 @@ import { Users, Clock, Loader2 } from 'lucide-react';
 
 const PatientDashboard: React.FC = () => {
   const [patients, setPatients] = useState<PatientSummary[]>([]);
-  const [selectedPatient, setSelectedPatient] = useState<PatientSummary | null>(null);
+  const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
 
-  const loadData = async () => {
-    setIsLoading(true);
+  // Buscar el paciente seleccionado por ID (useMemo mantiene referencia estable)
+  const selectedPatient = useMemo(() => {
+    if (!selectedPatientId) return null;
+    return patients.find(p => p.id === selectedPatientId) || null;
+  }, [selectedPatientId, patients]);
+
+  const loadData = async (showLoader = true) => {
+    // Solo mostrar loader si no hay datos previos y se solicita
+    if (showLoader && patients.length === 0) {
+      setIsLoading(true);
+    }
     const user = await getCurrentUser();
     if (user) {
         setCurrentUser(user);
         const pts = await getPatientsForPsychologist(user.id);
-        setPatients(pts);
+        // Solo actualizar si hay cambios significativos para evitar re-renders innecesarios
+        setPatients(prevPatients => {
+          const patientsChanged = JSON.stringify(prevPatients) !== JSON.stringify(pts);
+          return patientsChanged ? pts : prevPatients;
+        });
     }
     setIsLoading(false);
   };
@@ -28,10 +41,14 @@ const PatientDashboard: React.FC = () => {
 
     useEffect(() => {
         const handleFocus = () => {
-            loadData();
+            // No recargar si hay un paciente seleccionado (modal abierto)
+            if (!selectedPatientId) {
+                loadData();
+            }
         };
         const handleVisibility = () => {
-            if (document.visibilityState === 'visible') {
+            // No recargar si hay un paciente seleccionado (modal abierto)
+            if (document.visibilityState === 'visible' && !selectedPatientId) {
                 loadData();
             }
         };
@@ -43,7 +60,7 @@ const PatientDashboard: React.FC = () => {
             window.removeEventListener('focus', handleFocus);
             document.removeEventListener('visibilitychange', handleVisibility);
         };
-    }, []);
+    }, [selectedPatientId]);
 
   // Las invitaciones y conexiones con pacientes se manejan desde la pestaña Conexiones
 
@@ -62,7 +79,10 @@ const PatientDashboard: React.FC = () => {
       return 'text-red-500';
   };
 
-  if (isLoading) return <div className="p-8 text-center text-slate-400"><Loader2 className="animate-spin inline-block mr-2"/> Cargando pacientes...</div>;
+  // Solo mostrar loader si no hay pacientes Y no hay modal abierto
+  if (isLoading && patients.length === 0 && !selectedPatientId) {
+    return <div className="p-8 text-center text-slate-400"><Loader2 className="animate-spin inline-block mr-2"/> Cargando pacientes...</div>;
+  }
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -77,7 +97,7 @@ const PatientDashboard: React.FC = () => {
                 </div>
             ) : (
                 patients.map(patient => (
-                    <div key={patient.id} onClick={() => setSelectedPatient(patient)} className="border border-slate-200 rounded-xl p-4 sm:p-5 hover:shadow-md transition-shadow bg-white cursor-pointer group">
+                    <div key={patient.id} onClick={() => setSelectedPatientId(patient.id)} className="border border-slate-200 rounded-xl p-4 sm:p-5 hover:shadow-md transition-shadow bg-white cursor-pointer group">
                         <div className="flex flex-col sm:flex-row justify-between items-start mb-2 sm:mb-3 gap-2">
                             <div className="min-w-0 flex-1 flex items-center gap-3">
                                 {/* Avatar del paciente */}
@@ -115,8 +135,9 @@ const PatientDashboard: React.FC = () => {
 
        {selectedPatient && currentUser && (
          <PatientDetailModal 
+           key={selectedPatient.id}
            patient={selectedPatient} 
-           onClose={() => setSelectedPatient(null)} 
+           onClose={() => setSelectedPatientId(null)} 
            psychologistId={currentUser.id}
          />
        )}

@@ -308,3 +308,115 @@ export async function analyzeGoalsProgress(transcript: string, goals: Goal[]): P
     return g;
   });
 }
+
+// Extract text from document using Gemini API
+export async function extractTextFromDocument(fileUrl: string, fileName: string): Promise<string> {
+  if (!ai) {
+    throw new Error("Falta la API key de Gemini");
+  }
+
+  try {
+    // Fetch file from URL
+    const response = await fetch(fileUrl);
+    const blob = await response.blob();
+    
+    // Convert blob to base64
+    const arrayBuffer = await blob.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    const base64Data = btoa(binary);
+
+    // Determine MIME type from blob or filename
+    let mimeType = blob.type;
+    if (!mimeType || mimeType === 'application/octet-stream') {
+      const ext = fileName.toLowerCase().split('.').pop();
+      const mimeMap: Record<string, string> = {
+        'pdf': 'application/pdf',
+        'txt': 'text/plain',
+        'md': 'text/markdown',
+        'doc': 'application/msword',
+        'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      };
+      mimeType = mimeMap[ext || ''] || 'application/octet-stream';
+    }
+
+    const prompt = `
+      Extrae TODO el texto de este documento.
+      Proporciona el contenido completo sin omitir nada.
+      Si es una transcripción de sesión terapéutica, mantén todo el diálogo tal cual.
+      NO resumas, NO interpretes, solo extrae el texto completo.
+    `;
+
+    const genResponse = await ai.models.generateContent({
+      model: "gemini-2.0-flash-exp",
+      contents: [{
+        role: "user",
+        parts: [
+          { text: prompt },
+          {
+            inlineData: {
+              mimeType: mimeType,
+              data: base64Data
+            }
+          }
+        ]
+      }]
+    });
+
+    return genResponse.text || "No se pudo extraer texto del documento.";
+  } catch (error) {
+    console.error('Error extracting text from document:', error);
+    throw new Error("Error al extraer texto del documento.");
+  }
+}
+
+// New: Transcribe audio/video file using Gemini API
+export async function transcribeAudioFile(audioBlob: Blob): Promise<string> {
+  if (!ai) {
+    throw new Error("Falta la API key de Gemini");
+  }
+
+  try {
+    // Convert blob to base64
+    const arrayBuffer = await audioBlob.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    const base64Audio = btoa(binary);
+
+    // Determine MIME type
+    const mimeType = audioBlob.type || 'audio/webm';
+
+    const prompt = `
+      Transcribe el siguiente archivo de audio/video a texto.
+      Proporciona una transcripción completa y precisa de todo lo que se dice.
+      NO resumas, NO omitas nada, transcribe literalmente todo.
+    `;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.0-flash-exp",
+      contents: [{
+        role: "user",
+        parts: [
+          { text: prompt },
+          {
+            inlineData: {
+              mimeType: mimeType,
+              data: base64Audio
+            }
+          }
+        ]
+      }]
+    });
+
+    return response.text || "No se pudo transcribir el audio.";
+  } catch (error) {
+    console.error('Error transcribing audio:', error);
+    throw new Error("Error al transcribir el audio. Intenta pegar el transcript manualmente.");
+  }
+}

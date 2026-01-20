@@ -623,7 +623,7 @@ ${currentUser.name || 'Tu psicólogo/a'}
                   </div>
                   <p className="text-[11px] sm:text-xs text-slate-500 mb-2 sm:mb-3">Pacientes que han aceptado tu invitación y tienen acceso activo</p>
                   {myPatients.length === 0 ? (
-                    <p className="text-xs sm:text-sm text-slate-500 italic">Aún no tienes pacientes conectados.</p>
+                    <p className="text-xs sm:text-sm text-slate-500 py-3 sm:py-4 text-center bg-slate-50 rounded-lg sm:rounded-xl">Aún no tienes pacientes conectados.</p>
                   ) : (
                     <div className="space-y-2 sm:space-y-3">
                       {myPatients.map(patient => (
@@ -632,7 +632,10 @@ ${currentUser.name || 'Tu psicólogo/a'}
                             <p className="text-xs sm:text-sm font-semibold text-slate-900 truncate">{patient.name}</p>
                             <p className="text-[11px] sm:text-xs text-slate-500 truncate">{patient.email}</p>
                           </div>
-                          <button onClick={() => handleRevoke(patient.id)} className="text-[11px] sm:text-xs text-slate-400 hover:text-orange-500 flex items-center gap-1 whitespace-nowrap flex-shrink-0">
+                          <button 
+                            onClick={() => handleRevoke(patient.id)} 
+                            className="px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg border border-orange-200 text-orange-600 hover:bg-orange-50 text-[11px] sm:text-xs flex items-center gap-1 whitespace-nowrap flex-shrink-0"
+                          >
                             <Trash2 size={12} className="sm:w-3.5 sm:h-3.5" /> 
                             <span className="hidden sm:inline">Finalizar relación</span>
                             <span className="sm:hidden">Finalizar</span>

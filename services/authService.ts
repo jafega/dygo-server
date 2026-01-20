@@ -441,5 +441,49 @@ export const uploadAvatar = async (userId: string, base64Image: string): Promise
     return base64Image;
 };
 
+export const uploadSessionFile = async (file: File, userId: string): Promise<string> => {
+    if (USE_BACKEND) {
+        try {
+            // Convert file to base64
+            const base64 = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+
+            const res = await fetch(`${API_URL}/upload-session-file`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    userId, 
+                    base64File: base64,
+                    fileName: file.name,
+                    fileType: file.type
+                })
+            });
+            
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || 'Error subiendo archivo');
+            }
+            
+            const data = await res.json();
+            return data.url;
+        } catch (e) {
+            console.error('Error uploading session file:', e);
+            throw e;
+        }
+    }
+    
+    // Sin backend, convertir a base64 y devolver
+    return new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+};
+
 
 
