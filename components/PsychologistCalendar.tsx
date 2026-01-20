@@ -191,6 +191,13 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
     const patient = patients.find(p => p.id === newSession.patientId);
     if (!patient) return;
 
+    // Obtener el usuario actual para enviar el header de autenticación
+    const currentUser = await getCurrentUser();
+    if (!currentUser) {
+      alert('Error: Usuario no autenticado');
+      return;
+    }
+
     // Generate Google Meet link if requested
     let meetLink = '';
     if (newSession.generateMeetLink && newSession.type === 'online') {
@@ -214,7 +221,10 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
     try {
       const response = await fetch(`${API_URL}/sessions`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-id': currentUser.id
+        },
         body: JSON.stringify({ ...session, psychologistId })
       });
 
@@ -222,6 +232,9 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
         await loadSessions();
         setShowNewSession(false);
         resetNewSession();
+      } else {
+        const error = await response.json();
+        alert('Error al crear la sesión: ' + (error.error || 'Error desconocido'));
       }
     } catch (error) {
       console.error('Error creating session:', error);

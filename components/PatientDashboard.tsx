@@ -3,13 +3,14 @@ import { PatientSummary } from '../types';
 import { getPatientsForPsychologist } from '../services/storageService';
 import { getCurrentUser } from '../services/authService';
 import PatientDetailModal from './PatientDetailModal';
-import { Users, Clock, Loader2 } from 'lucide-react';
+import { Users, Clock, Loader2, ToggleLeft, ToggleRight } from 'lucide-react';
 
 const PatientDashboard: React.FC = () => {
   const [patients, setPatients] = useState<PatientSummary[]>([]);
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [showInactive, setShowInactive] = useState(false);
 
   // Buscar el paciente seleccionado por ID (useMemo mantiene referencia estable)
   const selectedPatient = useMemo(() => {
@@ -26,7 +27,7 @@ const PatientDashboard: React.FC = () => {
       const user = await getCurrentUser();
       if (user) {
         setCurrentUser(user);
-        const pts = await getPatientsForPsychologist(user.id);
+        const pts = await getPatientsForPsychologist(user.id, showInactive);
         setPatients(pts);
       }
     } catch (error) {
@@ -47,7 +48,7 @@ const PatientDashboard: React.FC = () => {
     }, 30000);
 
     return () => clearInterval(intervalId);
-  }, [selectedPatientId]);
+  }, [selectedPatientId, showInactive]);
 
   // Las invitaciones y conexiones con pacientes se manejan desde la pestaña Conexiones
 
@@ -74,6 +75,24 @@ const PatientDashboard: React.FC = () => {
   return (
     <div className="space-y-4 sm:space-y-6">
        {/* Todas las invitaciones y conexiones con pacientes se manejan desde la pestaña Conexiones */}
+       
+       {/* Toggle para mostrar/ocultar relaciones inactivas */}
+       <div className="flex items-center justify-end gap-2 sm:gap-3 bg-white rounded-lg sm:rounded-xl p-3 sm:p-4 border border-slate-200">
+         <span className="text-xs sm:text-sm text-slate-600 font-medium">Mostrar inactivos</span>
+         <button
+           onClick={() => setShowInactive(!showInactive)}
+           className={`relative inline-flex items-center h-6 sm:h-7 w-11 sm:w-12 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${
+             showInactive ? 'bg-indigo-600' : 'bg-slate-300'
+           }`}
+           aria-label="Toggle mostrar inactivos"
+         >
+           <span
+             className={`inline-block h-4 sm:h-5 w-4 sm:w-5 transform rounded-full bg-white transition-transform ${
+               showInactive ? 'translate-x-6 sm:translate-x-7' : 'translate-x-1'
+             }`}
+           />
+         </button>
+       </div>
        
        <div className="space-y-3">
           <div className="grid gap-3 sm:gap-4">

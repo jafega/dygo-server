@@ -941,6 +941,11 @@ async function saveSupabaseDb(data, prevCache = null) {
       console.log(`   Eliminando chunk de ${c.length} registros:`, c);
       const { error: delError } = await supabaseAdmin.from(table).delete().in('id', c);
       if (delError) {
+        // Ignorar errores de foreign key constraint - el registro todavía se está usando
+        if (delError.code === '23503') {
+          console.warn(`⚠️ [deleteMissing] No se puede eliminar chunk de ${table} - referenciado por otra tabla:`, delError.message);
+          continue;
+        }
         console.error(`❌ [deleteMissing] Error eliminando chunk de ${table}:`, delError);
         throw delError;
       }
@@ -991,20 +996,20 @@ async function saveSupabaseDb(data, prevCache = null) {
     user_id: settings[k]?.user_id || settings[k]?.userId || null
   }));
   
-  // Sessions: extraer campos psychologist_user_id y patiente_user_id
+  // Sessions: extraer campos psychologist_user_id y patient_user_id
   const sessionsRows = (data.sessions || []).map(s => ({
     id: s.id,
     data: s,
     psychologist_user_id: s.psychologist_user_id || null,
-    patiente_user_id: s.patiente_user_id || null
+    patient_user_id: s.patient_user_id || s.patientId || null
   }));
   
-  // Invoices: extraer campos psychologist_user_id y patiente_user_id
+  // Invoices: extraer campos psychologist_user_id y patient_user_id
   const invoicesRows = (data.invoices || []).map(inv => ({
     id: inv.id,
     data: inv,
     psychologist_user_id: inv.psychologist_user_id || null,
-    patiente_user_id: inv.patiente_user_id || null
+    patient_user_id: inv.patient_user_id || inv.patientId || null
   }));
   
   // Care relationships: extraer campos según el nuevo schema (psychologist_user_id, patient_user_id)
@@ -3020,10 +3025,6 @@ app.post('/api/goals-sync', handleGoalsSync);
 // --- RUTAS DE INVITACIONES ---
 app.get('/api/invitations', (_req, res) => {
   const db = getDb();
-  console.log(`📋 GET /api/invitations - Total: ${db.invitations.length}`);
-  db.invitations.forEach((inv, i) => {
-    console.log(`   ${i + 1}. ID: ${inv.id}, Psych: ${inv.psychologistEmail || inv.fromPsychologistId}, Patient: ${inv.patientEmail || inv.toUserEmail}, Status: ${inv.status || 'PENDING'}`);
-  });
   
   // Prevenir caché del navegador
   res.set({
@@ -3104,17 +3105,8 @@ app.post('/api/invitations', async (req, res) => {
   }
 
   db.invitations.push(invitation);
-  console.log(`💾 Invitación guardada:`, {
-    id: invitation.id,
-    psych_user_id: invitation.psych_user_id,
-    psych_user_email: invitation.psych_user_email,
-    patient_user_email: invitation.patient_user_email,
-    patient_user_id: invitation.patient_user_id,
-    status: invitation.status
-  });
   
   saveDb(db);
-  console.log(`📊 Total invitaciones en DB: ${db.invitations.length}`);
   res.json(invitation);
 });
 
@@ -4184,17 +4176,11 @@ app.get('/api/relationships', (req, res) => {
     const psychId = psychologist_user_id || psych_user_id || psychologistId;
     const patId = patient_user_id || patientId;
     
-    console.log('[GET /api/relationships] Request:', { psychId, patId, includeEnded });
-    
     if (!psychId && !patId) {
       return res.status(400).json({ error: 'psychologist_user_id o patient_user_id requerido' });
     }
 
     const db = getDb();
-    console.log('[GET /api/relationships] Total careRelationships:', db.careRelationships?.length || 0);
-    if (db.careRelationships && db.careRelationships.length > 0) {
-      console.log('[GET /api/relationships] Sample relationship:', db.careRelationships[0]);
-    }
     
     const relationships = (db.careRelationships || []).filter(rel => {
       if (!rel) return false;
@@ -4203,38 +4189,18 @@ app.get('/api/relationships', (req, res) => {
       const relPsychId = rel.psychologist_user_id || rel.psych_user_id || rel.psychologistId;
       const relPatId = rel.patient_user_id || rel.patientId;
       
-      console.log('[GET /api/relationships] Evaluando relación:', {
-        id: rel.id,
-        relPsychId,
-        relPatId,
-        psychIdBuscado: psychId,
-        patIdBuscado: patId
-      });
-      
       const matchesPsych = psychId ? relPsychId === psychId : true;
       const matchesPatient = patId ? relPatId === patId : true;
       const matches = matchesPsych && matchesPatient;
       
-      console.log('[GET /api/relationships] Resultado comparación:', {
-        matchesPsych,
-        matchesPatient,
-        matches
-      });
-      
       // Por defecto, solo devolver relaciones activas (sin endedAt)
       // A menos que includeEnded=true
       if (matches && !includeEnded && rel.endedAt) {
-        console.log('[GET /api/relationships] SKIPPING ended relationship:', { id: rel.id, endedAt: rel.endedAt });
         return false;
       }
       
-      if (matches) {
-        console.log('[GET /api/relationships] MATCH found:', { id: rel.id, psych_user_id: relPsychId, patient_user_id: relPatId, endedAt: rel.endedAt || 'active' });
-      }
       return matches;
     });
-    
-    console.log('[GET /api/relationships] Filtered count:', relationships.length);
 
     // Prevenir caché
     res.set({
@@ -4243,7 +4209,6 @@ app.get('/api/relationships', (req, res) => {
       'Expires': '0'
     });
     
-    console.log('[GET /api/relationships] Sending response with', relationships.length, 'relationships');
     res.json(relationships);
   } catch (error) {
     console.error('[GET /api/relationships] ERROR:', error);
@@ -4496,7 +4461,37 @@ app.post('/api/sessions', async (req, res) => {
     const db = getDb();
     if (!db.sessions) db.sessions = [];
 
-    const session = { ...req.body, id: req.body.id || Date.now().toString() };
+    // Obtener el user_id del psicólogo autenticado
+    const psychologistUserId = req.headers['x-user-id'] || req.headers['x-userid'];
+    
+    if (!psychologistUserId) {
+      console.error('❌ Missing psychologist userId from session');
+      return res.status(401).json({ error: 'Usuario no autenticado' });
+    }
+
+    // Obtener el patient_user_id desde el patientId
+    let patientUserId = null;
+    if (req.body.patientId) {
+      const patient = db.users?.find(u => u.id === req.body.patientId);
+      if (patient) {
+        patientUserId = patient.id;
+      }
+    }
+
+    const session = { 
+      ...req.body, 
+      id: req.body.id || Date.now().toString(),
+      psychologist_user_id: psychologistUserId,
+      patient_user_id: patientUserId
+    };
+    
+    console.log('📝 Creating session:', { 
+      sessionId: session.id, 
+      psychologistUserId, 
+      patientUserId,
+      patientId: req.body.patientId 
+    });
+    
     db.sessions.push(session);
     await saveDb(db, { awaitPersistence: true });
     return res.json(session);
@@ -4568,9 +4563,15 @@ app.patch('/api/sessions/:id', async (req, res) => {
 
     if (updatedSession.status === 'available') {
       updatedSession.patientId = '';
+      updatedSession.patient_user_id = '';
       updatedSession.patientName = 'Disponible';
       updatedSession.patientPhone = '';
       delete updatedSession.meetLink;
+    }
+
+    // Cuando se asigna un paciente, actualizar también el campo patient_user_id
+    if (updatedSession.patientId) {
+      updatedSession.patient_user_id = updatedSession.patientId;
     }
 
     if (updatedSession.status === 'scheduled' &&
@@ -4624,17 +4625,40 @@ app.delete('/api/sessions/:id', async (req, res) => {
 app.get('/api/psychologist/:psychologistId/patients', (req, res) => {
   const { psychologistId } = req.params;
   const db = getDb();
+  
+  console.log(`[GET /api/psychologist/${psychologistId}/patients] Total relationships:`, db.careRelationships?.length);
+  
+  // Filtrar solo relaciones activas (sin endedAt) del psicólogo
   const linkedPatientIds = new Set(
     (db.careRelationships || [])
-      .filter(rel => rel.psychologistId === psychologistId)
-      .map(rel => rel.patientId)
+      .filter(rel => {
+        const psychId = rel.psychologist_user_id || rel.psych_user_id || rel.psychologistId;
+        const patId = rel.patient_user_id || rel.patientId;
+        const isMatch = psychId === psychologistId;
+        const isActive = !rel.endedAt; // Solo relaciones activas
+        
+        console.log(`  Evaluating relationship:`, {
+          psychId,
+          patId,
+          endedAt: rel.endedAt,
+          isMatch,
+          isActive,
+          result: isMatch && isActive
+        });
+        
+        return isMatch && isActive;
+      })
+      .map(rel => rel.patient_user_id || rel.patientId)
   );
 
+  console.log(`[GET /api/psychologist/${psychologistId}/patients] Linked patient IDs:`, Array.from(linkedPatientIds));
+  
   const patients = db.users
-    ? db.users.filter(user => 
-        user.role === 'PATIENT' && 
-        linkedPatientIds.has(user.id)
-      ).map(u => ({
+    ? db.users.filter(user => {
+        const isLinked = linkedPatientIds.has(user.id);
+        console.log(`  Evaluating user ${user.id} (${user.name}):`, { isLinked });
+        return isLinked;
+      }).map(u => ({
         id: u.id,
         name: u.name,
         email: u.email,
@@ -4642,6 +4666,7 @@ app.get('/api/psychologist/:psychologistId/patients', (req, res) => {
       }))
     : [];
   
+  console.log(`[GET /api/psychologist/${psychologistId}/patients] Found ${patients.length} active patients:`, patients);
   res.json(patients);
 });
 

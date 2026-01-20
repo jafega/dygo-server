@@ -66,9 +66,6 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
       // Cargar relaciones activas
       const psychologists = await getPsychologistsForPatient(currentUser.id);
       
-      console.log('📊 [ConnectionsPanel] Total invitaciones:', allInvitations.length);
-      console.log('📊 [ConnectionsPanel] Psicólogos conectados:', psychologists.length);
-      
       // Categorizar invitaciones para PACIENTE
       // 1. Invitaciones RECIBIDAS: donde el initiatorEmail NO es el mío (psicólogo me invita)
       const receivedAsPatient = allInvitations.filter(inv => {
@@ -87,14 +84,8 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
       setReceivedInvitations(receivedAsPatient);
       setSentInvitationsAsPatient(sentAsPatient);
       setConnectedPsychologists(psychologists);
-      
-      console.log('✅ [Paciente] Invitaciones recibidas:', receivedAsPatient.length);
-      console.log('✅ [Paciente] Solicitudes enviadas:', sentAsPatient.length);
-      console.log('✅ [Paciente] Psicólogos conectados:', psychologists.length);
 
       if (currentUser.is_psychologist === true) {
-        console.log('👨‍⚕️ [ConnectionsPanel] Cargando datos adicionales para PSICÓLOGO...');
-        
         // Para psicólogos, cargar AMBAS:
         // 1. Invitaciones ENVIADAS por mí (donde soy el psicólogo que invitó)
         const sentAsPsych = await getSentInvitationsForPsychologist(currentUser.id, currentUser.email);
@@ -105,17 +96,9 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
         // 3. Pacientes conectados
         const patients = await getPatientsForPsychologist(currentUser.id);
         
-        console.log('📊 [ConnectionsPanel] Invitaciones enviadas:', sentAsPsych.length);
-        console.log('📊 [ConnectionsPanel] Solicitudes recibidas:', receivedAsPsych.length);
-        console.log('📊 [ConnectionsPanel] Pacientes conectados:', patients.length);
-        
         setSentInvitationsAsPsych(sentAsPsych);
         setReceivedInvitationsAsPsych(receivedAsPsych);
         setConnectedPatients(patients.filter(p => !p.isSelf));
-        
-        console.log('✅ [Psicólogo] Invitaciones enviadas:', sentAsPsych.length);
-        console.log('✅ [Psicólogo] Solicitudes recibidas:', receivedAsPsych.length);
-        console.log('✅ [Psicólogo] Pacientes conectados:', patients.filter(p => !p.isSelf).length);
         
         onPendingInvitesChange?.(receivedAsPatient.length > 0 || receivedAsPsych.length > 0);
       } else {

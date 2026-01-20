@@ -21,8 +21,10 @@ const CACHE_TTL = 30000; // 30 segundos
 type RelationshipFilter = {
   psychologistId?: string; // Legacy
   patientId?: string; // Legacy
-  psych_user_id?: string;
+  psych_user_id?: string; // Legacy
+  psychologist_user_id?: string; // Campo canónico
   patient_user_id?: string;
+  includeEnded?: boolean; // Incluir relaciones finalizadas
 };
 
 const getLocalRelationships = (): CareRelationship[] => {
@@ -44,9 +46,9 @@ const matchesRelationshipFilter = (rel: CareRelationship, filter: RelationshipFi
   if (!rel) return false;
   
   // Soportar tanto campos nuevos como legacy
-  const relPsychId = rel.psych_user_id || rel.psychologistId;
+  const relPsychId = rel.psychologist_user_id || rel.psych_user_id || rel.psychologistId;
   const relPatId = rel.patient_user_id || rel.patientId;
-  const filterPsychId = filter.psych_user_id || filter.psychologistId;
+  const filterPsychId = filter.psychologist_user_id || filter.psych_user_id || filter.psychologistId;
   const filterPatId = filter.patient_user_id || filter.patientId;
   
   if (filterPsychId && relPsychId !== filterPsychId) return false;
@@ -55,7 +57,7 @@ const matchesRelationshipFilter = (rel: CareRelationship, filter: RelationshipFi
 };
 
 const fetchRelationships = async (filter: RelationshipFilter, skipCache = false): Promise<CareRelationship[]> => {
-  const hasPsych = filter.psychologist_user_id || filter.psychologistId;
+  const hasPsych = filter.psychologist_user_id || filter.psych_user_id || filter.psychologistId;
   const hasPat = filter.patient_user_id || filter.patientId;
   
   if (!hasPsych && !hasPat) {
@@ -86,6 +88,10 @@ const fetchRelationships = async (filter: RelationshipFilter, skipCache = false)
         params.append('patient_user_id', filter.patient_user_id);
       } else if (filter.patientId) {
         params.append('patientId', filter.patientId);
+      }
+      // Incluir relaciones finalizadas si se solicita
+      if (filter.includeEnded) {
+        params.append('includeEnded', 'true');
       }
       // Anti-caché: timestamp único en cada petición
       params.append('_t', Date.now().toString());
@@ -185,7 +191,7 @@ const ensureRelationship = async (psychUserId: string, patientUserId: string): P
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ 
-                psych_user_id: psychUserId, 
+                psychologist_user_id: psychUserId, 
                 patient_user_id: patientUserId 
               })
           });
@@ -819,7 +825,7 @@ export const endRelationship = async (psychUserId: string, patientUserId: string
                 'Pragma': 'no-cache'
             },
             body: JSON.stringify({ 
-              psych_user_id: psychUserId, 
+              psychologist_user_id: psychUserId, 
               patient_user_id: patientUserId 
             })
         });
@@ -838,14 +844,14 @@ export const endRelationship = async (psychUserId: string, patientUserId: string
     }
 };
 
-export const getPatientsForPsychologist = async (psychId: string): Promise<PatientSummary[]> => {
+export const getPatientsForPsychologist = async (psychId: string, includeInactive: boolean = false): Promise<PatientSummary[]> => {
     try {
-        console.log('[getPatientsForPsychologist] Iniciando con psychId:', psychId);
+        console.log('[getPatientsForPsychologist] Iniciando con psychId:', psychId, 'includeInactive:', includeInactive);
         
         // Cargar usuarios y relaciones primero
         const [psych, relationships, allUsers] = await Promise.all([
             AuthService.getUserById(psychId),
-            fetchRelationships({ psychologist_user_id: psychId }, true), // skipCache=true para datos frescos
+            fetchRelationships({ psychologist_user_id: psychId, includeEnded: true }, true), // skipCache=true para datos frescos, incluir finalizadas
             AuthService.getUsers()
         ]);
         
@@ -866,8 +872,13 @@ export const getPatientsForPsychologist = async (psychId: string): Promise<Patie
         // Crear índice de usuarios para búsqueda rápida
         const userMap = new Map(allUsers.map(u => [u.id, u]));
         
+        // Filtrar relaciones según parámetro includeInactive
+        const filteredRelationships = includeInactive ? relationships : relationships.filter(rel => !rel.endedAt);
+        
+        console.log('[getPatientsForPsychologist] Relaciones totales:', relationships.length, 'Filtradas:', filteredRelationships.length, 'includeInactive:', includeInactive);
+        
         // Obtener IDs únicos de pacientes
-        const patientIds = relationships
+        const patientIds = filteredRelationships
             .map(rel => rel.patient_user_id || rel.patientId)
             .filter((id): id is string => Boolean(id));
         const uniquePatientIds = Array.from(new Set(patientIds));
@@ -933,7 +944,9 @@ export const getPatientsForPsychologist = async (psychId: string): Promise<Patie
 };
 
 export const getPsychologistsForPatient = async (patientId: string): Promise<User[]> => {
-    const relationships = await fetchRelationships({ patient_user_id: patientId }, true); // skipCache=true para datos frescos
+    const allRelationships = await fetchRelationships({ patient_user_id: patientId, includeEnded: true }, true); // skipCache=true para datos frescos, incluir finalizadas
+    // Filtrar solo relaciones activas
+    const relationships = allRelationships.filter(rel => !rel.endedAt);
     if (relationships.length === 0) return [];
 
     const psychIds = Array.from(new Set(
@@ -951,11 +964,13 @@ export const getAllPsychologists = async (currentUserId?: string): Promise<User[
     // Filtrar por is_psychologist === true
     let psychologists = users.filter(u => u.is_psychologist === true || u.isPsychologist === true);
     
-    // Si se proporciona currentUserId, excluir psicólogos con los que ya tiene relación
+    // Si se proporciona currentUserId, excluir psicólogos con los que ya tiene relación activa
     if (currentUserId) {
-        const relationships = await fetchRelationships({ patient_user_id: currentUserId }, true); // skipCache=true para datos frescos
+        const allRelationships = await fetchRelationships({ patient_user_id: currentUserId, includeEnded: true }, true); // skipCache=true para datos frescos, incluir finalizadas
+        // Filtrar solo relaciones activas
+        const activeRelationships = allRelationships.filter(rel => !rel.endedAt);
         const connectedPsychIds = new Set(
-            relationships
+            activeRelationships
                 .map(rel => rel.psychologist_user_id || rel.psychologistId)
                 .filter((id): id is string => Boolean(id))
         );
