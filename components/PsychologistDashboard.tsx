@@ -167,12 +167,12 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
   const activePatients = activePatientsSet.size;
 
   // Financial metrics
-  console.log('[PsychologistDashboard] All invoices:', invoices.map(inv => ({ id: inv.id, status: inv.status, amount: inv.amount, date: inv.date })));
+  console.log('[PsychologistDashboard] All invoices:', invoices.map(inv => ({ id: inv.id, status: inv.status, total: inv.total, date: inv.date })));
   const paidInvoices = invoices.filter(inv => inv.status === 'paid');
   const pendingInvoices = invoices.filter(inv => inv.status === 'pending');
   console.log('[PsychologistDashboard] Filtered paid:', paidInvoices.length, 'pending:', pendingInvoices.length);
-  const totalRevenue = paidInvoices.reduce((sum, inv) => sum + inv.amount, 0);
-  const totalPending = pendingInvoices.reduce((sum, inv) => sum + inv.amount, 0);
+  const totalRevenue = paidInvoices.reduce((sum, inv) => sum + (inv.total || inv.amount || 0), 0);
+  const totalPending = pendingInvoices.reduce((sum, inv) => sum + (inv.total || inv.amount || 0), 0);
   const totalBilling = totalRevenue + totalPending; // Total incluye pagadas + pendientes
   
   // Monthly revenue breakdown - last 12 months
@@ -194,7 +194,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
     const invoiceDate = new Date(invoice.date || invoice.created_at);
     const key = `${invoiceDate.getFullYear()}-${String(invoiceDate.getMonth() + 1).padStart(2, '0')}`;
     if (monthlyRevenue.hasOwnProperty(key)) {
-      monthlyRevenue[key] += invoice.amount;
+      monthlyRevenue[key] += (invoice.total || invoice.amount || 0);
     }
   });
   
@@ -202,7 +202,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
     const invoiceDate = new Date(invoice.date || invoice.created_at);
     const key = `${invoiceDate.getFullYear()}-${String(invoiceDate.getMonth() + 1).padStart(2, '0')}`;
     if (monthlyPending.hasOwnProperty(key)) {
-      monthlyPending[key] += invoice.amount;
+      monthlyPending[key] += (invoice.total || invoice.amount || 0);
     }
   });
   
@@ -221,7 +221,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
       const invDate = new Date(inv.date || inv.created_at);
       return invDate >= rangeStart && invDate <= rangeEnd;
     })
-    .reduce((sum, inv) => sum + inv.amount, 0);
+    .reduce((sum, inv) => sum + (inv.total || inv.amount || 0), 0);
 
   if (isLoading) {
     return (

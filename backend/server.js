@@ -720,12 +720,16 @@ function buildSupabaseEntryRow(entry) {
 
 // Función específica para invoices que maneja columnas directas + JSONB
 function buildSupabaseInvoiceRow(invoice) {
-  const { id, psychologist_user_id, patient_user_id, amount, status, created_at, ...restData } = invoice;
+  const { id, psychologist_user_id, patient_user_id, amount, status, tax, total, created_at, ...restData } = invoice;
   
-  // Calcular tax y total
-  const finalAmount = amount || 0;
-  const tax = finalAmount * 0.21;
-  const total = finalAmount + tax;
+  console.log('[buildSupabaseInvoiceRow] 🔍 Valores recibidos:', { id, amount, tax, total, status });
+  
+  // Si vienen tax y total del frontend, usarlos; si no, calcular con 21% por defecto
+  const finalAmount = parseFloat(amount) || 0;
+  const finalTax = tax !== undefined && tax !== null ? parseFloat(tax) : (finalAmount * 0.21);
+  const finalTotal = total !== undefined && total !== null ? parseFloat(total) : (finalAmount + finalTax);
+  
+  console.log('[buildSupabaseInvoiceRow] ✅ Valores finales:', { finalAmount, finalTax, finalTotal, status: status || 'pending' });
   
   return {
     id,
@@ -733,8 +737,8 @@ function buildSupabaseInvoiceRow(invoice) {
     patient_user_id: patient_user_id || null,
     amount: finalAmount,
     status: status || 'pending',
-    tax,
-    total,
+    tax: finalTax,
+    total: finalTotal,
     created_at: created_at || new Date().toISOString(),
     data: { ...invoice } // Todo el objeto completo en data para compatibilidad
   };
@@ -3760,9 +3764,6 @@ app.get('/api/invoices', async (req, res) => {
 
 app.post('/api/invoices', async (req, res) => {
   try {
-    const db = getDb();
-    if (!db.invoices) db.invoices = [];
-    
     const invoice = { ...req.body, id: req.body.id || Date.now().toString() };
 
     const headerUserId = req.headers['x-user-id'] || req.headers['x-userid'];
@@ -3780,6 +3781,33 @@ app.post('/api/invoices', async (req, res) => {
       invoice.patient_user_id = invoice.patientId;
     }
 
+    // Guardar en Supabase si está disponible (PRIMERO)
+    if (supabaseAdmin) {
+      try {
+        console.log('📤 [POST /api/invoices] Invoice recibido:', JSON.stringify(invoice, null, 2).substring(0, 800));
+        const supabasePayload = buildSupabaseInvoiceRow(invoice);
+        console.log('📦 [POST /api/invoices] Payload para Supabase:', JSON.stringify(supabasePayload, null, 2));
+        await trySupabaseUpsert('invoices', [supabasePayload]);
+        console.log('✅ Factura guardada en Supabase:', invoice.id);
+        
+        // Devolver el invoice con los campos normalizados de Supabase
+        return res.json({
+          ...invoice,
+          amount: supabasePayload.amount,
+          tax: supabasePayload.tax,
+          total: supabasePayload.total,
+          status: supabasePayload.status
+        });
+      } catch (err) {
+        console.error('❌ Error guardando factura en Supabase:', err);
+        return res.status(500).json({ error: 'Error guardando factura en Supabase' });
+      }
+    }
+    
+    // Fallback: Guardar en DB local solo si NO hay Supabase
+    const db = getDb();
+    if (!db.invoices) db.invoices = [];
+    
     // Adjuntar información del usuario que genera la factura (sin contraseña)
     const dbUser = (db.users || []).find(u => String(u.id) === String(psychologistUserId));
     if (dbUser) {
@@ -3792,20 +3820,8 @@ app.post('/api/invoices', async (req, res) => {
       invoice.psychologist_user = normalizedUser;
     }
     
-    // Guardar en DB local
     db.invoices.push(invoice);
     saveDb(db);
-
-    // Guardar en Supabase si está disponible
-    if (supabaseAdmin) {
-      try {
-        await upsertTable('invoices', [invoice]);
-        console.log('✅ Factura guardada en Supabase:', invoice.id);
-      } catch (err) {
-        console.error('❌ Error guardando factura en Supabase:', err);
-        // No fallar la petición si Supabase falla, ya está en DB local
-      }
-    }
 
     res.json(invoice);
   } catch (error) {

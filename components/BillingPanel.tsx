@@ -55,8 +55,10 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
     date: new Date().toISOString().split('T')[0],
     dueDate: '',
     description: '',
-    items: [{ description: 'Sesión de terapia', quantity: 1, unitPrice: 0 }]
+    items: [{ description: 'Sesión de terapia', quantity: 1, unitPrice: 0 }],
+    taxRate: 21 // Porcentaje de IVA por defecto
   });
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     loadInvoices();
@@ -102,7 +104,10 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
   };
 
   const calculateTotal = () => {
-    return formData.items.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
+    const subtotal = formData.items.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
+    const tax = subtotal * (formData.taxRate / 100);
+    const total = subtotal + tax;
+    return { subtotal, tax, total };
   };
 
   const generateInvoiceNumber = async () => {
@@ -145,6 +150,11 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
   };
 
   const handleCreateInvoice = async () => {
+    if (isSubmitting) {
+      console.log('[BillingPanel] ⚠️ Ya hay un submit en proceso, ignorando...');
+      return;
+    }
+    
     if (!formData.patientId || !formData.date || !formData.dueDate) {
       alert('Por favor completa todos los campos requeridos');
       return;
@@ -168,26 +178,38 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
     const patient = patients.find(p => p.id === formData.patientId);
     if (!patient) return;
 
-    // Generate invoice number asynchronously
-    const invoiceNumber = await generateInvoiceNumber();
-
-    const newInvoice: Invoice = {
-      id: Date.now().toString(),
-      invoiceNumber,
-      patientId: formData.patientId,
-      patient_user_id: formData.patientId, // Campo canónico para schema
-      patientName: patient.name,
-      amount: calculateTotal(),
-      date: formData.date,
-      dueDate: formData.dueDate,
-      status: 'pending',
-      description: formData.description,
-      items: formData.items,
-      psychologist_user_id: activePsychologistId,
-      psychologistId: activePsychologistId
-    };
-
+    setIsSubmitting(true);
+    
     try {
+      // Generate invoice number asynchronously
+      const invoiceNumber = await generateInvoiceNumber();
+
+      // Calcular totales
+      const totals = calculateTotal();
+      
+      console.log('[BillingPanel] 📊 Totales calculados:', totals);
+
+      const newInvoice: Invoice = {
+        id: Date.now().toString(),
+        invoiceNumber,
+        patientId: formData.patientId,
+        patient_user_id: formData.patientId, // Campo canónico para schema
+        patientName: patient.name,
+        amount: totals.subtotal, // Amount es el subtotal (sin IVA)
+        date: formData.date,
+        dueDate: formData.dueDate,
+        status: 'pending',
+        description: formData.description,
+        items: formData.items,
+        psychologist_user_id: activePsychologistId,
+        psychologistId: activePsychologistId,
+        tax: totals.tax, // IVA calculado
+        total: totals.total, // Total con IVA
+        taxRate: formData.taxRate // Guardar el porcentaje aplicado
+      } as any;
+      
+      console.log('[BillingPanel] 📤 Enviando factura:', { id: newInvoice.id, amount: newInvoice.amount, tax: newInvoice.tax, total: newInvoice.total, status: newInvoice.status });
+
       const response = await fetch(`${API_URL}/invoices`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-User-Id': activePsychologistId },
@@ -198,14 +220,21 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       });
 
       if (response.ok) {
+        console.log('[BillingPanel] ✅ Factura creada exitosamente');
         await loadInvoices();
         setShowNewInvoice(false);
         resetForm();
         alert('Factura creada correctamente');
+      } else {
+        const errorData = await response.json();
+        console.error('[BillingPanel] ❌ Error del servidor:', errorData);
+        alert('Error al crear la factura: ' + (errorData.error || 'Error desconocido'));
       }
     } catch (error) {
-      console.error('Error creating invoice:', error);
+      console.error('[BillingPanel] ❌ Error creating invoice:', error);
       alert('Error al crear la factura');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -501,7 +530,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                     <td className={`px-4 py-3 text-sm text-slate-700 ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>{invoice.patientName}</td>
                     <td className={`px-4 py-3 text-sm text-slate-600 ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>{new Date(invoice.date).toLocaleDateString()}</td>
                     <td className={`px-4 py-3 text-sm text-slate-600 ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>{new Date(invoice.dueDate).toLocaleDateString()}</td>
-                    <td className={`px-4 py-3 text-sm font-semibold text-slate-900 text-right ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>€{invoice.amount.toFixed(2)}</td>
+                    <td className={`px-4 py-3 text-sm font-semibold text-slate-900 text-right ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>€{((invoice.total || invoice.amount || 0)).toFixed(2)}</td>
                     <td className="px-4 py-3">
                       <div className="flex justify-center">
                         <div className="relative group">
@@ -691,11 +720,38 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                 </div>
               </div>
 
-              {/* Total */}
-              <div className="pt-3 sm:pt-4 border-t border-slate-200">
-                <div className="flex justify-between items-center">
+              {/* Totales con IVA */}
+              <div className="pt-3 sm:pt-4 border-t border-slate-200 space-y-2">
+                {/* Subtotal */}
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-slate-600">Subtotal:</span>
+                  <span className="font-semibold text-slate-900">€{calculateTotal().subtotal.toFixed(2)}</span>
+                </div>
+                
+                {/* IVA con campo editable */}
+                <div className="flex justify-between items-center text-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-600">IVA:</span>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        value={formData.taxRate}
+                        onChange={(e) => setFormData({ ...formData, taxRate: parseFloat(e.target.value) || 0 })}
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        className="w-14 px-2 py-0.5 border border-slate-300 rounded text-xs text-center focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      />
+                      <span className="text-slate-500 text-xs">%</span>
+                    </div>
+                  </div>
+                  <span className="font-semibold text-slate-900">€{calculateTotal().tax.toFixed(2)}</span>
+                </div>
+                
+                {/* Total */}
+                <div className="flex justify-between items-center pt-2 border-t border-slate-100">
                   <span className="text-sm sm:text-lg font-semibold text-slate-900">Total:</span>
-                  <span className="text-xl sm:text-2xl font-bold text-indigo-600">€{calculateTotal().toFixed(2)}</span>
+                  <span className="text-xl sm:text-2xl font-bold text-indigo-600">€{calculateTotal().total.toFixed(2)}</span>
                 </div>
               </div>
             </div>
@@ -706,15 +762,17 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                   setShowNewInvoice(false);
                   resetForm();
                 }}
-                className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm text-slate-700 hover:bg-slate-100 rounded-lg transition-colors font-medium"
+                disabled={isSubmitting}
+                className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm text-slate-700 hover:bg-slate-100 rounded-lg transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Cancelar
               </button>
               <button
                 onClick={handleCreateInvoice}
-                className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium shadow-md"
+                disabled={isSubmitting}
+                className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Crear Factura
+                {isSubmitting ? 'Creando...' : 'Crear Factura'}
               </button>
             </div>
           </div>
