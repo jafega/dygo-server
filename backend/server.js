@@ -3609,85 +3609,124 @@ app.get('/api/dbinfo', async (_req, res) => {
 // ==========================================
 
 // --- INVOICES ---
-app.get('/api/invoices', (req, res) => {
-  const psychologistId = req.query.psychologist_user_id || req.query.psych_user_id || req.query.psychologistId;
-  const patientId = req.query.patient_user_id || req.query.patientId;
-  const startDate = req.query.startDate;
-  const endDate = req.query.endDate;
-  
-  if (!psychologistId && !patientId) {
-    return res.status(400).json({ error: 'Missing psychologistId or patientId' });
-  }
+app.get('/api/invoices', async (req, res) => {
+  try {
+    const psychologistId = req.query.psychologist_user_id || req.query.psych_user_id || req.query.psychologistId;
+    const patientId = req.query.patient_user_id || req.query.patientId;
+    const startDate = req.query.startDate;
+    const endDate = req.query.endDate;
+    
+    if (!psychologistId && !patientId) {
+      return res.status(400).json({ error: 'Missing psychologistId or patientId' });
+    }
 
-  const db = getDb();
-  if (!db.invoices) db.invoices = [];
-  
-  let invoices = db.invoices;
-  
-  // Filtrar por psychologist_user_id (nuevo esquema) o psychologistId (compatibilidad)
-  if (psychologistId) {
-    invoices = invoices.filter(inv => 
-      inv.psychologist_user_id === psychologistId || inv.psychologistId === psychologistId
-    );
+    let invoices = [];
+
+    // Consultar Supabase si está disponible
+    if (supabaseAdmin) {
+      try {
+        const invoicesRows = await readTable('invoices');
+        invoices = invoicesRows.map(normalizeSupabaseRow);
+      } catch (err) {
+        console.error('Error reading invoices from Supabase:', err);
+        // Fallback a DB local si falla Supabase
+        const db = getDb();
+        if (!db.invoices) db.invoices = [];
+        invoices = db.invoices;
+      }
+    } else {
+      // Usar DB local
+      const db = getDb();
+      if (!db.invoices) db.invoices = [];
+      invoices = db.invoices;
+    }
+    
+    // Filtrar por psychologist_user_id (nuevo esquema) o psychologistId (compatibilidad)
+    if (psychologistId) {
+      invoices = invoices.filter(inv => 
+        inv.psychologist_user_id === psychologistId || inv.psychologistId === psychologistId
+      );
+    }
+    
+    // Filtrar por patient_user_id (nuevo esquema) o patientId (compatibilidad)
+    if (patientId) {
+      invoices = invoices.filter(inv => 
+        inv.patient_user_id === patientId || inv.patientId === patientId
+      );
+    }
+    
+    // Filter by date range
+    if (startDate || endDate) {
+      invoices = invoices.filter(inv => {
+        const invDate = inv.date || inv.created_at?.split('T')[0];
+        if (!invDate) return true;
+        if (startDate && invDate < startDate) return false;
+        if (endDate && invDate > endDate) return false;
+        return true;
+      });
+    }
+    
+    res.json(invoices);
+  } catch (error) {
+    console.error('Error in GET /api/invoices:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
-  
-  // Filtrar por patient_user_id (nuevo esquema) o patientId (compatibilidad)
-  if (patientId) {
-    invoices = invoices.filter(inv => 
-      inv.patient_user_id === patientId || inv.patientId === patientId
-    );
-  }
-  
-  // Filter by date range
-  if (startDate || endDate) {
-    invoices = invoices.filter(inv => {
-      const invDate = inv.date || inv.created_at?.split('T')[0];
-      if (!invDate) return true;
-      if (startDate && invDate < startDate) return false;
-      if (endDate && invDate > endDate) return false;
-      return true;
-    });
-  }
-  
-  res.json(invoices);
 });
 
-app.post('/api/invoices', (req, res) => {
-  const db = getDb();
-  if (!db.invoices) db.invoices = [];
-  
-  const invoice = { ...req.body, id: req.body.id || Date.now().toString() };
+app.post('/api/invoices', async (req, res) => {
+  try {
+    const db = getDb();
+    if (!db.invoices) db.invoices = [];
+    
+    const invoice = { ...req.body, id: req.body.id || Date.now().toString() };
 
-  const headerUserId = req.headers['x-user-id'] || req.headers['x-userid'];
-  const psychologistUserId = invoice.psychologist_user_id || invoice.psych_user_id || invoice.psychologistId || headerUserId;
-  if (!psychologistUserId) {
-    return res.status(400).json({ error: 'psychologist_user_id es obligatorio para crear la factura' });
+    const headerUserId = req.headers['x-user-id'] || req.headers['x-userid'];
+    const psychologistUserId = invoice.psychologist_user_id || invoice.psych_user_id || invoice.psychologistId || headerUserId;
+    if (!psychologistUserId) {
+      return res.status(400).json({ error: 'psychologist_user_id es obligatorio para crear la factura' });
+    }
+
+    // Canonical ID for schema; mantener campo legacy para compatibilidad
+    invoice.psychologist_user_id = psychologistUserId;
+    invoice.psychologistId = invoice.psychologistId || psychologistUserId;
+
+    // Asegurar patient_user_id
+    if (!invoice.patient_user_id && invoice.patientId) {
+      invoice.patient_user_id = invoice.patientId;
+    }
+
+    // Adjuntar información del usuario que genera la factura (sin contraseña)
+    const dbUser = (db.users || []).find(u => String(u.id) === String(psychologistUserId));
+    if (dbUser) {
+      const { password, ...safeUser } = dbUser;
+      const normalizedUser = {
+        ...safeUser,
+        is_psychologist: safeUser.is_psychologist ?? (safeUser.isPsychologist ?? (safeUser.role === 'PSYCHOLOGIST')),
+        isPsychologist: safeUser.is_psychologist ?? (safeUser.isPsychologist ?? (safeUser.role === 'PSYCHOLOGIST'))
+      };
+      invoice.psychologist_user = normalizedUser;
+    }
+    
+    // Guardar en DB local
+    db.invoices.push(invoice);
+    saveDb(db);
+
+    // Guardar en Supabase si está disponible
+    if (supabaseAdmin) {
+      try {
+        await upsertTable('invoices', [invoice]);
+        console.log('✅ Factura guardada en Supabase:', invoice.id);
+      } catch (err) {
+        console.error('❌ Error guardando factura en Supabase:', err);
+        // No fallar la petición si Supabase falla, ya está en DB local
+      }
+    }
+
+    res.json(invoice);
+  } catch (error) {
+    console.error('Error in POST /api/invoices:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
-
-  // Canonical ID for schema; mantener campo legacy para compatibilidad
-  invoice.psychologist_user_id = psychologistUserId;
-  invoice.psychologistId = invoice.psychologistId || psychologistUserId;
-
-  // Asegurar patient_user_id
-  if (!invoice.patient_user_id && invoice.patientId) {
-    invoice.patient_user_id = invoice.patientId;
-  }
-
-  // Adjuntar información del usuario que genera la factura (sin contraseña)
-  const dbUser = (db.users || []).find(u => String(u.id) === String(psychologistUserId));
-  if (dbUser) {
-    const { password, ...safeUser } = dbUser;
-    const normalizedUser = {
-      ...safeUser,
-      is_psychologist: safeUser.is_psychologist ?? (safeUser.isPsychologist ?? (safeUser.role === 'PSYCHOLOGIST')),
-      isPsychologist: safeUser.is_psychologist ?? (safeUser.isPsychologist ?? (safeUser.role === 'PSYCHOLOGIST'))
-    };
-    invoice.psychologist_user = normalizedUser;
-  }
-  
-  db.invoices.push(invoice);
-  saveDb(db);
-  res.json(invoice);
 });
 
 app.post('/api/invoices/payment-link', (req, res) => {
@@ -3707,35 +3746,67 @@ app.post('/api/invoices/payment-link', (req, res) => {
 });
 
 // Update invoice status
-app.patch('/api/invoices/:id', (req, res) => {
-  const { id } = req.params;
-  const { status } = req.body;
-  
-  const db = getDb();
-  if (!db.invoices) db.invoices = [];
-  
-  const idx = db.invoices.findIndex(inv => inv.id === id);
-  if (idx === -1) return res.status(404).json({ error: 'Invoice not found' });
-  
-  db.invoices[idx] = { ...db.invoices[idx], ...req.body };
-  saveDb(db);
-  res.json(db.invoices[idx]);
+app.patch('/api/invoices/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    
+    const db = getDb();
+    if (!db.invoices) db.invoices = [];
+    
+    const idx = db.invoices.findIndex(inv => inv.id === id);
+    if (idx === -1) return res.status(404).json({ error: 'Invoice not found' });
+    
+    db.invoices[idx] = { ...db.invoices[idx], ...req.body };
+    saveDb(db);
+
+    // Actualizar en Supabase si está disponible
+    if (supabaseAdmin) {
+      try {
+        await upsertTable('invoices', [db.invoices[idx]]);
+        console.log('✅ Factura actualizada en Supabase:', id);
+      } catch (err) {
+        console.error('❌ Error actualizando factura en Supabase:', err);
+      }
+    }
+
+    res.json(db.invoices[idx]);
+  } catch (error) {
+    console.error('Error in PATCH /api/invoices/:id:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
 });
 
 // Cancel invoice
-app.post('/api/invoices/:id/cancel', (req, res) => {
-  const { id } = req.params;
-  
-  const db = getDb();
-  if (!db.invoices) db.invoices = [];
-  
-  const idx = db.invoices.findIndex(inv => inv.id === id);
-  if (idx === -1) return res.status(404).json({ error: 'Invoice not found' });
-  
-  db.invoices[idx].status = 'cancelled';
-  db.invoices[idx].cancelledAt = new Date().toISOString();
-  saveDb(db);
-  res.json(db.invoices[idx]);
+app.post('/api/invoices/:id/cancel', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const db = getDb();
+    if (!db.invoices) db.invoices = [];
+    
+    const idx = db.invoices.findIndex(inv => inv.id === id);
+    if (idx === -1) return res.status(404).json({ error: 'Invoice not found' });
+    
+    db.invoices[idx].status = 'cancelled';
+    db.invoices[idx].cancelledAt = new Date().toISOString();
+    saveDb(db);
+
+    // Actualizar en Supabase si está disponible
+    if (supabaseAdmin) {
+      try {
+        await upsertTable('invoices', [db.invoices[idx]]);
+        console.log('✅ Factura cancelada en Supabase:', id);
+      } catch (err) {
+        console.error('❌ Error cancelando factura en Supabase:', err);
+      }
+    }
+
+    res.json(db.invoices[idx]);
+  } catch (error) {
+    console.error('Error in POST /api/invoices/:id/cancel:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
 });
 
 // Generate PDF invoice

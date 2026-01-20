@@ -48,23 +48,14 @@ export default function PatientBillingPanel() {
 
   const handleDownloadPDF = async (invoiceId: string) => {
     try {
-      const response = await fetch(`${API_URL}/invoices/${invoiceId}/pdf`);
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `factura-${invoiceId}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-      } else {
-        alert('Error al descargar el PDF');
+      // Abrir la factura en una nueva ventana para visualizar/imprimir
+      const pdfWindow = window.open(`${API_URL}/invoices/${invoiceId}/pdf`, '_blank');
+      if (!pdfWindow) {
+        alert('Por favor, permite ventanas emergentes para visualizar la factura');
       }
     } catch (error) {
-      console.error('Error downloading PDF:', error);
-      alert('Error al descargar el PDF');
+      console.error('Error opening PDF:', error);
+      alert('Error al abrir la factura');
     }
   };
 
