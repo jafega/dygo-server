@@ -188,7 +188,7 @@ const App: React.FC = () => {
       const refreshed = await AuthService.getUserById(userId);
       if (refreshed) setCurrentUser(refreshed);
       await loadUserData(userId);
-      if (refreshed?.email) await checkInvitations(refreshed.email);
+      if (refreshed?.email) await checkInvitations(refreshed.email, refreshed.id);
       // Check profile for both psychologists and patients
       await checkProfileComplete(userId);
     } catch (e) {
@@ -196,8 +196,8 @@ const App: React.FC = () => {
     }
   };
 
-  const checkInvitations = async (email: string) => {
-      const invites = await StorageService.getPendingInvitationsForEmail(email);
+  const checkInvitations = async (email: string, userId?: string) => {
+      const invites = await StorageService.getPendingInvitationsForEmail(email, userId);
       setHasPendingInvites(invites.length > 0);
   };
 
@@ -802,7 +802,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                     {psychPanelView === 'dashboard' && <PsychologistDashboard psychologistId={currentUser.id} />}
                     {psychPanelView === 'patients' && <PatientDashboard />}
                     {psychPanelView === 'billing' && <BillingPanel psychologistId={currentUser.id} />}
-                    {psychPanelView === 'profile' && <PsychologistProfilePanel userId={currentUser.id} />}
+                    {psychPanelView === 'profile' && <PsychologistProfilePanel userId={currentUser.id} userEmail={currentUser.email} />}
                     {psychPanelView === 'calendar' && <PsychologistCalendar psychologistId={currentUser.id} />}
                     {psychPanelView === 'connections' && <ConnectionsPanel currentUser={currentUser} />}
 

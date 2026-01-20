@@ -666,12 +666,18 @@ export const sendInvitation = async (
 };
 
 // Obtener invitaciones pendientes donde este email es el PACIENTE
-export const getPendingInvitationsForEmail = async (email: string): Promise<Invitation[]> => {
+export const getPendingInvitationsForEmail = async (email: string, userId?: string): Promise<Invitation[]> => {
     const invs = await getInvitations();
     const normalizedEmail = email.toLowerCase().trim();
     return invs.filter(i => {
-        const patientEmail = i.patient_user_email || i.patientEmail || i.toUserEmail || '';
-        return patientEmail.toLowerCase().trim() === normalizedEmail && i.status === 'PENDING';
+        // Buscar por email en múltiples campos (incluyendo invited_patient_email de la columna de Supabase)
+        const patientEmail = i.invited_patient_email || i.patient_user_email || i.patientEmail || i.toUserEmail || '';
+        const matchesEmail = patientEmail.toLowerCase().trim() === normalizedEmail;
+        
+        // Si tenemos userId, también buscar por patient_user_id
+        const matchesUserId = userId ? i.patient_user_id === userId : false;
+        
+        return (matchesEmail || matchesUserId) && i.status === 'PENDING';
     });
 };
 

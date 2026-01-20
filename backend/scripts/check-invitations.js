@@ -38,17 +38,22 @@ async function checkInvitations() {
   
   data.forEach((row, index) => {
     console.log(`\n${index + 1}. ID: ${row.id}`);
+    console.log(`   Estructura completa:`, JSON.stringify(row, null, 2));
     
     if (row.data) {
       // Formato nuevo (con columna data)
       console.log(`   De (Psicólogo): ${row.data.fromPsychologistName} (${row.data.fromPsychologistId})`);
-      console.log(`   Para (Email): ${row.data.toUserEmail}`);
+      console.log(`   Para (Email): ${row.data.toUserEmail || row.data.patient_user_email || row.data.patientEmail}`);
+      console.log(`   Patient User ID: ${row.data.patient_user_id || 'N/A'}`);
+      console.log(`   Psych User ID: ${row.data.psych_user_id || 'N/A'}`);
       console.log(`   Estado: ${row.data.status}`);
-      console.log(`   Fecha: ${new Date(row.data.timestamp).toLocaleString()}`);
+      console.log(`   Fecha: ${new Date(row.data.timestamp || row.data.created_at).toLocaleString()}`);
     } else {
       // Formato antiguo (columnas directas)
-      console.log(`   De (Psicólogo): ${row.fromPsychologistName || 'N/A'} (${row.fromPsychologistId || 'N/A'})`);
-      console.log(`   Para (Email): ${row.toUserEmail || 'N/A'}`);
+      console.log(`   De (Psicólogo): ${row.fromPsychologistName || row.psych_user_email || 'N/A'} (${row.fromPsychologistId || row.psych_user_id || 'N/A'})`);
+      console.log(`   Para (Email): ${row.toUserEmail || row.patient_user_email || row.patientEmail || 'N/A'}`);
+      console.log(`   Patient User ID: ${row.patient_user_id || 'N/A'}`);
+      console.log(`   Psych User ID: ${row.psych_user_id || 'N/A'}`);
       console.log(`   Estado: ${row.status || 'N/A'}`);
       console.log(`   Fecha: ${row.timestamp ? new Date(row.timestamp).toLocaleString() : 'N/A'}`);
     }

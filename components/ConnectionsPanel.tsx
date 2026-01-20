@@ -65,7 +65,7 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
         console.log('👤 [ConnectionsPanel] Cargando datos para PACIENTE...');
         const [connected, pending] = await Promise.all([
           basePromise,
-          getPendingInvitationsForEmail(currentUser.email)
+          getPendingInvitationsForEmail(currentUser.email, currentUser.id)
         ]);
         setMyPsychologists(connected);
         setInvitations(pending);
@@ -77,7 +77,7 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
           basePromise,
           getSentInvitationsForPsychologist(currentUser.id, currentUser.email),
           getPatientsForPsychologist(currentUser.id),
-          getPendingInvitationsForEmail(currentUser.email),
+          getPendingInvitationsForEmail(currentUser.email, currentUser.id),
           getPendingPsychologistInvitationsForEmail(currentUser.email)
         ]);
         console.log('✅ [ConnectionsPanel] Datos recibidos - Conectados:', connected.length, 'Invitaciones enviadas:', sent.length, 'Pacientes:', patients.length, 'Invitaciones recibidas:', pending.length, 'Solicitudes como psicólogo:', psychRequests.length);

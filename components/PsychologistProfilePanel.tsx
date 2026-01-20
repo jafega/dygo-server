@@ -28,15 +28,16 @@ interface PsychologistProfile {
 
 interface PsychologistProfileProps {
   userId: string;
+  userEmail: string;
 }
 
-const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId }) => {
+const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, userEmail }) => {
   const [profile, setProfile] = useState<PsychologistProfile>({
     name: '',
     professionalId: '',
     specialty: '',
     phone: '',
-    email: '',
+    email: userEmail,
     address: '',
     city: '',
     postalCode: '',
@@ -56,13 +57,17 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId }
     loadProfile();
   }, [userId]);
 
+  useEffect(() => {
+    setProfile(prev => ({ ...prev, email: userEmail }));
+  }, [userEmail]);
+
   const loadProfile = async () => {
     setIsLoading(true);
     try {
       const response = await fetch(`${API_URL}/psychologist/${userId}/profile`);
       if (response.ok) {
         const data = await response.json();
-        setProfile(data);
+        setProfile({ ...data, email: userEmail });
       }
     } catch (error) {
       console.error('Error loading profile:', error);
@@ -177,10 +182,11 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId }
             <input
               type="email"
               value={profile.email}
-              onChange={(e) => handleChange('email', e.target.value)}
-              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-              placeholder="email@ejemplo.com"
+              disabled
+              className="w-full px-4 py-2 border border-slate-300 rounded-lg bg-slate-100 text-slate-600 cursor-not-allowed"
+              placeholder="correo@ejemplo.com"
             />
+            <p className="text-xs text-slate-500 mt-1">El email está vinculado a tu cuenta y no se puede modificar</p>
           </div>
         </div>
 
