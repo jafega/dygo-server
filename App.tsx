@@ -23,7 +23,7 @@ import PatientProfilePanel from './components/PatientProfilePanel';
 import PsychologistCalendar from './components/PsychologistCalendar';
 import PsychologistDashboard from './components/PsychologistDashboard';
 import ConnectionsPanel from './components/ConnectionsPanel';
-import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock, AlertCircle } from 'lucide-react';
+import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock, AlertCircle, Smile, Shield } from 'lucide-react';
 
 // Custom Dygo Logo Component
 const DygoLogo: React.FC<{ className?: string }> = ({ className = "w-8 h-8" }) => (
@@ -74,7 +74,7 @@ const App: React.FC = () => {
   const [sessionDate, setSessionDate] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
-  const [activeTab, setActiveTab] = useState<'insights' | 'feedback' | 'sessions' | 'calendar' | 'billing' | 'connections' | 'profile'>('insights');
+  const [activeTab, setActiveTab] = useState<'insights' | 'feedback' | 'sessions' | 'appointments' | 'calendar' | 'billing' | 'connections' | 'profile' | 'admin'>('insights');
   const [showSettings, setShowSettings] = useState(false);
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReport | null>(null);
   const [hasPendingInvites, setHasPendingInvites] = useState(false);
@@ -249,14 +249,16 @@ const App: React.FC = () => {
       setHasPendingInvites(invites.length > 0);
   };
 
-  const checkProfileComplete = async (userId: string) => {
-    if (!currentUser) {
+  const checkProfileComplete = async (userId: string, user?: User) => {
+    const userToCheck = user || currentUser;
+    
+    if (!userToCheck) {
       setIsProfileIncomplete(false);
       return;
     }
 
     try {
-      const endpoint = currentUser.is_psychologist === true
+      const endpoint = userToCheck.is_psychologist === true
         ? `${API_URL}/psychologist/${userId}/profile`
         : `${API_URL}/patient/${userId}/profile`;
       
@@ -265,7 +267,7 @@ const App: React.FC = () => {
         const profile = await response.json();
         
         // Campos esenciales según el rol
-        const requiredFields = currentUser.is_psychologist === true 
+        const requiredFields = userToCheck.is_psychologist === true 
           ? [
               profile.name,
               profile.phone,
@@ -308,6 +310,9 @@ const App: React.FC = () => {
       
       console.log('✅ Usuario obtenido:', user.email || user.id);
       setCurrentUser(user);
+      
+      // Verificar completitud del perfil al hacer login
+      await checkProfileComplete(user.id, user);
       
       // Solo permitir vista de psicólogo si is_psychologist es true
       const canAccessPsychologistView = user.is_psychologist === true;
@@ -706,35 +711,6 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
     </button>
   );
 
-  // Superadmin view
-  if (currentUser && viewState === ViewState.SUPERADMIN) {
-    return (
-      <div className="min-h-screen bg-white text-slate-900 pb-20 md:pb-0 relative">
-        <div className="max-w-5xl mx-auto p-4 md:p-8 space-y-8">
-          <header className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold">Superadmin</h1>
-            <div className="flex items-center gap-2">
-              <button onClick={() => setViewState(ViewState.CALENDAR)} className="px-3 py-2 bg-slate-100 rounded">Volver</button>
-              <div className="ml-2"><ProfileCircle onClick={handleOpenSettings} /></div>
-            </div>
-          </header>
-
-          <SuperAdmin />
-
-          {showSettings && (
-            <SettingsModal 
-              settings={settings} 
-              onSave={handleSaveSettings} 
-              onClose={() => { setShowSettings(false); if(currentUser) checkInvitations(currentUser.email); }} 
-              onLogout={handleLogout}
-              onUserUpdate={handleUserUpdate}
-            />
-          )}
-        </div>
-      </div>
-    );
-  }
-
   // Psychologist View - Solo accesible si is_psychologist es true
   if (currentUser?.is_psychologist === true && psychViewMode === 'DASHBOARD') {
       console.log('✅ [App] Mostrando vista de psicólogo - is_psychologist:', currentUser.is_psychologist);
@@ -751,8 +727,6 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   avatarUrl={currentUser.avatarUrl}
                   onSwitchToPersonal={() => setPsychViewMode('PERSONAL')}
                   onOpenSettings={handleOpenSettings}
-                  isSuperAdmin={String(currentUser.email).toLowerCase() === 'garryjavi@gmail.com'}
-                  onSuperAdminClick={() => setViewState(ViewState.SUPERADMIN)}
                   isProfileIncomplete={isProfileIncomplete}
                />
                
@@ -1040,8 +1014,20 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
               }`}
             >
-              <Calendar size={18} />
-              <span className={`${sidebarOpen ? 'inline' : 'hidden'} md:inline`}>Calendario</span>
+              <Smile size={18} />
+              <span className={`${sidebarOpen ? 'inline' : 'hidden'} md:inline`}>Historia</span>
+            </button>
+
+            <button
+              onClick={() => { setActiveTab('appointments'); if (window.innerWidth < 768) setSidebarOpen(false); }}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium ${
+                activeTab === 'appointments'
+                  ? 'bg-indigo-50 text-indigo-700 shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+              }`}
+            >
+              <CalendarIcon size={18} />
+              <span className={`${sidebarOpen ? 'inline' : 'hidden'} md:inline`}>Citas</span>
             </button>
 
             <button
@@ -1114,6 +1100,21 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
           </nav>
 
           <div className={`${sidebarOpen ? 'block' : 'hidden'} md:block p-3 border-t border-slate-200 space-y-2`}>
+            {/* Admin tab - solo para garryjavi@gmail.com */}
+            {currentUser?.email?.toLowerCase() === 'garryjavi@gmail.com' && (
+              <button
+                onClick={() => { setActiveTab('admin'); if (window.innerWidth < 768) setSidebarOpen(false); }}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium mb-2 ${
+                  activeTab === 'admin'
+                    ? 'bg-red-50 text-red-700 shadow-sm'
+                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                }`}
+              >
+                <Shield size={18} />
+                <span className={`${sidebarOpen ? 'inline' : 'hidden'} md:inline`}>Admin</span>
+              </button>
+            )}
+            
             <button
               onClick={handleOpenSettings}
               className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer"
@@ -1156,30 +1157,36 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
             <header className="md:hidden mb-6">
               <div className="flex items-center gap-3 mb-2">
                 {activeTab === 'insights' && <LayoutDashboard className="w-6 h-6 text-indigo-600" />}
-                {activeTab === 'feedback' && <MessageCircle className="w-6 h-6 text-indigo-600" />}
+                {activeTab === 'calendar' && <Smile className="w-6 h-6 text-indigo-600" />}
+                {activeTab === 'appointments' && <CalendarIcon className="w-6 h-6 text-indigo-600" />}
                 {activeTab === 'sessions' && <Stethoscope className="w-6 h-6 text-indigo-600" />}
-                {activeTab === 'calendar' && <Calendar className="w-6 h-6 text-indigo-600" />}
+                {activeTab === 'feedback' && <MessageCircle className="w-6 h-6 text-indigo-600" />}
                 {activeTab === 'billing' && <FileText className="w-6 h-6 text-indigo-600" />}
                 {activeTab === 'connections' && <Link2 className="w-6 h-6 text-indigo-600" />}
                 {activeTab === 'profile' && <UserIcon className="w-6 h-6 text-indigo-600" />}
+                {activeTab === 'admin' && <Shield className="w-6 h-6 text-red-600" />}
                 <h1 className="text-2xl font-bold text-slate-900">
                   {activeTab === 'insights' && 'Resumen'}
-                  {activeTab === 'feedback' && 'Feedback'}
+                  {activeTab === 'calendar' && 'Historia'}
+                  {activeTab === 'appointments' && 'Citas'}
                   {activeTab === 'sessions' && 'Sesiones'}
-                  {activeTab === 'calendar' && 'Calendario'}
+                  {activeTab === 'feedback' && 'Feedback'}
                   {activeTab === 'billing' && 'Facturación'}
                   {activeTab === 'connections' && 'Conexiones'}
                   {activeTab === 'profile' && 'Mi Perfil'}
+                  {activeTab === 'admin' && 'Administración'}
                 </h1>
               </div>
               <p className="text-sm text-slate-500">
                 {activeTab === 'insights' && 'Vista general de tu progreso'}
-                {activeTab === 'feedback' && 'Comentarios y recomendaciones'}
-                {activeTab === 'sessions' && 'Gestiona tus citas con el psicólogo'}
                 {activeTab === 'calendar' && 'Visualiza tus entradas y actividades'}
+                {activeTab === 'appointments' && 'Gestiona tus citas con el psicólogo'}
+                {activeTab === 'sessions' && 'Sesiones clínicas con tu psicólogo'}
+                {activeTab === 'feedback' && 'Comentarios y recomendaciones'}
                 {activeTab === 'billing' && 'Consulta y descarga tus facturas'}
                 {activeTab === 'connections' && 'Administra conexiones con tu psicólogo'}
                 {activeTab === 'profile' && 'Información personal y preferencias'}
+                {activeTab === 'admin' && 'Panel de administración del sistema'}
               </p>
             </header>
 
@@ -1188,21 +1195,25 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
               <div>
                 <h1 className="text-3xl font-bold text-slate-900">
                   {activeTab === 'insights' && 'Resumen'}
+                  {activeTab === 'calendar' && 'Mi Historia'}
+                  {activeTab === 'appointments' && 'Mis Citas'}
+                  {activeTab === 'sessions' && 'Sesiones Clínicas'}
                   {activeTab === 'feedback' && 'Feedback del Psicólogo'}
-                  {activeTab === 'sessions' && 'Mis Sesiones'}
-                  {activeTab === 'calendar' && 'Calendario'}
                   {activeTab === 'billing' && 'Facturación'}
                   {activeTab === 'connections' && 'Conexiones'}
                   {activeTab === 'profile' && 'Mi Perfil'}
+                  {activeTab === 'admin' && 'Administración del Sistema'}
                 </h1>
                 <p className="text-slate-500 mt-1">
                   {activeTab === 'insights' && 'Vista general de tu progreso'}
+                  {activeTab === 'calendar' && 'Visualiza tus entradas y actividades del día a día'}
+                  {activeTab === 'appointments' && 'Gestiona y reserva citas con tu psicólogo'}
+                  {activeTab === 'sessions' && 'Sesiones clínicas con tu psicólogo'}
                   {activeTab === 'feedback' && 'Comentarios y recomendaciones de tu psicólogo'}
-                  {activeTab === 'sessions' && 'Gestiona tus citas con el psicólogo'}
-                  {activeTab === 'calendar' && 'Visualiza tus entradas y actividades'}
                   {activeTab === 'billing' && 'Consulta y descarga tus facturas'}
                   {activeTab === 'connections' && 'Administra invitaciones y conexiones con tu psicólogo'}
                   {activeTab === 'profile' && 'Información personal y configuración de tu cuenta'}
+                  {activeTab === 'admin' && 'Gestión de usuarios del sistema'}
                 </p>
               </div>
               <div className="flex gap-3">
@@ -1503,8 +1514,8 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
               </div>
             )}
 
-            {/* Vista de Sesiones */}
-            {activeTab === 'sessions' && (
+            {/* Vista de Citas */}
+            {activeTab === 'appointments' && (
               <div className="animate-in fade-in">
                 <PatientSessions />
               </div>
@@ -1538,6 +1549,12 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                 <PatientProfilePanel userId={currentUser.id} />
               </div>
             )}
+
+            {activeTab === 'admin' && currentUser?.email?.toLowerCase() === 'garryjavi@gmail.com' && (
+              <div className="animate-in fade-in">
+                <SuperAdmin />
+              </div>
+            )}
           </div>
         </main>
       </div>
@@ -1550,7 +1567,8 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
           onClose={() => { setSelectedDate(null); setSelectedEntryId(null); setSelectedEntryMode('day'); }}
           onStartSession={(dateStr) => handleStartSession(dateStr)} 
           onDeleteEntry={handleDeleteEntry} 
-          onUpdateEntry={handleUpdateEntry} 
+          onUpdateEntry={handleUpdateEntry}
+          currentUserRole={currentUser?.is_psychologist ? 'PSYCHOLOGIST' : 'PATIENT'}
         />
       )}
       {weeklyReport && <WeeklyReportModal report={weeklyReport} onClose={() => setWeeklyReport(null)} />}

@@ -17,8 +17,6 @@ interface PsychologistSidebarProps {
   avatarUrl?: string;
   onSwitchToPersonal: () => void;
   onOpenSettings: () => void;
-  isSuperAdmin?: boolean;
-  onSuperAdminClick?: () => void;
   isProfileIncomplete?: boolean;
 }
 
@@ -32,8 +30,6 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
   avatarUrl = '',
   onSwitchToPersonal,
   onOpenSettings,
-  isSuperAdmin = false,
-  onSuperAdminClick,
   isProfileIncomplete = false
 }) => {
   const menuItems = [
@@ -185,22 +181,6 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
               </button>
             );
           })}
-          
-          {/* Superadmin Button */}
-          {isSuperAdmin && onSuperAdminClick && (
-            <button
-              onClick={() => {
-                onSuperAdminClick();
-                if (window.innerWidth < 1024) {
-                  onToggle();
-                }
-              }}
-              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all text-amber-600 hover:bg-amber-50 hover:text-amber-700 border-t border-slate-200 mt-2 pt-3"
-            >
-              <ShieldCheck size={18} />
-              <span>Superadmin</span>
-            </button>
-          )}
         </nav>
 
         {/* Footer */}

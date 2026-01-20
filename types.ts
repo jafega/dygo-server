@@ -170,8 +170,7 @@ export enum ViewState {
   CALENDAR = 'CALENDAR',
   VOICE_SESSION = 'VOICE_SESSION',
   INSIGHTS = 'INSIGHTS',
-  PATIENTS = 'PATIENTS',
-  SUPERADMIN = 'SUPERADMIN'
+  PATIENTS = 'PATIENTS'
 }
 
 export interface SentimentDataPoint {

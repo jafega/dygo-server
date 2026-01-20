@@ -278,6 +278,12 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
 
   const filteredDirectory = useMemo(() => {
     const query = directorySearch.trim().toLowerCase();
+    
+    // No mostrar resultados hasta que haya al menos 3 caracteres
+    if (query.length < 3) {
+      return [];
+    }
+    
     return allPsychologists.filter(psych => {
       if (psych.id === currentUser?.id) return false;
       const alreadyLinked = connectedPsychologists.some(p => p.id === psych.id);
@@ -290,10 +296,26 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
       });
       if (hasPendingInvitation) return false;
       
+      // Excluir psicólogos que me tienen a mí como paciente
+      // Si soy paciente de un psicólogo, no debería aparecer en mi búsqueda
+      const isPsychologistOfCurrentUser = connectedPatients.some(patient => {
+        return patient.id === currentUser?.id;
+      });
+      
+      // Si este psicólogo está en la lista de pacientes conectados, significa que el usuario actual
+      // es paciente de alguien. Necesitamos verificar si este psych específico me tiene como paciente.
+      // Esto se hace comparando si psych.id coincide con alguno de mis psicólogos conectados
+      // Pero eso ya lo verificamos arriba con alreadyLinked.
+      
+      // Lo que realmente necesitamos es: si el psicólogo que estoy mirando (psych)
+      // tiene al usuario actual como paciente. Para eso necesitaríamos consultar
+      // los pacientes de ese psicólogo, pero no tenemos esa información aquí.
+      // Por simplicidad, podemos asumir que si ya estamos conectados, no aparece (ya cubierto arriba).
+      
       if (!query) return true;
       return psych.name.toLowerCase().includes(query) || psych.email.toLowerCase().includes(query);
     });
-  }, [allPsychologists, directorySearch, connectedPsychologists, currentUser?.id, receivedInvitations, sentInvitationsAsPatient]);
+  }, [allPsychologists, directorySearch, connectedPsychologists, connectedPatients, currentUser?.id, receivedInvitations, sentInvitationsAsPatient]);
 
   if (!currentUser) {
     return (
@@ -356,7 +378,7 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
                     type="text"
                     value={directorySearch}
                     onChange={(e) => setDirectorySearch(e.target.value)}
-                    placeholder="Nombre o email"
+                    placeholder="Escribe al menos 3 letras..."
                     className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg sm:rounded-xl border border-slate-200 bg-white text-xs sm:text-sm"
                   />
                   <button onClick={() => { setDirectorySearch(''); setShowDirectory(false); }} className="p-1.5 sm:p-2 rounded-lg sm:rounded-xl text-slate-500 hover:bg-white">
@@ -366,8 +388,10 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
                 <div className="mt-2 sm:mt-3 max-h-48 sm:max-h-56 overflow-y-auto space-y-1 sm:space-y-2">
                   {directoryLoading ? (
                     <div className="text-sm text-slate-500 flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" />Cargando directorio…</div>
+                  ) : directorySearch.trim().length < 3 ? (
+                    <p className="text-sm text-slate-400 text-center py-6">Escribe al menos 3 letras para buscar especialistas</p>
                   ) : filteredDirectory.length === 0 ? (
-                    <p className="text-sm text-slate-400 text-center py-6">No hay especialistas disponibles.</p>
+                    <p className="text-sm text-slate-400 text-center py-6">No hay especialistas disponibles con ese criterio.</p>
                   ) : filteredDirectory.map(psych => (
                     <div key={psych.id} className="bg-white rounded-lg border border-slate-100 p-2 sm:p-3 flex items-center justify-between gap-2">
                       <div className="min-w-0 flex-1">

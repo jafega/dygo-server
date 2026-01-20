@@ -9,9 +9,10 @@ interface EntryModalProps {
     onStartSession: (dateStr: string) => void;
   onDeleteEntry: (id: string) => void;
   onUpdateEntry: (entry: JournalEntry) => void;
+  currentUserRole?: 'PATIENT' | 'PSYCHOLOGIST';
 }
 
-const EntryModal: React.FC<EntryModalProps> = ({ entries, dateStr, onClose, onStartSession, onDeleteEntry, onUpdateEntry }) => {
+const EntryModal: React.FC<EntryModalProps> = ({ entries, dateStr, onClose, onStartSession, onDeleteEntry, onUpdateEntry, currentUserRole = 'PATIENT' }) => {
   const now = new Date();
   const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const isPastOrToday = dateStr <= todayStr;
@@ -76,6 +77,7 @@ const EntryModal: React.FC<EntryModalProps> = ({ entries, dateStr, onClose, onSt
                     index={entries.length - index} // Show reverse chronological number
                     onDelete={() => onDeleteEntry(entry.id)}
                     onUpdate={onUpdateEntry}
+                    currentUserRole={currentUserRole}
                 />
              ))}
           </div>
@@ -90,7 +92,8 @@ const EntryCard: React.FC<{
     index: number;
     onDelete: () => void;
     onUpdate: (entry: JournalEntry) => void;
-}> = ({ entry, index, onDelete, onUpdate }) => {
+    currentUserRole?: 'PATIENT' | 'PSYCHOLOGIST';
+}> = ({ entry, index, onDelete, onUpdate, currentUserRole = 'PATIENT' }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [editSummary, setEditSummary] = useState(entry.summary);
     
@@ -313,7 +316,8 @@ const EntryCard: React.FC<{
 
                  {isPsychEntry && !isSession && (
                      <div className="space-y-3">
-                         {(internalNote?.text || (internalNote?.attachments?.length || 0) > 0) && (
+                         {/* Solo mostrar notas internas si el usuario actual es psicólogo */}
+                         {currentUserRole === 'PSYCHOLOGIST' && (internalNote?.text || (internalNote?.attachments?.length || 0) > 0) && (
                              <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
                                  <h4 className="text-[10px] font-bold uppercase text-amber-700 mb-1 flex items-center gap-1">
                                      <FileText size={11} /> Nota interna
