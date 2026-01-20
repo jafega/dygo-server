@@ -191,43 +191,7 @@ const createInitialDb = () => ({
   psychologistProfiles: {}
 });
 
-const migrateLegacyAccessLists = (db) => {
-  if (!db || !Array.isArray(db.users)) return;
-  if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
-
-  const existing = new Set(
-    db.careRelationships
-      .filter(rel => rel && rel.psychologistId && rel.patientId)
-      .map(rel => `${rel.psychologistId}:${rel.patientId}`)
-  );
-
-  let added = 0;
-  for (const user of db.users) {
-    if (!Array.isArray(user?.accessList) || user.accessList.length === 0) continue;
-    const isPsych = String(user.role || '').toUpperCase() === 'PSYCHOLOGIST';
-
-    for (const targetId of user.accessList) {
-      if (!targetId) continue;
-      const psychologistId = isPsych ? user.id : targetId;
-      const patientId = isPsych ? targetId : user.id;
-      if (!psychologistId || !patientId) continue;
-      const key = `${psychologistId}:${patientId}`;
-      if (existing.has(key)) continue;
-      db.careRelationships.push({
-        id: crypto.randomUUID(),
-        psychologistId,
-        patientId,
-        createdAt: Date.now()
-      });
-      existing.add(key);
-      added++;
-    }
-  }
-
-  if (added > 0) {
-    console.log(`🔁 Migrated ${added} legacy accessList relationships`);
-  }
-};
+// migrateLegacyAccessLists eliminada - ya no es necesaria con la nueva estructura
 
 const ensureDbShape = (db) => {
   if (!db || typeof db !== 'object') {
@@ -244,55 +208,7 @@ const ensureDbShape = (db) => {
   if (!Array.isArray(db.invoices)) db.invoices = [];
   if (!db.psychologistProfiles || typeof db.psychologistProfiles !== 'object') db.psychologistProfiles = {};
 
-  // Migrar invitaciones antiguas a nueva estructura
-  migrateInvitationsToNewStructure(db);
-  
-  // migrateLegacyAccessLists(db); // DISABLED - use care_relationships table only
   return db;
-};
-
-// Migrar invitaciones antiguas (fromPsychologistId/toUserEmail) a nueva estructura (psychologistId/patientEmail)
-const migrateInvitationsToNewStructure = (db) => {
-  if (!Array.isArray(db.invitations)) return;
-  
-  let migrated = 0;
-  db.invitations.forEach(inv => {
-    // Detectar estructura antigua: tiene fromPsychologistId pero no psychologistEmail
-    if (inv.fromPsychologistId && !inv.psychologistEmail) {
-      console.log('🔄 Migrando invitación antigua:', inv.id);
-      
-      // Buscar psicólogo
-      const psychologist = db.users.find(u => u.id === inv.fromPsychologistId);
-      if (psychologist) {
-        inv.psychologistId = inv.fromPsychologistId;
-        inv.psychologistEmail = psychologist.email;
-        inv.psychologistName = inv.fromPsychologistName || psychologist.name;
-        inv.patientEmail = inv.toUserEmail;
-        
-        // Buscar paciente si existe
-        const patient = db.users.find(u => normalizeEmail(u.email) === normalizeEmail(inv.toUserEmail));
-        if (patient) {
-          inv.patientId = patient.id;
-          inv.patientName = patient.name;
-        }
-        
-        inv.createdAt = inv.createdAt || new Date().toISOString();
-        
-        console.log('✅ Invitación migrada:', {
-          id: inv.id,
-          psychologistEmail: inv.psychologistEmail,
-          patientEmail: inv.patientEmail
-        });
-        migrated++;
-      } else {
-        console.warn('⚠️ No se encontró psicólogo para migrar invitación:', inv.id, 'psychId:', inv.fromPsychologistId);
-      }
-    }
-  });
-  
-  if (migrated > 0) {
-    console.log(`📊 Total invitaciones migradas: ${migrated}`);
-  }
 };
 
 const relationshipKey = (psychUserId, patientUserId) => `${psychUserId}:${patientUserId}`;
@@ -304,25 +220,18 @@ const ensureCareRelationship = (db, psychUserId, patientUserId) => {
   }
   if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
   
-  // Buscar usando nuevos campos o campos legacy
   const existing = db.careRelationships.find(rel => 
-    (rel.psych_user_id === psychUserId && rel.patient_user_id === patientUserId) ||
-    (rel.psychologistId === psychUserId && rel.patientId === patientUserId)
+    rel.psychologist_user_id === psychUserId && rel.patient_user_id === patientUserId
   );
   
   if (existing) {
     console.log('[ensureCareRelationship] ✓ Relación ya existe', { id: existing.id });
-    // Migrar a nuevos campos si tiene los legacy
-    if (!existing.psych_user_id && existing.psychologistId) {
-      existing.psych_user_id = existing.psychologistId;
-      existing.patient_user_id = existing.patientId;
-    }
     return existing;
   }
   
   const rel = {
     id: crypto.randomUUID(),
-    psych_user_id: psychUserId,
+    psychologist_user_id: psychUserId,
     patient_user_id: patientUserId,
     createdAt: Date.now()
   };
@@ -335,8 +244,7 @@ const removeCareRelationshipByPair = (db, psychUserId, patientUserId) => {
   if (!Array.isArray(db.careRelationships)) return false;
   const before = db.careRelationships.length;
   db.careRelationships = db.careRelationships.filter(rel => 
-    !((rel.psych_user_id === psychUserId && rel.patient_user_id === patientUserId) ||
-      (rel.psychologistId === psychUserId && rel.patientId === patientUserId))
+    !(rel.psychologist_user_id === psychUserId && rel.patient_user_id === patientUserId)
   );
   return db.careRelationships.length !== before;
 };
@@ -345,8 +253,7 @@ const removeCareRelationshipsForUser = (db, userId) => {
   if (!Array.isArray(db.careRelationships) || !userId) return 0;
   const before = db.careRelationships.length;
   db.careRelationships = db.careRelationships.filter(rel => 
-    rel.psych_user_id !== userId && rel.patient_user_id !== userId &&
-    rel.psychologistId !== userId && rel.patientId !== userId
+    rel.psychologist_user_id !== userId && rel.patient_user_id !== userId
   );
   return before - db.careRelationships.length;
 };
@@ -643,7 +550,7 @@ async function initializeSupabase() {
         if (supabaseDbCache.careRelationships && supabaseDbCache.careRelationships.length > 0) {
           console.log('📋 Care relationships loaded:');
           supabaseDbCache.careRelationships.forEach(rel => {
-            console.log(`   - ${rel.psychologistId} → ${rel.patientId} (${rel.endedAt ? 'FINALIZADA' : 'ACTIVA'})`);
+            console.log(`   - ${rel.psychologist_user_id} → ${rel.patient_user_id} (${rel.endedAt ? 'FINALIZADA' : 'ACTIVA'})`);
           });
         } else {
           console.log('⚠️ No care_relationships found in cache');
@@ -676,25 +583,86 @@ function normalizeSupabaseRow(row) {
   const base = { ...row };
   const data = base.data;
   delete base.data;
+  
   if (data && typeof data === 'object') {
-    return { ...base, ...data };
+    // Expandir data pero eliminar campos que vienen de columnas de la tabla
+    const cleanData = { ...data };
+    delete cleanData.is_psychologist;      // Usar columna de tabla
+    delete cleanData.isPsychologist;       // Usar columna de tabla
+    delete cleanData.role;                 // DEPRECATED - no usar
+    delete cleanData.user_email;           // Usar columna de tabla
+    delete cleanData.psychologist_profile_id; // Usar columna de tabla
+    
+    // Combinar: primero data limpia, luego columnas de tabla
+    const merged = { ...cleanData, ...base };
+    
+    // Asegurar que is_psychologist y isPsychologist vengan de la columna
+    if (base.is_psychologist !== undefined) {
+      merged.is_psychologist = base.is_psychologist;
+      merged.isPsychologist = base.is_psychologist;
+    }
+    
+    // Asegurar que user_email venga de la columna
+    if (base.user_email !== undefined) {
+      merged.user_email = base.user_email;
+      if (!merged.email) merged.email = base.user_email;
+    }
+    
+    // Asegurar que psychologist_profile_id venga de la columna
+    if (base.psychologist_profile_id !== undefined) {
+      merged.psychologist_profile_id = base.psychologist_profile_id;
+    }
+    
+    return merged;
   }
+  
   return base;
 }
 
 function buildSupabaseRowFromEntity(originalRow, entity) {
   const hasData = originalRow && Object.prototype.hasOwnProperty.call(originalRow, 'data');
   if (hasData) {
-    return { id: originalRow.id || entity.id, data: entity };
+    // Crear una copia de entity sin campos que van en columnas de tabla
+    const { is_psychologist, isPsychologist, role, user_email, psychologist_profile_id, ...dataFields } = entity;
+    
+    // Construir el row con columnas de tabla + data limpio
+    return { 
+      id: originalRow.id || entity.id,
+      is_psychologist: is_psychologist !== undefined ? is_psychologist : (isPsychologist || false),
+      user_email: user_email || entity.email,
+      psychologist_profile_id: psychologist_profile_id || null,
+      data: dataFields 
+    };
   }
   return { ...entity, id: originalRow?.id || entity.id };
+}
+
+// Función específica para entries que maneja creator_user_id y target_user_id correctamente
+function buildSupabaseEntryRow(entry) {
+  const { id, creator_user_id, target_user_id, ...restData } = entry;
+  return {
+    id,
+    creator_user_id,
+    target_user_id,
+    data: restData
+  };
 }
 
 async function trySupabaseUpsert(table, payloads) {
   let lastError = null;
   for (const payload of payloads) {
+    console.log(`[trySupabaseUpsert] 🔄 Intentando upsert en ${table}:`, JSON.stringify(payload, null, 2).substring(0, 1000));
     const { error } = await supabaseAdmin.from(table).upsert(payload, { onConflict: 'id' });
-    if (!error) return;
+    if (!error) {
+      console.log(`[trySupabaseUpsert] ✅ Upsert exitoso en ${table}`);
+      return;
+    }
+    console.error(`[trySupabaseUpsert] ❌ Error en upsert de ${table}:`, {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code
+    });
     lastError = error;
   }
   if (lastError) throw lastError;
@@ -775,7 +743,14 @@ async function loadSupabaseCache() {
 
   const users = usersRows.map(normalizeSupabaseRow);
   const entries = []; // No cargar entries aquí - lazy loading
-  const goals = goalsRows.map(normalizeSupabaseRow);
+  const goals = goalsRows.map(row => {
+    const normalized = normalizeSupabaseRow(row);
+    // Asegurar que userId esté disponible desde patient_user_id
+    if (row.patient_user_id && !normalized.userId) {
+      normalized.userId = row.patient_user_id;
+    }
+    return normalized;
+  });
   const invitations = invitationsRows.map(normalizeSupabaseRow);
   const sessions = sessionsRows.map(normalizeSupabaseRow);
   const invoices = invoicesRows.map(normalizeSupabaseRow);
@@ -801,7 +776,8 @@ async function loadEntriesForUser(userId) {
       setTimeout(() => reject(new Error(`Timeout loading entries for user ${userId}`)), 10000)
     );
     
-    const readPromise = supabaseAdmin.from('entries').select('*').eq('userId', userId);
+    // Buscar por target_user_id (la persona sobre quien es la entrada)
+    const readPromise = supabaseAdmin.from('entries').select('*').eq('target_user_id', userId);
     const { data, error } = await Promise.race([readPromise, timeoutPromise]);
     
     if (error) {
@@ -959,52 +935,77 @@ async function saveSupabaseDb(data, prevCache = null) {
     console.log(`✅ [deleteMissing] Completada eliminación de ${toDelete.length} registros de ${table}`);
   };
 
-  // Users: extraer campos específicos para columnas de Supabase
+  // Users: extraer campos específicos para columnas de Supabase según el nuevo schema
   const usersRows = (data.users || []).map(u => ({
     id: u.id,
     data: u,
-    email: u.email || null,
     user_email: u.user_email || u.email || null,
-    name: u.name || null,
-    role: u.role || 'PATIENT',
-    is_psychologist: u.is_psychologist ?? false
+    is_psychologist: u.is_psychologist ?? (u.isPsychologist ?? (u.role === 'PSYCHOLOGIST' ? true : false)),
+    psychologist_profile_id: u.psychologist_profile_id || null,
+    auth_user_id: u.auth_user_id || u.supabaseId || null  // UUID de auth.users
   }));
   
-  const entriesRows = (data.entries || []).map(e => ({ id: e.id, data: e }));
-  const goalsRows = (data.goals || []).map(g => ({ id: g.id, data: g }));
+  // Entries: extraer campos para foreign keys creator_user_id y target_user_id
+  const entriesRows = (data.entries || []).map(e => ({
+    id: e.id,
+    data: e,
+    creator_user_id: e.creator_user_id || e.userId || null,
+    target_user_id: e.target_user_id || e.targetUserId || e.userId || null
+  }));
+  // Goals: extraer campo patient_user_id
+  const goalsRows = (data.goals || []).map(g => ({
+    id: g.id,
+    data: g,
+    patient_user_id: g.patient_user_id || null
+  }));
   
-  // Invitations: extraer campos específicos para columnas de Supabase
+  // Invitations: extraer campos según el nuevo schema (psychologist_user_id, patient_user_id)
   const invitationsRows = (data.invitations || []).map(i => ({
     id: i.id,
     data: i,
-    psych_user_id: i.psych_user_id || i.psychologistId || null,
-    psych_user_email: i.psych_user_email || i.psychologistEmail || null,
-    psych_user_name: i.psych_user_name || i.psychologistName || null,
-    patient_user_id: i.patient_user_id || i.patientId || null,
-    patient_user_email: i.patient_user_email || i.patientEmail || null,
-    patient_user_name: i.patient_user_name || i.patientName || null,
-    patient_first_name: i.patient_first_name || i.patientFirstName || null,
-    patient_last_name: i.patient_last_name || i.patientLastName || null,
-    status: i.status || 'PENDING'
+    psychologist_user_id: i.psychologist_user_id || null,
+    patient_user_id: i.patient_user_id || null
   }));
   
+  // Settings: extraer campo user_id
   const settings = data.settings || {};
-  const settingsRows = Object.keys(settings).map(k => ({ id: k, data: settings[k] }));
-  const sessionsRows = (data.sessions || []).map(s => ({ id: s.id, data: s }));
-  const invoicesRows = (data.invoices || []).map(inv => ({ id: inv.id, data: inv }));
+  const settingsRows = Object.keys(settings).map(k => ({
+    id: k,
+    data: settings[k],
+    user_id: settings[k]?.user_id || settings[k]?.userId || null
+  }));
   
-  // Care relationships: extraer campos específicos para columnas de Supabase
+  // Sessions: extraer campos psychologist_user_id y patiente_user_id
+  const sessionsRows = (data.sessions || []).map(s => ({
+    id: s.id,
+    data: s,
+    psychologist_user_id: s.psychologist_user_id || null,
+    patiente_user_id: s.patiente_user_id || null
+  }));
+  
+  // Invoices: extraer campos psychologist_user_id y patiente_user_id
+  const invoicesRows = (data.invoices || []).map(inv => ({
+    id: inv.id,
+    data: inv,
+    psychologist_user_id: inv.psychologist_user_id || null,
+    patiente_user_id: inv.patiente_user_id || null
+  }));
+  
+  // Care relationships: extraer campos según el nuevo schema (psychologist_user_id, patient_user_id)
   const relationshipsRows = (data.careRelationships || []).map(rel => ({
     id: rel.id,
     data: rel,
-    psych_user_id: rel.psych_user_id || rel.psychologistId || null,
-    patient_user_id: rel.patient_user_id || rel.patientId || null,
-    created_at: rel.createdAt ? new Date(rel.createdAt).toISOString() : new Date().toISOString(),
-    ended_at: rel.endedAt ? new Date(rel.endedAt).toISOString() : null
+    psychologist_user_id: rel.psychologist_user_id || null,
+    patient_user_id: rel.patient_user_id || null
   }));
   
+  // Psychologist profiles: extraer campo user_id
   const profiles = data.psychologistProfiles || {};
-  const profilesRows = Object.keys(profiles).map(k => ({ id: k, data: profiles[k] }));
+  const profilesRows = Object.keys(profiles).map(k => ({
+    id: k,
+    data: profiles[k],
+    user_id: profiles[k]?.user_id || profiles[k]?.userId || null
+  }));
 
   await upsertTable('users', usersRows);
   await upsertTable('entries', entriesRows);
@@ -1242,16 +1243,17 @@ app.post('/api/auth/register', (req, res) => {
     }
 
     const normalizedRole = String(role || 'PATIENT').toUpperCase() === 'PSYCHOLOGIST' ? 'PSYCHOLOGIST' : 'PATIENT';
+    const isPsych = normalizedRole === 'PSYCHOLOGIST';
 
     const newUser = {
       id: crypto.randomUUID(), // requiere Node 16.14+ / 18+
       name,
       email: normalizedEmail,
-      user_email: normalizedEmail,
+      user_email: normalizedEmail,  // Columna de tabla según el schema
       password, // OJO: en producción deberías hashearla
       role: normalizedRole,
-      isPsychologist: normalizedRole === 'PSYCHOLOGIST',
-      is_psychologist: false
+      isPsychologist: isPsych,
+      is_psychologist: isPsych  // Columna de tabla según el schema
     };
 
     db.users.push(newUser);
@@ -1288,9 +1290,17 @@ app.post('/api/auth/register', (req, res) => {
 const handleSupabaseAuth = async (req, res) => {
   try {
     const { access_token } = req.body || {};
-    if (!access_token) return res.status(400).json({ error: 'access_token is required' });
-    if (!process.env.SUPABASE_URL) return res.status(500).json({ error: 'SUPABASE_URL not configured' });
+    if (!access_token) {
+      console.error('❌ Supabase auth: missing access_token');
+      return res.status(400).json({ error: 'Se requiere un token de acceso' });
+    }
+    if (!process.env.SUPABASE_URL) {
+      console.error('❌ Supabase auth: SUPABASE_URL not configured in server');
+      return res.status(500).json({ error: 'Supabase no está configurado en el servidor' });
+    }
 
+    console.log('🔐 Validando token de Supabase...');
+    
     // Validate token against Supabase /auth/v1/user
     const userInfoRes = await fetch(`${process.env.SUPABASE_URL.replace(/\/$/, '')}/auth/v1/user`, {
       headers: {
@@ -1300,71 +1310,235 @@ const handleSupabaseAuth = async (req, res) => {
     });
 
     if (!userInfoRes.ok) {
-      console.warn('Invalid Supabase token response:', await userInfoRes.text());
-      return res.status(400).json({ error: 'Invalid supabase token' });
+      const errorText = await userInfoRes.text();
+      console.error('❌ Token inválido o expirado:', errorText);
+      return res.status(400).json({ 
+        error: 'Token de autenticación inválido o expirado',
+        details: 'Por favor, intenta iniciar sesión nuevamente'
+      });
     }
 
     const supUser = await userInfoRes.json();
+    console.log('✅ Token validado para usuario:', supUser.email);
+    console.log('📊 Supabase user ID (auth_user_id):', supUser.id);
     // supUser contains `email`, `id` (supabase user id), etc.
 
-    const db = getDb();
-    let user = db.users.find(u => u.supabaseId && String(u.supabaseId) === String(supUser.id));
-    if (!user) {
-      user = db.users.find(u => u.email && normalizeEmail(u.email) === normalizeEmail(supUser.email));
-    }
-
-    if (!user) {
-      user = {
-        id: crypto.randomUUID(),
-        name: supUser.user_metadata?.full_name || supUser.email || 'Sin nombre',
-        email: normalizeEmail(supUser.email),
-        user_email: normalizeEmail(supUser.email),
-        password: '',
-        role: 'PATIENT',
-        isPsychologist: false,
-        is_psychologist: false,
-        supabaseId: supUser.id
-      };
-      db.users.push(user);
-      if (!db.settings) db.settings = {};
-      if (!db.settings[user.id]) db.settings[user.id] = {};
+    let user = null;
+    
+    // Buscar usuario en Supabase primero si está disponible
+    if (supabaseAdmin) {
+      console.log('🔍 Buscando usuario en Supabase...');
+      const users = await readSupabaseTable('users');
+      console.log('📊 Total usuarios en Supabase:', users?.length || 0);
       
-      // ✨ Procesar invitaciones pendientes para este email (Supabase OAuth)
-      const normalizedEmail = normalizeEmail(supUser.email);
-      const pendingInvitations = db.invitations.filter(
-        inv => inv.toUserEmail === normalizedEmail && inv.status === 'PENDING'
-      );
-
-      if (pendingInvitations.length > 0) {
-        console.log(`📧 [Supabase Auth] Encontradas ${pendingInvitations.length} invitaciones pendientes para ${normalizedEmail}`);
-        pendingInvitations.forEach(inv => {
-          console.log(`   - Invitación de ${inv.fromPsychologistName} (${inv.fromPsychologistId})`);
-        });
-        console.log('✅ El usuario podrá ver y gestionar estas invitaciones en el panel de Conexiones');
+      // Buscar por auth_user_id (UUID) que es la columna correcta según el schema
+      user = (users || []).find(u => u.auth_user_id && String(u.auth_user_id) === String(supUser.id));
+      if (!user) {
+        console.log('⚠️ No encontrado por auth_user_id, buscando por email...');
+        user = (users || []).find(u => u.user_email && normalizeEmail(u.user_email) === normalizeEmail(supUser.email));
       }
       
-      saveDb(db);
-      console.log('✅ Created new user from Supabase sign-in:', user.email);
+      if (user) {
+        console.log('✅ Usuario encontrado en Supabase:', user.id);
+      } else {
+        console.log('⚠️ Usuario no encontrado en Supabase');
+      }
     } else {
-      // Ensure supabaseId is set
-      if (!user.supabaseId) {
-        user.supabaseId = supUser.id;
+      console.log('⚠️ supabaseAdmin no está inicializado, buscando en db.json...');
+    }
+    
+    // Fallback a db.json si no se encuentra en Supabase
+    if (!user) {
+      const db = getDb();
+      user = db.users.find(u => u.auth_user_id && String(u.auth_user_id) === String(supUser.id));
+      if (!user) {
+        user = db.users.find(u => u.email && normalizeEmail(u.email) === normalizeEmail(supUser.email));
       }
-      if (user.role) {
-        user.isPsychologist = String(user.role).toUpperCase() === 'PSYCHOLOGIST';
-      }
-      if (!db.settings) db.settings = {};
-      if (!db.settings[user.id]) db.settings[user.id] = {};
-      saveDb(db);
     }
 
-    return res.json(user);
+    if (!user) {
+      console.log('🆕 Creando nuevo usuario desde OAuth...');
+      console.log('📊 supabaseAdmin disponible:', !!supabaseAdmin);
+      
+      const normalizedEmail = normalizeEmail(supUser.email);
+      
+      // ⚠️ VALIDACIÓN CRÍTICA: Verificar una última vez que NO existe el usuario
+      // para evitar duplicados en caso de condiciones de carrera
+      let existingUser = null;
+      
+      if (supabaseAdmin) {
+        console.log('🔍 Verificación final: buscando usuario existente por email...');
+        const allUsers = await readSupabaseTable('users');
+        existingUser = (allUsers || []).find(u => 
+          (u.user_email && normalizeEmail(u.user_email) === normalizedEmail) ||
+          (u.email && normalizeEmail(u.email) === normalizedEmail) ||
+          (u.data?.email && normalizeEmail(u.data.email) === normalizedEmail)
+        );
+        
+        if (existingUser) {
+          console.log('⚠️ Usuario ya existe en Supabase (detectado en verificación final):', existingUser.id);
+          user = existingUser;
+          
+          // Asegurar que tenga auth_user_id
+          if (!existingUser.auth_user_id) {
+            console.log('📝 Actualizando auth_user_id del usuario existente...');
+            const { error } = await supabaseAdmin
+              .from('users')
+              .update({ auth_user_id: supUser.id })
+              .eq('id', existingUser.id);
+            if (!error) {
+              console.log('✅ auth_user_id actualizado');
+              if (user.data) user.data.auth_user_id = supUser.id;
+              user.auth_user_id = supUser.id;
+            }
+          }
+        }
+      } else {
+        // Verificar en db.json
+        const db = getDb();
+        existingUser = db.users.find(u => 
+          (u.email && normalizeEmail(u.email) === normalizedEmail) ||
+          (u.user_email && normalizeEmail(u.user_email) === normalizedEmail)
+        );
+        
+        if (existingUser) {
+          console.log('⚠️ Usuario ya existe en db.json (detectado en verificación final):', existingUser.id);
+          user = existingUser;
+          
+          // Actualizar auth_user_id si no lo tiene
+          if (!existingUser.auth_user_id) {
+            existingUser.auth_user_id = supUser.id;
+            await saveDb(db, { awaitPersistence: true });
+          }
+        }
+      }
+      
+      // Solo crear si realmente no existe después de todas las verificaciones
+      if (!existingUser) {
+        console.log('✅ Email único confirmado, creando usuario...');
+        
+        const newUser = {
+          id: crypto.randomUUID(),
+          name: supUser.user_metadata?.full_name || supUser.email || 'Sin nombre',
+          email: normalizedEmail,
+          user_email: normalizedEmail,
+          password: '',
+          role: 'PATIENT',
+          isPsychologist: false,
+          is_psychologist: false,
+          auth_user_id: supUser.id  // UUID de auth.users
+        };
+        
+        // Guardar en Supabase si está disponible
+        if (supabaseAdmin) {
+          console.log('💾 Guardando usuario en Supabase...');
+          
+          // Preparar data sin campos que van en columnas
+          const { is_psychologist, isPsychologist, role, user_email, auth_user_id, psychologist_profile_id, ...cleanData } = newUser;
+          
+          // Crear la fila con las columnas correctas según el schema
+          const userRow = {
+            id: newUser.id,
+            data: cleanData,  // Solo campos que no son columnas de tabla
+            user_email: newUser.user_email,
+            is_psychologist: newUser.is_psychologist,
+            psychologist_profile_id: null,
+            auth_user_id: supUser.id  // UUID
+          };
+          const { data: insertedData, error } = await supabaseAdmin.from('users').insert([userRow]).select();
+          if (error) {
+            console.error('❌ Error creating user in Supabase:', error);
+            
+            // Si el error es por duplicado, intentar buscar el usuario existente
+            if (error.code === '23505' || error.message?.includes('duplicate') || error.message?.includes('unique')) {
+              console.log('⚠️ Error de duplicado, buscando usuario existente...');
+              const users = await readSupabaseTable('users');
+              const duplicate = users.find(u => normalizeEmail(u.user_email || u.email) === normalizedEmail);
+              if (duplicate) {
+                console.log('✅ Usuario duplicado encontrado, usando existente:', duplicate.id);
+                user = duplicate;
+                return;
+              }
+            }
+            
+            throw error;
+          }
+          console.log('✅ Created new user in Supabase from OAuth:', newUser.email);
+          console.log('📊 Inserted data:', insertedData);
+        } else {
+          console.log('⚠️ supabaseAdmin no disponible, guardando en db.json...');
+          // Fallback a db.json
+          const db = getDb();
+          db.users.push(newUser);
+          if (!db.settings) db.settings = {};
+          if (!db.settings[newUser.id]) db.settings[newUser.id] = {};
+          // Esperar a que se persista antes de continuar
+          await saveDb(db, { awaitPersistence: true });
+          console.log('✅ Created new user from Supabase sign-in:', newUser.email);
+        }
+        
+        user = newUser;
+      }
+    } else {
+      // Usuario encontrado - asegurar que auth_user_id esté actualizado
+      if (!user.auth_user_id && supabaseAdmin && user.id) {
+        const { error } = await supabaseAdmin
+          .from('users')
+          .update({ auth_user_id: supUser.id })
+          .eq('id', user.id);
+        if (error) {
+          console.error('❌ Error updating auth_user_id:', error);
+        } else {
+          console.log('✅ Updated user auth_user_id in Supabase:', user.id);
+          user.auth_user_id = supUser.id;
+          if (user.data) user.data.auth_user_id = supUser.id;
+        }
+      } else if (!user.auth_user_id && !supabaseAdmin) {
+        // Actualizar en db.json
+        const db = getDb();
+        const dbUser = db.users.find(u => u.id === user.id);
+        if (dbUser) {
+          dbUser.auth_user_id = supUser.id;
+          saveDb(db);
+        }
+      }
+    }
+
+    // Normalizar el formato del usuario para la respuesta
+    // IMPORTANTE: is_psychologist de las columnas de Supabase tiene prioridad sobre data.is_psychologist
+    const userResponse = user.data ? { 
+      ...user.data, 
+      id: user.id, 
+      user_email: user.user_email,
+      // Usar el valor de la columna is_psychologist de Supabase, no el de data
+      is_psychologist: user.is_psychologist !== undefined ? user.is_psychologist : user.data.is_psychologist,
+      isPsychologist: user.is_psychologist !== undefined ? user.is_psychologist : user.data.isPsychologist
+    } : user;
+    
+    console.log('✅ Autenticación Supabase exitosa para:', userResponse.email || userResponse.id, {
+      is_psychologist: userResponse.is_psychologist,
+      isPsychologist: userResponse.isPsychologist
+    });
+    return res.json(userResponse);
   } catch (err) {
-    console.error('❌ Error in supabase auth handler:', err);
+    console.error('❌ Error crítico en autenticación Supabase:', err);
+    
+    // Proporcionar mensajes de error más descriptivos
+    let errorMessage = 'Error durante la autenticación';
+    let errorDetails = err.message || 'Error desconocido';
+    
+    if (err.message && err.message.includes('fetch')) {
+      errorMessage = 'Error de conexión con Supabase';
+      errorDetails = 'No se pudo conectar con el servicio de autenticación';
+    } else if (err.code) {
+      errorDetails = `Código de error: ${err.code} - ${err.message}`;
+    }
+    
     return res.status(500).json({ 
-      error: 'Supabase auth failed',
-      details: err.message || 'Unknown error',
-      configured: !!process.env.SUPABASE_URL
+      error: errorMessage,
+      details: errorDetails,
+      supabase_configured: !!process.env.SUPABASE_URL,
+      timestamp: new Date().toISOString()
     });
   }
 };
@@ -1385,20 +1559,63 @@ app.post('/api/auth/login', async (req, res) => {
 
     const normalizedEmail = String(email).trim().toLowerCase();
     let user = null;
+    const db = getDb();
+    
     if (supabaseAdmin) {
       const users = await readSupabaseTable('users');
-      user = (users || []).find((u) => String(u.email || '').trim().toLowerCase() === normalizedEmail && u.password === password);
+      // Buscar por user_email (columna de tabla) o email en data
+      user = (users || []).find((u) => {
+        const emailMatch = normalizeEmail(u.user_email || u.data?.email || u.email || '') === normalizedEmail;
+        const passwordMatch = (u.data?.password || u.password) === password;
+        return emailMatch && passwordMatch;
+      });
     } else {
-      const db = getDb();
       user = db.users.find((u) => String(u.email || '').trim().toLowerCase() === normalizedEmail && u.password === password);
     }
 
     if (!user) {
-      return res.status(401).json({ error: 'Credenciales inválidas' });
+      // Crear nuevo usuario automáticamente si no existe
+      console.log('👤 Usuario no encontrado, creando nuevo usuario para:', normalizedEmail);
+      
+      const newUser = {
+        id: crypto.randomUUID(),
+        name: normalizedEmail.split('@')[0], // Usar parte del email como nombre
+        email: normalizedEmail,
+        user_email: normalizedEmail,  // Columna de tabla
+        password,
+        role: 'PATIENT',
+        isPsychologist: false,
+        is_psychologist: false  // Columna de tabla
+      };
+
+      db.users.push(newUser);
+      await saveDb(db, { awaitPersistence: true });
+      
+      console.log('✅ Nuevo usuario creado:', newUser.id);
+      return res.json(newUser);
     }
 
-    console.log('✅ Login exitoso:', user.name);
-    res.json(user);
+    console.log('✅ Login exitoso:', user.name || user.data?.name);
+    
+    // Normalizar la respuesta del usuario
+    // IMPORTANTE: is_psychologist de las columnas de Supabase tiene prioridad sobre data
+    const userResponse = user.data ? { 
+      ...user.data, 
+      id: user.id,
+      user_email: user.user_email,
+      // Usar el valor de la columna is_psychologist de Supabase, no el de data
+      is_psychologist: user.is_psychologist !== undefined ? user.is_psychologist : user.data.is_psychologist,
+      isPsychologist: user.is_psychologist !== undefined ? user.is_psychologist : user.data.isPsychologist,
+      auth_user_id: user.auth_user_id
+    } : user;
+    
+    console.log('📊 Login response:', {
+      email: userResponse.email,
+      is_psychologist: userResponse.is_psychologist,
+      isPsychologist: userResponse.isPsychologist
+    });
+    
+    res.json(userResponse);
   } catch (error) {
     console.error('❌ Error en /api/auth/login:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
@@ -1501,8 +1718,8 @@ const handleAdminDeleteUser = (req, res) => {
     // 3) Remove invitations sent by or for this user
     db.invitations = db.invitations.filter((i) => {
       if (!i) return false;
-      const fromMatch = i.fromPsychologistId && String(i.fromPsychologistId) === String(user.id);
-      const toMatch = i.toUserEmail && String(i.toUserEmail).toLowerCase() === String(user.email).toLowerCase();
+      const fromMatch = i.psychologist_user_id && String(i.psychologist_user_id) === String(user.id);
+      const toMatch = i.patient_user_id && String(i.patient_user_id) === String(user.id);
       return !(fromMatch || toMatch);
     });
 
@@ -1804,7 +2021,10 @@ app.get('/api/users', async (req, res) => {
     if (supabaseAdmin) {
       if (id) {
         const user = await readSupabaseRowById('users', String(id));
-        if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+        if (!user) {
+          console.log(`⚠️ Usuario con ID ${id} no encontrado en Supabase`);
+          return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
 
         if (user.premiumUntil && Number(user.premiumUntil) < Date.now()) {
           user.isPremium = false;
@@ -1827,10 +2047,9 @@ app.get('/api/users', async (req, res) => {
         if (u.premiumUntil && Number(u.premiumUntil) < Date.now()) {
           return { ...u, isPremium: false, premiumUntil: undefined };
         }
-        if (u.role) {
-          return { ...u, isPsychologist: String(u.role).toUpperCase() === 'PSYCHOLOGIST' };
-        }
-        return u;
+        // Respetar is_psychologist de la BD, solo usar role como fallback
+        const isPsych = u.is_psychologist !== undefined ? u.is_psychologist : (String(u.role).toUpperCase() === 'PSYCHOLOGIST');
+        return { ...u, isPsychologist: isPsych, is_psychologist: isPsych };
       });
       const unique = [];
       const seen = new Set();
@@ -1847,8 +2066,83 @@ app.get('/api/users', async (req, res) => {
     const db = getDb();
 
     if (id) {
-      const user = db.users.find((u) => u.id === id);
-      if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+      let user = db.users.find((u) => u.id === id);
+      
+      if (!user) {
+        console.log(`⚠️ Usuario con ID ${id} no encontrado, verificando si fue eliminado...`);
+        // Si el usuario no existe, buscar si hay datos asociados (entradas, goals, etc)
+        const userEntries = db.entries?.filter(e => e.userId === id) || [];
+        const userGoals = db.goals?.filter(g => g.userId === id) || [];
+        
+        // Si hay datos del usuario antiguo, crear un nuevo usuario y migrar los datos
+        if (userEntries.length > 0 || userGoals.length > 0) {
+          console.log(`📦 Encontrados datos del usuario eliminado: ${userEntries.length} entradas, ${userGoals.length} objetivos`);
+          console.log(`✨ Creando nuevo usuario y migrando datos...`);
+          
+          // Crear nuevo usuario
+          const newUser = {
+            id: crypto.randomUUID(),
+            name: 'Usuario Recuperado',
+            email: `recuperado_${Date.now()}@dygo.app`,
+            user_email: `recuperado_${Date.now()}@dygo.app`,
+            password: crypto.randomUUID().substring(0, 12),
+            role: 'PATIENT',
+            isPsychologist: false,
+            is_psychologist: false
+          };
+          
+          db.users.push(newUser);
+          
+          // Migrar entradas
+          userEntries.forEach(entry => {
+            entry.userId = newUser.id;
+          });
+          
+          // Migrar objetivos
+          userGoals.forEach(goal => {
+            goal.userId = newUser.id;
+          });
+          
+          // Migrar settings si existen
+          if (db.settings && db.settings[id]) {
+            db.settings[newUser.id] = db.settings[id];
+            delete db.settings[id];
+          }
+          
+          // Migrar relaciones de cuidado
+          if (db.careRelationships) {
+            db.careRelationships.forEach(rel => {
+              if (rel.patient_user_id === id) {
+                rel.patient_user_id = newUser.id;
+              }
+              if (rel.psychologist_user_id === id) {
+                rel.psychologist_user_id = newUser.id;
+              }
+            });
+          }
+          
+          // Migrar invitaciones
+          if (db.invitations) {
+            db.invitations.forEach(inv => {
+              if (inv.patient_user_id === id) {
+                inv.patient_user_id = newUser.id;
+              }
+              if (inv.psychologist_user_id === id) {
+                inv.psychologist_user_id = newUser.id;
+              }
+            });
+          }
+          
+          await saveDb(db, { awaitPersistence: true });
+          
+          console.log(`✅ Datos migrados exitosamente al nuevo usuario ${newUser.id}`);
+          console.log(`⚠️ IMPORTANTE: El usuario debe actualizar su email y contraseña en configuración`);
+          
+          return res.json(newUser);
+        }
+        
+        return res.status(404).json({ error: 'Usuario no encontrado' });
+      }
 
       if (user.premiumUntil && Number(user.premiumUntil) < Date.now()) {
         user.isPremium = false;
@@ -1931,13 +2225,100 @@ app.put('/api/users', async (req, res) => {
 
     const updated = { ...db.users[idx], ...req.body };
     if (updated.email) updated.email = normalizeEmail(updated.email);
-    if (updated.role) {
-      updated.isPsychologist = String(updated.role).toUpperCase() === 'PSYCHOLOGIST';
-      updated.is_psychologist = String(updated.role).toUpperCase() === 'PSYCHOLOGIST';
+    
+    // Si el usuario se está convirtiendo en psicólogo (basado en is_psychologist)
+    const isBecomingPsychologist = updated.is_psychologist === true || updated.isPsychologist === true;
+    
+    // Sincronizar ambos campos
+    updated.isPsychologist = isBecomingPsychologist;
+    updated.is_psychologist = isBecomingPsychologist;
+    
+    // Crear psychologist_profile si se convierte en psicólogo y no tiene uno ya
+    if (isBecomingPsychologist && !updated.psychologist_profile_id) {
+      const profileId = crypto.randomUUID();
+      
+      // Crear perfil en Supabase si está disponible
+      if (supabaseAdmin) {
+        const newProfile = {
+          id: profileId,
+          user_id: id,
+          license: '',
+          specialties: [],
+          bio: '',
+          hourly_rate: 0,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+        
+        // Separar user_id como columna de tabla
+        const { user_id, ...profileData } = newProfile;
+        
+        const { error: profileError } = await supabaseAdmin
+          .from('psychologist_profiles')
+          .insert([{ 
+            id: profileId,
+            user_id: user_id,  // Columna de tabla
+            data: profileData 
+          }]);
+        
+        if (profileError) {
+          console.error('❌ Error creando perfil de psicólogo en Supabase:', profileError);
+          throw new Error(`Error creando perfil: ${profileError.message}`);
+        }
+        
+        console.log(`✓ Nuevo perfil de psicólogo creado en Supabase: ${profileId}`);
+      }
+      
+      // También guardar en db.json local
+      if (!db.psychologistProfiles) db.psychologistProfiles = {};
+      db.psychologistProfiles[profileId] = {
+        id: profileId,
+        user_id: id,
+        license: '',
+        specialties: [],
+        bio: '',
+        hourly_rate: 0,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      
+      updated.psychologist_profile_id = profileId;
     }
+    
     if (updated.email && !updated.user_email) updated.user_email = updated.email;
+    
+    // Actualizar en db.json
     db.users[idx] = updated;
     await saveDb(db, { awaitPersistence: true });
+    
+    // Actualizar en Supabase si está disponible
+    if (supabaseAdmin) {
+      try {
+        // Preparar datos para Supabase: separar columnas de data
+        const { is_psychologist, isPsychologist, role, user_email, psychologist_profile_id, auth_user_id, ...dataFields } = updated;
+        
+        const { error: updateError } = await supabaseAdmin
+          .from('users')
+          .update({
+            user_email: user_email || updated.email,
+            is_psychologist: is_psychologist || false,
+            psychologist_profile_id: psychologist_profile_id || null,
+            data: dataFields
+          })
+          .eq('id', id);
+        
+        if (updateError) {
+          console.error('❌ Error actualizando usuario en Supabase:', updateError);
+          // No fallar la request, ya se guardó en db.json
+          console.warn('⚠️ Usuario actualizado en db.json pero no en Supabase');
+        } else {
+          console.log('✅ Usuario actualizado en Supabase:', id);
+        }
+      } catch (supabaseErr) {
+        console.error('❌ Error actualizando en Supabase:', supabaseErr);
+      }
+    }
+    
     return res.json(db.users[idx]);
   } catch (err) {
     console.error('Error in PUT /api/users', err);
@@ -2188,8 +2569,8 @@ app.get('/api/entries', async (req, res) => {
             ? supabaseDbCache.careRelationships
             : (getDb().careRelationships || []);
           const relationship = relationshipsSource.find(rel => 
-            (rel.psychologistId === String(viewerId) && rel.patientId === String(userId)) ||
-            (rel.psychologistId === String(userId) && rel.patientId === String(viewerId))
+            (rel.psychologist_user_id === String(viewerId) && rel.patient_user_id === String(userId)) ||
+            (rel.psychologist_user_id === String(userId) && rel.patient_user_id === String(viewerId))
           );
           
           // Si la relación está finalizada, solo mostrar entradas creadas por el psicólogo (viewer)
@@ -2256,8 +2637,8 @@ app.get('/api/entries', async (req, res) => {
     // Si viewerId está presente, verificar si la relación está finalizada
     if (userId && viewerId && String(viewerId) !== String(userId)) {
       const relationship = (db.careRelationships || []).find(rel => 
-        (rel.psychologistId === String(viewerId) && rel.patientId === String(userId)) ||
-        (rel.psychologistId === String(userId) && rel.patientId === String(viewerId))
+        (rel.psychologist_user_id === String(viewerId) && rel.patient_user_id === String(userId)) ||
+        (rel.psychologist_user_id === String(userId) && rel.patient_user_id === String(viewerId))
       );
       
       // Si la relación está finalizada, solo mostrar entradas creadas por el viewer
@@ -2296,17 +2677,16 @@ app.post('/api/entries', (req, res) => {
     const targetUserId = entry?.userId;
     if (authorPsychId && targetUserId && String(authorPsychId) !== String(targetUserId)) {
       const findRelationship = () => {
-        // Priorizar cache de Supabase si está disponible
         if (supabaseDbCache?.careRelationships) {
-          return supabaseDbCache.careRelationships.find(rel => (
-            rel.psychologistId === String(authorPsychId) && rel.patientId === String(targetUserId)
-          ));
+          return supabaseDbCache.careRelationships.find(rel => 
+            rel.psychologist_user_id === String(authorPsychId) && rel.patient_user_id === String(targetUserId)
+          );
         }
         const db = getDb();
         if (!Array.isArray(db.careRelationships)) return null;
-        return db.careRelationships.find(rel => (
-          rel.psychologistId === String(authorPsychId) && rel.patientId === String(targetUserId)
-        ));
+        return db.careRelationships.find(rel => 
+          rel.psychologist_user_id === String(authorPsychId) && rel.patient_user_id === String(targetUserId)
+        );
       };
 
       const relationship = findRelationship();
@@ -2335,21 +2715,18 @@ app.post('/api/entries', (req, res) => {
         console.log('[POST /api/entries] 💾 Guardando entrada en Supabase:', {
           id: entry.id,
           userId: entry.userId,
+          creator_user_id: entry.creator_user_id,
+          target_user_id: entry.target_user_id,
           hasTranscript: !!entry.transcript,
           transcriptLength: entry.transcript?.length || 0,
           summary: entry.summary?.substring(0, 50) + '...',
           entryType: entry.psychologistEntryType || entry.createdBy
         });
         
-        let sampleRow = null;
-        const { data: sample, error: sampleErr } = await supabaseAdmin.from('entries').select('*').limit(1);
-        if (!sampleErr && Array.isArray(sample) && sample.length > 0) sampleRow = sample[0];
-
-        const payloads = sampleRow
-          ? [buildSupabaseRowFromEntity(sampleRow, entry), { ...entry, id: entry.id }]
-          : [{ id: entry.id, data: entry }, { ...entry, id: entry.id }];
-
-        await trySupabaseUpsert('entries', payloads);
+        const payload = buildSupabaseEntryRow(entry);
+        console.log('[POST /api/entries] 📝 Payload a enviar:', JSON.stringify(payload, null, 2).substring(0, 500));
+        
+        await trySupabaseUpsert('entries', [payload]);
 
         if (supabaseDbCache?.entries) {
           const idx = supabaseDbCache.entries.findIndex(e => e.id === entry.id);
@@ -2384,11 +2761,9 @@ app.put('/api/entries/:id', (req, res) => {
         const existingRow = (existingRows && existingRows[0]) ? existingRows[0] : null;
         const existing = existingRow ? normalizeSupabaseRow(existingRow) : null;
         const updated = { ...(existing || {}), ...req.body, id };
-        const payloads = existingRow
-          ? [buildSupabaseRowFromEntity(existingRow, updated), { ...updated, id }]
-          : [{ id, data: updated }, { ...updated, id }];
+        const payload = buildSupabaseEntryRow(updated);
 
-        await trySupabaseUpsert('entries', payloads);
+        await trySupabaseUpsert('entries', [payload]);
 
         if (supabaseDbCache?.entries) {
           const idx = supabaseDbCache.entries.findIndex(e => e.id === id);
@@ -2430,11 +2805,9 @@ app.put('/api/entries', (req, res) => {
         const existingRow = (existingRows && existingRows[0]) ? existingRows[0] : null;
         const existing = existingRow ? normalizeSupabaseRow(existingRow) : null;
         const updated = { ...(existing || {}), ...req.body, id };
-        const payloads = existingRow
-          ? [buildSupabaseRowFromEntity(existingRow, updated), { ...updated, id }]
-          : [{ id, data: updated }, { ...updated, id }];
+        const payload = buildSupabaseEntryRow(updated);
 
-        await trySupabaseUpsert('entries', payloads);
+        await trySupabaseUpsert('entries', [payload]);
 
         if (supabaseDbCache?.entries) {
           const idx = supabaseDbCache.entries.findIndex(e => e.id === id);
@@ -2527,10 +2900,44 @@ app.delete('/api/entries', (req, res) => {
 });
 
 // --- RUTAS DE METAS (GOALS) ---
-app.get('/api/goals', (req, res) => {
+app.get('/api/goals', async (req, res) => {
   const { userId } = req.query;
-  const db = getDb();
 
+  // Leer desde Supabase si está disponible
+  if (supabaseAdmin) {
+    try {
+      console.log('[GET /api/goals] 📖 Obteniendo goals desde Supabase:', { userId });
+      
+      let query = supabaseAdmin.from('goals').select('*');
+      
+      if (userId) {
+        query = query.eq('patient_user_id', userId);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        console.error('[GET /api/goals] ❌ Error obteniendo goals:', error);
+        throw error;
+      }
+
+      // Normalizar los datos: extraer el campo data de cada row
+      const goals = (data || []).map(row => ({
+        ...row.data,
+        id: row.id,
+        userId: row.patient_user_id
+      }));
+
+      console.log('[GET /api/goals] ✅ Goals obtenidos exitosamente:', goals.length);
+      return res.json(goals);
+    } catch (err) {
+      console.error('[GET /api/goals] ❌ Error:', err);
+      return res.status(500).json({ error: 'Error obteniendo goals desde Supabase' });
+    }
+  }
+
+  // Fallback a db.json si Supabase no está disponible
+  const db = getDb();
   const safeGoals = Array.isArray(db.goals) ? db.goals : [];
 
   const goals = userId
@@ -2542,12 +2949,64 @@ app.get('/api/goals', (req, res) => {
 
 
 // Sincronizar metas completas de un usuario
-const handleGoalsSync = (req, res) => {
+const handleGoalsSync = async (req, res) => {
   const { userId, goals } = req.body || {};
   if (!userId || !Array.isArray(goals)) {
     return res.status(400).json({ error: 'userId y goals son obligatorios' });
   }
 
+  // Guardar en Supabase si está disponible
+  if (supabaseAdmin) {
+    try {
+      console.log('[handleGoalsSync] 💾 Sincronizando goals en Supabase:', {
+        userId,
+        goalsCount: goals.length
+      });
+
+      // 1. Eliminar todos los goals existentes del usuario
+      const { error: deleteError } = await supabaseAdmin
+        .from('goals')
+        .delete()
+        .eq('patient_user_id', userId);
+
+      if (deleteError) {
+        console.error('[handleGoalsSync] ❌ Error eliminando goals existentes:', deleteError);
+        throw deleteError;
+      }
+
+      // 2. Insertar los nuevos goals si hay alguno
+      if (goals.length > 0) {
+        const goalsToInsert = goals.map(goal => ({
+          id: goal.id,
+          patient_user_id: userId,
+          data: goal
+        }));
+
+        const { error: insertError } = await supabaseAdmin
+          .from('goals')
+          .insert(goalsToInsert);
+
+        if (insertError) {
+          console.error('[handleGoalsSync] ❌ Error insertando nuevos goals:', insertError);
+          throw insertError;
+        }
+      }
+
+      // Actualizar caché si existe
+      if (supabaseDbCache?.goals) {
+        supabaseDbCache.goals = supabaseDbCache.goals.filter(g => g.userId !== userId);
+        supabaseDbCache.goals.push(...goals);
+      }
+
+      console.log('[handleGoalsSync] ✅ Goals sincronizados exitosamente en Supabase');
+      return res.json({ success: true });
+    } catch (err) {
+      console.error('[handleGoalsSync] ❌ Error guardando goals en Supabase:', err);
+      return res.status(500).json({ error: 'Error sincronizando goals en Supabase' });
+    }
+  }
+
+  // Fallback a db.json si Supabase no está disponible
   const db = getDb();
   db.goals = db.goals.filter((g) => g.userId !== userId);
   db.goals.push(...goals);
@@ -3566,13 +4025,27 @@ app.get('/api/relationships', (req, res) => {
     const relationships = (db.careRelationships || []).filter(rel => {
       if (!rel) return false;
       
-      // Soportar tanto campos nuevos como legacy
-      const relPsychId = rel.psych_user_id || rel.psychologistId;
+      // Soportar tanto campos nuevos como legacy Y los campos de Supabase
+      const relPsychId = rel.psychologist_user_id || rel.psych_user_id || rel.psychologistId;
       const relPatId = rel.patient_user_id || rel.patientId;
+      
+      console.log('[GET /api/relationships] Evaluando relación:', {
+        id: rel.id,
+        relPsychId,
+        relPatId,
+        psychIdBuscado: psychId,
+        patIdBuscado: patId
+      });
       
       const matchesPsych = psychId ? relPsychId === psychId : true;
       const matchesPatient = patId ? relPatId === patId : true;
       const matches = matchesPsych && matchesPatient;
+      
+      console.log('[GET /api/relationships] Resultado comparación:', {
+        matchesPsych,
+        matchesPatient,
+        matches
+      });
       
       // Por defecto, solo devolver relaciones activas (sin endedAt)
       // A menos que includeEnded=true
@@ -3718,11 +4191,9 @@ app.patch('/api/relationships/end', async (req, res) => {
     const db = getDb();
     if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
     
-    const relationship = db.careRelationships.find(rel => {
-      const relPsychId = rel.psych_user_id || rel.psychologistId;
-      const relPatId = rel.patient_user_id || rel.patientId;
-      return relPsychId === psychId && relPatId === patId;
-    });
+    const relationship = db.careRelationships.find(rel => 
+      rel.psychologist_user_id === psychId && rel.patient_user_id === patId
+    );
     
     if (!relationship) {
       console.error('[PATCH /api/relationships/end] ❌ Relación no encontrada');
@@ -4027,6 +4498,10 @@ process.on('unhandledRejection', (reason, promise) => {
 console.log('🔧 Attempting to start server...');
 console.log('   VERCEL:', process.env.VERCEL);
 console.log('   VERCEL_ENV:', process.env.VERCEL_ENV);
+console.log('📊 Configuración Supabase:');
+console.log('   SUPABASE_URL:', SUPABASE_URL ? '✅ Configurado' : '❌ No configurado');
+console.log('   SUPABASE_SERVICE_ROLE_KEY:', SUPABASE_SERVICE_ROLE_KEY ? '✅ Configurado' : '❌ No configurado');
+console.log('   SUPABASE_REST_ONLY:', SUPABASE_REST_ONLY);
 
 // Initialize database connections before starting server
 (async () => {

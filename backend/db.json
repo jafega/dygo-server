@@ -4,17 +4,21 @@
       "id": "psych-001",
       "name": "Garry Javi",
       "email": "garryjavi@gmail.com",
+      "user_email": "garryjavi@gmail.com",
       "password": "123",
       "role": "PSYCHOLOGIST",
-      "isPsychologist": true
+      "isPsychologist": true,
+      "is_psychologist": true
     },
     {
       "id": "patient-001",
       "name": "Garrido Javier Fernandez",
       "email": "garridojavierfernandez@gmail.com",
+      "user_email": "garridojavierfernandez@gmail.com",
       "password": "123",
       "role": "PATIENT",
-      "isPsychologist": false
+      "isPsychologist": false,
+      "is_psychologist": false
     }
   ],
   "entries": [],
@@ -29,5 +33,6 @@
       "patient_user_id": "patient-001",
       "createdAt": 1737398400000
     }
-  ]
+  ],
+  "psychologistProfiles": {}
 }
