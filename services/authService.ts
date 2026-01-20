@@ -208,6 +208,16 @@ export const getCurrentUser = async (): Promise<User | null> => {
   const id = localStorage.getItem(CURRENT_USER_KEY);
   if (!id) return null;
   
+  // Verificar primero que Supabase esté conectado
+  if (USE_BACKEND) {
+    const isConnected = await checkSupabaseConnection();
+    if (!isConnected) {
+      console.error('❌ Supabase no está conectado. Limpiando sesión...');
+      localStorage.removeItem(CURRENT_USER_KEY);
+      throw new Error('SUPABASE_DISCONNECTED');
+    }
+  }
+  
   // Siempre obtener datos frescos del backend/Supabase
   const user = await getUserById(id);
   
@@ -533,5 +543,29 @@ export const uploadSessionFile = async (file: File, userId: string): Promise<str
     });
 };
 
+// Verificar conexión con Supabase
+export const checkSupabaseConnection = async (): Promise<boolean> => {
+  if (!USE_BACKEND) {
+    // Sin backend, asumimos que está "conectado" (modo local)
+    return true;
+  }
 
+  try {
+    const res = await fetch(`${API_URL}/health/supabase`, {
+      method: 'GET',
+      // Timeout de 5 segundos
+      signal: AbortSignal.timeout(5000)
+    });
 
+    if (!res.ok) {
+      console.error('❌ Supabase no está conectado:', res.status);
+      return false;
+    }
+
+    const data = await res.json();
+    return data.connected === true;
+  } catch (error) {
+    console.error('❌ Error verificando conexión a Supabase:', error);
+    return false;
+  }
+};

@@ -897,6 +897,20 @@ async function saveSupabaseDb(data, prevCache = null) {
   const upsertTable = async (table, rows) => {
     if (!rows.length) return;
     console.log(`🔄 [saveSupabaseDb] Haciendo upsert en tabla '${table}' con ${rows.length} filas`);
+    
+    // Validación extra para psychologist_profiles
+    if (table === 'psychologist_profiles') {
+      const invalidRows = rows.filter(r => !r.user_id);
+      if (invalidRows.length > 0) {
+        console.warn(`⚠️ [saveSupabaseDb] Saltando ${invalidRows.length} perfiles con user_id null:`, invalidRows.map(r => r.id));
+        rows = rows.filter(r => r.user_id); // Filtrar los que no tienen user_id
+        if (rows.length === 0) {
+          console.log(`⏭️ [saveSupabaseDb] No hay perfiles válidos para guardar`);
+          return;
+        }
+      }
+    }
+    
     const chunks = chunk(rows);
     for (const c of chunks) {
       const { error: upsertError } = await supabaseAdmin.from(table).upsert(c, { onConflict: 'id' });
@@ -1003,11 +1017,13 @@ async function saveSupabaseDb(data, prevCache = null) {
   
   // Psychologist profiles: extraer campo user_id
   const profiles = data.psychologistProfiles || {};
-  const profilesRows = Object.keys(profiles).map(k => ({
-    id: k,
-    data: profiles[k],
-    user_id: profiles[k]?.user_id || profiles[k]?.userId || null
-  }));
+  const profilesRows = Object.keys(profiles)
+    .map(k => ({
+      id: k,
+      data: profiles[k],
+      user_id: profiles[k]?.user_id || profiles[k]?.userId || null
+    }))
+    .filter(p => p.user_id !== null); // Filtrar perfiles sin user_id válido
 
   await upsertTable('users', usersRows);
   await upsertTable('entries', entriesRows);
@@ -1017,7 +1033,13 @@ async function saveSupabaseDb(data, prevCache = null) {
   await upsertTable('sessions', sessionsRows);
   await upsertTable('care_relationships', relationshipsRows);
   await upsertTable('invoices', invoicesRows);
-  await upsertTable('psychologist_profiles', profilesRows);
+  
+  // Solo hacer upsert de profiles si hay alguno válido
+  if (profilesRows.length > 0) {
+    await upsertTable('psychologist_profiles', profilesRows);
+  } else {
+    console.log('⏭️ [saveSupabaseDb] No hay psychologist_profiles válidos para guardar');
+  }
 
   if (prevCache) {
     await deleteMissing('users', (prevCache.users || []).map(u => u.id), usersRows.map(r => r.id));
@@ -3360,6 +3382,67 @@ app.get('/api/health', (_req, res) => {
   } catch (err) {
     console.error('Healthcheck error', err);
     return res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+// Health check específico para Supabase
+app.get('/api/health/supabase', async (_req, res) => {
+  try {
+    // Verificar si Supabase está configurado
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      return res.status(503).json({ 
+        connected: false, 
+        error: 'Supabase no está configurado',
+        configured: false
+      });
+    }
+
+    // Verificar si el cliente de Supabase está inicializado
+    if (!supabaseAdmin) {
+      return res.status(503).json({ 
+        connected: false, 
+        error: 'Cliente de Supabase no inicializado',
+        configured: true
+      });
+    }
+
+    // Intentar una consulta simple para verificar conectividad
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('users')
+        .select('id')
+        .limit(1);
+
+      if (error) {
+        console.error('❌ Supabase health check failed:', error);
+        return res.status(503).json({ 
+          connected: false, 
+          error: error.message,
+          code: error.code,
+          configured: true
+        });
+      }
+
+      return res.json({ 
+        connected: true, 
+        configured: true,
+        timestamp: new Date().toISOString()
+      });
+    } catch (queryError) {
+      console.error('❌ Supabase query error:', queryError);
+      return res.status(503).json({ 
+        connected: false, 
+        error: queryError.message || 'Error al consultar Supabase',
+        configured: true
+      });
+    }
+  } catch (err) {
+    console.error('❌ Supabase health check error:', err);
+    return res.status(500).json({ 
+      connected: false, 
+      error: String(err),
+      configured: !!SUPABASE_URL && !!SUPABASE_SERVICE_ROLE_KEY
+    });
   }
 });
 

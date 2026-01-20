@@ -110,24 +110,64 @@ const App: React.FC = () => {
     const init = async () => {
         setIsLoadingData(true);
         await AuthService.initializeDemoData();
-        const user = await AuthService.getCurrentUser();
-        if (user) {
-            setCurrentUser(user);
-            // If backend is available, try to migrate any local data for this user
-            if (USE_BACKEND) {
-                try { await StorageService.migrateLocalToBackend(user.id); } catch (e) { console.warn('Migration skipped', e); }
-            }
-            await refreshUserData(user.id);
-            // Solo permitir vista de psicólogo si is_psychologist es true
-            const canAccessPsychologistView = user.is_psychologist === true;
-            setViewState(canAccessPsychologistView ? ViewState.PATIENTS : ViewState.CALENDAR);
-        } else {
+        
+        try {
+          const user = await AuthService.getCurrentUser();
+          if (user) {
+              setCurrentUser(user);
+              // If backend is available, try to migrate any local data for this user
+              if (USE_BACKEND) {
+                  try { await StorageService.migrateLocalToBackend(user.id); } catch (e) { console.warn('Migration skipped', e); }
+              }
+              await refreshUserData(user.id);
+              // Solo permitir vista de psicólogo si is_psychologist es true
+              const canAccessPsychologistView = user.is_psychologist === true;
+              setViewState(canAccessPsychologistView ? ViewState.PATIENTS : ViewState.CALENDAR);
+          } else {
+              setViewState(ViewState.AUTH);
+          }
+        } catch (error) {
+          // Si hay un error de conexión con Supabase, redirigir al login
+          if (error instanceof Error && error.message === 'SUPABASE_DISCONNECTED') {
+            console.error('❌ Supabase no está conectado. Redirigiendo a login...');
+            setError('La base de datos no está disponible. Por favor, inicia sesión de nuevo.');
             setViewState(ViewState.AUTH);
+          } else {
+            console.error('Error inicializando usuario:', error);
+            setViewState(ViewState.AUTH);
+          }
         }
+        
         setIsLoadingData(false);
     };
     init();
   }, []);
+
+  // Verificación periódica de la conexión a Supabase cada 30 segundos
+  useEffect(() => {
+    if (!USE_BACKEND || !currentUser) return;
+
+    const checkConnection = async () => {
+      try {
+        const isConnected = await AuthService.checkSupabaseConnection();
+        if (!isConnected) {
+          console.error('❌ Supabase se ha desconectado. Redirigiendo a login...');
+          setError('Se ha perdido la conexión con la base de datos. Por favor, inicia sesión de nuevo.');
+          AuthService.logout();
+          setCurrentUser(null);
+          setViewState(ViewState.AUTH);
+        }
+      } catch (error) {
+        console.error('Error verificando conexión a Supabase:', error);
+      }
+    };
+
+    // Verificar inmediatamente y luego cada 30 segundos
+    checkConnection();
+    const interval = setInterval(checkConnection, 30000);
+
+    return () => clearInterval(interval);
+  }, [currentUser]);
 
   // Efecto para forzar vista de paciente si is_psychologist es false
   useEffect(() => {
@@ -192,6 +232,14 @@ const App: React.FC = () => {
       // Check profile for both psychologists and patients
       await checkProfileComplete(userId);
     } catch (e) {
+      if (e instanceof Error && e.message === 'SUPABASE_DISCONNECTED') {
+        console.error('❌ Supabase desconectado durante refreshUserData');
+        setError('Se ha perdido la conexión con la base de datos. Por favor, inicia sesión de nuevo.');
+        AuthService.logout();
+        setCurrentUser(null);
+        setViewState(ViewState.AUTH);
+        return;
+      }
       console.warn('No se pudo refrescar el perfil desde el servidor.', e);
     }
   };
