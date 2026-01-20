@@ -3842,7 +3842,7 @@ app.patch('/api/invoices/:id', async (req, res) => {
         console.log('📤 [PATCH /api/invoices/:id] Actualizando en Supabase:', updatedInvoice);
         
         // Actualizar en Supabase
-        await upsertTable('invoices', [updatedInvoice]);
+        await trySupabaseUpsert('invoices', [updatedInvoice]);
         
         // Actualizar el caché local
         const db = getDb();
