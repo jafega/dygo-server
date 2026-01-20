@@ -4584,7 +4584,7 @@ app.put('/api/patient/:userId/profile', async (req, res) => {
 });
 
 // --- RELACIONES PACIENTE / PSICÓLOGO ---
-app.get('/api/relationships', (req, res) => {
+app.get('/api/relationships', async (req, res) => {
   try {
     const { psychologistId, patientId, psych_user_id, psychologist_user_id, patient_user_id, includeEnded } = req.query;
     
@@ -4596,27 +4596,68 @@ app.get('/api/relationships', (req, res) => {
       return res.status(400).json({ error: 'psychologist_user_id o patient_user_id requerido' });
     }
 
-    const db = getDb();
-    
-    const relationships = (db.careRelationships || []).filter(rel => {
-      if (!rel) return false;
-      
-      // Soportar tanto campos nuevos como legacy Y los campos de Supabase
-      const relPsychId = rel.psychologist_user_id || rel.psych_user_id || rel.psychologistId;
-      const relPatId = rel.patient_user_id || rel.patientId;
-      
-      const matchesPsych = psychId ? relPsychId === psychId : true;
-      const matchesPatient = patId ? relPatId === patId : true;
-      const matches = matchesPsych && matchesPatient;
-      
-      // Por defecto, solo devolver relaciones activas (sin endedAt)
-      // A menos que includeEnded=true
-      if (matches && !includeEnded && rel.endedAt) {
-        return false;
+    let relationships = [];
+
+    // SIEMPRE consultar directamente desde Supabase (nunca usar caché)
+    if (supabaseAdmin) {
+      try {
+        console.log('[GET /api/relationships] Consultando Supabase directamente - psychId:', psychId, 'patId:', patId, 'includeEnded:', includeEnded);
+        
+        let query = supabaseAdmin.from('care_relationships').select('*');
+        
+        // Aplicar filtros
+        if (psychId) {
+          query = query.eq('psychologist_user_id', psychId);
+        }
+        if (patId) {
+          query = query.eq('patient_user_id', patId);
+        }
+        
+        const { data, error } = await query;
+        
+        if (error) {
+          console.error('[GET /api/relationships] Error consultando Supabase:', error);
+        } else {
+          console.log('[GET /api/relationships] Datos desde Supabase:', data?.length || 0, 'relaciones');
+          relationships = (data || []).map(normalizeSupabaseRow);
+          
+          // Filtrar relaciones finalizadas si no se solicitan
+          if (!includeEnded) {
+            relationships = relationships.filter(rel => !rel.endedAt && !rel.ended_at);
+          }
+        }
+      } catch (err) {
+        console.error('[GET /api/relationships] Error en consulta Supabase:', err);
       }
+    }
+    
+    // Fallback a db local solo si Supabase no está disponible
+    if (relationships.length === 0 && !supabaseAdmin) {
+      console.log('[GET /api/relationships] Fallback a DB local');
+      const db = getDb();
       
-      return matches;
-    });
+      relationships = (db.careRelationships || []).filter(rel => {
+        if (!rel) return false;
+        
+        // Soportar tanto campos nuevos como legacy Y los campos de Supabase
+        const relPsychId = rel.psychologist_user_id || rel.psych_user_id || rel.psychologistId;
+        const relPatId = rel.patient_user_id || rel.patientId;
+        
+        const matchesPsych = psychId ? relPsychId === psychId : true;
+        const matchesPatient = patId ? relPatId === patId : true;
+        const matches = matchesPsych && matchesPatient;
+        
+        // Por defecto, solo devolver relaciones activas (sin endedAt)
+        // A menos que includeEnded=true
+        if (matches && !includeEnded && (rel.endedAt || rel.ended_at)) {
+          return false;
+        }
+        
+        return matches;
+      });
+    }
+
+    console.log('[GET /api/relationships] Devolviendo', relationships.length, 'relaciones');
 
     // Prevenir caché
     res.set({
