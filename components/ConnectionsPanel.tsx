@@ -47,18 +47,10 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
   useEffect(() => {
     if (!currentUser) return;
     loadConnections();
-    
-    // Recargar invitaciones cada 10 segundos para detectar cambios en tiempo real
-    const interval = setInterval(() => {
-      loadConnections(false); // No mostrar loader en recargas automáticas
-    }, 10000);
-    
-    return () => clearInterval(interval);
   }, [currentUser?.id]);
 
   const loadConnections = async (showLoader = true) => {
     if (!currentUser) return;
-    console.log('🔄 [ConnectionsPanel] loadConnections iniciado para usuario:', currentUser.id, 'is_psychologist:', currentUser.is_psychologist);
     
     // Limpiar caché al cargar conexiones para siempre obtener datos frescos
     clearConnectionsCache();

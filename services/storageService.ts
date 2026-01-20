@@ -541,33 +541,26 @@ export const saveSettings = async (userId: string, settings: UserSettings): Prom
 
 // --- Invitations ---
 const getInvitations = async (): Promise<Invitation[]> => {
-    console.log('🔍 [getInvitations] Iniciando carga de invitaciones...', { USE_BACKEND, API_URL });
     if (USE_BACKEND) {
         try {
             // Agregar timestamp para evitar caché del navegador
             const url = `${API_URL}/invitations?_t=${Date.now()}`;
-            console.log('📡 [getInvitations] Fetching:', url);
             const res = await fetch(url, {
                 headers: {
                     'Cache-Control': 'no-cache',
                     'Pragma': 'no-cache'
                 }
             });
-            console.log('📨 [getInvitations] Response status:', res.status, res.ok);
             if (res.ok) {
                 const data = await res.json();
-                console.log('✅ [getInvitations] Invitaciones recibidas:', data.length, data);
                 return data;
             }
             throw new Error(`Server error: ${res.status}`);
         } catch(e) {
-            console.error('❌ [getInvitations] Fetch invitations failed', e);
+            console.error('❌ [getInvitations] Error:', e);
             if (ALLOW_LOCAL_FALLBACK) { 
-                console.warn('⚠️ [getInvitations] Using local fallback');
                 return JSON.parse(localStorage.getItem(INVITATIONS_KEY) || '[]');
             } else { 
-                // Devolver array vacío en lugar de lanzar error para evitar bloquear la UI
-                console.error('❌ [getInvitations] No se puede conectar con el servidor para obtener invitaciones. Mostrando lista vacía.');
                 return [];
             }
         }
@@ -690,9 +683,7 @@ export const getPendingInvitationsForEmail = async (email: string, userId?: stri
 
 // Obtener invitaciones enviadas donde este usuario es el PSICÓLOGO (invitó a pacientes)
 export const getSentInvitationsForPsychologist = async (psychId: string, psychEmail?: string): Promise<Invitation[]> => {
-    console.log('📋 [getSentInvitationsForPsychologist] Buscando invitaciones enviadas por:', psychId);
     const invs = await getInvitations();
-    console.log('📊 [getSentInvitationsForPsychologist] Total invitaciones:', invs.length);
     const normalizedEmail = psychEmail?.toLowerCase().trim();
     const filtered = invs.filter(i => {
         const iPsychId = i.psychologist_user_id || i.psychologistId || i.fromPsychologistId;
@@ -701,23 +692,20 @@ export const getSentInvitationsForPsychologist = async (psychId: string, psychEm
          (normalizedEmail && iPsychEmail?.toLowerCase().trim() === normalizedEmail)) && 
         i.status === 'PENDING';
     });
-    console.log('✅ [getSentInvitationsForPsychologist] Invitaciones PENDING de este psicólogo:', filtered.length, filtered);
     return filtered;
 };
 
 // Obtener invitaciones donde solicitan a este email como PSICÓLOGO (para aprobar)
 export const getPendingPsychologistInvitationsForEmail = async (email: string): Promise<Invitation[]> => {
-    console.log('📋 [getPendingPsychologistInvitationsForEmail] Buscando solicitudes para:', email);
     const invs = await getInvitations();
     const normalizedEmail = email.toLowerCase().trim();
     const filtered = invs.filter(i => {
-        const iPsychEmail = i.psych_user_email || i.psychologistEmail;
+        const iPsychEmail = i.psychologist_user_email || i.psychologistEmail;
         const iInitiatorEmail = i.initiatorEmail;
         return iPsychEmail?.toLowerCase().trim() === normalizedEmail && 
         i.status === 'PENDING' &&
         iInitiatorEmail?.toLowerCase().trim() !== normalizedEmail; // Excluir las que el psicólogo inició
     });
-    console.log('✅ [getPendingPsychologistInvitationsForEmail] Solicitudes PENDING iniciadas por pacientes:', filtered.length, filtered);
     return filtered;
 };
 
