@@ -74,7 +74,7 @@ const App: React.FC = () => {
   const [sessionDate, setSessionDate] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
-  const [activeTab, setActiveTab] = useState<'insights' | 'feedback' | 'sessions' | 'appointments' | 'calendar' | 'billing' | 'connections' | 'profile' | 'admin'>('calendar');
+  const [activeTab, setActiveTab] = useState<'insights' | 'sessions' | 'appointments' | 'calendar' | 'billing' | 'connections' | 'profile' | 'admin'>('calendar');
   const [showSettings, setShowSettings] = useState(false);
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReport | null>(null);
   const [hasPendingInvites, setHasPendingInvites] = useState(false);
@@ -1006,23 +1006,6 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
             </button>
 
             <button
-              onClick={() => { setActiveTab('feedback'); if (window.innerWidth < 768) setSidebarOpen(false); }}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium ${
-                activeTab === 'feedback'
-                  ? 'bg-indigo-50 text-indigo-700 shadow-sm'
-                  : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-              }`}
-            >
-              <MessageCircle size={18} />
-              <span className={`${sidebarOpen ? 'inline' : 'hidden'} md:inline flex-1 text-left`}>Feedback</span>
-              {unreadFeedbackCount > 0 && (
-                <span className={`${sidebarOpen ? 'inline-flex' : 'hidden'} md:inline-flex min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-xs font-bold items-center justify-center`}>
-                  {unreadFeedbackCount > 99 ? '99+' : unreadFeedbackCount}
-                </span>
-              )}
-            </button>
-
-            <button
               onClick={() => { setActiveTab('billing'); if (window.innerWidth < 768) setSidebarOpen(false); }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium ${
                 activeTab === 'billing'
@@ -1123,7 +1106,6 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                 {activeTab === 'calendar' && <Smile className="w-6 h-6 text-indigo-600" />}
                 {activeTab === 'appointments' && <CalendarIcon className="w-6 h-6 text-indigo-600" />}
                 {activeTab === 'sessions' && <Stethoscope className="w-6 h-6 text-indigo-600" />}
-                {activeTab === 'feedback' && <MessageCircle className="w-6 h-6 text-indigo-600" />}
                 {activeTab === 'billing' && <FileText className="w-6 h-6 text-indigo-600" />}
                 {activeTab === 'connections' && <Link2 className="w-6 h-6 text-indigo-600" />}
                 {activeTab === 'profile' && <UserIcon className="w-6 h-6 text-indigo-600" />}
@@ -1133,7 +1115,6 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   {activeTab === 'calendar' && 'Historia'}
                   {activeTab === 'appointments' && 'Citas'}
                   {activeTab === 'sessions' && 'Sesiones'}
-                  {activeTab === 'feedback' && 'Feedback'}
                   {activeTab === 'billing' && 'Facturación'}
                   {activeTab === 'connections' && 'Conexiones'}
                   {activeTab === 'profile' && 'Mi Perfil'}
@@ -1145,7 +1126,6 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                 {activeTab === 'calendar' && 'Visualiza tus entradas y actividades'}
                 {activeTab === 'appointments' && 'Gestiona tus citas con el psicólogo'}
                 {activeTab === 'sessions' && 'Sesiones clínicas con tu psicólogo'}
-                {activeTab === 'feedback' && 'Comentarios y recomendaciones'}
                 {activeTab === 'billing' && 'Consulta y descarga tus facturas'}
                 {activeTab === 'connections' && 'Administra conexiones con tu psicólogo'}
                 {activeTab === 'profile' && 'Información personal y preferencias'}
@@ -1161,7 +1141,6 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   {activeTab === 'calendar' && 'Mi Historia'}
                   {activeTab === 'appointments' && 'Mis Citas'}
                   {activeTab === 'sessions' && 'Sesiones Clínicas'}
-                  {activeTab === 'feedback' && 'Feedback del Psicólogo'}
                   {activeTab === 'billing' && 'Facturación'}
                   {activeTab === 'connections' && 'Conexiones'}
                   {activeTab === 'profile' && 'Mi Perfil'}
@@ -1172,7 +1151,6 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   {activeTab === 'calendar' && 'Visualiza tus entradas y actividades del día a día'}
                   {activeTab === 'appointments' && 'Gestiona y reserva citas con tu psicólogo'}
                   {activeTab === 'sessions' && 'Sesiones clínicas con tu psicólogo'}
-                  {activeTab === 'feedback' && 'Comentarios y recomendaciones de tu psicólogo'}
                   {activeTab === 'billing' && 'Consulta y descarga tus facturas'}
                   {activeTab === 'connections' && 'Administra invitaciones y conexiones con tu psicólogo'}
                   {activeTab === 'profile' && 'Información personal y configuración de tu cuenta'}
@@ -1324,62 +1302,6 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   <BookOpen size={20} /> Ver Reporte Semanal
                 </button>
 
-              </div>
-            )}
-
-            {activeTab === 'feedback' && (
-              <div className="animate-in fade-in">
-                <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
-                  <h3 className="text-sm font-bold text-slate-700 mb-3">Feedback</h3>
-                  {feedbackEntries.length === 0 ? (
-                    <p className="text-sm text-slate-500">Aún no hay feedback.</p>
-                  ) : (
-                    <div className="space-y-3 max-h-[520px] overflow-y-auto">
-                      {feedbackEntries.map(entry => {
-                        const feedbackText = getFeedbackText(entry) || (entry.psychologistEntryType === 'FEEDBACK' ? 'Feedback del especialista.' : '');
-                        const timeLabel = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-                        const hasDiaryRef = entry.transcript && entry.transcript.trim().length > 0;
-                        const isUnread = isFeedbackUnread(entry);
-                        return (
-                          <div key={entry.id} className="p-3 rounded-xl border border-indigo-100 bg-indigo-50/40">
-                            <div className="flex items-center justify-between gap-2 mb-2">
-                              <div className="flex flex-col gap-1">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">
-                                    Feedback
-                                  </span>
-                                  {isUnread && (
-                                    <span className="text-[10px] font-semibold text-red-700 bg-red-50 border border-red-100 px-2 py-0.5 rounded-full">
-                                      No leído
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="text-[11px] text-slate-500">{entry.date}{timeLabel ? ` • ${timeLabel}` : ''}</div>
-                              </div>
-                              <button
-                                onClick={() => {
-                                  if (isFeedbackUnread(entry)) {
-                                    markFeedbackAsRead([entry]);
-                                  }
-                                  setSelectedDate(entry.date);
-                                  setSelectedEntryId(entry.id);
-                                  setSelectedEntryMode('single');
-                                }}
-                                className="text-[11px] font-semibold text-indigo-700 bg-white border border-indigo-100 px-2 py-0.5 rounded-full hover:bg-indigo-50"
-                              >
-                                Ver detalle
-                              </button>
-                            </div>
-                            {hasDiaryRef && (
-                              <div className="text-[10px] text-slate-500 mb-2">Referencia: entrada de diario</div>
-                            )}
-                            <p className="text-sm text-slate-800 leading-relaxed">{feedbackText}</p>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
               </div>
             )}
 
