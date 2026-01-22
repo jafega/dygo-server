@@ -353,53 +353,53 @@ const PatientTimeline: React.FC<PatientTimelineProps> = ({ patientId, psychologi
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-3 sm:p-6 space-y-3 sm:space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-bold text-slate-900">Timeline del Paciente</h3>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <h3 className="text-base sm:text-lg font-bold text-slate-900">Timeline del Paciente</h3>
         <button
           onClick={() => setShowAddModal(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium"
+          className="w-full sm:w-auto flex items-center justify-center gap-2 px-3 sm:px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-xs sm:text-sm font-medium"
         >
-          <Plus size={18} />
-          Nueva Entrada
+          <Plus size={16} />
+          <span>Nueva Entrada</span>
         </button>
       </div>
 
       {/* Timeline */}
       {isLoading ? (
-        <div className="text-center py-12 text-slate-500">Cargando timeline...</div>
+        <div className="text-center py-8 sm:py-12 text-sm text-slate-500">Cargando timeline...</div>
       ) : entries.length === 0 ? (
-        <div className="text-center py-12 text-slate-500">
+        <div className="text-center py-8 sm:py-12 text-sm text-slate-500">
           No hay entradas todavía. Añade la primera entrada.
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-3">
           {entries.map((entry) => (
             <div
               key={entry.id}
-              className={`rounded-lg border p-4 ${getEntryBgColor(entry.entryType)}`}
+              className={`rounded-lg border p-3 sm:p-4 ${getEntryBgColor(entry.entryType)}`}
             >
-              <div className="flex items-start gap-3">
-                <div className="p-2 bg-white rounded-lg border border-slate-200 shadow-sm">
+              <div className="flex items-start gap-2 sm:gap-3">
+                <div className="p-1.5 sm:p-2 bg-white rounded-lg border border-slate-200 shadow-sm flex-shrink-0">
                   {getEntryIcon(entry.entryType)}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold text-slate-900">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-2 mb-2">
+                    <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                      <span className="text-[10px] sm:text-xs font-semibold text-slate-900">
                         {getEntryTypeLabel(entry.entryType)}
                       </span>
                       {entry.createdBy === 'PSYCHOLOGIST' && (
-                        <span className="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full font-medium">
+                        <span className="text-[9px] sm:text-xs px-1.5 sm:px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full font-medium">
                           Psicólogo
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-2">
-                      <div className="flex items-center gap-1 text-xs text-slate-500">
-                        <Clock size={14} />
-                        {formatDate(entry.timestamp)}
+                    <div className="flex items-center gap-1.5 sm:gap-2">
+                      <div className="flex items-center gap-0.5 sm:gap-1 text-[10px] sm:text-xs text-slate-500">
+                        <Clock size={12} className="sm:w-3.5 sm:h-3.5" />
+                        <span className="whitespace-nowrap">{formatDate(entry.timestamp)}</span>
                       </div>
                       {/* Botón eliminar solo para internal_note y feedback creados por el usuario actual */}
                       {(() => {
@@ -421,62 +421,62 @@ const PatientTimeline: React.FC<PatientTimelineProps> = ({ patientId, psychologi
                         return showButton && (
                           <button
                             onClick={() => handleDeleteEntry(entry.id, entry.entryType || '')}
-                            className="p-1.5 hover:bg-red-50 rounded-lg transition-colors group"
+                            className="p-1 sm:p-1.5 hover:bg-red-50 rounded-lg transition-colors group"
                             title="Eliminar entrada"
                           >
-                            <Trash2 size={14} className="text-slate-400 group-hover:text-red-600" />
+                            <Trash2 size={12} className="sm:w-3.5 sm:h-3.5 text-slate-400 group-hover:text-red-600" />
                           </button>
                         );
                       })()}
                     </div>
                   </div>
-                  <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">
+                  <p className="text-xs sm:text-sm text-slate-700 whitespace-pre-wrap break-words">
                     {entry.content}
                   </p>
                   
                   {/* Attachments */}
                   {entry.attachments && entry.attachments.length > 0 && (
-                    <div className="mt-3 space-y-2">
-                      <div className="text-xs font-semibold text-slate-600 flex items-center gap-1">
-                        <Paperclip size={14} />
+                    <div className="mt-2 sm:mt-3 space-y-1.5 sm:space-y-2">
+                      <div className="text-[10px] sm:text-xs font-semibold text-slate-600 flex items-center gap-1">
+                        <Paperclip size={12} className="sm:w-3.5 sm:h-3.5" />
                         Archivos adjuntos ({entry.attachments.length})
                       </div>
-                      <div className="grid grid-cols-1 gap-2">
+                      <div className="grid grid-cols-1 gap-1.5 sm:gap-2">
                         {entry.attachments.map((attachment) => (
                           <div
                             key={attachment.id}
-                            className="flex items-center gap-3 bg-white rounded-lg border border-slate-200 p-3 hover:border-slate-300 transition-colors"
+                            className="flex items-center gap-2 sm:gap-3 bg-white rounded-lg border border-slate-200 p-2 sm:p-3 hover:border-slate-300 transition-colors"
                           >
                             <div className="flex-shrink-0">
                               {getFileIcon(attachment.type)}
                             </div>
                             <div className="flex-1 min-w-0">
-                              <div className="text-sm font-medium text-slate-900 truncate">
+                              <div className="text-xs sm:text-sm font-medium text-slate-900 truncate">
                                 {attachment.name}
                               </div>
-                              <div className="text-xs text-slate-500">
+                              <div className="text-[10px] sm:text-xs text-slate-500">
                                 {formatFileSize(attachment.size)}
                               </div>
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1 sm:gap-2">
                               {attachment.type.startsWith('image/') && (
                                 <a
                                   href={attachment.url}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                                  className="p-1.5 sm:p-2 hover:bg-slate-100 rounded-lg transition-colors"
                                   title="Ver imagen"
                                 >
-                                  <Eye size={16} className="text-slate-600" />
+                                  <Eye size={14} className="sm:w-4 sm:h-4 text-slate-600" />
                                 </a>
                               )}
                               <a
                                 href={attachment.url}
                                 download={attachment.name}
-                                className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                                className="p-1.5 sm:p-2 hover:bg-slate-100 rounded-lg transition-colors"
                                 title="Descargar"
                               >
-                                <Download size={16} className="text-slate-600" />
+                                <Download size={14} className="sm:w-4 sm:h-4 text-slate-600" />
                               </a>
                             </div>
                           </div>
@@ -485,7 +485,7 @@ const PatientTimeline: React.FC<PatientTimelineProps> = ({ patientId, psychologi
                       
                       {/* Image preview */}
                       {entry.attachments.some(a => a.type.startsWith('image/')) && (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-2">
+                        <div className="grid grid-cols-2 gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
                           {entry.attachments
                             .filter(a => a.type.startsWith('image/'))
                             .map((attachment) => (
@@ -494,7 +494,7 @@ const PatientTimeline: React.FC<PatientTimelineProps> = ({ patientId, psychologi
                                 href={attachment.url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="relative group rounded-lg overflow-hidden border-2 border-slate-200 hover:border-indigo-400 transition-all"
+                                className="relative group rounded-lg overflow-hidden border-2 border-slate-200 hover:border-indigo-400 transition-all aspect-square"
                               >
                                 <img
                                   src={attachment.url}

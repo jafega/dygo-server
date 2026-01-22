@@ -311,30 +311,30 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   ];
 
   return (
-    <div className="fixed inset-0 left-64 bg-black/60 backdrop-blur-sm z-50">
+    <div className="fixed inset-0 sm:left-64 bg-black/60 backdrop-blur-sm z-50">
       <div className="bg-white w-full h-full overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center">
-              <User size={24} />
+        <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-3 sm:px-6 py-3 sm:py-4 flex items-center justify-between">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0">
+              <User size={20} className="sm:w-6 sm:h-6" />
             </div>
-            <div>
-              <h2 className="text-xl font-bold">{patient.name}</h2>
-              <p className="text-sm text-purple-100">Paciente</p>
+            <div className="min-w-0">
+              <h2 className="text-base sm:text-xl font-bold truncate">{patient.name}</h2>
+              <p className="text-xs sm:text-sm text-purple-100">Paciente</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-white/20 rounded-full transition-colors"
+            className="p-1.5 sm:p-2 hover:bg-white/20 rounded-full transition-colors flex-shrink-0"
           >
-            <X size={24} />
+            <X size={20} className="sm:w-6 sm:h-6" />
           </button>
         </div>
 
         {/* Tabs */}
-        <div className="border-b border-slate-200 bg-slate-50 px-6 overflow-x-auto">
-          <div className="flex gap-2">
+        <div className="border-b border-slate-200 bg-slate-50 px-2 sm:px-6 overflow-x-auto">
+          <div className="flex gap-1 sm:gap-2">
             {tabs.map(tab => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -342,14 +342,15 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id as any)}
-                  className={`px-4 py-3 font-medium text-sm flex items-center gap-2 border-b-2 transition-colors whitespace-nowrap ${
+                  className={`px-2 sm:px-4 py-2 sm:py-3 font-medium text-xs sm:text-sm flex items-center gap-1 sm:gap-2 border-b-2 transition-colors whitespace-nowrap ${
                     isActive
                       ? 'border-purple-600 text-purple-600'
                       : 'border-transparent text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  <Icon size={16} />
-                  {tab.label}
+                  <Icon size={14} className="sm:w-4 sm:h-4" />
+                  <span className="hidden sm:inline">{tab.label}</span>
+                  <span className="sm:hidden">{tab.label.split(' ')[0]}</span>
                 </button>
               );
             })}
@@ -359,13 +360,13 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
         {/* Content */}
         <div className="flex-1 overflow-auto">
           {activeTab === 'INFO' && (
-            <div className="p-8 space-y-8">
+            <div className="p-3 sm:p-6 md:p-8 space-y-4 sm:space-y-6">
               {/* Información Personal */}
-              <div className="bg-gradient-to-br from-slate-50 to-white rounded-2xl p-8 shadow-sm border border-slate-200 space-y-6">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xl font-bold text-slate-900 flex items-center gap-3">
-                    <User className="text-purple-600" size={24} />
-                    Información Personal
+              <div className="bg-gradient-to-br from-slate-50 to-white rounded-xl sm:rounded-2xl p-4 sm:p-6 md:p-8 shadow-sm border border-slate-200 space-y-4 sm:space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <h3 className="text-base sm:text-lg md:text-xl font-bold text-slate-900 flex items-center gap-2 sm:gap-3">
+                    <User className="text-purple-600" size={18} />
+                    <span>Información Personal</span>
                   </h3>
                   <button
                     onClick={() => {
@@ -376,26 +377,26 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                       }
                     }}
                     disabled={isSaving}
-                    className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50"
+                    className="w-full sm:w-auto flex items-center justify-center gap-2 px-3 sm:px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 text-sm"
                   >
                     {isEditingInfo ? (
                       <>
-                        <Save size={18} />
-                        {isSaving ? 'Guardando...' : 'Guardar'}
+                        <Save size={16} />
+                        <span>{isSaving ? 'Guardando...' : 'Guardar'}</span>
                       </>
                     ) : (
                       <>
-                        <Edit2 size={18} />
-                        Editar
+                        <Edit2 size={16} />
+                        <span>Editar</span>
                       </>
                     )}
                   </button>
                 </div>
                 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-3">
-                    <label className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                      <User size={16} className="text-purple-600" />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 md:gap-6">
+                  <div className="space-y-2 sm:space-y-3">
+                    <label className="text-xs sm:text-sm font-bold text-slate-700 flex items-center gap-1.5 sm:gap-2">
+                      <User size={14} className="sm:w-4 sm:h-4 text-purple-600" />
                       Nombre
                     </label>
                     {isEditingInfo ? (
@@ -403,19 +404,19 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                         type="text"
                         value={editedPatientData.firstName}
                         onChange={(e) => setEditedPatientData({ ...editedPatientData, firstName: e.target.value, name: `${e.target.value} ${editedPatientData.lastName}`.trim() })}
-                        className="w-full px-4 py-3 bg-white border-2 border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                        className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-white border-2 border-slate-300 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all text-sm"
                         placeholder="Nombre"
                       />
                     ) : (
-                      <div className="flex items-center gap-3 px-5 py-4 bg-white border-2 border-slate-200 rounded-xl">
-                        <span className="text-slate-900 font-medium">{editedPatientData.firstName || 'No especificado'}</span>
+                      <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-4 bg-white border-2 border-slate-200 rounded-lg sm:rounded-xl">
+                        <span className="text-sm sm:text-base text-slate-900 font-medium">{editedPatientData.firstName || 'No especificado'}</span>
                       </div>
                     )}
                   </div>
 
-                  <div className="space-y-3">
-                    <label className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                      <User size={16} className="text-purple-600" />
+                  <div className="space-y-2 sm:space-y-3">
+                    <label className="text-xs sm:text-sm font-bold text-slate-700 flex items-center gap-1.5 sm:gap-2">
+                      <User size={14} className="sm:w-4 sm:h-4 text-purple-600" />
                       Apellidos
                     </label>
                     {isEditingInfo ? (
@@ -423,22 +424,22 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                         type="text"
                         value={editedPatientData.lastName}
                         onChange={(e) => setEditedPatientData({ ...editedPatientData, lastName: e.target.value, name: `${editedPatientData.firstName} ${e.target.value}`.trim() })}
-                        className="w-full px-4 py-3 bg-white border-2 border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                        className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-white border-2 border-slate-300 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all text-sm"
                         placeholder="Apellidos"
                       />
                     ) : (
-                      <div className="flex items-center gap-3 px-5 py-4 bg-white border-2 border-slate-200 rounded-xl">
-                        <span className="text-slate-900 font-medium">{editedPatientData.lastName || 'No especificado'}</span>
+                      <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-4 bg-white border-2 border-slate-200 rounded-lg sm:rounded-xl">
+                        <span className="text-sm sm:text-base text-slate-900 font-medium">{editedPatientData.lastName || 'No especificado'}</span>
                       </div>
                     )}
                   </div>
 
-                  <div className="space-y-3">
-                    <label className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                      <Mail size={16} className="text-purple-600" />
-                      Email
+                  <div className="space-y-2 sm:space-y-3">
+                    <label className="text-xs sm:text-sm font-bold text-slate-700 flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                      <Mail size={14} className="sm:w-4 sm:h-4 text-purple-600" />
+                      <span>Email</span>
                       {patientData?.auth_user_id && (
-                        <span className="text-xs text-slate-500 font-normal">(vinculado a cuenta)</span>
+                        <span className="text-[10px] sm:text-xs text-slate-500 font-normal">(vinculado a cuenta)</span>
                       )}
                     </label>
                     {isEditingInfo && !patientData?.auth_user_id ? (
@@ -446,18 +447,18 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                         type="email"
                         value={editedPatientData.email}
                         onChange={(e) => setEditedPatientData({ ...editedPatientData, email: e.target.value })}
-                        className="w-full px-4 py-3 bg-white border-2 border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                        className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-white border-2 border-slate-300 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all text-sm"
                       />
                     ) : (
-                      <div className="flex items-center gap-3 px-5 py-4 bg-white border-2 border-slate-200 rounded-xl">
-                        <span className="text-slate-900 font-medium">{editedPatientData.email || patient.email || 'No especificado'}</span>
+                      <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-4 bg-white border-2 border-slate-200 rounded-lg sm:rounded-xl">
+                        <span className="text-xs sm:text-sm md:text-base text-slate-900 font-medium break-all">{editedPatientData.email || patient.email || 'No especificado'}</span>
                       </div>
                     )}
                   </div>
 
-                  <div className="space-y-3">
-                    <label className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                      <Phone size={16} className="text-purple-600" />
+                  <div className="space-y-2 sm:space-y-3">
+                    <label className="text-xs sm:text-sm font-bold text-slate-700 flex items-center gap-1.5 sm:gap-2">
+                      <Phone size={14} className="sm:w-4 sm:h-4 text-purple-600" />
                       Teléfono
                     </label>
                     {isEditingInfo ? (
@@ -465,18 +466,18 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                         type="tel"
                         value={editedPatientData.phone}
                         onChange={(e) => setEditedPatientData({ ...editedPatientData, phone: e.target.value })}
-                        className="w-full px-4 py-3 bg-white border-2 border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                        className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-white border-2 border-slate-300 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all text-sm"
                       />
                     ) : (
-                      <div className="flex items-center gap-3 px-5 py-4 bg-white border-2 border-slate-200 rounded-xl">
-                        <span className="text-slate-900 font-medium">{editedPatientData.phone || patient.phone || 'No especificado'}</span>
+                      <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-4 bg-white border-2 border-slate-200 rounded-lg sm:rounded-xl">
+                        <span className="text-sm sm:text-base text-slate-900 font-medium">{editedPatientData.phone || patient.phone || 'No especificado'}</span>
                       </div>
                     )}
                   </div>
 
-                  <div className="space-y-3">
-                    <label className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                      <CreditCard size={16} className="text-purple-600" />
+                  <div className="space-y-2 sm:space-y-3">
+                    <label className="text-xs sm:text-sm font-bold text-slate-700 flex items-center gap-1.5 sm:gap-2">
+                      <CreditCard size={14} className="sm:w-4 sm:h-4 text-purple-600" />
                       DNI / NIE
                     </label>
                     {isEditingInfo ? (
@@ -484,18 +485,18 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                         type="text"
                         value={editedPatientData.dni}
                         onChange={(e) => setEditedPatientData({ ...editedPatientData, dni: e.target.value })}
-                        className="w-full px-4 py-3 bg-white border-2 border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                        className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-white border-2 border-slate-300 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all text-sm"
                       />
                     ) : (
-                      <div className="flex items-center gap-3 px-5 py-4 bg-white border-2 border-slate-200 rounded-xl">
-                        <span className="text-slate-900 font-medium">{editedPatientData.dni || 'No especificado'}</span>
+                      <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-4 bg-white border-2 border-slate-200 rounded-lg sm:rounded-xl">
+                        <span className="text-sm sm:text-base text-slate-900 font-medium">{editedPatientData.dni || 'No especificado'}</span>
                       </div>
                     )}
                   </div>
 
-                  <div className="space-y-3">
-                    <label className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                      <Cake size={16} className="text-purple-600" />
+                  <div className="space-y-2 sm:space-y-3">
+                    <label className="text-xs sm:text-sm font-bold text-slate-700 flex items-center gap-1.5 sm:gap-2">
+                      <Cake size={14} className="sm:w-4 sm:h-4 text-purple-600" />
                       Fecha de Nacimiento
                     </label>
                     {isEditingInfo ? (
@@ -503,11 +504,11 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                         type="date"
                         value={editedPatientData.birthDate}
                         onChange={(e) => setEditedPatientData({ ...editedPatientData, birthDate: e.target.value })}
-                        className="w-full px-4 py-3 bg-white border-2 border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                        className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-white border-2 border-slate-300 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all text-sm"
                       />
                     ) : (
-                      <div className="flex items-center gap-3 px-5 py-4 bg-white border-2 border-slate-200 rounded-xl">
-                        <span className="text-slate-900 font-medium">
+                      <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-4 bg-white border-2 border-slate-200 rounded-lg sm:rounded-xl">
+                        <span className="text-sm sm:text-base text-slate-900 font-medium">
                           {editedPatientData.birthDate ? new Date(editedPatientData.birthDate).toLocaleDateString('es-ES', {
                             year: 'numeric',
                             month: 'long',
@@ -519,13 +520,13 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                   </div>
 
                   {patientData?.created_at && (
-                    <div className="space-y-3">
-                      <label className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                        <Calendar size={16} className="text-purple-600" />
+                    <div className="space-y-2 sm:space-y-3">
+                      <label className="text-xs sm:text-sm font-bold text-slate-700 flex items-center gap-1.5 sm:gap-2">
+                        <Calendar size={14} className="sm:w-4 sm:h-4 text-purple-600" />
                         Fecha de Registro
                       </label>
-                      <div className="flex items-center gap-3 px-5 py-4 bg-slate-100 border-2 border-slate-200 rounded-xl">
-                        <span className="text-slate-700 font-medium">{new Date(patientData.created_at).toLocaleDateString('es-ES', { 
+                      <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-4 bg-slate-100 border-2 border-slate-200 rounded-lg sm:rounded-xl">
+                        <span className="text-sm sm:text-base text-slate-700 font-medium">{new Date(patientData.created_at).toLocaleDateString('es-ES', { 
                           year: 'numeric', 
                           month: 'long', 
                           day: 'numeric'
@@ -534,9 +535,9 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                     </div>
                   )}
 
-                  <div className="space-y-3 md:col-span-2">
-                    <label className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                      <MapPin size={16} className="text-purple-600" />
+                  <div className="space-y-2 sm:space-y-3 md:col-span-2">
+                    <label className="text-xs sm:text-sm font-bold text-slate-700 flex items-center gap-1.5 sm:gap-2">
+                      <MapPin size={14} className="sm:w-4 sm:h-4 text-purple-600" />
                       Dirección
                     </label>
                     {isEditingInfo ? (
@@ -544,20 +545,20 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                         type="text"
                         value={editedPatientData.address}
                         onChange={(e) => setEditedPatientData({ ...editedPatientData, address: e.target.value })}
-                        className="w-full px-4 py-3 bg-white border-2 border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                        className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-white border-2 border-slate-300 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all text-sm"
                         placeholder="Calle, número, ciudad, código postal..."
                       />
                     ) : (
-                      <div className="flex items-center gap-3 px-5 py-4 bg-white border-2 border-slate-200 rounded-xl">
-                        <span className="text-slate-900 font-medium">{editedPatientData.address || 'No especificado'}</span>
+                      <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-4 bg-white border-2 border-slate-200 rounded-lg sm:rounded-xl">
+                        <span className="text-xs sm:text-sm md:text-base text-slate-900 font-medium">{editedPatientData.address || 'No especificado'}</span>
                       </div>
                     )}
                   </div>
                 </div>
 
-                <div className="space-y-3 pt-4 border-t border-slate-200">
-                  <label className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                    <FileText size={16} className="text-purple-600" />
+                <div className="space-y-2 sm:space-y-3 pt-3 sm:pt-4 border-t border-slate-200">
+                  <label className="text-xs sm:text-sm font-bold text-slate-700 flex items-center gap-1.5 sm:gap-2">
+                    <FileText size={14} className="sm:w-4 sm:h-4 text-purple-600" />
                     Notas Clínicas
                   </label>
                   {isEditingInfo ? (
@@ -565,12 +566,12 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                       value={editedPatientData.notes}
                       onChange={(e) => setEditedPatientData({ ...editedPatientData, notes: e.target.value })}
                       rows={4}
-                      className="w-full px-4 py-3 bg-white border-2 border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all resize-none"
+                      className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-white border-2 border-slate-300 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all resize-none text-sm"
                       placeholder="Notas sobre el paciente..."
                     />
                   ) : (
-                    <div className="px-5 py-4 bg-white border-2 border-slate-200 rounded-xl">
-                      <p className="text-slate-900 whitespace-pre-wrap font-medium">{editedPatientData.notes || 'Sin notas'}</p>
+                    <div className="px-3 sm:px-5 py-2.5 sm:py-4 bg-white border-2 border-slate-200 rounded-lg sm:rounded-xl">
+                      <p className="text-xs sm:text-sm md:text-base text-slate-900 whitespace-pre-wrap font-medium">{editedPatientData.notes || 'Sin notas'}</p>
                     </div>
                   )}
                 </div>
