@@ -334,7 +334,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
 
         {/* Tabs */}
         <div className="border-b border-slate-200 bg-slate-50 px-2 sm:px-6 overflow-x-auto">
-          <div className="flex gap-1 sm:gap-2">
+          <div className="flex justify-around sm:justify-start gap-1 sm:gap-2">
             {tabs.map(tab => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -342,15 +342,14 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id as any)}
-                  className={`px-2 sm:px-4 py-2 sm:py-3 font-medium text-xs sm:text-sm flex items-center gap-1 sm:gap-2 border-b-2 transition-colors whitespace-nowrap ${
+                  className={`flex-1 sm:flex-none px-3 sm:px-4 py-3 sm:py-3 font-medium text-xs sm:text-sm flex items-center justify-center sm:justify-start gap-1 sm:gap-2 border-b-2 transition-colors whitespace-nowrap ${
                     isActive
                       ? 'border-purple-600 text-purple-600'
                       : 'border-transparent text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  <Icon size={14} className="sm:w-4 sm:h-4" />
+                  <Icon size={22} className="sm:w-4 sm:h-4" />
                   <span className="hidden sm:inline">{tab.label}</span>
-                  <span className="sm:hidden">{tab.label.split(' ')[0]}</span>
                 </button>
               );
             })}

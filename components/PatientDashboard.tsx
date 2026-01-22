@@ -333,34 +333,34 @@ const PatientDashboard = forwardRef<PatientDashboardHandle>((props, ref) => {
                 </div>
             ) : (
                 filteredPatients.map(patient => (
-                    <div key={patient.id} onClick={() => setSelectedPatientId(patient.id)} className="border border-slate-200 rounded-xl p-3 sm:p-4 hover:shadow-md transition-shadow bg-white cursor-pointer group">
-                        <div className="flex justify-between items-center gap-3">
-                            <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div key={patient.id} onClick={() => setSelectedPatientId(patient.id)} className="border border-slate-200 rounded-lg sm:rounded-xl p-2.5 sm:p-4 hover:shadow-md transition-shadow bg-white cursor-pointer group">
+                        <div className="flex justify-between items-start sm:items-center gap-2 sm:gap-3">
+                            <div className="flex items-start sm:items-center gap-2 sm:gap-3 min-w-0 flex-1">
                                 {/* Avatar del paciente */}
-                                <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0 overflow-hidden border-2 border-slate-200">
+                                <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0 overflow-hidden border-2 border-slate-200">
                                     {patient.avatarUrl ? (
                                         <img src={patient.avatarUrl} alt={patient.name} className="w-full h-full object-cover" />
                                     ) : (
-                                        <span className="text-indigo-700 font-semibold text-base">
+                                        <span className="text-indigo-700 font-semibold text-sm sm:text-base">
                                             {patient.name?.charAt(0).toUpperCase()}
                                         </span>
                                     )}
                                 </div>
                                 
                                 <div className="min-w-0 flex-1">
-                                    <h4 className="font-bold text-slate-800 text-base group-hover:text-indigo-600 transition-colors truncate">{patient.name}</h4>
-                                    <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-slate-400 mt-0.5">
-                                        <Clock size={10} className="sm:w-3 sm:h-3 shrink-0" /> 
-                                        <span className="truncate">Última Act: {patient.lastUpdate}</span>
+                                    <h4 className="font-bold text-slate-800 text-sm sm:text-base group-hover:text-indigo-600 transition-colors truncate">{patient.name}</h4>
+                                    <div className="flex items-center gap-1 sm:gap-1.5 text-[9px] sm:text-xs text-slate-400 mt-0.5">
+                                        <Clock size={10} className="shrink-0" /> 
+                                        <span className="truncate">{patient.lastUpdate}</span>
                                     </div>
                                     
                                     {/* Tags del paciente */}
                                     {patient.tags && patient.tags.length > 0 && (
-                                      <div className="flex flex-wrap gap-1.5 mt-2">
+                                      <div className="flex flex-wrap gap-1 sm:gap-1.5 mt-1.5 sm:mt-2">
                                         {patient.tags.map((tag, idx) => (
                                           <span
                                             key={idx}
-                                            className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-[10px] font-medium"
+                                            className="inline-flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-[9px] sm:text-[10px] font-medium"
                                           >
                                             🏷️ {tag}
                                           </span>
@@ -370,16 +370,16 @@ const PatientDashboard = forwardRef<PatientDashboardHandle>((props, ref) => {
                                 </div>
                             </div>
                             
-                            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-                                <span className={`px-2.5 py-1 rounded-full text-[10px] sm:text-xs font-bold border ${getRiskColor(patient.riskLevel)} whitespace-nowrap`}>
-                                    Riesgo {patient.riskLevel}
+                            <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1.5 sm:gap-3 shrink-0">
+                                <span className={`px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-full text-[9px] sm:text-xs font-bold border ${getRiskColor(patient.riskLevel)} whitespace-nowrap`}>
+                                    <span className="hidden sm:inline">Riesgo </span>{patient.riskLevel}
                                 </span>
                                 {(() => {
                                     const sentiment = patient.averageSentiment;
                                     const isValid = sentiment && !isNaN(sentiment) && sentiment > 0;
                                     const color = getSentimentColor(sentiment);
                                     return isValid && color ? (
-                                        <div className={`font-bold text-lg sm:text-xl ${color} min-w-[2.5rem] text-right`}>
+                                        <div className={`font-bold text-base sm:text-lg md:text-xl ${color} min-w-[2rem] sm:min-w-[2.5rem] text-right`}>
                                             {sentiment}
                                         </div>
                                     ) : null;

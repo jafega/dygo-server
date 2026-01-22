@@ -223,58 +223,60 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
   }
 
   return (
-    <div className="h-full overflow-auto bg-slate-50 p-4 space-y-4">
+    <div className="h-full overflow-auto bg-slate-50 p-2 sm:p-4 space-y-3 sm:space-y-4">
       {/* Header with Filters */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-4">
-        <div className="flex items-center justify-between">
+      <div className="bg-white rounded-lg sm:rounded-xl border border-slate-200 p-3 sm:p-4 shadow-sm space-y-3 sm:space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0">
           <div className="flex items-center gap-2">
-            <Calendar className="text-purple-600" size={20} />
-            <h3 className="text-lg font-bold text-slate-800">Sesiones del Paciente</h3>
+            <Calendar className="text-purple-600" size={18} className="sm:w-5 sm:h-5" />
+            <h3 className="text-base sm:text-lg font-bold text-slate-800">Sesiones del Paciente</h3>
           </div>
-          <div className="text-sm text-slate-500">
+          <div className="text-xs sm:text-sm text-slate-500">
             Total: <span className="font-bold text-slate-800">{sessions.length}</span>
           </div>
         </div>
 
         {/* Date Range */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-          <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-            <Filter size={16} />
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2 text-xs sm:text-sm font-semibold text-slate-700">
+            <Filter size={14} />
             Periodo:
           </div>
-          <input
-            type="date"
-            value={dateRange.start}
-            onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-            className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500"
-          />
-          <span className="text-slate-400 self-center">—</span>
-          <input
-            type="date"
-            value={dateRange.end}
-            onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-            className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500"
-          />
-          <button
-            onClick={() => {
-              const now = new Date();
-              const start = new Date(now.getFullYear(), now.getMonth(), 1);
-              const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-              setDateRange({
-                start: start.toISOString().split('T')[0],
-                end: end.toISOString().split('T')[0]
-              });
-            }}
-            className="px-3 py-2 bg-purple-100 text-purple-700 rounded-lg text-sm font-medium hover:bg-purple-200"
-          >
-            Mes actual
-          </button>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+            <input
+              type="date"
+              value={dateRange.start}
+              onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
+              className="px-2.5 sm:px-3 py-2 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-purple-500"
+            />
+            <span className="text-slate-400 self-center hidden sm:inline">—</span>
+            <input
+              type="date"
+              value={dateRange.end}
+              onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
+              className="px-2.5 sm:px-3 py-2 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-purple-500"
+            />
+            <button
+              onClick={() => {
+                const now = new Date();
+                const start = new Date(now.getFullYear(), now.getMonth(), 1);
+                const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                setDateRange({
+                  start: start.toISOString().split('T')[0],
+                  end: end.toISOString().split('T')[0]
+                });
+              }}
+              className="px-3 py-2 bg-purple-100 text-purple-700 rounded-lg text-xs sm:text-sm font-medium hover:bg-purple-200"
+            >
+              Mes actual
+            </button>
+          </div>
         </div>
 
         {/* Status Filter */}
         <div className="space-y-2">
-          <label className="text-xs font-semibold text-slate-600 uppercase">Estado</label>
-          <div className="flex flex-wrap gap-2">
+          <label className="text-[10px] sm:text-xs font-semibold text-slate-600 uppercase">Estado</label>
+          <div className="flex flex-wrap gap-1.5 sm:gap-2">
             {[
               { value: 'scheduled', label: 'Programadas' },
               { value: 'completed', label: 'Completadas' },
@@ -284,7 +286,7 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
               <button
                 key={option.value}
                 onClick={() => toggleStatusFilter(option.value)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-medium transition-colors ${
                   filterStatus.includes(option.value)
                     ? 'bg-purple-600 text-white'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -298,8 +300,8 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
 
         {/* Payment Filter */}
         <div className="space-y-2">
-          <label className="text-xs font-semibold text-slate-600 uppercase">Pago</label>
-          <div className="flex gap-2">
+          <label className="text-[10px] sm:text-xs font-semibold text-slate-600 uppercase">Pago</label>
+          <div className="flex gap-1.5 sm:gap-2">
             {[
               { value: 'all', label: 'Todas' },
               { value: 'paid', label: 'Pagadas' },
@@ -308,7 +310,7 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
               <button
                 key={option.value}
                 onClick={() => setFilterPayment(option.value)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                className={`flex-1 sm:flex-none px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-medium transition-colors ${
                   filterPayment === option.value
                     ? 'bg-green-600 text-white'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -323,35 +325,35 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
 
       {/* Metrics */}
       {sessions.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-xl border border-green-200 p-4 shadow-sm">
-            <div className="text-xs font-semibold text-green-700 mb-2">Completadas</div>
-            <div className="text-2xl font-bold text-green-900">{completedSessions.length}</div>
-            <div className="text-xs text-green-600 mt-1">sesiones</div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
+          <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg sm:rounded-xl border border-green-200 p-2.5 sm:p-4 shadow-sm">
+            <div className="text-[10px] sm:text-xs font-semibold text-green-700 mb-1 sm:mb-2">Completadas</div>
+            <div className="text-xl sm:text-2xl font-bold text-green-900">{completedSessions.length}</div>
+            <div className="text-[9px] sm:text-xs text-green-600 mt-0.5 sm:mt-1">sesiones</div>
           </div>
-          <div className="bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-xl border border-indigo-200 p-4 shadow-sm">
-            <div className="text-xs font-semibold text-indigo-700 mb-2">Generado Total</div>
-            <div className="text-2xl font-bold text-indigo-900">{totalEarnings.toFixed(2)} €</div>
-            <div className="text-xs text-indigo-600 mt-1">{completedSessions.length} sesiones</div>
+          <div className="bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-lg sm:rounded-xl border border-indigo-200 p-2.5 sm:p-4 shadow-sm">
+            <div className="text-[10px] sm:text-xs font-semibold text-indigo-700 mb-1 sm:mb-2">Generado Total</div>
+            <div className="text-xl sm:text-2xl font-bold text-indigo-900">{totalEarnings.toFixed(2)} €</div>
+            <div className="text-[9px] sm:text-xs text-indigo-600 mt-0.5 sm:mt-1">{completedSessions.length} sesiones</div>
           </div>
-          <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl border border-blue-200 p-4 shadow-sm">
-            <div className="text-xs font-semibold text-blue-700 mb-2">Cobrado</div>
-            <div className="text-2xl font-bold text-blue-900">{paidEarnings.toFixed(2)} €</div>
-            <div className="text-xs text-blue-600 mt-1">{paidSessions.length} sesiones</div>
+          <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg sm:rounded-xl border border-blue-200 p-2.5 sm:p-4 shadow-sm">
+            <div className="text-[10px] sm:text-xs font-semibold text-blue-700 mb-1 sm:mb-2">Cobrado</div>
+            <div className="text-xl sm:text-2xl font-bold text-blue-900">{paidEarnings.toFixed(2)} €</div>
+            <div className="text-[9px] sm:text-xs text-blue-600 mt-0.5 sm:mt-1">{paidSessions.length} sesiones</div>
           </div>
-          <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl border border-purple-200 p-4 shadow-sm">
-            <div className="text-xs font-semibold text-purple-700 mb-2">Total Sesiones</div>
-            <div className="text-2xl font-bold text-purple-900">{sessions.length}</div>
-            <div className="text-xs text-purple-600 mt-1">en el periodo</div>
+          <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg sm:rounded-xl border border-purple-200 p-2.5 sm:p-4 shadow-sm">
+            <div className="text-[10px] sm:text-xs font-semibold text-purple-700 mb-1 sm:mb-2">Total Sesiones</div>
+            <div className="text-xl sm:text-2xl font-bold text-purple-900">{sessions.length}</div>
+            <div className="text-[9px] sm:text-xs text-purple-600 mt-0.5 sm:mt-1">en el periodo</div>
           </div>
         </div>
       )}
 
       {/* Sessions List */}
       {displayedSessions.length === 0 ? (
-        <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
-          <Calendar className="mx-auto text-slate-300 mb-3" size={40} />
-          <p className="text-slate-500 text-sm">
+        <div className="bg-white rounded-lg sm:rounded-xl border border-slate-200 p-6 sm:p-8 text-center">
+          <Calendar className="mx-auto text-slate-300 mb-3" size={32} />
+          <p className="text-slate-500 text-xs sm:text-sm">
             {sessions.length === 0 
               ? 'No hay sesiones en este periodo'
               : 'No hay sesiones con los filtros seleccionados'}
@@ -366,48 +368,48 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
               <div
                 key={session.id}
                 onClick={() => handleOpenSession(session)}
-                className="bg-white rounded-lg border border-slate-200 p-3 hover:shadow-md transition-all cursor-pointer hover:border-purple-300"
+                className="bg-white rounded-lg border border-slate-200 p-2.5 sm:p-3 hover:shadow-md transition-all cursor-pointer hover:border-purple-300"
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-start gap-3 flex-1">
-                    <div className="bg-purple-100 rounded-lg p-2 text-center min-w-[50px]">
-                      <div className="text-[10px] font-semibold text-purple-600 uppercase">
+                <div className="flex items-start justify-between gap-2 sm:gap-3">
+                  <div className="flex items-start gap-2 sm:gap-3 flex-1 min-w-0">
+                    <div className="bg-purple-100 rounded-lg p-1.5 sm:p-2 text-center min-w-[40px] sm:min-w-[50px] flex-shrink-0">
+                      <div className="text-[9px] sm:text-[10px] font-semibold text-purple-600 uppercase">
                         {new Date(session.date).toLocaleDateString('es-ES', { month: 'short' })}
                       </div>
-                      <div className="text-xl font-bold text-purple-900">
+                      <div className="text-lg sm:text-xl font-bold text-purple-900">
                         {new Date(session.date).getDate()}
                       </div>
                     </div>
                     
-                    <div className="flex-1">
-                      <div className="text-sm text-slate-500 flex items-center gap-2 mb-1">
-                        <Clock size={14} />
-                        {session.startTime} - {session.endTime}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs sm:text-sm text-slate-500 flex items-center gap-1.5 sm:gap-2 mb-1">
+                        <Clock size={12} />
+                        <span className="truncate">{session.startTime} - {session.endTime}</span>
                       </div>
-                      <div className="flex items-center gap-2 flex-wrap mb-2">
+                      <div className="flex items-center gap-1 sm:gap-2 flex-wrap mb-1.5 sm:mb-2">
                         {getStatusBadge(session.status)}
                         {session.type === 'online' && (
-                          <span className="inline-flex items-center gap-1 px-2 py-1 bg-indigo-50 text-indigo-700 rounded-full text-xs">
-                            <Video size={12} />
-                            Online
+                          <span className="inline-flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 sm:py-1 bg-indigo-50 text-indigo-700 rounded-full text-[9px] sm:text-xs">
+                            <Video size={10} className="sm:w-3 sm:h-3" />
+                            <span className="hidden sm:inline">Online</span>
                           </span>
                         )}
                         {session.paid && (
-                          <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-50 text-green-700 rounded-full text-xs">
-                            <DollarSign size={12} />
-                            Pagada
+                          <span className="inline-flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 sm:py-1 bg-green-50 text-green-700 rounded-full text-[9px] sm:text-xs">
+                            <DollarSign size={10} className="sm:w-3 sm:h-3" />
+                            <span className="hidden sm:inline">Pagada</span>
                           </span>
                         )}
                       </div>
                       {session.notes && (
-                        <div className="text-xs text-slate-500 line-clamp-1">{session.notes}</div>
+                        <div className="text-[10px] sm:text-xs text-slate-500 line-clamp-1">{session.notes}</div>
                       )}
                     </div>
                   </div>
 
-                  <div className="text-right">
-                    <div className="text-lg font-bold text-purple-900">{earnings.toFixed(2)} €</div>
-                    <div className="text-xs text-slate-500">tu ganancia</div>
+                  <div className="text-right flex-shrink-0">
+                    <div className="text-base sm:text-lg font-bold text-purple-900">{earnings.toFixed(2)} €</div>
+                    <div className="text-[9px] sm:text-xs text-slate-500">ganancia</div>
                   </div>
                 </div>
               </div>
