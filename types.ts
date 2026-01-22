@@ -35,16 +35,26 @@ export interface User {
   dateOfBirth?: string; // ISO format YYYY-MM-DD
 }
 
+export interface RelationshipSettings {
+  defaultSessionPrice?: number; // Precio por defecto por sesión (DEPRECATED - usar default_session_price)
+  defaultPsychPercent?: number; // Porcentaje del psicólogo por defecto (DEPRECATED - usar default_psych_percent)
+  tags?: string[]; // Tags de la relación
+}
+
 export interface CareRelationship {
   id: string;
   // Columnas de tabla según el nuevo schema (minúsculas)
   psychologist_user_id: string; // FK a users(id) - ID del usuario con rol de psicólogo
   patient_user_id: string; // FK a users(id) - ID del usuario con rol de paciente
   created_at?: string; // timestamp with time zone (ISO string)
+  default_session_price: number; // Precio por defecto por sesión
+  default_psych_percent: number; // Porcentaje del psicólogo por defecto (0-100)
+  tags?: string[]; // Tags de la relación (en data JSONB)
   
-  // Campos adicionales en data JSONB
+  // Campos adicionales en data JSONB (legacy)
   createdAt?: number; // timestamp en ms (puede estar en data)
   endedAt?: number; // Timestamp cuando se finalizó la relación (puede estar en data)
+  data?: RelationshipSettings; // Configuración de la relación (legacy)
 }
 
 export interface Invitation {
@@ -92,6 +102,7 @@ export interface JournalEntry {
   // Columnas de tabla según el nuevo schema
   creator_user_id: string; // FK a users(id) - Usuario que creó la entrada
   target_user_id: string; // FK a users(id) - Usuario objetivo de la entrada (paciente)
+  entry_type?: 'internal_note' | 'feedback' | 'voice_session'; // Tipo de entrada (columna de tabla)
   
   // Campos en data JSONB
   userId?: string; // DEPRECATED: usar target_user_id en su lugar (mantener para compatibilidad)
@@ -114,6 +125,7 @@ export interface JournalEntry {
   psychologistFeedbackReadAt?: number;
 
   // Type of psychologist-created entry (for visibility/labeling)
+  // DEPRECATED: usar entry_type en su lugar (mantener para compatibilidad con entradas antiguas)
   psychologistEntryType?: 'NOTE' | 'FEEDBACK' | 'SESSION';
   
   // New field to identify if entry was created manually by psychologist
@@ -163,6 +175,7 @@ export interface PatientSummary {
   recentSummary: string;
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
   isSelf?: boolean; // To mark if this is the psychologist themselves
+  tags?: string[]; // Tags from care_relationships
 }
 
 export enum ViewState {

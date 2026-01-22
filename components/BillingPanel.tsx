@@ -436,7 +436,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
   };
 
   return (
-    <div className="space-y-6" data-billing-component ref={(el) => {
+    <div className="space-y-8 px-2 md:px-4" data-billing-component ref={(el) => {
       if (el) {
         (el as any).openNewInvoice = () => setShowNewInvoice(true);
       }
@@ -455,27 +455,74 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <div className="text-xs text-slate-500 uppercase font-semibold">Total Facturas</div>
-          <div className="text-2xl font-bold text-slate-900 mt-2">{invoices.length}</div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 md:gap-4 mt-6">
+        <div className="bg-gradient-to-br from-white to-slate-50 rounded-lg border border-slate-200 px-4 py-4 shadow-sm hover:shadow-md transition-all">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="p-1.5 bg-slate-100 rounded">
+              <FileText size={16} className="text-slate-600" />
+            </div>
+            <div className="text-[10px] text-slate-500 uppercase font-semibold tracking-wide">Total Facturas</div>
+          </div>
+          <div className="text-2xl font-bold text-slate-900">{invoices.length}</div>
         </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <div className="text-xs text-slate-500 uppercase font-semibold">Pagadas</div>
-          <div className="text-2xl font-bold text-green-600 mt-2">
+        
+        <div className="bg-gradient-to-br from-white to-green-50 rounded-lg border border-green-200 px-4 py-4 shadow-sm hover:shadow-md transition-all">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="p-1.5 bg-green-100 rounded">
+              <Check size={16} className="text-green-600" />
+            </div>
+            <div className="text-[10px] text-green-600 uppercase font-semibold tracking-wide">Pagadas</div>
+          </div>
+          <div className="text-2xl font-bold text-green-600">
             {invoices.filter(inv => inv.status === 'paid').length}
           </div>
         </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <div className="text-xs text-slate-500 uppercase font-semibold">Pendientes</div>
-          <div className="text-2xl font-bold text-yellow-600 mt-2">
+        
+        <div className="bg-gradient-to-br from-white to-yellow-50 rounded-lg border border-yellow-200 px-4 py-4 shadow-sm hover:shadow-md transition-all">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="p-1.5 bg-yellow-100 rounded">
+              <Clock size={16} className="text-yellow-600" />
+            </div>
+            <div className="text-[10px] text-yellow-600 uppercase font-semibold tracking-wide">Pendientes</div>
+          </div>
+          <div className="text-2xl font-bold text-yellow-600">
             {invoices.filter(inv => inv.status === 'pending').length}
           </div>
         </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <div className="text-xs text-slate-500 uppercase font-semibold">Total Ingresos</div>
-          <div className="text-2xl font-bold text-slate-900 mt-2">
+        
+        <div className="bg-gradient-to-br from-white to-orange-50 rounded-lg border border-orange-200 px-4 py-4 shadow-sm hover:shadow-md transition-all">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="p-1.5 bg-orange-100 rounded">
+              <DollarSign size={16} className="text-orange-600" />
+            </div>
+            <div className="text-[10px] text-orange-600 uppercase font-semibold tracking-wide">Total Pendiente</div>
+          </div>
+          <div className="text-xl font-bold text-orange-600">
+            €{invoices.filter(inv => inv.status === 'pending').reduce((sum, inv) => sum + (inv.total || inv.amount), 0).toFixed(2)}
+          </div>
+        </div>
+        
+        <div className="bg-gradient-to-br from-white to-emerald-50 rounded-lg border border-emerald-200 px-4 py-4 shadow-sm hover:shadow-md transition-all">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="p-1.5 bg-emerald-100 rounded">
+              <DollarSign size={16} className="text-emerald-600" />
+            </div>
+            <div className="text-[10px] text-emerald-600 uppercase font-semibold tracking-wide">Total Ingresos</div>
+          </div>
+          <div className="text-xl font-bold text-emerald-600">
             €{invoices.filter(inv => inv.status === 'paid').reduce((sum, inv) => sum + (inv.total || inv.amount), 0).toFixed(2)}
+          </div>
+        </div>
+        
+        <div className="bg-gradient-to-br from-white to-indigo-50 rounded-lg border border-indigo-200 px-4 py-4 shadow-sm hover:shadow-md transition-all">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="p-1.5 bg-indigo-100 rounded">
+              <FileText size={16} className="text-indigo-600" />
+            </div>
+            <div className="text-[10px] text-indigo-600 uppercase font-semibold tracking-wide">Total Facturado</div>
+          </div>
+          <div className="text-xl font-bold text-indigo-600">
+            €{invoices.filter(inv => inv.status !== 'cancelled').reduce((sum, inv) => sum + (inv.total || inv.amount), 0).toFixed(2)}
           </div>
         </div>
       </div>
@@ -483,7 +530,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       {/* Invoice List */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         {selectedInvoices.size > 0 && (
-          <div className="bg-indigo-50 border-b border-indigo-200 px-4 py-3 flex items-center justify-between">
+          <div className="bg-indigo-50 border-b border-indigo-200 px-6 py-4 flex items-center justify-between">
             <span className="text-sm font-medium text-indigo-700">
               {selectedInvoices.size} factura{selectedInvoices.size !== 1 ? 's' : ''} seleccionada{selectedInvoices.size !== 1 ? 's' : ''}
             </span>
@@ -513,13 +560,13 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                     )}
                   </button>
                 </th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase">Nº Factura</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase">Paciente</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase">Fecha</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase">Vencimiento</th>
-                <th className="text-right px-4 py-3 text-xs font-semibold text-slate-600 uppercase">Importe</th>
-                <th className="text-center px-4 py-3 text-xs font-semibold text-slate-600 uppercase">Estado</th>
-                <th className="text-center px-4 py-3 text-xs font-semibold text-slate-600 uppercase">Acciones</th>
+                <th className="text-left px-6 py-4 text-xs font-semibold text-slate-600 uppercase tracking-wider">Nº Factura</th>
+                <th className="text-left px-6 py-4 text-xs font-semibold text-slate-600 uppercase tracking-wider">Paciente</th>
+                <th className="text-left px-6 py-4 text-xs font-semibold text-slate-600 uppercase tracking-wider">Fecha</th>
+                <th className="text-left px-6 py-4 text-xs font-semibold text-slate-600 uppercase tracking-wider">Vencimiento</th>
+                <th className="text-right px-6 py-4 text-xs font-semibold text-slate-600 uppercase tracking-wider">Importe</th>
+                <th className="text-center px-6 py-4 text-xs font-semibold text-slate-600 uppercase tracking-wider">Estado</th>
+                <th className="text-center px-6 py-4 text-xs font-semibold text-slate-600 uppercase tracking-wider">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -532,7 +579,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
               ) : (
                 invoices.map((invoice) => (
                   <tr key={invoice.id} className={`hover:bg-slate-50 transition-colors ${invoice.status === 'cancelled' ? 'opacity-60' : ''}`}>
-                    <td className="px-4 py-3">
+                    <td className="px-6 py-4">
                       <button
                         onClick={() => toggleSelectInvoice(invoice.id)}
                         className="p-1 hover:bg-slate-200 rounded transition-colors"
@@ -544,18 +591,18 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                         )}
                       </button>
                     </td>
-                    <td className={`px-4 py-3 text-sm font-medium text-slate-900 ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>{invoice.invoiceNumber}</td>
-                    <td className={`px-4 py-3 text-sm text-slate-700 ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>{invoice.patientName}</td>
-                    <td className={`px-4 py-3 text-sm text-slate-600 ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>{new Date(invoice.date).toLocaleDateString()}</td>
-                    <td className={`px-4 py-3 text-sm text-slate-600 ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>{new Date(invoice.dueDate).toLocaleDateString()}</td>
-                    <td className={`px-4 py-3 text-sm font-semibold text-slate-900 text-right ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>€{((invoice.total || invoice.amount || 0)).toFixed(2)}</td>
-                    <td className="px-4 py-3">
+                    <td className={`px-6 py-4 text-sm font-medium text-slate-900 ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>{invoice.invoiceNumber}</td>
+                    <td className={`px-6 py-4 text-sm text-slate-700 ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>{invoice.patientName}</td>
+                    <td className={`px-6 py-4 text-sm text-slate-600 ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>{new Date(invoice.date).toLocaleDateString()}</td>
+                    <td className={`px-6 py-4 text-sm text-slate-600 ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>{new Date(invoice.dueDate).toLocaleDateString()}</td>
+                    <td className={`px-6 py-4 text-sm font-semibold text-slate-900 text-right ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>€{((invoice.total || invoice.amount || 0)).toFixed(2)}</td>
+                    <td className="px-6 py-4">
                       <div className="flex justify-center">
                         <div className="relative group">
                           <select
                             value={invoice.status}
                             onChange={(e) => handleChangeStatus(invoice.id, e.target.value as any)}
-                            className={`appearance-none text-xs font-semibold border rounded-lg pl-3 pr-8 py-2 cursor-pointer transition-all hover:shadow-md focus:ring-2 focus:ring-indigo-500 focus:border-transparent focus:outline-none ${getStatusColor(invoice.status)}`}
+                            className={`appearance-none text-xs font-semibold border-2 rounded-lg pl-3 pr-8 py-2 cursor-pointer transition-all hover:shadow-md focus:ring-2 focus:ring-indigo-500 focus:border-transparent focus:outline-none ${getStatusColor(invoice.status)}`}
                             style={{ minWidth: '120px' }}
                           >
                             <option value="pending">⏱️ Pendiente</option>
@@ -570,8 +617,8 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-center gap-2">
+                    <td className="px-6 py-4">
+                      <div className="flex items-center justify-center gap-3">
                         <button
                           onClick={() => setSelectedInvoice(invoice)}
                           className="p-1.5 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"

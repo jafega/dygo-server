@@ -35,6 +35,7 @@ const SUPABASE_TABLES_TO_ENSURE = [
   'invitations',
   'settings',
   'sessions',
+  'dispo',
   'care_relationships',
   'invoices',
   'psychologist_profiles'
@@ -234,7 +235,9 @@ const ensureCareRelationship = (db, psychUserId, patientUserId) => {
     id: crypto.randomUUID(),
     psychologist_user_id: psychUserId,
     patient_user_id: patientUserId,
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    default_session_price: 0,
+    default_psych_percent: 100
   };
   console.log('[ensureCareRelationship] ✓ Nueva relación creada', rel);
   db.careRelationships.push(rel);
@@ -595,9 +598,19 @@ function normalizeSupabaseRow(row) {
     delete cleanData.psychologist_profile_id; // Usar columna de tabla
     delete cleanData.creator_user_id;      // Usar columna de tabla (entries)
     delete cleanData.target_user_id;       // Usar columna de tabla (entries)
-    delete cleanData.patient_user_id;      // Usar columna de tabla (goals/invoices)
-    delete cleanData.psychologist_user_id; // Usar columna de tabla (invoices)
-    // No eliminar amount, tax, total, status porque pueden estar solo en JSONB si no hay columnas
+    delete cleanData.entry_type;           // Usar columna de tabla (entries)
+    delete cleanData.entryType;            // Usar columna de tabla (entries)
+    delete cleanData.patient_user_id;      // Usar columna de tabla (goals/invoices/sessions)
+    delete cleanData.psychologist_user_id; // Usar columna de tabla (invoices/sessions)
+    delete cleanData.status;               // Usar columna de tabla (sessions/invoices)
+    delete cleanData.date;                 // Usar starts_on/ends_on (sessions)
+    delete cleanData.startTime;            // Usar starts_on (sessions)
+    delete cleanData.endTime;              // Usar ends_on (sessions)
+    delete cleanData.price;                // Usar columna de tabla (sessions)
+    delete cleanData.percent_psych;        // Usar columna de tabla (sessions)
+    delete cleanData.paid;                 // Usar columna de tabla (sessions)
+    delete cleanData.default_session_price; // Usar columna de tabla (care_relationships)
+    delete cleanData.default_psych_percent; // Usar columna de tabla (care_relationships)
     
     // Combinar: primero data limpia, luego columnas de tabla
     const merged = { ...cleanData, ...base };
@@ -632,6 +645,12 @@ function normalizeSupabaseRow(row) {
       merged.target_user_id = base.target_user_id;
       // Mantener compatibilidad: target_user_id es siempre el paciente
       merged.userId = base.target_user_id;
+    }
+    
+    // Para entries: mapear entry_type desde columna
+    if (base.entry_type !== undefined) {
+      merged.entry_type = base.entry_type;
+      merged.entryType = base.entry_type; // Compatibilidad frontend
     }
     
     // Para goals: mapear patient_user_id
@@ -682,6 +701,36 @@ function normalizeSupabaseRow(row) {
       merged.taxRate = parseFloat(cleanData.taxRate);
     }
     
+    // Para sessions: mapear price, percent_psych, paid desde columnas de tabla
+    if (base.price !== undefined && base.price !== null) {
+      merged.price = parseFloat(base.price);
+    }
+    
+    if (base.percent_psych !== undefined && base.percent_psych !== null) {
+      merged.percent_psych = parseFloat(base.percent_psych);
+    }
+    
+    if (base.paid !== undefined && base.paid !== null) {
+      merged.paid = base.paid;
+    }
+    
+    // Para care_relationships: mapear default_session_price y default_psych_percent
+    // También añadir compatibilidad camelCase para el frontend
+    if (base.default_session_price !== undefined && base.default_session_price !== null) {
+      merged.default_session_price = parseFloat(base.default_session_price);
+      merged.defaultPrice = parseFloat(base.default_session_price); // Compatibilidad frontend
+    }
+    
+    if (base.default_psych_percent !== undefined && base.default_psych_percent !== null) {
+      merged.default_psych_percent = parseFloat(base.default_psych_percent);
+      merged.defaultPercent = parseFloat(base.default_psych_percent); // Compatibilidad frontend
+    }
+    
+    // Tags vienen del JSONB data
+    if (cleanData.tags !== undefined) {
+      merged.tags = cleanData.tags;
+    }
+    
     return merged;
   }
   
@@ -708,7 +757,7 @@ function buildSupabaseRowFromEntity(originalRow, entity) {
 
 // Función específica para entries que maneja creator_user_id y target_user_id correctamente
 function buildSupabaseEntryRow(entry) {
-  const { id, creator_user_id, target_user_id, userId, createdByPsychologistId, ...restData } = entry;
+  const { id, creator_user_id, target_user_id, userId, createdByPsychologistId, entryType, psychologistEntryType, type, ...restData } = entry;
   
   // Determinar creator_user_id y target_user_id
   // Si la entrada es del psicólogo (createdBy === 'PSYCHOLOGIST'):
@@ -743,11 +792,17 @@ function buildSupabaseEntryRow(entry) {
     });
   }
   
+  // Extraer entry_type como columna directa (no en data)
+  // Excluir entryType de restData
+  const { entryType: dataEntryType, ...cleanData } = restData;
+  const finalEntryType = entryType || dataEntryType || psychologistEntryType || type || null;
+  
   return {
     id,
     creator_user_id: finalCreatorId,
     target_user_id: finalTargetId,
-    data: restData
+    entry_type: finalEntryType,
+    data: cleanData
   };
 }
 
@@ -981,9 +1036,38 @@ async function loadSupabaseCache() {
     return normalized;
   });
   const invitations = invitationsRows.map(normalizeSupabaseRow);
-  const sessions = sessionsRows.map(normalizeSupabaseRow);
+  const sessions = sessionsRows.map(row => {
+    const normalized = normalizeSupabaseRow(row);
+    // Priorizar status de la columna sobre data.status
+    if (row.status) {
+      normalized.status = row.status;
+    }
+    // Convertir starts_on/ends_on a date/startTime/endTime para compatibilidad con frontend
+    if (row.starts_on) {
+      const startsDate = new Date(row.starts_on);
+      normalized.date = startsDate.toISOString().split('T')[0];
+      normalized.startTime = startsDate.toTimeString().substring(0, 5);
+      normalized.starts_on = row.starts_on;
+    }
+    if (row.ends_on) {
+      const endsDate = new Date(row.ends_on);
+      normalized.endTime = endsDate.toTimeString().substring(0, 5);
+      normalized.ends_on = row.ends_on;
+    }
+    return normalized;
+  });
   const invoices = invoicesRows.map(normalizeSupabaseRow);
-  const careRelationships = relationshipsRows.map(normalizeSupabaseRow);
+  const careRelationships = relationshipsRows.map(row => {
+    const normalized = normalizeSupabaseRow(row);
+    // Asegurar que default_session_price y default_psych_percent tengan valores
+    if (normalized.default_session_price === null || normalized.default_session_price === undefined) {
+      normalized.default_session_price = 0;
+    }
+    if (normalized.default_psych_percent === null || normalized.default_psych_percent === undefined) {
+      normalized.default_psych_percent = 100;
+    }
+    return normalized;
+  });
   const settings = Object.fromEntries(settingsRows.map(row => [row.id, (row.data && typeof row.data === 'object') ? row.data : normalizeSupabaseRow(row)]));
   const psychologistProfiles = Object.fromEntries(profilesRows.map(row => [row.id, (row.data && typeof row.data === 'object') ? row.data : normalizeSupabaseRow(row)]));
 
@@ -1114,6 +1198,12 @@ async function dedupeSupabaseUsers() {
   }
 }
 
+// Helper para combinar date + time en timestamp ISO
+function dateTimeToISO(date, time) {
+  if (!date || !time) return null;
+  return `${date}T${time}:00`;
+}
+
 async function saveSupabaseDb(data, prevCache = null) {
   if (!supabaseAdmin) return;
 
@@ -1229,26 +1319,65 @@ async function saveSupabaseDb(data, prevCache = null) {
     user_id: settings[k]?.user_id || settings[k]?.userId || null
   }));
   
-  // Sessions: extraer campos psychologist_user_id y patient_user_id
-  const sessionsRows = (data.sessions || []).map(s => ({
-    id: s.id,
-    data: s,
-    psychologist_user_id: s.psychologist_user_id || null,
-    patient_user_id: s.patient_user_id || s.patientId || null
-  }));
+  // Sessions: extraer campos psychologist_user_id, patient_user_id, status, starts_on, ends_on, price, percent_psych, paid
+  // Solo persistir sesiones reales con paciente (no disponibilidad)
+  const sessionsRows = (data.sessions || [])
+    .filter(s => s.patient_user_id || s.patientId) // Filtrar sesiones sin paciente
+    .map(s => {
+      // Remover campos que van en columnas separadas (no en JSONB data)
+      const { status, date, startTime, endTime, starts_on, ends_on, price, percent_psych, paid, ...cleanData } = s;
+      
+      // Extraer price, percent_psych, paid (pueden estar en el objeto o en data JSONB)
+      const finalPrice = price ?? s.data?.price ?? null;
+      const finalPercentPsych = percent_psych ?? s.data?.percent_psych ?? null;
+      const finalPaid = paid ?? s.data?.paid ?? false;
+      
+      // Validar que price y percent_psych no sean null
+      if (finalPrice === null || finalPercentPsych === null) {
+        console.warn(`⚠️ [saveSupabaseDb] Sesión ${s.id} sin price o percent_psych - saltando`);
+        return null;
+      }
+      
+      return {
+        id: s.id,
+        data: cleanData,
+        psychologist_user_id: s.psychologist_user_id || null,
+        patient_user_id: s.patient_user_id || s.patientId || null,
+        status: s.status || 'scheduled',
+        starts_on: s.starts_on || dateTimeToISO(s.date, s.startTime) || null,
+        ends_on: s.ends_on || dateTimeToISO(s.date, s.endTime) || null,
+        price: finalPrice,
+        percent_psych: finalPercentPsych,
+        paid: finalPaid
+      };
+    })
+    .filter(s => s !== null); // Remover sesiones inválidas
   
   // Invoices: usar buildSupabaseInvoiceRow para incluir amount, tax, total, status
   const invoicesRows = (data.invoices || [])
     .filter(inv => inv.psychologist_user_id || inv.psychologistId) // Filtrar facturas sin psicólogo
     .map(inv => buildSupabaseInvoiceRow(inv));
 
-  // Care relationships: extraer campos según el nuevo schema (psychologist_user_id, patient_user_id)
-  const relationshipsRows = (data.careRelationships || []).map(rel => ({
-    id: rel.id,
-    data: rel,
-    psychologist_user_id: rel.psychologist_user_id || null,
-    patient_user_id: rel.patient_user_id || null
-  }));
+  // Care relationships: extraer campos según el nuevo schema (psychologist_user_id, patient_user_id, default_session_price, default_psych_percent)
+  const relationshipsRows = (data.careRelationships || [])
+    .filter(rel => {
+      // Solo incluir relaciones que tienen los campos requeridos
+      const hasPrice = rel.default_session_price !== undefined && rel.default_session_price !== null;
+      const hasPercent = rel.default_psych_percent !== undefined && rel.default_psych_percent !== null;
+      if (!hasPrice || !hasPercent) {
+        console.warn(`⚠️ [saveSupabaseDb] Saltando care_relationship ${rel.id} sin default_session_price o default_psych_percent`);
+        return false;
+      }
+      return true;
+    })
+    .map(rel => ({
+      id: rel.id,
+      data: rel.data || rel,
+      psychologist_user_id: rel.psychologist_user_id || null,
+      patient_user_id: rel.patient_user_id || null,
+      default_session_price: rel.default_session_price,
+      default_psych_percent: Math.min(rel.default_psych_percent, 100)
+    }));
   
   // Psychologist profiles: extraer campo user_id
   const profiles = data.psychologistProfiles || {};
@@ -1402,7 +1531,12 @@ const saveDb = (data, options = {}) => {
         for (const i of (data.invitations || [])) await insert('invitations', i.id, i);
         const settings = data.settings || {};
         for (const k of Object.keys(settings)) await insert('settings', k, settings[k]);
-        for (const s of (data.sessions || [])) await insert('sessions', s.id, s);
+        // Solo insertar sesiones reales con paciente (no disponibilidad)
+        for (const s of (data.sessions || [])) {
+          if (s.patient_user_id || s.patientId) {
+            await insert('sessions', s.id, s);
+          }
+        }
         for (const rel of (data.careRelationships || [])) await insert('care_relationships', rel.id, rel);
         for (const inv of (data.invoices || [])) await insert('invoices', inv.id, inv);
         const profiles = data.psychologistProfiles || {};
@@ -1453,7 +1587,12 @@ const saveDb = (data, options = {}) => {
       (dbObj.invitations || []).forEach(i => insert.run({ table: 'invitations', id: i.id, data: JSON.stringify(i) }));
       const settings = dbObj.settings || {};
       Object.keys(settings).forEach(k => insert.run({ table: 'settings', id: k, data: JSON.stringify(settings[k]) }));
-      (dbObj.sessions || []).forEach(s => insert.run({ table: 'sessions', id: s.id, data: JSON.stringify(s) }));
+      // Solo insertar sesiones reales con paciente (no disponibilidad)
+      (dbObj.sessions || []).forEach(s => {
+        if (s.patient_user_id || s.patientId) {
+          insert.run({ table: 'sessions', id: s.id, data: JSON.stringify(s) });
+        }
+      });
       (dbObj.careRelationships || []).forEach(rel => insert.run({ table: 'care_relationships', id: rel.id, data: JSON.stringify(rel) }));
       (dbObj.invoices || []).forEach(inv => insert.run({ table: 'invoices', id: inv.id, data: JSON.stringify(inv) }));
       const profiles = dbObj.psychologistProfiles || {};
@@ -1950,6 +2089,143 @@ const handleAdminResetUserPassword = (req, res) => {
 
 app.post('/api/admin/reset-user-password', handleAdminResetUserPassword);
 app.post('/api/admin-reset-user-password', handleAdminResetUserPassword);
+
+// --- ADMIN: Create a patient and connect to psychologist
+const handleAdminCreatePatient = async (req, res) => {
+  try {
+    const psychologistId = req.headers['x-user-id'] || req.headers['x-userid'];
+    if (!psychologistId) return res.status(401).json({ error: 'Missing psychologist id in header x-user-id' });
+
+    const { name, email, phone } = req.body || {};
+    if (!name || !email) return res.status(400).json({ error: 'Name and email are required' });
+
+    const db = getDb();
+    const psychologist = db.users.find(u => u.id === String(psychologistId));
+    if (!psychologist || !psychologist.is_psychologist) {
+      return res.status(403).json({ error: 'Only psychologists can create patients' });
+    }
+
+    // Verificar si el email ya existe en Supabase
+    const normalizedEmail = normalizeEmail(email);
+    
+    if (supabaseAdmin) {
+      const { data: existingInSupabase } = await supabaseAdmin
+        .from('users')
+        .select('id')
+        .eq('user_email', normalizedEmail)
+        .maybeSingle();
+      
+      if (existingInSupabase) {
+        return res.status(400).json({ error: 'Ya existe un usuario con ese email' });
+      }
+    } else {
+      const existingUser = db.users.find(u => normalizeEmail(u.email) === normalizedEmail);
+      if (existingUser) {
+        return res.status(400).json({ error: 'Ya existe un usuario con ese email' });
+      }
+    }
+
+    // Crear el nuevo paciente
+    const newPatient = {
+      id: crypto.randomUUID(),
+      email: normalizedEmail,
+      name: name.trim(),
+      phone: phone ? phone.trim() : '',
+      is_psychologist: false,
+      auth_user_id: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    // Crear la relación de cuidado
+    const relationship = {
+      id: crypto.randomUUID(),
+      psychologist_user_id: psychologistId,
+      patient_user_id: newPatient.id,
+      status: 'active',
+      default_session_price: 0,
+      default_psych_percent: 80,
+      data: {
+        psychologistId: psychologistId,
+        patientId: newPatient.id,
+        status: 'active',
+        tags: []
+      },
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    // PRIMERO: Insertar en Supabase si está disponible
+    if (supabaseAdmin) {
+      console.log('[handleAdminCreatePatient] 🔄 Insertando en Supabase...');
+      
+      try {
+        // 1. Insertar paciente
+        console.log('[handleAdminCreatePatient] Insertando usuario:', newPatient.id);
+        const { error: userError } = await supabaseAdmin
+          .from('users')
+          .insert({
+            id: newPatient.id,
+            data: newPatient,
+            user_email: newPatient.email,
+            is_psychologist: false
+          });
+
+        if (userError) {
+          console.error('[handleAdminCreatePatient] ❌ Error insertando usuario:', userError);
+          throw new Error(`Error al crear usuario: ${userError.message}`);
+        }
+        console.log('[handleAdminCreatePatient] ✅ Usuario insertado en Supabase');
+
+        // 2. Insertar relación
+        console.log('[handleAdminCreatePatient] Insertando relación:', relationship.id);
+        const { error: relError } = await supabaseAdmin
+          .from('care_relationships')
+          .insert({
+            id: relationship.id,
+            data: relationship.data,
+            psychologist_user_id: psychologistId,
+            patient_user_id: newPatient.id,
+            default_session_price: 0,
+            default_psych_percent: 80
+          });
+
+        if (relError) {
+          console.error('[handleAdminCreatePatient] ❌ Error insertando relación:', relError);
+          // Intentar eliminar el usuario si la relación falló
+          await supabaseAdmin.from('users').delete().eq('id', newPatient.id);
+          throw new Error(`Error al crear relación: ${relError.message}`);
+        }
+        console.log('[handleAdminCreatePatient] ✅ Relación insertada en Supabase');
+      } catch (supaErr) {
+        console.error('[handleAdminCreatePatient] ❌ Error en Supabase:', supaErr);
+        return res.status(500).json({ error: supaErr.message || 'Error al crear paciente en Supabase' });
+      }
+    }
+
+    // SEGUNDO: Guardar también en DB local
+    db.users.push(newPatient);
+    if (!Array.isArray(db.careRelationships)) {
+      db.careRelationships = [];
+    }
+    db.careRelationships.push(relationship);
+    await saveDb(db, { awaitPersistence: false }); // No esperar persistencia para no duplicar en Supabase
+
+    console.log(`✅ Paciente creado: ${newPatient.name} (${newPatient.email}) por psicólogo ${psychologist.name}`);
+
+    return res.json({
+      success: true,
+      patient: newPatient,
+      relationship: relationship
+    });
+
+  } catch (err) {
+    console.error('Error in admin-create-patient', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+app.post('/api/admin/create-patient', handleAdminCreatePatient);
 
 // --- ADMIN: Delete a user and all associated data (restricted to superadmin)
 const handleAdminDeleteUser = (req, res) => {
@@ -2481,6 +2757,99 @@ app.put('/api/users/:id', async (req, res) => {
   }
 });
 
+// PATCH endpoint for updating users (Supabase)
+app.patch('/api/users/:id', async (req, res) => {
+  try {
+    const userId = req.params.id;
+    
+    if (!supabaseAdmin) {
+      // Fallback a db.json si no hay Supabase
+      const db = getDb();
+      const idx = db.users.findIndex((u) => u.id === userId);
+      if (idx === -1) return res.status(404).json({ error: 'Usuario no encontrado' });
+      
+      if (req.body?.email) {
+        const normalizedEmail = normalizeEmail(req.body.email);
+        const duplicate = db.users.find((u, i) => i !== idx && normalizeEmail(u.email) === normalizedEmail);
+        if (duplicate) return res.status(400).json({ error: 'Email ya en uso' });
+      }
+      
+      // Merge data fields
+      const currentData = db.users[idx].data || {};
+      const newData = req.body.data || {};
+      
+      const updated = { 
+        ...db.users[idx], 
+        ...req.body,
+        data: { ...currentData, ...newData }
+      };
+      
+      if (updated.email) updated.email = normalizeEmail(updated.email);
+      if (updated.email && !updated.user_email) updated.user_email = updated.email;
+      
+      db.users[idx] = updated;
+      await saveDb(db, { awaitPersistence: true });
+      return res.json(db.users[idx]);
+    }
+
+    // Con Supabase
+    const existingUser = await readSupabaseRowById('users', userId);
+    if (!existingUser) {
+      console.log(`⚠️ Usuario con ID ${userId} no encontrado en Supabase`);
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+
+    // Verificar email duplicado si se está actualizando
+    if (req.body?.email) {
+      const normalizedEmail = normalizeEmail(req.body.email);
+      const users = (await readSupabaseTable('users')) || [];
+      const duplicate = users.find(u => u.id !== userId && normalizeEmail(u.email || u.user_email) === normalizedEmail);
+      if (duplicate) return res.status(400).json({ error: 'Email ya en uso' });
+    }
+
+    // Preparar datos para actualizar
+    const updateFields = {};
+    
+    // user_email es la única columna directa para email
+    if (req.body.email !== undefined) {
+      updateFields.user_email = normalizeEmail(req.body.email);
+    }
+    
+    // Merge data field (JSONB column) - name, phone y otros campos van aquí
+    const currentData = existingUser.data || {};
+    const newData = req.body.data || {};
+    
+    // Agregar name, firstName, lastName, phone al data si vienen en el body
+    const mergedData = { ...currentData, ...newData };
+    if (req.body.name !== undefined) mergedData.name = req.body.name;
+    if (req.body.firstName !== undefined) mergedData.firstName = req.body.firstName;
+    if (req.body.lastName !== undefined) mergedData.lastName = req.body.lastName;
+    if (req.body.phone !== undefined) mergedData.phone = req.body.phone;
+    if (req.body.email !== undefined) mergedData.email = normalizeEmail(req.body.email);
+    
+    updateFields.data = mergedData;
+
+    // Actualizar en Supabase
+    const { error: updateError } = await supabaseAdmin
+      .from('users')
+      .update(updateFields)
+      .eq('id', userId);
+
+    if (updateError) {
+      console.error('❌ Error actualizando usuario en Supabase:', updateError);
+      throw new Error(`Error actualizando usuario: ${updateError.message}`);
+    }
+
+    // Obtener usuario actualizado
+    const updatedUser = await readSupabaseRowById('users', userId);
+    console.log('✅ Usuario actualizado en Supabase:', userId);
+    return res.json(updatedUser);
+  } catch (err) {
+    console.error('Error in PATCH /api/users/:id', err);
+    return res.status(500).json({ error: err?.message || 'Error actualizando el usuario' });
+  }
+});
+
 app.put('/api/users', async (req, res) => {
   try {
     const id = req.query.id || req.query.userId;
@@ -2767,6 +3136,84 @@ app.post('/api/upload-session-file', async (req, res) => {
   } catch (err) {
     console.error('Error in POST /api/upload-session-file', err);
     return res.status(500).json({ error: err?.message || 'Error subiendo archivo de sesión' });
+  }
+});
+
+// Upload endpoint for entry attachments (base64)
+app.post('/api/upload', async (req, res) => {
+  try {
+    console.log('📥 POST /api/upload recibido');
+    console.log('📦 Body keys:', Object.keys(req.body || {}));
+    console.log('📦 Body:', JSON.stringify(req.body || {}).substring(0, 200));
+    
+    const { fileName, fileType, fileData, userId, folder = 'patient-attachments', fileSize } = req.body;
+
+    console.log('📝 Datos extraídos:', { 
+      hasFileName: !!fileName, 
+      hasFileData: !!fileData, 
+      fileDataLength: fileData?.length || 0,
+      userId,
+      folder 
+    });
+
+    if (!fileData || !fileName) {
+      console.error('❌ Falta fileData o fileName');
+      return res.status(400).json({ error: 'No se recibió ningún archivo' });
+    }
+
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: 'Supabase no está configurado' });
+    }
+
+    // Convertir base64 a Buffer
+    const fileBuffer = Buffer.from(fileData, 'base64');
+
+    // Verificar que el bucket existe
+    const { data: buckets } = await supabaseAdmin.storage.listBuckets();
+    const bucketExists = buckets?.some(b => b.name === folder);
+    
+    if (!bucketExists) {
+      console.log(`📦 Creando bucket ${folder}...`);
+      const { error: createError } = await supabaseAdmin.storage.createBucket(folder, {
+        public: true,
+        fileSizeLimit: 50 * 1024 * 1024 // 50MB limit
+      });
+      
+      if (createError && !createError.message.includes('already exists')) {
+        console.error('Error creando bucket:', createError);
+        return res.status(500).json({ error: 'Error creando bucket' });
+      }
+    }
+
+    // Generar nombre único
+    const timestamp = Date.now();
+    const safeFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const filePath = `${userId || 'unknown'}/${timestamp}_${safeFileName}`;
+
+    // Subir a Supabase Storage
+    const { data, error } = await supabaseAdmin.storage
+      .from(folder)
+      .upload(filePath, fileBuffer, {
+        contentType: fileType || 'application/octet-stream',
+        upsert: false,
+        cacheControl: '3600'
+      });
+
+    if (error) {
+      console.error('Error subiendo a Supabase Storage:', error);
+      return res.status(500).json({ error: 'Error subiendo archivo' });
+    }
+
+    // Obtener URL pública
+    const { data: { publicUrl } } = supabaseAdmin.storage
+      .from(folder)
+      .getPublicUrl(filePath);
+
+    console.log('✅ Archivo adjunto subido:', filePath);
+    return res.json({ url: publicUrl, path: filePath });
+  } catch (err) {
+    console.error('Error in POST /api/upload', err);
+    return res.status(500).json({ error: err?.message || 'Error procesando el archivo' });
   }
 });
 
@@ -4954,8 +5401,11 @@ app.post('/api/relationships', async (req, res) => {
     // Soportar tanto campos nuevos como legacy y ambos nombres
     const psychId = req.body.psychologist_user_id || req.body.psych_user_id || req.body.psychologistId;
     const patId = req.body.patient_user_id || req.body.patientId;
+    const defaultPrice = req.body.default_session_price ?? req.body.defaultSessionPrice ?? 0;
+    const defaultPercent = req.body.default_psych_percent ?? req.body.defaultPsychPercent ?? 100;
+    const tags = req.body.tags || [];
     
-    console.log('[POST /api/relationships] Request:', { psychId, patId });
+    console.log('[POST /api/relationships] Request:', { psychId, patId, defaultPrice, defaultPercent, tags });
     
     if (!psychId || !patId) {
       console.error('[POST /api/relationships] ❌ Missing required fields');
@@ -4967,6 +5417,54 @@ app.post('/api/relationships', async (req, res) => {
       return res.status(400).json({ error: 'No puedes crear una relación contigo mismo' });
     }
 
+    // PRIMERO: Intentar crear en Supabase si está disponible
+    if (supabaseAdmin) {
+      try {
+        console.log('[POST /api/relationships] Creando en Supabase...');
+        
+        // Verificar si ya existe
+        const { data: existing } = await supabaseAdmin
+          .from('care_relationships')
+          .select('*')
+          .eq('psychologist_user_id', psychId)
+          .eq('patient_user_id', patId)
+          .maybeSingle();
+        
+        if (existing) {
+          console.log('[POST /api/relationships] ⚠️ Relación ya existe:', existing.id);
+          return res.json(normalizeSupabaseRow(existing));
+        }
+        
+        // Crear nueva relación
+        const newRel = {
+          id: crypto.randomUUID(),
+          psychologist_user_id: psychId,
+          patient_user_id: patId,
+          default_session_price: defaultPrice,
+          default_psych_percent: defaultPercent,
+          data: { tags }
+        };
+        
+        const { data, error } = await supabaseAdmin
+          .from('care_relationships')
+          .insert([newRel])
+          .select()
+          .single();
+        
+        if (error) {
+          console.error('[POST /api/relationships] ❌ Error en Supabase:', error);
+          throw error;
+        }
+        
+        console.log('[POST /api/relationships] ✓ Relación creada en Supabase:', data.id);
+        return res.json(normalizeSupabaseRow(data));
+      } catch (supaErr) {
+        console.error('[POST /api/relationships] ❌ Error guardando en Supabase:', supaErr);
+        // Fallback a DB local
+      }
+    }
+    
+    // FALLBACK: Crear en DB local
     const db = getDb();
     
     // Validar que ambos usuarios existan
@@ -4982,7 +5480,7 @@ app.post('/api/relationships', async (req, res) => {
       return res.status(404).json({ error: 'El usuario (paciente) no existe' });
     }
     
-    console.log('[POST /api/relationships] Creando relación:', {
+    console.log('[POST /api/relationships] Creando en DB local:', {
       psychologist: `${psychUser.name} (${psychUser.role})`,
       patient: `${patientUser.name} (${patientUser.role})`
     });
@@ -4991,8 +5489,15 @@ app.post('/api/relationships', async (req, res) => {
     if (!relationship) {
       return res.status(500).json({ error: 'No se pudo crear la relación' });
     }
+    
+    // Aplicar valores default
+    relationship.default_session_price = defaultPrice;
+    relationship.default_psych_percent = defaultPercent;
+    if (!relationship.data) relationship.data = {};
+    relationship.data.tags = tags;
+    
     await saveDb(db, { awaitPersistence: true });
-    console.log('[POST /api/relationships] ✓ Relación guardada');
+    console.log('[POST /api/relationships] ✓ Relación guardada en DB local');
     return res.json(relationship);
   } catch (err) {
     console.error('❌ Error creating relationship', err);
@@ -5105,15 +5610,324 @@ app.patch('/api/relationships/end', async (req, res) => {
   }
 });
 
+app.put('/api/relationships/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updatedData = req.body;
+    
+    console.log('[PUT /api/relationships/:id] Updating relationship:', id);
+    
+    if (!id) {
+      return res.status(400).json({ error: 'ID de relación requerido' });
+    }
+
+    // Si usamos Supabase, actualizar allí
+    if (supabaseAdmin) {
+      try {
+        const { data: existingRows, error: selectErr } = await supabaseAdmin
+          .from('care_relationships')
+          .select('*')
+          .eq('id', id)
+          .limit(1);
+
+        if (selectErr) throw selectErr;
+        
+        const existing = existingRows && existingRows[0] ? normalizeSupabaseRow(existingRows[0]) : null;
+        if (!existing) {
+          return res.status(404).json({ error: 'Relación no encontrada' });
+        }
+
+        // Preparar datos actualizados: ahora default_session_price y default_psych_percent son columnas directas
+        const updatePayload = {};
+        
+        // Si vienen los campos directos, actualizarlos
+        if (updatedData.default_session_price !== undefined) {
+          updatePayload.default_session_price = updatedData.default_session_price;
+        }
+        if (updatedData.default_psych_percent !== undefined) {
+          updatePayload.default_psych_percent = Math.min(updatedData.default_psych_percent, 100);
+        }
+        
+        // Actualizar data JSONB con tags y otros campos
+        const existingData = existing.data || {};
+        const newData = { ...existingData };
+        
+        // Si se envían tags, guardarlas en data
+        if (updatedData.tags !== undefined) {
+          newData.tags = updatedData.tags;
+        }
+        
+        // Merge cualquier otro campo de data que venga
+        if (updatedData.data) {
+          Object.assign(newData, updatedData.data);
+        }
+        
+        // Siempre actualizar el campo data
+        updatePayload.data = newData;
+        
+        console.log('[PUT /api/relationships/:id] Update payload:', JSON.stringify(updatePayload, null, 2));
+
+        const { error: updateErr } = await supabaseAdmin
+          .from('care_relationships')
+          .update(updatePayload)
+          .eq('id', id);
+
+        if (updateErr) {
+          console.error('[PUT /api/relationships/:id] Supabase update error:', updateErr);
+          throw updateErr;
+        }
+
+        // Obtener la relación actualizada
+        const { data: updatedRows, error: fetchErr } = await supabaseAdmin
+          .from('care_relationships')
+          .select('*')
+          .eq('id', id)
+          .limit(1);
+
+        if (fetchErr) throw fetchErr;
+        
+        const updated = updatedRows && updatedRows[0] ? normalizeSupabaseRow(updatedRows[0]) : null;
+
+        // Actualizar cache
+        if (supabaseDbCache?.careRelationships && updated) {
+          const idx = supabaseDbCache.careRelationships.findIndex(rel => rel.id === id);
+          if (idx >= 0) supabaseDbCache.careRelationships[idx] = updated;
+        }
+
+        console.log('[PUT /api/relationships/:id] ✓ Relación actualizada en Supabase');
+        return res.json(updated || existing);
+      } catch (err) {
+        console.error('[PUT /api/relationships/:id] ❌ Error actualizando en Supabase:', err);
+        return res.status(500).json({ error: 'Error actualizando la relación' });
+      }
+    }
+
+    // Fallback a DB local
+    const db = getDb();
+    if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
+    
+    const idx = db.careRelationships.findIndex(rel => rel.id === id);
+    if (idx === -1) {
+      return res.status(404).json({ error: 'Relación no encontrada' });
+    }
+
+    // Actualizar campos directos y mantener compatibilidad con data
+    const existingData = db.careRelationships[idx].data || {};
+    const newData = {
+      ...existingData,
+      ...(updatedData.data || {})
+    };
+    
+    // Si se envían tags, guardarlas en data
+    if (updatedData.tags !== undefined) {
+      newData.tags = updatedData.tags;
+    }
+    
+    db.careRelationships[idx] = {
+      ...db.careRelationships[idx],
+      ...updatedData,
+      default_session_price: updatedData.default_session_price ?? db.careRelationships[idx].default_session_price ?? 0,
+      default_psych_percent: updatedData.default_psych_percent !== undefined 
+        ? Math.min(updatedData.default_psych_percent, 100) 
+        : (db.careRelationships[idx].default_psych_percent ?? 100),
+      data: newData
+    };
+
+    await saveDb(db, { awaitPersistence: true });
+    console.log('[PUT /api/relationships/:id] ✓ Relación actualizada en DB local');
+    return res.json(db.careRelationships[idx]);
+  } catch (err) {
+    console.error('❌ Error updating relationship', err);
+    return res.status(500).json({ error: err?.message || 'No se pudo actualizar la relación' });
+  }
+});
+
 // --- SESSIONS / CALENDAR ---
-app.get('/api/sessions', (req, res) => {
+app.get('/api/sessions', async (req, res) => {
   const { psychologistId, patientId, year, month, startDate, endDate, status, futureOnly } = req.query;
   if (!psychologistId && !patientId) {
     return res.status(400).json({ error: 'Missing psychologistId or patientId' });
   }
   
+  try {
+    // Si hay Supabase, consultar directamente desde allí
+    if (supabaseAdmin) {
+      console.log(`📖 [GET /api/sessions] Consultando Supabase directamente para psychologistId=${psychologistId}, patientId=${patientId}`);
+      
+      // Construir query de Supabase
+      let query = supabaseAdmin.from('sessions').select('*');
+      
+      if (psychologistId) {
+        query = query.eq('psychologist_user_id', psychologistId);
+      }
+      if (patientId) {
+        query = query.eq('patient_user_id', patientId);
+      }
+      
+      // Aplicar filtros de fecha
+      if (startDate) {
+        query = query.gte('starts_on', `${startDate}T00:00:00`);
+      }
+      if (endDate) {
+        query = query.lte('starts_on', `${endDate}T23:59:59`);
+      }
+      if (futureOnly === 'true') {
+        const now = new Date().toISOString();
+        query = query.gte('starts_on', now);
+      }
+      
+      // Aplicar filtro de status
+      if (status) {
+        const statuses = status.split(',');
+        query = query.in('status', statuses);
+      }
+      
+      const { data: sessionsData, error: sessionsError } = await query;
+      
+      if (sessionsError) {
+        console.error('❌ Error consultando sesiones de Supabase:', sessionsError);
+        throw sessionsError;
+      }
+      
+      // Normalizar sesiones (convierte starts_on/ends_on a date/startTime/endTime)
+      let sessions = (sessionsData || []).map(row => {
+        const normalized = normalizeSupabaseRow(row);
+        if (row.status) normalized.status = row.status;
+        if (row.starts_on) {
+          // NO usar toTimeString() porque aplica zona horaria local
+          // Extraer la hora directamente del string ISO
+          const startsISO = row.starts_on;
+          const match = startsISO.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+          if (match) {
+            normalized.date = match[1];
+            normalized.startTime = match[2];
+          } else {
+            // Fallback si el formato es diferente
+            const startsDate = new Date(row.starts_on);
+            normalized.date = startsDate.toISOString().split('T')[0];
+            normalized.startTime = startsDate.toISOString().split('T')[1].substring(0, 5);
+          }
+          normalized.starts_on = row.starts_on;
+        }
+        if (row.ends_on) {
+          // Extraer la hora directamente del string ISO sin conversiones de zona horaria
+          const endsISO = row.ends_on;
+          const match = endsISO.match(/T(\d{2}:\d{2})/);
+          if (match) {
+            normalized.endTime = match[1];
+          } else {
+            // Fallback
+            const endsDate = new Date(row.ends_on);
+            normalized.endTime = endsDate.toISOString().split('T')[1].substring(0, 5);
+          }
+          normalized.ends_on = row.ends_on;
+        }
+        // Agregar compatibilidad con campos legacy
+        if (row.psychologist_user_id) normalized.psychologistId = row.psychologist_user_id;
+        if (row.patient_user_id) normalized.patientId = row.patient_user_id;
+        return normalized;
+      });
+      
+      // Si es psicólogo, también incluir disponibilidad desde tabla dispo
+      if (psychologistId && !patientId) {
+        const { data: dispoData, error: dispoError } = await supabaseAdmin
+          .from('dispo')
+          .select('*')
+          .eq('psychologist_user_id', psychologistId);
+        
+        if (!dispoError && dispoData) {
+          const dispoSlots = dispoData.map(d => ({
+            id: d.id,
+            psychologistId: psychologistId,
+            psychologist_user_id: d.psychologist_user_id,
+            patientId: '',
+            patient_user_id: '',
+            patientName: 'Disponible',
+            patientPhone: '',
+            date: d.data?.date || '',
+            startTime: d.data?.startTime || '',
+            endTime: d.data?.endTime || '',
+            type: d.data?.type || 'online',
+            status: 'available',
+            isFromDispo: true
+          }));
+          sessions = [...sessions, ...dispoSlots];
+        }
+      }
+      
+      // Cargar datos de usuarios para enriquecer
+      const { data: usersData } = await supabaseAdmin.from('users').select('*');
+      const userIndex = new Map(
+        (usersData || [])
+          .filter(u => u && u.id)
+          .map(u => {
+            const normalized = normalizeSupabaseRow(u);
+            return [normalized.id, normalized];
+          })
+      );
+      
+      // Cargar relaciones para obtener tags
+      const { data: relationshipsData } = await supabaseAdmin.from('care_relationships').select('*');
+      const relationshipIndex = new Map();
+      (relationshipsData || []).forEach(rel => {
+        const key = `${rel.psychologist_user_id}-${rel.patient_user_id}`;
+        relationshipIndex.set(key, normalizeSupabaseRow(rel));
+      });
+      
+      // Enriquecer sesiones con datos de usuarios y tags
+      const sessionsWithDetails = sessions.map(session => {
+        const enriched = { ...session };
+        if (session.patientId || session.patient_user_id) {
+          const patientIdToUse = session.patient_user_id || session.patientId;
+          const patient = userIndex.get(patientIdToUse);
+          if (patient) {
+            const resolvedPhone = (patient.phone || '').trim() || enriched.patientPhone;
+            if (resolvedPhone && resolvedPhone !== enriched.patientPhone) {
+              enriched.patientPhone = resolvedPhone;
+            }
+            if (enriched.status !== 'available') {
+              enriched.patientName = enriched.patientName === 'Disponible' || !enriched.patientName ? patient.name : enriched.patientName;
+            }
+            enriched.patientEmail = patient.email;
+          }
+        }
+        
+        if (session.psychologistId || session.psychologist_user_id) {
+          const psychologistIdToUse = session.psychologist_user_id || session.psychologistId;
+          const psychologist = userIndex.get(psychologistIdToUse);
+          if (psychologist) {
+            enriched.psychologistName = enriched.psychologistName || psychologist.name;
+            enriched.psychologistEmail = psychologist.email;
+          }
+          
+          // Agregar tags de la relación si existe
+          const patientIdToUse = session.patient_user_id || session.patientId;
+          if (patientIdToUse) {
+            const relationKey = `${psychologistIdToUse}-${patientIdToUse}`;
+            const relationship = relationshipIndex.get(relationKey);
+            if (relationship) {
+              enriched.tags = relationship.tags || relationship.data?.tags || [];
+            }
+          }
+        }
+        
+        return enriched;
+      });
+      
+      console.log(`✅ [GET /api/sessions] Devolviendo ${sessionsWithDetails.length} sesiones desde Supabase`);
+      return res.json(sessionsWithDetails);
+    }
+    
+    // Fallback a caché en memoria si no hay Supabase
+    console.log(`📖 [GET /api/sessions] Usando caché en memoria (sin Supabase)`);
+  } catch (error) {
+    console.error('❌ Error consultando Supabase, usando caché en memoria:', error);
+  }
+  
+  // Código original como fallback
   const db = getDb();
   if (!db.sessions) db.sessions = [];
+  if (!db.dispo) db.dispo = [];
   if (!Array.isArray(db.users)) db.users = [];
   
   const userIndex = new Map(
@@ -5124,20 +5938,44 @@ app.get('/api/sessions', (req, res) => {
   
   let sessions = db.sessions;
   
+  // Si es psicólogo, también incluir disponibilidad desde tabla dispo
+  if (psychologistId && !patientId) {
+    const dispoSlots = db.dispo
+      .filter(d => d.psychologist_user_id === psychologistId)
+      .map(d => ({
+        id: d.id,
+        psychologistId: psychologistId,
+        psychologist_user_id: d.psychologist_user_id,
+        patientId: '',
+        patient_user_id: '',
+        patientName: 'Disponible',
+        patientPhone: '',
+        date: d.data?.date || '',
+        startTime: d.data?.startTime || '',
+        endTime: d.data?.endTime || '',
+        type: d.data?.type || 'online',
+        status: 'available',
+        isFromDispo: true
+      }));
+    sessions = [...sessions, ...dispoSlots];
+  }
+  
+  let sessionsFiltered = sessions;
+  
   // Filter by psychologistId or patientId
   if (psychologistId) {
-    sessions = sessions.filter(s => s.psychologistId === psychologistId || s.psychologist_user_id === psychologistId);
+    sessionsFiltered = sessionsFiltered.filter(s => s.psychologistId === psychologistId || s.psychologist_user_id === psychologistId);
   }
   if (patientId) {
     // Filtrar tanto por patientId (legacy) como por patient_user_id (Supabase)
-    sessions = sessions.filter(s => s.patientId === patientId || s.patient_user_id === patientId);
+    sessionsFiltered = sessionsFiltered.filter(s => s.patientId === patientId || s.patient_user_id === patientId);
   }
   
   // Filter by year and month if provided (legacy support)
   if (year && month) {
     const yearNum = parseInt(year);
     const monthNum = parseInt(month);
-    sessions = sessions.filter(s => {
+    sessionsFiltered = sessionsFiltered.filter(s => {
       const date = new Date(s.date);
       return date.getFullYear() === yearNum && date.getMonth() + 1 === monthNum;
     });
@@ -5146,7 +5984,7 @@ app.get('/api/sessions', (req, res) => {
   // Filter by date range (more flexible than year/month)
   if (startDate || endDate || futureOnly === 'true') {
     const now = new Date().toISOString().split('T')[0];
-    sessions = sessions.filter(s => {
+    sessionsFiltered = sessionsFiltered.filter(s => {
       if (futureOnly === 'true' && s.date < now) return false;
       if (startDate && s.date < startDate) return false;
       if (endDate && s.date > endDate) return false;
@@ -5157,10 +5995,10 @@ app.get('/api/sessions', (req, res) => {
   // Filter by status if provided
   if (status) {
     const statuses = status.split(',');
-    sessions = sessions.filter(s => statuses.includes(s.status));
+    sessionsFiltered = sessionsFiltered.filter(s => statuses.includes(s.status));
   }
 
-  const sessionsWithDetails = sessions.map(session => {
+  const sessionsWithDetails = sessionsFiltered.map(session => {
     const enriched = { ...session };
     if (session.patientId) {
       const patient = userIndex.get(session.patientId);
@@ -5182,6 +6020,17 @@ app.get('/api/sessions', (req, res) => {
         enriched.psychologistName = enriched.psychologistName || psychologist.name;
         enriched.psychologistEmail = psychologist.email;
       }
+      
+      // Agregar tags de la relación si existe
+      if (session.patientId && db.careRelationships) {
+        const relationship = db.careRelationships.find(rel => 
+          rel.psychologist_user_id === session.psychologistId && 
+          rel.patient_user_id === session.patientId
+        );
+        if (relationship) {
+          enriched.tags = relationship.tags || relationship.data?.tags || [];
+        }
+      }
     }
 
     return enriched;
@@ -5194,6 +6043,7 @@ app.post('/api/sessions', async (req, res) => {
   try {
     const db = getDb();
     if (!db.sessions) db.sessions = [];
+    if (!db.dispo) db.dispo = [];
 
     // Obtener el user_id del psicólogo autenticado
     const psychologistUserId = req.headers['x-user-id'] || req.headers['x-userid'];
@@ -5203,30 +6053,69 @@ app.post('/api/sessions', async (req, res) => {
       return res.status(401).json({ error: 'Usuario no autenticado' });
     }
 
+    // Si se proporciona deleteDispoId, borrar de la tabla dispo
+    const { deleteDispoId, ...sessionData } = req.body;
+    
+    // NO PERMITIR crear disponibilidad desde este endpoint
+    if (sessionData.status === 'available' || !sessionData.patientId) {
+      console.error('❌ Cannot create availability through /api/sessions. Use /api/sessions/availability instead');
+      return res.status(400).json({ 
+        error: 'No se puede crear disponibilidad desde este endpoint. Usa /api/sessions/availability' 
+      });
+    }
+    
+    if (deleteDispoId) {
+      console.log('🗑️ Deleting dispo slot:', deleteDispoId);
+      const dispoIdx = db.dispo.findIndex(d => d.id === deleteDispoId);
+      if (dispoIdx !== -1) {
+        db.dispo.splice(dispoIdx, 1);
+        console.log('✅ Dispo slot deleted');
+      } else {
+        console.warn('⚠️ Dispo slot not found:', deleteDispoId);
+      }
+    }
+
     // Obtener el patient_user_id desde el patientId
     let patientUserId = null;
-    if (req.body.patientId) {
-      const patient = db.users?.find(u => u.id === req.body.patientId);
+    if (sessionData.patientId) {
+      const patient = db.users?.find(u => u.id === sessionData.patientId);
       if (patient) {
         patientUserId = patient.id;
       }
     }
 
+    // Validar percent_psych
+    if (sessionData.percent_psych && sessionData.percent_psych > 100) {
+      console.error('❌ percent_psych cannot exceed 100');
+      return res.status(400).json({ error: 'El porcentaje del psicólogo no puede exceder 100%' });
+    }
+    
+    // Calcular starts_on y ends_on a partir de date, startTime, endTime
+    const starts_on = dateTimeToISO(sessionData.date, sessionData.startTime);
+    const ends_on = dateTimeToISO(sessionData.date, sessionData.endTime);
+    
     const session = { 
-      ...req.body, 
-      id: req.body.id || Date.now().toString(),
+      ...sessionData, 
+      id: sessionData.id || Date.now().toString(),
       psychologist_user_id: psychologistUserId,
-      patient_user_id: patientUserId
+      patient_user_id: patientUserId,
+      starts_on,
+      ends_on,
+      percent_psych: Math.min(sessionData.percent_psych ?? 70, 100)
     };
     
     console.log('📝 Creating session:', { 
       sessionId: session.id, 
       psychologistUserId, 
       patientUserId,
-      patientId: req.body.patientId 
+      patientId: sessionData.patientId 
     });
     
     db.sessions.push(session);
+    
+    // Limpiar sesiones de disponibilidad (sin paciente) antes de guardar
+    db.sessions = db.sessions.filter(s => s.patient_user_id || s.patientId);
+    
     await saveDb(db, { awaitPersistence: true });
     return res.json(session);
   } catch (err) {
@@ -5241,7 +6130,7 @@ app.post('/api/sessions/availability', async (req, res) => {
     // Obtener el user_id de la sesión del usuario autenticado
     const userId = req.headers['x-user-id'] || req.headers['x-userid'];
     
-    console.log('📅 Creating availability slots:', { slotsCount: slots?.length, psychologistId, userId });
+    console.log('📅 Creating availability slots in dispo table:', { slotsCount: slots?.length, psychologistId, userId });
     
     if (!slots || !Array.isArray(slots) || slots.length === 0) {
       console.error('❌ Invalid slots data:', slots);
@@ -5254,23 +6143,32 @@ app.post('/api/sessions/availability', async (req, res) => {
     }
     
     const db = getDb();
-    if (!db.sessions) db.sessions = [];
+    if (!db.dispo) db.dispo = [];
     
     const newSlots = [];
     slots.forEach(slot => {
-      // Usar el userId de la sesión como psychologist_user_id
-      const newSlot = { 
-        ...slot, 
-        psychologistId,
-        psychologist_user_id: userId
+      // Guardar en tabla dispo con estructura: id, data, psychologist_user_id, created_at
+      const dispoSlot = {
+        id: slot.id || Date.now().toString() + Math.random().toString(36).substring(7),
+        psychologist_user_id: userId,
+        data: {
+          date: slot.date,
+          startTime: slot.startTime,
+          endTime: slot.endTime,
+          type: slot.type || 'online'
+        },
+        created_at: new Date().toISOString()
       };
-      db.sessions.push(newSlot);
-      newSlots.push(newSlot);
+      db.dispo.push(dispoSlot);
+      newSlots.push(dispoSlot);
     });
     
+    // Limpiar sesiones de disponibilidad (sin paciente) antes de guardar
+    db.sessions = (db.sessions || []).filter(s => s.patient_user_id || s.patientId);
+    
     await saveDb(db, { awaitPersistence: true });
-    console.log('✅ Availability slots created successfully:', newSlots.length);
-    res.json({ success: true, count: slots.length, slots: newSlots });
+    console.log('✅ Availability slots created successfully in dispo table:', newSlots.length);
+    res.json({ success: true, count: newSlots.length, slots: newSlots });
   } catch (error) {
     console.error('❌ Error creating availability slots:', error);
     res.status(500).json({ error: 'Error al crear espacios disponibles: ' + error.message });
@@ -5293,7 +6191,34 @@ app.patch('/api/sessions/:id', async (req, res) => {
 
     console.log(`✅ [PATCH /api/sessions/${id}] Sesión encontrada en índice ${idx}:`, db.sessions[idx]);
 
-    const updatedSession = { ...db.sessions[idx], ...req.body };
+    // Validar percent_psych si se proporciona
+    if (req.body.percent_psych && req.body.percent_psych > 100) {
+      console.error(`❌ [PATCH /api/sessions/${id}] percent_psych cannot exceed 100`);
+      return res.status(400).json({ error: 'El porcentaje del psicólogo no puede exceder 100%' });
+    }
+
+    const updatedSession = { 
+      ...db.sessions[idx], 
+      ...req.body,
+      percent_psych: req.body.percent_psych !== undefined 
+        ? Math.min(req.body.percent_psych, 100) 
+        : db.sessions[idx].percent_psych
+    };
+    
+    // SOLO recalcular starts_on/ends_on si se modificaron explícitamente date, startTime o endTime
+    // Esto evita problemas de zona horaria cuando solo se actualiza status, paid, etc.
+    if (req.body.date !== undefined || req.body.startTime !== undefined || req.body.endTime !== undefined) {
+      const date = updatedSession.date;
+      const startTime = updatedSession.startTime;
+      const endTime = updatedSession.endTime;
+      
+      if (date && startTime) {
+        updatedSession.starts_on = dateTimeToISO(date, startTime);
+      }
+      if (date && endTime) {
+        updatedSession.ends_on = dateTimeToISO(date, endTime);
+      }
+    }
 
     if (updatedSession.status === 'available') {
       updatedSession.patientId = '';
@@ -5317,12 +6242,58 @@ app.patch('/api/sessions/:id', async (req, res) => {
     }
 
     db.sessions[idx] = updatedSession;
-    console.log(`💾 [PATCH /api/sessions/${id}] Guardando sesión actualizada en memoria:`, updatedSession);
-    console.log(`🔄 [PATCH /api/sessions/${id}] Llamando a saveDb con awaitPersistence=true...`);
+    console.log(`💾 [PATCH /api/sessions/${id}] Sesión actualizada en memoria:`, updatedSession);
     
-    await saveDb(db, { awaitPersistence: true });
+    // Actualizar directamente en Supabase sin tocar otras tablas
+    if (supabaseAdmin) {
+      try {
+        console.log(`🔄 [PATCH /api/sessions/${id}] Actualizando en Supabase directamente...`);
+        
+        // Preparar el row para Supabase - solo incluir campos que pueden cambiar
+        // NO incluir patient_user_id ni psychologist_user_id a menos que se proporcionen explícitamente
+        // Esto evita triggers de care_relationships
+        const supabaseRow = {
+          data: updatedSession,
+          status: updatedSession.status || 'scheduled',
+          starts_on: updatedSession.starts_on,
+          ends_on: updatedSession.ends_on,
+          price: updatedSession.price ?? 0,
+          percent_psych: updatedSession.percent_psych ?? 100,
+          paid: updatedSession.paid ?? false
+        };
+        
+        // Solo incluir patient_user_id si se proporcionó explícitamente en el body
+        if (req.body.patient_user_id !== undefined || req.body.patientId !== undefined) {
+          supabaseRow.patient_user_id = updatedSession.patient_user_id || updatedSession.patientId;
+        }
+        
+        // Solo incluir psychologist_user_id si se proporcionó explícitamente en el body
+        if (req.body.psychologist_user_id !== undefined || req.body.psychologistId !== undefined) {
+          supabaseRow.psychologist_user_id = updatedSession.psychologist_user_id || updatedSession.psychologistId;
+        }
+        
+        const { error: updateErr } = await supabaseAdmin
+          .from('sessions')
+          .update(supabaseRow)
+          .eq('id', id);
+        
+        if (updateErr) {
+          console.error(`❌ [PATCH /api/sessions/${id}] Error en Supabase:`, updateErr);
+          throw updateErr;
+        }
+        
+        console.log(`✅ [PATCH /api/sessions/${id}] Sesión actualizada en Supabase`);
+      } catch (supaErr) {
+        console.error(`❌ [PATCH /api/sessions/${id}] Error actualizando en Supabase:`, supaErr);
+        // NO hacer fallback a saveDb para evitar upserts masivos con datos incompletos
+        // Solo loguear el error y continuar
+        console.warn(`⚠️ [PATCH /api/sessions/${id}] Sesión actualizada en memoria pero no se sincronizó con Supabase`);
+      }
+    } else {
+      // Si no hay Supabase, usar saveDb tradicional
+      await saveDb(db, { awaitPersistence: true });
+    }
     
-    console.log(`✅ [PATCH /api/sessions/${id}] saveDb completado. Sesión guardada en Supabase.`);
     console.log(`📤 [PATCH /api/sessions/${id}] Enviando respuesta al cliente:`, db.sessions[idx]);
     
     return res.json(db.sessions[idx]);
@@ -5332,12 +6303,121 @@ app.patch('/api/sessions/:id', async (req, res) => {
   }
 });
 
+app.put('/api/sessions/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`📝 [PUT /api/sessions/${id}] Actualizando sesión completa con datos:`, req.body);
+    
+    const db = getDb();
+    if (!db.sessions) db.sessions = [];
+
+    const idx = db.sessions.findIndex(s => s.id === id);
+    if (idx === -1) {
+      console.log(`❌ [PUT /api/sessions/${id}] Sesión no encontrada`);
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    // Validar percent_psych
+    if (req.body.percent_psych && req.body.percent_psych > 100) {
+      console.error(`❌ [PUT /api/sessions/${id}] percent_psych cannot exceed 100`);
+      return res.status(400).json({ error: 'El porcentaje del psicólogo no puede exceder 100%' });
+    }
+    
+    // PUT reemplaza completamente la sesión
+    const updatedSession = { 
+      ...req.body, 
+      id,
+      percent_psych: Math.min(req.body.percent_psych ?? 100, 100)
+    };
+    
+    // Calcular starts_on/ends_on si se proporcionan date/startTime/endTime
+    if (updatedSession.date && updatedSession.startTime) {
+      updatedSession.starts_on = dateTimeToISO(updatedSession.date, updatedSession.startTime);
+    }
+    if (updatedSession.date && updatedSession.endTime) {
+      updatedSession.ends_on = dateTimeToISO(updatedSession.date, updatedSession.endTime);
+    }
+
+    db.sessions[idx] = updatedSession;
+    console.log(`💾 [PUT /api/sessions/${id}] Sesión reemplazada completamente en memoria`);
+    
+    // Actualizar directamente en Supabase sin tocar otras tablas
+    if (supabaseAdmin) {
+      try {
+        console.log(`🔄 [PUT /api/sessions/${id}] Actualizando en Supabase directamente...`);
+        
+        // Preparar el row para Supabase
+        // Solo incluir patient_user_id y psychologist_user_id si se proporcionan explícitamente
+        // Esto evita triggers de care_relationships cuando no es necesario
+        const supabaseRow = {
+          data: updatedSession,
+          status: updatedSession.status || 'scheduled',
+          starts_on: updatedSession.starts_on,
+          ends_on: updatedSession.ends_on,
+          price: updatedSession.price ?? 0,
+          percent_psych: updatedSession.percent_psych ?? 100,
+          paid: updatedSession.paid ?? false
+        };
+        
+        // Solo incluir patient_user_id si está presente en el request
+        if (req.body.patient_user_id !== undefined || req.body.patientId !== undefined) {
+          supabaseRow.patient_user_id = updatedSession.patient_user_id || updatedSession.patientId;
+        }
+        
+        // Solo incluir psychologist_user_id si está presente en el request
+        if (req.body.psychologist_user_id !== undefined || req.body.psychologistId !== undefined) {
+          supabaseRow.psychologist_user_id = updatedSession.psychologist_user_id || updatedSession.psychologistId;
+        }
+        
+        const { error: updateErr } = await supabaseAdmin
+          .from('sessions')
+          .update(supabaseRow)
+          .eq('id', id);
+        
+        if (updateErr) {
+          console.error(`❌ [PUT /api/sessions/${id}] Error en Supabase:`, updateErr);
+          throw updateErr;
+        }
+        
+        console.log(`✅ [PUT /api/sessions/${id}] Sesión actualizada en Supabase`);
+      } catch (supaErr) {
+        console.error(`❌ [PUT /api/sessions/${id}] Error actualizando en Supabase:`, supaErr);
+        // NO hacer fallback a saveDb para evitar upserts masivos con datos incompletos
+        // Solo loguear el error y continuar
+        console.warn(`⚠️ [PUT /api/sessions/${id}] Sesión actualizada en memoria pero no se sincronizó con Supabase`);
+      }
+    } else {
+      // Si no hay Supabase, usar saveDb tradicional
+      await saveDb(db, { awaitPersistence: true });
+    }
+    
+    console.log(`📤 [PUT /api/sessions/${id}] Enviando respuesta al cliente`);
+    
+    return res.json(db.sessions[idx]);
+  } catch (err) {
+    console.error('❌ Error updating session (PUT)', err);
+    return res.status(500).json({ error: err?.message || 'No se pudo actualizar la sesión' });
+  }
+});
+
 app.delete('/api/sessions/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const db = getDb();
     if (!db.sessions) db.sessions = [];
+    if (!db.dispo) db.dispo = [];
 
+    // Intentar eliminar de dispo primero
+    const dispoIdx = db.dispo.findIndex(d => d.id === id);
+    if (dispoIdx !== -1) {
+      db.dispo.splice(dispoIdx, 1);
+      // Limpiar sesiones de disponibilidad antes de guardar
+      db.sessions = (db.sessions || []).filter(s => s.patient_user_id || s.patientId);
+      await saveDb(db, { awaitPersistence: true });
+      return res.json({ success: true, deletedFrom: 'dispo' });
+    }
+
+    // Si no está en dispo, buscar en sessions
     const idx = db.sessions.findIndex(s => s.id === id);
     if (idx === -1) return res.status(404).json({ error: 'Session not found' });
 
@@ -5347,8 +6427,10 @@ app.delete('/api/sessions/:id', async (req, res) => {
     }
 
     db.sessions.splice(idx, 1);
+    // Limpiar sesiones de disponibilidad antes de guardar
+    db.sessions = db.sessions.filter(s => s.patient_user_id || s.patientId);
     await saveDb(db, { awaitPersistence: true });
-    return res.json({ success: true });
+    return res.json({ success: true, deletedFrom: 'sessions' });
   } catch (err) {
     console.error('❌ Error deleting session', err);
     return res.status(500).json({ error: err?.message || 'No se pudo eliminar la sesión' });

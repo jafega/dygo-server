@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, FileText, User as UserIcon, Calendar, Menu, X, ArrowLeftRight, ShieldCheck, Link2, BarChart3, AlertCircle } from 'lucide-react';
+import { Users, FileText, User as UserIcon, Calendar, Menu, X, ArrowLeftRight, ShieldCheck, Link2, BarChart3, AlertCircle, ClipboardList } from 'lucide-react';
 
 const DygoLogo: React.FC<{ className?: string }> = ({ className = "w-8 h-8" }) => (
   <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
@@ -8,8 +8,8 @@ const DygoLogo: React.FC<{ className?: string }> = ({ className = "w-8 h-8" }) =
 );
 
 interface PsychologistSidebarProps {
-  activeView: 'patients' | 'billing' | 'profile' | 'calendar' | 'connections' | 'dashboard';
-  onViewChange: (view: 'patients' | 'billing' | 'profile' | 'calendar' | 'connections' | 'dashboard') => void;
+  activeView: 'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule';
+  onViewChange: (view: 'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule') => void;
   isOpen: boolean;
   onToggle: () => void;
   userName?: string;
@@ -33,11 +33,11 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
   isProfileIncomplete = false
 }) => {
   const menuItems = [
-    { id: 'dashboard' as const, label: 'Dashboard', icon: BarChart3 },
+    { id: 'schedule' as const, label: 'Agenda', icon: Calendar },
     { id: 'patients' as const, label: 'Pacientes', icon: Users },
-    { id: 'calendar' as const, label: 'Calendario', icon: Calendar },
+    { id: 'sessions' as const, label: 'Sesiones', icon: ClipboardList },
+    { id: 'dashboard' as const, label: 'Métricas', icon: BarChart3 },
     { id: 'billing' as const, label: 'Facturación', icon: FileText },
-    { id: 'connections' as const, label: 'Conexiones', icon: Link2 },
     { id: 'profile' as const, label: 'Mi Perfil Profesional', icon: UserIcon },
   ];
 

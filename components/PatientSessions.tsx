@@ -198,33 +198,83 @@ const PatientSessions: React.FC = () => {
     console.log(`[bookSession] Iniciando reserva de sesión ${slotId} para usuario:`, user);
     
     try {
-      const requestBody = {
-        status: 'scheduled',
-        patientId: user.id,
-        patientName: user.name,
-        patientPhone: user.phone || ''
-      };
-      
-      console.log(`[bookSession] Haciendo PATCH a ${API_URL}/sessions/${slotId} con:`, requestBody);
-      
-      const response = await fetch(`${API_URL}/sessions/${slotId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody)
-      });
+      // Buscar el slot para verificar si viene de dispo
+      const slot = availableSlots.find(s => s.id === slotId);
+      if (!slot) {
+        alert('Slot no encontrado');
+        return;
+      }
 
-      console.log(`[bookSession] Respuesta recibida. Status: ${response.status}, OK: ${response.ok}`);
+      // Si el slot viene de la tabla dispo, crear nueva sesión y borrar de dispo
+      if ((slot as any).isFromDispo) {
+        console.log('[bookSession] Slot viene de tabla dispo, creando nueva sesión...');
+        
+        const newSession = {
+          id: Date.now().toString(),
+          patientId: user.id,
+          patientName: user.name,
+          patientPhone: user.phone || '',
+          date: slot.date,
+          startTime: slot.startTime,
+          endTime: slot.endTime,
+          type: slot.type,
+          status: 'scheduled',
+          psychologistId: slot.psychologistId,
+          deleteDispoId: slotId // Indicar que se debe borrar este ID de dispo
+        };
 
-      if (response.ok) {
-        const updatedSession = await response.json();
-        console.log(`[bookSession] ✅ Sesión reservada exitosamente:`, updatedSession);
-        alert('¡Cita reservada exitosamente!');
-        setShowAvailability(false);
-        await loadSessions();
+        const response = await fetch(`${API_URL}/sessions`, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'x-user-id': slot.psychologist_user_id || slot.psychologistId
+          },
+          body: JSON.stringify(newSession)
+        });
+
+        console.log(`[bookSession] Respuesta recibida. Status: ${response.status}, OK: ${response.ok}`);
+
+        if (response.ok) {
+          const createdSession = await response.json();
+          console.log(`[bookSession] ✅ Sesión creada exitosamente desde dispo:`, createdSession);
+          alert('¡Cita reservada exitosamente!');
+          setShowAvailability(false);
+          await loadSessions();
+        } else {
+          const error = await response.json();
+          console.error(`[bookSession] ❌ Error del servidor:`, error);
+          alert('Error al reservar la cita: ' + (error.error || 'Error desconocido'));
+        }
       } else {
-        const error = await response.json();
-        console.error(`[bookSession] ❌ Error del servidor:`, error);
-        alert('Error al reservar la cita: ' + (error.error || 'Error desconocido'));
+        // Lógica anterior: PATCH para sesiones que están en sessions con status available
+        const requestBody = {
+          status: 'scheduled',
+          patientId: user.id,
+          patientName: user.name,
+          patientPhone: user.phone || ''
+        };
+        
+        console.log(`[bookSession] Haciendo PATCH a ${API_URL}/sessions/${slotId} con:`, requestBody);
+        
+        const response = await fetch(`${API_URL}/sessions/${slotId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody)
+        });
+
+        console.log(`[bookSession] Respuesta recibida. Status: ${response.status}, OK: ${response.ok}`);
+
+        if (response.ok) {
+          const updatedSession = await response.json();
+          console.log(`[bookSession] ✅ Sesión reservada exitosamente:`, updatedSession);
+          alert('¡Cita reservada exitosamente!');
+          setShowAvailability(false);
+          await loadSessions();
+        } else {
+          const error = await response.json();
+          console.error(`[bookSession] ❌ Error del servidor:`, error);
+          alert('Error al reservar la cita: ' + (error.error || 'Error desconocido'));
+        }
       }
     } catch (err) {
       console.error('[bookSession] ❌ Error en la petición:', err);

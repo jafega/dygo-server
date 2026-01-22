@@ -21,16 +21,14 @@ interface Session {
   tags?: string[]; // Tags heredadas de la relación
 }
 
-interface PsychologistCalendarProps {
+interface PsychologistScheduleProps {
   psychologistId: string;
 }
 
-type ViewMode = 'WEEK' | 'LIST';
 type SessionStatusFilter = Session['status'] | 'ALL';
 
-const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologistId }) => {
+const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologistId }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [viewMode, setViewMode] = useState<ViewMode>('WEEK');
   const [sessions, setSessions] = useState<Session[]>([]);
   const [patients, setPatients] = useState<any[]>([]);
   const [careRelationships, setCareRelationships] = useState<any[]>([]);
@@ -45,11 +43,8 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
   const [selectedSlot, setSelectedSlot] = useState<Session | null>(null);
   const [selectedPatientId, setSelectedPatientId] = useState('');
   const [meetLink, setMeetLink] = useState('');
-  const [listStatusFilter, setListStatusFilter] = useState<string[]>(['scheduled', 'completed']);
-  const [listPaymentFilter, setListPaymentFilter] = useState<string>('all'); // 'all', 'paid', 'unpaid'
-  const [listStartDate, setListStartDate] = useState('');
-  const [listEndDate, setListEndDate] = useState('');
-  const [showPastListSessions, setShowPastListSessions] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<string[]>(['scheduled', 'completed']);
+  const [paymentFilter, setPaymentFilter] = useState<string>('all'); // 'all', 'paid', 'unpaid'
   const [resizingSession, setResizingSession] = useState<{ id: string, edge: 'top' | 'bottom', date: string } | null>(null);
   const [tempSessionTimes, setTempSessionTimes] = useState<{ startTime: string, endTime: string } | null>(null);
   const [creatingSession, setCreatingSession] = useState<{ date: string, startY: number, currentY: number } | null>(null);
@@ -79,18 +74,32 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
     type: 'online' as 'in-person' | 'online' | 'home-visit'
   });
 
+  // Helper para convertir Date a formato YYYY-MM-DD en zona horaria local
+  const formatLocalDate = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // Helper para parsear una fecha en formato YYYY-MM-DD como fecha local (no UTC)
+  const parseLocalDate = (dateStr: string): Date => {
+    const [year, month, day] = dateStr.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  };
+
   useEffect(() => {
     loadSessions();
     loadPatients();
     loadCareRelationships();
   }, [psychologistId]);
   
-  // Recargar sesiones cuando cambia la vista o el rango de fechas
+  // Recargar sesiones cuando cambia el rango de fechas
   useEffect(() => {
     if (psychologistId) {
       loadSessions();
     }
-  }, [viewMode, currentDate]);
+  }, [currentDate]);
 
   // Handle resize mouse events
   useEffect(() => {
@@ -352,35 +361,18 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
   const loadSessions = async () => {
     setIsLoading(true);
     try {
-      // Optimización: Para vista de lista, cargar solo últimos 3 meses y próximos 6 meses
-      // Para vistas de mes/semana, cargar el rango específico
-      let startDate: string | undefined;
-      let endDate: string | undefined;
+      // Cargar la semana actual más 2 semanas antes y después
+      const weekStart = new Date(currentDate);
+      weekStart.setDate(weekStart.getDate() - weekStart.getDay() - 14);
+      const weekEnd = new Date(currentDate);
+      weekEnd.setDate(weekEnd.getDate() + (6 - weekEnd.getDay()) + 14);
       
-      if (viewMode === 'LIST') {
-        // Últimos 3 meses hasta próximos 6 meses
-        const today = new Date();
-        const past = new Date(today);
-        past.setMonth(past.getMonth() - 3);
-        const future = new Date(today);
-        future.setMonth(future.getMonth() + 6);
-        
-        startDate = past.toISOString().split('T')[0];
-        endDate = future.toISOString().split('T')[0];
-      } else if (viewMode === 'WEEK') {
-        // La semana actual más 2 semanas antes y después
-        const weekStart = new Date(currentDate);
-        weekStart.setDate(weekStart.getDate() - weekStart.getDay() - 14);
-        const weekEnd = new Date(currentDate);
-        weekEnd.setDate(weekEnd.getDate() + (6 - weekEnd.getDay()) + 14);
-        
-        startDate = weekStart.toISOString().split('T')[0];
-        endDate = weekEnd.toISOString().split('T')[0];
-      }
+      const startDate = formatLocalDate(weekStart);
+      const endDate = formatLocalDate(weekEnd);
       
       const params = new URLSearchParams({ psychologistId });
-      if (startDate) params.append('startDate', startDate);
-      if (endDate) params.append('endDate', endDate);
+      params.append('startDate', startDate);
+      params.append('endDate', endDate);
       
       const response = await fetch(`${API_URL}/sessions?${params.toString()}`);
       if (response.ok) {
@@ -423,28 +415,9 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
     }
   };
 
-  const getDaysInMonth = () => {
-    const year = currentDate.getFullYear();
-    const month = currentDate.getMonth();
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    const daysInMonth = lastDay.getDate();
-    const startingDayOfWeek = firstDay.getDay();
-    
-    return { daysInMonth, startingDayOfWeek };
-  };
-
   const getSessionsForDate = (date: string) => {
     const dateSessions = sessions.filter(s => s.date === date).sort((a, b) => a.startTime.localeCompare(b.startTime));
     return getFilteredSessionsByStatus(dateSessions);
-  };
-
-  const handlePreviousMonth = () => {
-    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1));
-  };
-
-  const handleNextMonth = () => {
-    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1));
   };
 
   const handlePreviousWeek = () => {
@@ -622,31 +595,42 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
       // Check if this day is selected
       if (!newAvailability.daysOfWeek.includes(dayOfWeek)) continue;
       
-      const dateStr = date.toISOString().split('T')[0];
+      const dateStr = formatLocalDate(date);
       
       // Generate multiple slots for this day based on duration
-      const start = new Date(`${dateStr}T${newAvailability.startTime}`);
-      const end = new Date(`${dateStr}T${newAvailability.endTime}`);
+      const [startHour, startMin] = newAvailability.startTime.split(':').map(Number);
+      const [endHour, endMin] = newAvailability.endTime.split(':').map(Number);
+      
+      const startMinutes = startHour * 60 + startMin;
+      const endMinutes = endHour * 60 + endMin;
       const duration = newAvailability.duration;
       
-      let current = new Date(start);
+      let currentMinutes = startMinutes;
       
-      while (current < end) {
-        const slotEnd = new Date(current.getTime() + duration * 60000);
-        if (slotEnd > end) break;
+      while (currentMinutes < endMinutes) {
+        const slotEndMinutes = currentMinutes + duration;
+        if (slotEndMinutes > endMinutes) break;
+        
+        const currentHour = Math.floor(currentMinutes / 60);
+        const currentMin = currentMinutes % 60;
+        const endHour = Math.floor(slotEndMinutes / 60);
+        const endMin = slotEndMinutes % 60;
         
         allSlots.push({
           id: `${Date.now()}-${allSlots.length}`,
           patientId: '',
           patientName: 'Disponible',
           date: dateStr,
-          startTime: current.toTimeString().slice(0, 5),
-          endTime: slotEnd.toTimeString().slice(0, 5),
+          startTime: `${String(currentHour).padStart(2, '0')}:${String(currentMin).padStart(2, '0')}`,
+          endTime: `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`,
           type: newAvailability.type,
-          status: 'available'
+          status: 'available',
+          price: 0,
+          paid: false,
+          percent_psych: 100
         });
         
-        current = slotEnd;
+        currentMinutes = slotEndMinutes;
       }
     }
 
@@ -1021,8 +1005,6 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
     }
   };
 
-  const { daysInMonth, startingDayOfWeek } = getDaysInMonth();
-  const monthName = currentDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
   const weekDays = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
   // Get week days for week view
@@ -1040,50 +1022,22 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
     return days;
   };
 
-  // Get all sessions sorted by date and time
-  const getSortedSessions = () => {
-    return [...sessions].sort((a, b) => {
-      const dateCompare = a.date.localeCompare(b.date);
-      if (dateCompare !== 0) return dateCompare;
-      return a.startTime.localeCompare(b.startTime);
-    });
-  };
-
-  // Filtrar sesiones por estado y pago (aplica a todas las vistas)
+  // Filtrar sesiones por estado y pago
   const getFilteredSessionsByStatus = (sessionsToFilter: Session[]) => {
     return sessionsToFilter.filter(session => {
       // Filtro por estado
-      const matchesStatus = listStatusFilter.length === 0 || listStatusFilter.includes(session.status);
+      const matchesStatus = statusFilter.length === 0 || statusFilter.includes(session.status);
       
       // Filtro por pago
       const isPaid = session.paid;
-      const matchesPayment = listPaymentFilter === 'all' || 
-        (listPaymentFilter === 'paid' && isPaid) || 
-        (listPaymentFilter === 'unpaid' && !isPaid);
+      const matchesPayment = paymentFilter === 'all' || 
+        (paymentFilter === 'paid' && isPaid) || 
+        (paymentFilter === 'unpaid' && !isPaid);
       
       return matchesStatus && matchesPayment;
     });
   };
 
-  const sortedSessions = getSortedSessions();
-  const todayMidnight = new Date();
-  todayMidnight.setHours(0, 0, 0, 0);
-  const filteredListSessions = sortedSessions.filter(session => {
-    const matchesStatus = listStatusFilter.length === 0 || listStatusFilter.includes(session.status);
-    
-    // Filtro de pago independiente
-    const isPaid = session.paid;
-    const matchesPayment = listPaymentFilter === 'all' || 
-      (listPaymentFilter === 'paid' && isPaid) || 
-      (listPaymentFilter === 'unpaid' && !isPaid);
-    
-    const matchesStart = !listStartDate || session.date >= listStartDate;
-    const matchesEnd = !listEndDate || session.date <= listEndDate;
-    const sessionDate = new Date(`${session.date}T${session.endTime || session.startTime || '00:00'}`);
-    const isPast = sessionDate < todayMidnight;
-    const matchesTemporal = showPastListSessions || !isPast;
-    return matchesStatus && matchesPayment && matchesStart && matchesEnd && matchesTemporal;
-  });
   const statusFilterOptions: { label: string; value: string }[] = [
     { label: 'Programadas', value: 'scheduled' },
     { label: 'Completadas', value: 'completed' },
@@ -1097,12 +1051,9 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
     { label: 'No Pagadas', value: 'unpaid' }
   ];
 
-  const resetListFilters = () => {
-    setListStatusFilter(['scheduled', 'completed']);
-    setListPaymentFilter('all');
-    setListStartDate('');
-    setListEndDate('');
-    setShowPastListSessions(false);
+  const resetFilters = () => {
+    setStatusFilter(['scheduled', 'completed']);
+    setPaymentFilter('all');
   };
 
   return (
@@ -1120,219 +1071,449 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
         >
           <Clock size={18} />
           <span>Añadir Disponibilidad</span>
-          </button>
-          <button
-            onClick={() => setShowNewSession(true)}
-            className="flex items-center justify-center gap-2 px-4 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors shadow-md font-medium"
-          >
-            <Plus size={18} />
-            <span>Nueva Sesión</span>
-          </button>
+        </button>
+        <button
+          onClick={() => setShowNewSession(true)}
+          className="flex items-center justify-center gap-2 px-4 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors shadow-md font-medium"
+        >
+          <Plus size={18} />
+          <span>Nueva Sesión</span>
+        </button>
       </div>
 
-        {/* Filtro de estado - Aplica a todas las vistas */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col">
-              <label className="text-xs font-semibold text-slate-500 uppercase mb-2">Filtrar por Estado</label>
-              <div className="flex flex-wrap gap-2">
-                {statusFilterOptions.map(option => (
-                  <button
-                    key={option.value}
-                    onClick={() => {
-                      if (listStatusFilter.includes(option.value)) {
-                        setListStatusFilter(listStatusFilter.filter(s => s !== option.value));
-                      } else {
-                        setListStatusFilter([...listStatusFilter, option.value]);
-                      }
-                    }}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                      listStatusFilter.includes(option.value)
-                        ? 'bg-indigo-600 text-white shadow-md'
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            
-            <div className="flex flex-col">
-              <label className="text-xs font-semibold text-slate-500 uppercase mb-2">Estado de Pago</label>
-              <div className="flex flex-wrap gap-2">
-                {paymentFilterOptions.map(option => (
-                  <button
-                    key={option.value}
-                    onClick={() => setListPaymentFilter(option.value)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                      listPaymentFilter === option.value
-                        ? 'bg-indigo-600 text-white shadow-md'
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            
-            {viewMode === 'LIST' && (
-              <div className="flex flex-wrap items-end gap-4">\n                <div className="flex flex-col">
-                  <label className="text-xs font-semibold text-slate-500 uppercase mb-1">Desde</label>
-                  <input
-                    type="date"
-                    value={listStartDate}
-                    onChange={(event) => setListStartDate(event.target.value)}
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-                <div className="flex flex-col">
-                  <label className="text-xs font-semibold text-slate-500 uppercase mb-1">Hasta</label>
-                  <input
-                    type="date"
-                    value={listEndDate}
-                    onChange={(event) => setListEndDate(event.target.value)}
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-                <label className="flex items-center gap-2 text-xs font-semibold text-slate-500 uppercase mb-1">
-                  <input
-                    type="checkbox"
-                    checked={showPastListSessions}
-                    onChange={(event) => setShowPastListSessions(event.target.checked)}
-                    className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                  />
-                  <span className="text-[11px] text-slate-600 normal-case">Ver también pasadas</span>
-                </label>
-              </div>
-            )}
-            
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={resetListFilters}
-                className="text-sm font-semibold text-slate-600 hover:text-slate-900"
-              >
-                Limpiar filtros
-              </button>
+      {/* Filtro de estado y pago */}
+      <div className="bg-white rounded-xl border border-slate-200 p-4">
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col">
+            <label className="text-xs font-semibold text-slate-500 uppercase mb-2">Filtrar por Estado</label>
+            <div className="flex flex-wrap gap-2">
+              {statusFilterOptions.map(option => (
+                <button
+                  key={option.value}
+                  onClick={() => {
+                    if (statusFilter.includes(option.value)) {
+                      setStatusFilter(statusFilter.filter(s => s !== option.value));
+                    } else {
+                      setStatusFilter([...statusFilter, option.value]);
+                    }
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    statusFilter.includes(option.value)
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
             </div>
           </div>
-        </div>
-
-        {/* View controls */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-1 bg-slate-100 rounded-xl p-1">
-              <button
-                onClick={() => setViewMode('WEEK')}
-                className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
-                  viewMode === 'WEEK' ? 'bg-white shadow text-indigo-600' : 'text-slate-500 hover:text-slate-700'
-                }`}
-                aria-pressed={viewMode === 'WEEK'}
-              >
-                Semana
-              </button>
-              <button
-                onClick={() => setViewMode('LIST')}
-                className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
-                  viewMode === 'LIST' ? 'bg-white shadow text-indigo-600' : 'text-slate-500 hover:text-slate-700'
-                }`}
-                aria-pressed={viewMode === 'LIST'}
-              >
-                Lista
-              </button>
+          
+          <div className="flex flex-col">
+            <label className="text-xs font-semibold text-slate-500 uppercase mb-2">Estado de Pago</label>
+            <div className="flex flex-wrap gap-2">
+              {paymentFilterOptions.map(option => (
+                <button
+                  key={option.value}
+                  onClick={() => setPaymentFilter(option.value)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    paymentFilter === option.value
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
             </div>
-            <span className="text-xs uppercase font-semibold text-slate-500 tracking-wide">
-              Vista actual: {viewMode === 'LIST' ? 'Lista' : 'Semana'}
-            </span>
+          </div>
+          
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="text-sm font-semibold text-slate-600 hover:text-slate-900"
+            >
+              Limpiar filtros
+            </button>
           </div>
         </div>
+      </div>
 
       {/* Calendar */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        {/* Navigation - Oculta en vista lista */}
-        {viewMode !== 'LIST' && (
-          <div className="flex items-center justify-between p-4 border-b border-slate-200 bg-slate-50">
-            <button
-              onClick={viewMode === 'WEEK' ? handlePreviousWeek : handlePreviousMonth}
-              className="p-2 hover:bg-slate-200 rounded-lg transition-colors"
-            >
-              <ChevronLeft size={20} />
-            </button>
-            <div className="flex items-center gap-3">
-              <h3 className="text-lg font-semibold text-slate-900 capitalize">
-                {viewMode === 'WEEK' 
-                  ? `Semana del ${getWeekDays()[0].getDate()} al ${getWeekDays()[6].getDate()} de ${currentDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}`
-                  : monthName
-                }
-              </h3>
-            </div>
-            <button
-              onClick={viewMode === 'WEEK' ? handleNextWeek : handleNextMonth}
-              className="p-2 hover:bg-slate-200 rounded-lg transition-colors"
-            >
-              <ChevronRight size={20} />
-            </button>
+        {/* Navigation */}
+        <div className="flex items-center justify-between p-4 border-b border-slate-200 bg-slate-50">
+          <button
+            onClick={handlePreviousWeek}
+            className="p-2 hover:bg-slate-200 rounded-lg transition-colors"
+          >
+            <ChevronLeft size={20} />
+          </button>
+          <div className="flex items-center gap-3">
+            <h3 className="text-lg font-semibold text-slate-900 capitalize">
+              Semana del {getWeekDays()[0].getDate()} al {getWeekDays()[6].getDate()} de {currentDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}
+            </h3>
           </div>
-        )}
+          <button
+            onClick={handleNextWeek}
+            className="p-2 hover:bg-slate-200 rounded-lg transition-colors"
+          >
+            <ChevronRight size={20} />
+          </button>
+        </div>
 
-        {/* Week View - Vertical Columns on Desktop */}
-        {viewMode === 'WEEK' && (
-          <div className="p-4">
-            {/* Mobile: Horizontal list */}
-            <div className="md:hidden space-y-3">
-              {getWeekDays().map(date => {
-                const dateStr = date.toISOString().split('T')[0];
-                const daySessions = getSessionsForDate(dateStr);
-                const isToday = new Date().toDateString() === date.toDateString();
-                
-                return (
-                  <div
-                    key={dateStr}
-                    className={`
-                      relative w-full flex flex-row items-stretch rounded-xl border transition-all min-h-[100px]
-                      ${isToday ? 'border-indigo-400 ring-1 ring-indigo-400 bg-indigo-50/20' : 'border-slate-200 bg-white'}
-                    `}
-                  >
-                    {/* Left: Date Column */}
-                    <div className={`w-20 shrink-0 flex flex-col items-center justify-center border-r p-2 ${isToday ? 'border-indigo-200 bg-indigo-50/50' : 'border-slate-100 bg-slate-50/50'}`}>
-                      <span className={`text-xs font-bold uppercase tracking-wide mb-1 ${isToday ? 'text-indigo-600' : 'text-slate-400'}`}>
+        {/* Week View */}
+        <div className="p-4">
+          {/* Mobile: Horizontal list */}
+          <div className="md:hidden space-y-3">
+            {getWeekDays().map(date => {
+              const dateStr = formatLocalDate(date);
+              const daySessions = getSessionsForDate(dateStr);
+              const isToday = new Date().toDateString() === date.toDateString();
+              
+              return (
+                <div
+                  key={dateStr}
+                  className={`
+                    relative w-full flex flex-row items-stretch rounded-xl border transition-all min-h-[100px]
+                    ${isToday ? 'border-indigo-400 ring-1 ring-indigo-400 bg-indigo-50/20' : 'border-slate-200 bg-white'}
+                  `}
+                >
+                  {/* Left: Date Column */}
+                  <div className={`w-20 shrink-0 flex flex-col items-center justify-center border-r p-2 ${isToday ? 'border-indigo-200 bg-indigo-50/50' : 'border-slate-100 bg-slate-50/50'}`}>
+                    <span className={`text-xs font-bold uppercase tracking-wide mb-1 ${isToday ? 'text-indigo-600' : 'text-slate-400'}`}>
+                      {weekDays[date.getDay()]}
+                    </span>
+                    <span className={`text-2xl font-bold ${isToday ? 'text-indigo-700' : 'text-slate-700'}`}>
+                      {date.getDate()}
+                    </span>
+                    {daySessions.length > 0 && (
+                      <div className="mt-2 text-xs font-semibold text-slate-500">
+                        {daySessions.length} sesión{daySessions.length !== 1 ? 'es' : ''}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Right: Sessions Content */}
+                  <div className="flex-1 p-3 flex flex-col justify-center">
+                    {daySessions.length === 0 ? (
+                      <div className="h-full flex items-center text-slate-300 text-sm italic">
+                        Sin sesiones
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {daySessions.map(session => (
+                          <div
+                            key={session.id}
+                            className={`group px-3 py-2 rounded-lg cursor-pointer transition-all hover:shadow-md border relative ${
+                              session.status === 'available'
+                                ? 'bg-purple-50 border-purple-200 hover:bg-purple-100'
+                                : session.status === 'scheduled'
+                                ? 'bg-indigo-50 border-indigo-200 hover:bg-indigo-100'
+                                : session.status === 'completed'
+                                ? 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                                : session.status === 'paid'
+                                ? 'bg-green-50 border-green-200 hover:bg-green-100'
+                                : 'bg-red-50 border-red-200 hover:bg-red-100'
+                            }`}
+                            onClick={() => {
+                              if (session.status === 'available') {
+                                setSelectedSlot(session);
+                                setShowAssignPatient(true);
+                              } else {
+                                handleOpenSession(session);
+                              }
+                            }}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 flex-1">
+                                <span className={`text-xs font-semibold ${
+                                  session.status === 'available' ? 'text-purple-700' :
+                                  session.status === 'scheduled' ? 'text-blue-700' :
+                                  session.status === 'completed' ? 'text-green-700' :
+                                  session.status === 'paid' ? 'text-green-700' : 'text-red-700'
+                                }`}>
+                                  {session.startTime} - {session.endTime}
+                                </span>
+                                {session.type === 'online' ? (
+                                  <Video size={14} className="text-indigo-500" />
+                                ) : session.type === 'home-visit' ? (
+                                  <MapPin size={14} className="text-green-500" />
+                                ) : (
+                                  <MapPin size={14} className="text-purple-500" />
+                                )}
+                                {session.paid && (
+                                  <span className="text-sm">💵</span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                  session.status === 'available' ? 'bg-purple-100 text-purple-700' :
+                                  session.status === 'scheduled' ? 'bg-blue-100 text-blue-700' :
+                                  session.status === 'completed' ? 'bg-green-100 text-green-700' :
+                                  session.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                                }`}>
+                                  {session.status === 'available' ? 'Disponible' :
+                                   session.status === 'scheduled' ? 'Programada' :
+                                   session.status === 'completed' ? 'Completada' :
+                                   session.status === 'paid' ? 'Pagada' : 'Cancelada'}
+                                </span>
+                                {session.status === 'available' && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (confirm('¿Eliminar esta disponibilidad?')) {
+                                        handleDeleteAvailability(session.id);
+                                      }
+                                    }}
+                                    className="p-1 hover:bg-red-100 rounded transition-all text-red-600 hover:text-red-700"
+                                    title="Eliminar disponibilidad"
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                            {session.patientName && (
+                              <div className="text-xs text-slate-700 mt-1 font-medium">{session.patientName}</div>
+                            )}
+                            {session.notes && (
+                              <div className="text-xs text-slate-500 mt-1 line-clamp-1">{session.notes}</div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop: Vertical columns grid with hourly timeline */}
+          <div className="hidden md:block">
+            <div className="flex gap-2 max-w-full">
+              {/* Time labels column - fixed */}
+              <div className="w-14 flex-shrink-0">
+                <div className="h-14 sticky top-0 bg-white z-20"></div> {/* Header spacer */}
+              </div>
+              
+              {/* Days headers - sticky */}
+              <div className="flex-1 grid grid-cols-7 gap-2 sticky top-0 bg-white z-10 pb-2">
+                {getWeekDays().map(date => {
+                  const dateStr = formatLocalDate(date);
+                  const daySessions = getSessionsForDate(dateStr);
+                  const isToday = new Date().toDateString() === date.toDateString();
+                  
+                  return (
+                    <div
+                      key={dateStr}
+                      className={`flex flex-col items-center justify-center p-2 border rounded-lg h-14 ${isToday ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-slate-50'}`}
+                    >
+                      <span className={`text-[10px] font-bold uppercase tracking-wide ${isToday ? 'text-indigo-600' : 'text-slate-400'}`}>
                         {weekDays[date.getDay()]}
                       </span>
-                      <span className={`text-2xl font-bold ${isToday ? 'text-indigo-700' : 'text-slate-700'}`}>
+                      <span className={`text-lg font-bold ${isToday ? 'text-indigo-700' : 'text-slate-700'}`}>
                         {date.getDate()}
                       </span>
-                      {daySessions.length > 0 && (
-                        <div className="mt-2 text-xs font-semibold text-slate-500">
-                          {daySessions.length} sesión{daySessions.length !== 1 ? 'es' : ''}
-                        </div>
-                      )}
                     </div>
+                  );
+                })}
+              </div>
+            </div>
+            
+            {/* Scrollable content area */}
+            <div className="h-[600px] overflow-y-auto mt-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+              <div className="flex gap-2">
+                {/* Time labels column */}
+                <div className="w-14 flex-shrink-0">
+                  {Array.from({ length: 24 }, (_, i) => (
+                    <div key={i} className="h-12 flex items-start justify-end pr-2 text-[10px] text-slate-400 font-medium pt-0.5">
+                      {`${i.toString().padStart(2, '0')}:00`}
+                    </div>
+                  ))}
+                </div>
+                
+                {/* Days columns */}
+                <div className="flex-1 grid grid-cols-7 gap-2">
+                  {getWeekDays().map(date => {
+                    const dateStr = formatLocalDate(date);
+                    const daySessions = getSessionsForDate(dateStr);
+                    const isToday = new Date().toDateString() === date.toDateString();
+                    
+                    // Helper to convert time string (HH:MM) to minutes from midnight
+                    const timeToMinutes = (time: string) => {
+                      const [hours, minutes] = time.split(':').map(Number);
+                      return hours * 60 + minutes;
+                    };
+                    
+                    return (
+                      <div
+                        key={dateStr}
+                        data-week-day={dateStr}
+                        className={`
+                          relative rounded-lg border cursor-pointer
+                          ${isToday ? 'border-indigo-300 bg-indigo-50/20' : 'border-slate-200 bg-white'}
+                        `}
+                        style={{ height: `${24 * 48}px` }}
+                        onMouseDown={(e) => {
+                          // Only trigger if clicking on the background, not on a session
+                          if (e.target === e.currentTarget || (e.target as HTMLElement).classList.contains('hour-slot')) {
+                            const scrollableContainer = document.querySelector('.h-\\[600px\\].overflow-y-auto');
+                            if (!scrollableContainer) return;
 
-                    {/* Right: Sessions Content */}
-                    <div className="flex-1 p-3 flex flex-col justify-center">
-                      {daySessions.length === 0 ? (
-                        <div className="h-full flex items-center text-slate-300 text-sm italic">
-                          Sin sesiones
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          {daySessions.map(session => (
+                            const containerRect = scrollableContainer.getBoundingClientRect();
+                            const scrollTop = scrollableContainer.scrollTop;
+                            const y = e.clientY - containerRect.top + scrollTop;
+                            
+                            setCreatingSession({
+                              date: dateStr,
+                              startY: y,
+                              currentY: y
+                            });
+                          }
+                        }}
+                      >
+                        {/* Hour grid lines */}
+                        {Array.from({ length: 24 }, (_, i) => (
+                          <div
+                            key={i}
+                            className="hour-slot absolute w-full h-12 border-b border-slate-100 hover:bg-indigo-50/30 transition-colors pointer-events-none"
+                            style={{ top: `${i * 48}px` }}
+                          />
+                        ))}
+                        
+                        {/* Preview of new session being created */}
+                        {creatingSession && creatingSession.date === dateStr && (
+                          <div
+                            className="absolute left-1 right-1 rounded-md border-2 border-indigo-500 bg-indigo-200/50 pointer-events-none z-20"
+                            style={{
+                              top: `${Math.min(creatingSession.startY, creatingSession.currentY)}px`,
+                              height: `${Math.max(Math.abs(creatingSession.currentY - creatingSession.startY), 12)}px`
+                            }}
+                          >
+                            <div className="p-1 text-[9px] font-bold text-indigo-900">
+                              Nueva sesión
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* Preview of session being dragged */}
+                        {dragPreview && dragPreview.date === dateStr && draggingSession && (() => {
+                          const startMins = timeToMinutes(dragPreview.startTime);
+                          let endMins = timeToMinutes(dragPreview.endTime);
+                          if (endMins < startMins) endMins = 24 * 60;
+                          const durationMins = endMins - startMins;
+                          return (
+                            <div
+                              className="absolute left-1 right-1 rounded-md border-2 border-blue-500 bg-blue-200/50 pointer-events-none z-30"
+                              style={{
+                                top: `${(startMins / 60) * 48}px`,
+                                height: `${(durationMins / 60) * 48}px`
+                              }}
+                            >
+                              <div className="p-1 text-[9px] font-bold text-blue-900">
+                                {dragPreview.startTime} - {dragPreview.endTime}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                        
+                        {/* Preview of session being resized */}
+                        {resizingSession && resizingSession.date === dateStr && tempSessionTimes && (() => {
+                          const startMins = timeToMinutes(tempSessionTimes.startTime);
+                          let endMins = timeToMinutes(tempSessionTimes.endTime);
+                          if (endMins < startMins) endMins = 24 * 60;
+                          const durationMins = endMins - startMins;
+                          return (
+                            <div
+                              className="absolute left-1 right-1 rounded-md border-2 border-green-500 bg-green-200/50 pointer-events-none z-30"
+                              style={{
+                                top: `${(startMins / 60) * 48}px`,
+                                height: `${(durationMins / 60) * 48}px`
+                              }}
+                            >
+                              <div className="p-1 text-[9px] font-bold text-green-900">
+                                {tempSessionTimes.startTime} - {tempSessionTimes.endTime}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                        
+                        {/* Sessions positioned absolutely */}
+                        {daySessions.map(session => {
+                          const startMinutes = timeToMinutes(session.startTime);
+                          let endMinutes = timeToMinutes(session.endTime);
+                          
+                          // Si endTime es menor que startTime, la sesión cruza medianoche
+                          // En ese caso, mostrar solo hasta las 24:00 (1440 minutos)
+                          if (endMinutes < startMinutes) {
+                            endMinutes = 24 * 60; // 24:00 = 1440 minutos
+                          }
+                          
+                          const durationMinutes = endMinutes - startMinutes;
+                          
+                          // Calculate position and height (48px per hour = 0.8px per minute)
+                          const topPx = (startMinutes / 60) * 48;
+                          const heightPx = (durationMinutes / 60) * 48;
+                          
+                          return (
                             <div
                               key={session.id}
-                              className={`group px-3 py-2 rounded-lg cursor-pointer transition-all hover:shadow-md border relative ${
+                              className={`group absolute left-1 right-1 rounded-md cursor-${session.status === 'scheduled' ? 'move' : 'pointer'} transition-all hover:shadow-lg border hover:z-10 overflow-visible ${
+                                draggingSession?.id === session.id ? 'opacity-30' : ''
+                              } ${
+                                resizingSession?.id === session.id ? 'opacity-40' : ''
+                              } ${
                                 session.status === 'available'
-                                  ? 'bg-purple-50 border-purple-200 hover:bg-purple-100'
+                                  ? 'bg-purple-100 border-purple-300 hover:bg-purple-200'
                                   : session.status === 'scheduled'
-                                  ? 'bg-indigo-50 border-indigo-200 hover:bg-indigo-100'
+                                  ? 'bg-indigo-100 border-indigo-300 hover:bg-indigo-200'
                                   : session.status === 'completed'
-                                  ? 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                                  ? 'bg-slate-100 border-slate-300 hover:bg-slate-200'
                                   : session.status === 'paid'
-                                  ? 'bg-green-50 border-green-200 hover:bg-green-100'
-                                  : 'bg-red-50 border-red-200 hover:bg-red-100'
+                                  ? 'bg-green-100 border-green-300 hover:bg-green-200'
+                                  : 'bg-red-100 border-red-300 hover:bg-red-200'
                               }`}
-                              onClick={() => {
+                              style={{
+                                top: `${topPx}px`,
+                                height: `${Math.max(heightPx, 24)}px`
+                              }}
+                              onMouseDown={(e) => {
+                                // Only allow dragging for scheduled sessions
+                                if (session.status !== 'scheduled') return;
+                                
+                                // Don't start drag if clicking on resize handles or buttons
+                                if ((e.target as HTMLElement).classList.contains('resize-handle') ||
+                                    (e.target as HTMLElement).tagName === 'BUTTON') {
+                                  return;
+                                }
+                                
+                                e.stopPropagation();
+                                const scrollableContainer = document.querySelector('.h-\\[600px\\].overflow-y-auto');
+                                if (!scrollableContainer) return;
+
+                                const containerRect = scrollableContainer.getBoundingClientRect();
+                                const scrollTop = scrollableContainer.scrollTop;
+                                const y = e.clientY - containerRect.top + scrollTop;
+                                
+                                setDraggingSession({
+                                  id: session.id,
+                                  startY: y,
+                                  originalDate: dateStr,
+                                  originalStartTime: session.startTime,
+                                  originalEndTime: session.endTime
+                                });
+                              }}
+                              onClick={(e) => {
+                                // Don't trigger if clicking on resize handles
+                                if ((e.target as HTMLElement).classList.contains('resize-handle')) {
+                                  return;
+                                }
+                                // Don't open modal if we just finished dragging
+                                if (draggingSession) return;
+                                
                                 if (session.status === 'available') {
                                   setSelectedSlot(session);
                                   setShowAssignPatient(true);
@@ -1341,504 +1522,112 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                                 }
                               }}
                             >
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="flex items-center gap-2 flex-1">
-                                  <span className={`text-xs font-semibold ${
-                                    session.status === 'available' ? 'text-purple-700' :
-                                    session.status === 'scheduled' ? 'text-blue-700' :
-                                    session.status === 'completed' ? 'text-green-700' :
-                                    session.status === 'paid' ? 'text-green-700' : 'text-red-700'
-                                  }`}>
-                                    {session.startTime} - {session.endTime}
-                                  </span>
-                                  {session.type === 'online' ? (
-                                    <Video size={14} className="text-indigo-500" />
-                                  ) : session.type === 'home-visit' ? (
-                                    <MapPin size={14} className="text-green-500" />
-                                  ) : (
-                                    <MapPin size={14} className="text-purple-500" />
-                                  )}
-                                  {session.paid && (
-                                    <span className="text-sm">💵</span>
-                                  )}
+                              {/* Top resize handle */}
+                              {session.status === 'scheduled' && (
+                                <div
+                                  className="resize-handle absolute top-0 left-0 right-0 h-3 cursor-ns-resize opacity-0 group-hover:opacity-100 transition-all z-20"
+                                  style={{ marginTop: '-4px' }}
+                                  onMouseDown={(e) => {
+                                    e.stopPropagation();
+                                    setResizingSession({ id: session.id, edge: 'top', date: dateStr });
+                                    setTempSessionTimes({ startTime: session.startTime, endTime: session.endTime });
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    (e.target as HTMLElement).style.backgroundColor = 'rgba(59, 130, 246, 0.5)';
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    (e.target as HTMLElement).style.backgroundColor = '';
+                                  }}
+                                >
+                                  <div className="w-full h-0.5 bg-blue-500 mt-1.5"></div>
                                 </div>
-                                <div className="flex items-center gap-1.5">
-                                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                                    session.status === 'available' ? 'bg-purple-100 text-purple-700' :
-                                    session.status === 'scheduled' ? 'bg-blue-100 text-blue-700' :
-                                    session.status === 'completed' ? 'bg-green-100 text-green-700' :
-                                    session.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                                  }`}>
-                                    {session.status === 'available' ? 'Disponible' :
-                                     session.status === 'scheduled' ? 'Programada' :
-                                     session.status === 'completed' ? 'Completada' :
-                                     session.status === 'paid' ? 'Pagada' : 'Cancelada'}
-                                  </span>
-                                  {session.status === 'available' && (
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (confirm('¿Eliminar esta disponibilidad?')) {
-                                          handleDeleteAvailability(session.id);
-                                        }
-                                      }}
-                                      className="p-1 hover:bg-red-100 rounded transition-all text-red-600 hover:text-red-700"
-                                      title="Eliminar disponibilidad"
-                                    >
-                                      <Trash2 size={12} />
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                              {session.patientName && (
-                                <div className="text-xs text-slate-700 mt-1 font-medium">{session.patientName}</div>
                               )}
-                              {session.notes && (
-                                <div className="text-xs text-slate-500 mt-1 line-clamp-1">{session.notes}</div>
+                              
+                              <div className="p-1 h-full flex flex-col justify-between pointer-events-none">
+                                <div>
+                                  <div className="flex items-center justify-between gap-1 mb-0.5">
+                                    <span className={`text-[9px] font-bold leading-tight ${
+                                      session.status === 'available' ? 'text-purple-800' :
+                                      session.status === 'scheduled' ? 'text-blue-800' :
+                                      session.status === 'completed' ? 'text-green-800' :
+                                      session.status === 'paid' ? 'text-green-800' : 'text-red-800'
+                                    }`}>
+                                      {session.startTime}
+                                    </span>
+                                    <div className="flex items-center gap-0.5">
+                                      {session.status === 'scheduled' && (
+                                        <div className="opacity-0 group-hover:opacity-100 transition-opacity pointer-events-auto" title="Arrastra para mover">
+                                          <svg width="9" height="9" viewBox="0 0 9 9" fill="currentColor" className="text-blue-600">
+                                            <circle cx="2" cy="2" r="1"/>
+                                            <circle cx="7" cy="2" r="1"/>
+                                            <circle cx="2" cy="7" r="1"/>
+                                            <circle cx="7" cy="7" r="1"/>
+                                          </svg>
+                                        </div>
+                                      )}
+                                      {session.type === 'online' ? (
+                                        <Video size={9} className="text-indigo-600" />
+                                      ) : session.type === 'home-visit' ? (
+                                        <MapPin size={9} className="text-green-600" />
+                                      ) : (
+                                        <MapPin size={9} className="text-purple-600" />
+                                      )}
+                                      {session.paid && (
+                                        <span className="text-[9px]">💵</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {session.patientName && (
+                                    <div className="text-[9px] text-slate-800 font-semibold line-clamp-2 leading-tight">{session.patientName}</div>
+                                  )}
+                                </div>
+                                {session.status === 'available' && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (confirm('¿Eliminar esta disponibilidad?')) {
+                                        handleDeleteAvailability(session.id);
+                                      }
+                                    }}
+                                    className="opacity-0 group-hover:opacity-100 absolute top-0.5 right-0.5 p-0.5 hover:bg-red-200 rounded transition-all text-red-700 hover:text-red-900 pointer-events-auto"
+                                    title="Eliminar disponibilidad"
+                                  >
+                                    <Trash2 size={9} />
+                                  </button>
+                                )}
+                              </div>
+                              
+                              {/* Bottom resize handle */}
+                              {session.status === 'scheduled' && (
+                                <div
+                                  className="resize-handle absolute bottom-0 left-0 right-0 h-3 cursor-ns-resize opacity-0 group-hover:opacity-100 transition-all z-20"
+                                  style={{ marginBottom: '-4px' }}
+                                  onMouseDown={(e) => {
+                                    e.stopPropagation();
+                                    setResizingSession({ id: session.id, edge: 'bottom', date: dateStr });
+                                    setTempSessionTimes({ startTime: session.startTime, endTime: session.endTime });
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    (e.target as HTMLElement).style.backgroundColor = 'rgba(59, 130, 246, 0.5)';
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    (e.target as HTMLElement).style.backgroundColor = '';
+                                  }}
+                                >
+                                  <div className="w-full h-0.5 bg-blue-500 mb-1.5"></div>
+                                </div>
                               )}
                             </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Desktop: Vertical columns grid with hourly timeline */}
-            <div className="hidden md:block">
-              <div className="flex gap-2 max-w-full">
-                {/* Time labels column - fixed */}
-                <div className="w-14 flex-shrink-0">
-                  <div className="h-14 sticky top-0 bg-white z-20"></div> {/* Header spacer */}
-                </div>
-                
-                {/* Days headers - sticky */}
-                <div className="flex-1 grid grid-cols-7 gap-2 sticky top-0 bg-white z-10 pb-2">
-                  {getWeekDays().map(date => {
-                    const dateStr = date.toISOString().split('T')[0];
-                    const daySessions = getSessionsForDate(dateStr);
-                    const isToday = new Date().toDateString() === date.toDateString();
-                    
-                    return (
-                      <div
-                        key={dateStr}
-                        className={`flex flex-col items-center justify-center p-2 border rounded-lg h-14 ${isToday ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-slate-50'}`}
-                      >
-                        <span className={`text-[10px] font-bold uppercase tracking-wide ${isToday ? 'text-indigo-600' : 'text-slate-400'}`}>
-                          {weekDays[date.getDay()]}
-                        </span>
-                        <span className={`text-lg font-bold ${isToday ? 'text-indigo-700' : 'text-slate-700'}`}>
-                          {date.getDate()}
-                        </span>
+                          );
+                        })}
                       </div>
                     );
                   })}
                 </div>
               </div>
-              
-              {/* Scrollable content area */}
-              <div className="h-[600px] overflow-y-auto mt-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-                <div className="flex gap-2">
-                  {/* Time labels column */}
-                  <div className="w-14 flex-shrink-0">
-                    {Array.from({ length: 24 }, (_, i) => (
-                      <div key={i} className="h-12 flex items-start justify-end pr-2 text-[10px] text-slate-400 font-medium pt-0.5">
-                        {`${i.toString().padStart(2, '0')}:00`}
-                      </div>
-                    ))}
-                  </div>
-                  
-                  {/* Days columns */}
-                  <div className="flex-1 grid grid-cols-7 gap-2">
-                    {getWeekDays().map(date => {
-                      const dateStr = date.toISOString().split('T')[0];
-                      const daySessions = getSessionsForDate(dateStr);
-                      const isToday = new Date().toDateString() === date.toDateString();
-                      
-                      // Helper to convert time string (HH:MM) to minutes from midnight
-                      const timeToMinutes = (time: string) => {
-                        const [hours, minutes] = time.split(':').map(Number);
-                        return hours * 60 + minutes;
-                      };
-                      
-                      return (
-                        <div
-                          key={dateStr}
-                          data-week-day={dateStr}
-                          className={`
-                            relative rounded-lg border cursor-pointer
-                            ${isToday ? 'border-indigo-300 bg-indigo-50/20' : 'border-slate-200 bg-white'}
-                          `}
-                          style={{ height: `${24 * 48}px` }}
-                          onMouseDown={(e) => {
-                            // Only trigger if clicking on the background, not on a session
-                            if (e.target === e.currentTarget || (e.target as HTMLElement).classList.contains('hour-slot')) {
-                              const scrollableContainer = document.querySelector('.h-\\[600px\\].overflow-y-auto');
-                              if (!scrollableContainer) return;
-
-                              const containerRect = scrollableContainer.getBoundingClientRect();
-                              const scrollTop = scrollableContainer.scrollTop;
-                              const y = e.clientY - containerRect.top + scrollTop;
-                              
-                              setCreatingSession({
-                                date: dateStr,
-                                startY: y,
-                                currentY: y
-                              });
-                            }
-                          }}
-                        >
-                          {/* Hour grid lines */}
-                          {Array.from({ length: 24 }, (_, i) => (
-                            <div
-                              key={i}
-                              className="hour-slot absolute w-full h-12 border-b border-slate-100 hover:bg-indigo-50/30 transition-colors pointer-events-none"
-                              style={{ top: `${i * 48}px` }}
-                            />
-                          ))}
-                          
-                          {/* Preview of new session being created */}
-                          {creatingSession && creatingSession.date === dateStr && (
-                            <div
-                              className="absolute left-1 right-1 rounded-md border-2 border-indigo-500 bg-indigo-200/50 pointer-events-none z-20"
-                              style={{
-                                top: `${Math.min(creatingSession.startY, creatingSession.currentY)}px`,
-                                height: `${Math.max(Math.abs(creatingSession.currentY - creatingSession.startY), 12)}px`
-                              }}
-                            >
-                              <div className="p-1 text-[9px] font-bold text-indigo-900">
-                                Nueva sesión
-                              </div>
-                            </div>
-                          )}
-                          
-                          {/* Preview of session being dragged */}
-                          {dragPreview && dragPreview.date === dateStr && draggingSession && (
-                            <div
-                              className="absolute left-1 right-1 rounded-md border-2 border-blue-500 bg-blue-200/50 pointer-events-none z-30"
-                              style={{
-                                top: `${(timeToMinutes(dragPreview.startTime) / 60) * 48}px`,
-                                height: `${((timeToMinutes(dragPreview.endTime) - timeToMinutes(dragPreview.startTime)) / 60) * 48}px`
-                              }}
-                            >
-                              <div className="p-1 text-[9px] font-bold text-blue-900">
-                                {dragPreview.startTime} - {dragPreview.endTime}
-                              </div>
-                            </div>
-                          )}
-                          
-                          {/* Preview of session being resized */}
-                          {resizingSession && resizingSession.date === dateStr && tempSessionTimes && (
-                            <div
-                              className="absolute left-1 right-1 rounded-md border-2 border-green-500 bg-green-200/50 pointer-events-none z-30"
-                              style={{
-                                top: `${(timeToMinutes(tempSessionTimes.startTime) / 60) * 48}px`,
-                                height: `${((timeToMinutes(tempSessionTimes.endTime) - timeToMinutes(tempSessionTimes.startTime)) / 60) * 48}px`
-                              }}
-                            >
-                              <div className="p-1 text-[9px] font-bold text-green-900">
-                                {tempSessionTimes.startTime} - {tempSessionTimes.endTime}
-                              </div>
-                            </div>
-                          )}
-                          
-                          {/* Sessions positioned absolutely */}
-                          {daySessions.map(session => {
-                            const startMinutes = timeToMinutes(session.startTime);
-                            const endMinutes = timeToMinutes(session.endTime);
-                            const durationMinutes = endMinutes - startMinutes;
-                            
-                            // Calculate position and height (48px per hour = 0.8px per minute)
-                            const topPx = (startMinutes / 60) * 48;
-                            const heightPx = (durationMinutes / 60) * 48;
-                            
-                            return (
-                              <div
-                                key={session.id}
-                                className={`group absolute left-1 right-1 rounded-md cursor-${session.status === 'scheduled' ? 'move' : 'pointer'} transition-all hover:shadow-lg border hover:z-10 overflow-visible ${
-                                  draggingSession?.id === session.id ? 'opacity-30' : ''
-                                } ${
-                                  resizingSession?.id === session.id ? 'opacity-40' : ''
-                                } ${
-                                  session.status === 'available'
-                                    ? 'bg-purple-100 border-purple-300 hover:bg-purple-200'
-                                    : session.status === 'scheduled'
-                                    ? 'bg-indigo-100 border-indigo-300 hover:bg-indigo-200'
-                                    : session.status === 'completed'
-                                    ? 'bg-slate-100 border-slate-300 hover:bg-slate-200'
-                                    : session.status === 'paid'
-                                    ? 'bg-green-100 border-green-300 hover:bg-green-200'
-                                    : 'bg-red-100 border-red-300 hover:bg-red-200'
-                                }`}
-                                style={{
-                                  top: `${topPx}px`,
-                                  height: `${Math.max(heightPx, 24)}px`
-                                }}
-                                onMouseDown={(e) => {
-                                  // Only allow dragging for scheduled sessions
-                                  if (session.status !== 'scheduled') return;
-                                  
-                                  // Don't start drag if clicking on resize handles or buttons
-                                  if ((e.target as HTMLElement).classList.contains('resize-handle') ||
-                                      (e.target as HTMLElement).tagName === 'BUTTON') {
-                                    return;
-                                  }
-                                  
-                                  e.stopPropagation();
-                                  const scrollableContainer = document.querySelector('.h-\\[600px\\].overflow-y-auto');
-                                  if (!scrollableContainer) return;
-
-                                  const containerRect = scrollableContainer.getBoundingClientRect();
-                                  const scrollTop = scrollableContainer.scrollTop;
-                                  const y = e.clientY - containerRect.top + scrollTop;
-                                  
-                                  setDraggingSession({
-                                    id: session.id,
-                                    startY: y,
-                                    originalDate: dateStr,
-                                    originalStartTime: session.startTime,
-                                    originalEndTime: session.endTime
-                                  });
-                                }}
-                                onClick={(e) => {
-                                  // Don't trigger if clicking on resize handles
-                                  if ((e.target as HTMLElement).classList.contains('resize-handle')) {
-                                    return;
-                                  }
-                                  // Don't open modal if we just finished dragging
-                                  if (draggingSession) return;
-                                  
-                                  if (session.status === 'available') {
-                                    setSelectedSlot(session);
-                                    setShowAssignPatient(true);
-                                  } else {
-                                    handleOpenSession(session);
-                                  }
-                                }}
-                              >
-                                {/* Top resize handle */}
-                                {session.status === 'scheduled' && (
-                                  <div
-                                    className="resize-handle absolute top-0 left-0 right-0 h-3 cursor-ns-resize opacity-0 group-hover:opacity-100 transition-all z-20"
-                                    style={{ marginTop: '-4px' }}
-                                    onMouseDown={(e) => {
-                                      e.stopPropagation();
-                                      setResizingSession({ id: session.id, edge: 'top', date: dateStr });
-                                      setTempSessionTimes({ startTime: session.startTime, endTime: session.endTime });
-                                    }}
-                                    onMouseEnter={(e) => {
-                                      (e.target as HTMLElement).style.backgroundColor = 'rgba(59, 130, 246, 0.5)';
-                                    }}
-                                    onMouseLeave={(e) => {
-                                      (e.target as HTMLElement).style.backgroundColor = '';
-                                    }}
-                                  >
-                                    <div className="w-full h-0.5 bg-blue-500 mt-1.5"></div>
-                                  </div>
-                                )}
-                                
-                                <div className="p-1 h-full flex flex-col justify-between pointer-events-none">
-                                  <div>
-                                    <div className="flex items-center justify-between gap-1 mb-0.5">
-                                      <span className={`text-[9px] font-bold leading-tight ${
-                                        session.status === 'available' ? 'text-purple-800' :
-                                        session.status === 'scheduled' ? 'text-blue-800' :
-                                        session.status === 'completed' ? 'text-green-800' :
-                                        session.status === 'paid' ? 'text-green-800' : 'text-red-800'
-                                      }`}>
-                                        {session.startTime}
-                                      </span>
-                                      <div className="flex items-center gap-0.5">
-                                        {session.status === 'scheduled' && (
-                                          <div className="opacity-0 group-hover:opacity-100 transition-opacity pointer-events-auto" title="Arrastra para mover">
-                                            <svg width="9" height="9" viewBox="0 0 9 9" fill="currentColor" className="text-blue-600">
-                                              <circle cx="2" cy="2" r="1"/>
-                                              <circle cx="7" cy="2" r="1"/>
-                                              <circle cx="2" cy="7" r="1"/>
-                                              <circle cx="7" cy="7" r="1"/>
-                                            </svg>
-                                          </div>
-                                        )}
-                                        {session.type === 'online' ? (
-                                          <Video size={9} className="text-indigo-600" />
-                                        ) : session.type === 'home-visit' ? (
-                                          <MapPin size={9} className="text-green-600" />
-                                        ) : (
-                                          <MapPin size={9} className="text-purple-600" />
-                                        )}
-                                        {session.paid && (
-                                          <span className="text-[9px]">💵</span>
-                                        )}
-                                      </div>
-                                    </div>
-                                    {session.patientName && (
-                                      <div className="text-[9px] text-slate-800 font-semibold line-clamp-2 leading-tight">{session.patientName}</div>
-                                    )}
-                                  </div>
-                                  {session.status === 'available' && (
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (confirm('¿Eliminar esta disponibilidad?')) {
-                                          handleDeleteAvailability(session.id);
-                                        }
-                                      }}
-                                      className="opacity-0 group-hover:opacity-100 absolute top-0.5 right-0.5 p-0.5 hover:bg-red-200 rounded transition-all text-red-700 hover:text-red-900 pointer-events-auto"
-                                      title="Eliminar disponibilidad"
-                                    >
-                                      <Trash2 size={9} />
-                                    </button>
-                                  )}
-                                </div>
-                                
-                                {/* Bottom resize handle */}
-                                {session.status === 'scheduled' && (
-                                  <div
-                                    className="resize-handle absolute bottom-0 left-0 right-0 h-3 cursor-ns-resize opacity-0 group-hover:opacity-100 transition-all z-20"
-                                    style={{ marginBottom: '-4px' }}
-                                    onMouseDown={(e) => {
-                                      e.stopPropagation();
-                                      setResizingSession({ id: session.id, edge: 'bottom', date: dateStr });
-                                      setTempSessionTimes({ startTime: session.startTime, endTime: session.endTime });
-                                    }}
-                                    onMouseEnter={(e) => {
-                                      (e.target as HTMLElement).style.backgroundColor = 'rgba(59, 130, 246, 0.5)';
-                                    }}
-                                    onMouseLeave={(e) => {
-                                      (e.target as HTMLElement).style.backgroundColor = '';
-                                    }}
-                                  >
-                                    <div className="w-full h-0.5 bg-blue-500 mb-1.5"></div>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
-        )}
-
-        {/* List View */}
-        {viewMode === 'LIST' && (
-          <div className="p-4 max-h-[600px] overflow-y-auto">
-            {filteredListSessions.length === 0 ? (
-              <div className="text-center py-12 text-slate-400">
-                <CalendarIcon size={48} className="mx-auto mb-3" />
-                <p>No hay sesiones que coincidan con los filtros seleccionados</p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {filteredListSessions.map(session => {
-                  const patientInfo = patients.find(p => p.id === session.patientId);
-                  const readableDate = new Date(session.date).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
-                  const messageParts = [
-                    `Hola ${session.patientName || patientInfo?.name || ''}`.trim(),
-                    `tu sesión comenzará el ${readableDate} a las ${session.startTime}.`
-                  ];
-                  if (session.meetLink) {
-                    messageParts.push(`Enlace: ${session.meetLink}`);
-                  }
-                  const message = messageParts.join(' ').replace(/\s+/g, ' ').trim();
-                  const rawPhone = session.patientPhone || patientInfo?.phone || '';
-                  const normalizedPhone = rawPhone.replace(/[^0-9]/g, '');
-                  const whatsappBase = normalizedPhone ? `https://wa.me/${normalizedPhone}` : 'https://wa.me/';
-                  const whatsappUrl = `${whatsappBase}?text=${encodeURIComponent(message)}`;
-
-                  return (
-                    <div
-                      key={session.id}
-                      onClick={() => {
-                        if (session.status === 'available') {
-                          setSelectedSlot(session);
-                          setShowAssignPatient(true);
-                        } else {
-                          setSelectedSession(session);
-                        }
-                      }}
-                      className="p-4 border border-slate-200 rounded-lg hover:border-indigo-300 hover:bg-slate-50 cursor-pointer transition-all"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-sm font-semibold text-slate-700">
-                              {new Date(session.date).toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })}
-                            </span>
-                            <span className="text-sm text-slate-500">
-                              {session.startTime} - {session.endTime}
-                            </span>
-                            {session.type === 'online' ? (
-                              <Video size={14} className="text-indigo-600" />
-                            ) : session.type === 'home-visit' ? (
-                              <MapPin size={14} className="text-green-600" />
-                            ) : (
-                              <MapPin size={14} className="text-purple-600" />
-                            )}
-                          </div>
-                          <div className="text-base font-medium text-slate-900">{session.patientName}</div>
-                          {session.notes && (
-                            <div className="text-xs text-slate-500 mt-1">{session.notes}</div>
-                          )}
-                        </div>
-                        <div className="flex flex-col items-end gap-2">
-                          <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${
-                            session.status === 'available' 
-                              ? 'bg-purple-100 text-purple-700'
-                              : session.status === 'scheduled'
-                              ? 'bg-indigo-100 text-indigo-700'
-                              : session.status === 'completed'
-                              ? 'bg-slate-100 text-slate-700'
-                              : session.status === 'paid'
-                              ? 'bg-green-100 text-green-700'
-                              : 'bg-red-100 text-red-700'
-                          }`}>
-                            {session.status === 'available' ? 'Disponible' : 
-                             session.status === 'scheduled' ? 'Programada' :
-                             session.status === 'completed' ? 'Completada' :
-                             session.status === 'paid' ? 'Pagada' : 'Cancelada'}
-                          </span>
-                          {session.status === 'available' && (
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                handleDeleteAvailability(session.id);
-                              }}
-                              className="inline-flex items-center gap-1 px-3 py-1 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-full hover:bg-rose-100"
-                            >
-                              <Trash2 size={12} />
-                              Eliminar
-                            </button>
-                          )}
-                          {session.status === 'scheduled' && (
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                window.open(whatsappUrl, '_blank');
-                              }}
-                              className="inline-flex items-center gap-1 px-3 py-1 text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-full hover:bg-green-100"
-                            >
-                              <MessageCircle size={12} />
-                              WhatsApp
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
+        </div>
       </div>
 
       {/* Day Sessions Detail Modal */}
@@ -1848,7 +1637,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
             <div className="p-6 border-b border-slate-200">
               <div className="flex items-center justify-between">
                 <h3 className="text-xl font-bold text-slate-900">
-                  {new Date(selectedDate).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}
+                  {parseLocalDate(selectedDate).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}
                 </h3>
                 <button
                   onClick={() => setSelectedDate('')}
@@ -2263,7 +2052,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                   />
                   {newSession.startTime && newSession.endTime && (
                     <p className="text-xs text-slate-500 mt-1">
-                      Total: {getSessionTotalPrice(newSession).toFixed(2)}€
+                      Total: {getSessionTotalPrice(newSession as any).toFixed(2)}€
                     </p>
                   )}
                 </div>
@@ -2552,7 +2341,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
               <div>
                 <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Horario</div>
                 <div className="text-lg font-semibold text-slate-900">
-                  {new Date(selectedSlot.date).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}
+                  {parseLocalDate(selectedSlot.date).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}
                 </div>
                 <div className="text-sm text-slate-600 mt-1">
                   {selectedSlot.startTime} - {selectedSlot.endTime}
@@ -2633,4 +2422,4 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
   );
 };
 
-export default PsychologistCalendar;
+export default PsychologistSchedule;

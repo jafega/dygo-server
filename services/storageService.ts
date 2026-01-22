@@ -910,6 +910,12 @@ export const getPatientsForPsychologist = async (psychId: string, includeInactiv
                 ? (last7.reduce((acc, curr) => acc + curr.sentimentScore, 0) / last7.length)
                 : 0;
 
+            // Obtener tags de la relación
+            const relationship = filteredRelationships.find(rel => 
+                (rel.patient_user_id || rel.patientId) === user.id
+            );
+            const tags = relationship?.tags || relationship?.data?.tags || [];
+
             return {
                 id: user.id,
                 name: isSelf ? `${user.name} (Tú)` : user.name,
@@ -919,7 +925,8 @@ export const getPatientsForPsychologist = async (psychId: string, includeInactiv
                 averageSentiment: parseFloat(avgSentiment.toFixed(1)),
                 recentSummary: lastEntry ? lastEntry.summary : 'No hay registros recientes.',
                 riskLevel: avgSentiment < 4 ? 'HIGH' : avgSentiment < 6 ? 'MEDIUM' : 'LOW',
-                isSelf: isSelf
+                isSelf: isSelf,
+                tags: tags
             } as PatientSummary;
         };
         

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ViewState, JournalEntry, Goal, UserSettings, WeeklyReport, User } from './types';
 import * as StorageService from './services/storageService';
 import * as AuthService from './services/authService';
@@ -13,16 +13,16 @@ import GoalsPanel from './components/GoalsPanel';
 import EntryModal from './components/EntryModal';
 import WeeklyReportModal from './components/WeeklyReportModal';
 import SettingsModal from './components/SettingsModal';
-import PatientDashboard from './components/PatientDashboard';
+import PatientDashboard, { PatientDashboardHandle } from './components/PatientDashboard';
 import AuthScreen from './components/AuthScreen';
 import SuperAdmin from './components/SuperAdmin';
 import PsychologistSidebar from './components/PsychologistSidebar';
 import BillingPanel from './components/BillingPanel';
 import PsychologistProfilePanel from './components/PsychologistProfilePanel';
 import PatientProfilePanel from './components/PatientProfilePanel';
-import PsychologistCalendar from './components/PsychologistCalendar';
+import PsychologistSchedule from './components/PsychologistSchedule';
 import PsychologistDashboard from './components/PsychologistDashboard';
-import ConnectionsPanel from './components/ConnectionsPanel';
+import SessionsList from './components/SessionsList';
 import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock, AlertCircle, Smile, Shield } from 'lucide-react';
 
 // Custom Dygo Logo Component
@@ -39,8 +39,11 @@ const App: React.FC = () => {
   const [pendingRole, setPendingRole] = useState<'PATIENT' | 'PSYCHOLOGIST' | null>(null);
   
   const [psychViewMode, setPsychViewMode] = useState<'DASHBOARD' | 'PERSONAL'>('DASHBOARD');
-  const [psychPanelView, setPsychPanelView] = useState<'patients' | 'billing' | 'profile' | 'calendar' | 'connections' | 'dashboard'>('dashboard');
+  const [psychPanelView, setPsychPanelView] = useState<'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule'>('schedule');
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  
+  // Ref para controlar PatientDashboard
+  const patientDashboardRef = useRef<PatientDashboardHandle>(null);
   
   // State for draggable menu button position (unified across personal/professional)
   const [menuButtonPos, setMenuButtonPos] = useState(() => {
@@ -74,7 +77,7 @@ const App: React.FC = () => {
   const [sessionDate, setSessionDate] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
-  const [activeTab, setActiveTab] = useState<'insights' | 'sessions' | 'appointments' | 'calendar' | 'billing' | 'connections' | 'profile' | 'admin'>('calendar');
+  const [activeTab, setActiveTab] = useState<'insights' | 'sessions' | 'appointments' | 'calendar' | 'billing' | 'profile' | 'admin'>('calendar');
   const [showSettings, setShowSettings] = useState(false);
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReport | null>(null);
   const [hasPendingInvites, setHasPendingInvites] = useState(false);
@@ -689,12 +692,22 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
   // Psychologist View - Solo accesible si is_psychologist es true
   if (currentUser?.is_psychologist === true && psychViewMode === 'DASHBOARD') {
       console.log('✅ [App] Mostrando vista de psicólogo - is_psychologist:', currentUser.is_psychologist);
+      
+      // Handler para cambio de vista con cierre de modal si estamos en pacientes
+      const handleViewChange = (newView: typeof psychPanelView) => {
+        // Si estamos cambiando a 'patients' y ya estamos en 'patients', cerrar modal
+        if (newView === 'patients' && psychPanelView === 'patients') {
+          patientDashboardRef.current?.closeModal();
+        }
+        setPsychPanelView(newView);
+      };
+      
       return (
           <div className="h-screen bg-slate-50 text-slate-900 flex overflow-hidden">
                {/* Sidebar */}
                <PsychologistSidebar 
                   activeView={psychPanelView}
-                  onViewChange={setPsychPanelView}
+                  onViewChange={handleViewChange}
                   isOpen={sidebarOpen}
                   onToggle={() => setSidebarOpen(!sidebarOpen)}
                   userName={currentUser.name}
@@ -714,24 +727,27 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                         {psychPanelView === 'patients' && <Users className="w-6 h-6 text-indigo-600" />}
                         {psychPanelView === 'billing' && <FileText className="w-6 h-6 text-indigo-600" />}
                         {psychPanelView === 'profile' && <UserIcon className="w-6 h-6 text-indigo-600" />}
-                        {psychPanelView === 'calendar' && <CalendarIcon className="w-6 h-6 text-indigo-600" />}
+                        {psychPanelView === 'schedule' && <CalendarIcon className="w-6 h-6 text-indigo-600" />}
                         {psychPanelView === 'connections' && <Link2 className="w-6 h-6 text-indigo-600" />}
+                        {psychPanelView === 'sessions' && <FileText className="w-6 h-6 text-indigo-600" />}
                         <h1 className="text-2xl font-bold text-slate-900">
-                          {psychPanelView === 'dashboard' && 'Dashboard'}
+                          {psychPanelView === 'dashboard' && 'Métricas'}
                           {psychPanelView === 'patients' && 'Pacientes'}
                           {psychPanelView === 'billing' && 'Facturación'}
                           {psychPanelView === 'profile' && 'Mi Perfil'}
-                          {psychPanelView === 'calendar' && 'Calendario'}
+                          {psychPanelView === 'schedule' && 'Agenda'}
                           {psychPanelView === 'connections' && 'Conexiones'}
+                          {psychPanelView === 'sessions' && 'Sesiones'}
                         </h1>
                       </div>
                       <p className="text-sm text-slate-500">
-                        {psychPanelView === 'dashboard' && 'Resumen completo de tu actividad'}
+                        {psychPanelView === 'dashboard' && 'Métricas y resumen de actividad'}
                         {psychPanelView === 'patients' && 'Gestiona tu lista de pacientes'}
                         {psychPanelView === 'billing' && 'Gestiona facturas y pagos'}
                         {psychPanelView === 'profile' && 'Información personal y datos de facturación'}
-                        {psychPanelView === 'calendar' && 'Agenda y disponibilidad'}
+                        {psychPanelView === 'schedule' && 'Vista semanal de tu agenda'}
                         {psychPanelView === 'connections' && 'Gestiona quién puede verte y a quién acompañas'}
+                        {psychPanelView === 'sessions' && 'Gestión de sesiones'}
                       </p>
                     </header>
 
@@ -743,21 +759,23 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                           {psychPanelView === 'patients' && 'Pacientes'}
                           {psychPanelView === 'billing' && 'Facturación'}
                           {psychPanelView === 'profile' && 'Mi Perfil Profesional'}
-                          {psychPanelView === 'calendar' && 'Calendario'}
+                          {psychPanelView === 'schedule' && 'Agenda'}
                           {psychPanelView === 'connections' && 'Conexiones'}
+                          {psychPanelView === 'sessions' && 'Sesiones'}
                         </h1>
                         <p className="text-slate-500 mt-1">
                           {psychPanelView === 'dashboard' && 'Resumen completo de tu actividad profesional'}
                           {psychPanelView === 'patients' && 'Gestiona tu lista de pacientes y su progreso'}
                           {psychPanelView === 'billing' && 'Gestiona facturas y pagos de tus servicios'}
                           {psychPanelView === 'profile' && 'Información personal y datos de facturación'}
-                          {psychPanelView === 'calendar' && 'Gestiona tu agenda y disponibilidad'}
+                          {psychPanelView === 'schedule' && 'Vista semanal de tu agenda con filtros'}
                           {psychPanelView === 'connections' && 'Gestiona quién puede verte y a quién acompañas'}
+                          {psychPanelView === 'sessions' && 'Gestión completa de sesiones con métricas'}
                         </p>
                       </div>
                       {/* Action Buttons */}
                       <div className="flex gap-3">
-                        {psychPanelView === 'calendar' && (
+                        {psychPanelView === 'schedule' && (
                           <>
                             <button
                               onClick={() => {
@@ -797,10 +815,11 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                     </header>
 
                     {psychPanelView === 'dashboard' && <PsychologistDashboard psychologistId={currentUser.id} />}
-                    {psychPanelView === 'patients' && <PatientDashboard />}
+                    {psychPanelView === 'patients' && <PatientDashboard ref={patientDashboardRef} />}
+                    {psychPanelView === 'sessions' && <SessionsList psychologistId={currentUser.id} />}
                     {psychPanelView === 'billing' && <BillingPanel psychologistId={currentUser.id} />}
                     {psychPanelView === 'profile' && <PsychologistProfilePanel userId={currentUser.id} userEmail={currentUser.email} />}
-                    {psychPanelView === 'calendar' && <PsychologistCalendar psychologistId={currentUser.id} />}
+                    {psychPanelView === 'schedule' && <PsychologistSchedule psychologistId={currentUser.id} />}
                     {psychPanelView === 'connections' && <ConnectionsPanel currentUser={currentUser} />}
 
                     {showSettings && (
@@ -1018,18 +1037,6 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
             </button>
 
             <button
-              onClick={() => { setActiveTab('connections'); if (window.innerWidth < 768) setSidebarOpen(false); }}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium ${
-                activeTab === 'connections'
-                  ? 'bg-indigo-50 text-indigo-700 shadow-sm'
-                  : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-              }`}
-            >
-              <Link2 size={18} />
-              <span className={`${sidebarOpen ? 'inline' : 'hidden'} md:inline`}>Conexiones</span>
-            </button>
-
-            <button
               onClick={() => { setActiveTab('profile'); if (window.innerWidth < 768) setSidebarOpen(false); }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium relative ${
                 activeTab === 'profile'
@@ -1116,7 +1123,6 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   {activeTab === 'appointments' && 'Citas'}
                   {activeTab === 'sessions' && 'Sesiones'}
                   {activeTab === 'billing' && 'Facturación'}
-                  {activeTab === 'connections' && 'Conexiones'}
                   {activeTab === 'profile' && 'Mi Perfil'}
                   {activeTab === 'admin' && 'Administración'}
                 </h1>
@@ -1127,7 +1133,6 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                 {activeTab === 'appointments' && 'Gestiona tus citas con el psicólogo'}
                 {activeTab === 'sessions' && 'Sesiones clínicas con tu psicólogo'}
                 {activeTab === 'billing' && 'Consulta y descarga tus facturas'}
-                {activeTab === 'connections' && 'Administra conexiones con tu psicólogo'}
                 {activeTab === 'profile' && 'Información personal y preferencias'}
                 {activeTab === 'admin' && 'Panel de administración del sistema'}
               </p>
@@ -1142,7 +1147,6 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   {activeTab === 'appointments' && 'Mis Citas'}
                   {activeTab === 'sessions' && 'Sesiones Clínicas'}
                   {activeTab === 'billing' && 'Facturación'}
-                  {activeTab === 'connections' && 'Conexiones'}
                   {activeTab === 'profile' && 'Mi Perfil'}
                   {activeTab === 'admin' && 'Administración del Sistema'}
                 </h1>
@@ -1152,20 +1156,19 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   {activeTab === 'appointments' && 'Gestiona y reserva citas con tu psicólogo'}
                   {activeTab === 'sessions' && 'Sesiones clínicas con tu psicólogo'}
                   {activeTab === 'billing' && 'Consulta y descarga tus facturas'}
-                  {activeTab === 'connections' && 'Administra invitaciones y conexiones con tu psicólogo'}
                   {activeTab === 'profile' && 'Información personal y configuración de tu cuenta'}
                   {activeTab === 'admin' && 'Gestión de usuarios del sistema'}
                 </p>
               </div>
-              {/* <div className="flex gap-3">
+              {activeTab === 'calendar' && (
                 <button
                   onClick={() => handleStartSession()}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-lg font-medium flex items-center gap-2 transition-all shadow-lg hover:shadow-indigo-500/30"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-xl font-medium flex items-center gap-2 transition-all shadow-lg hover:shadow-indigo-500/30"
                 >
-                  <Mic size={18} />
-                  Grabar entrada
+                  <Mic size={20} />
+                  Hablar con IA
                 </button>
-              </div> */}
+              )}
             </header>
 
             {/* Mobile Action Button - Circular Floating Button */}
@@ -1421,12 +1424,6 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
             {activeTab === 'billing' && (
               <div className="animate-in fade-in">
                 <PatientBillingPanel />
-              </div>
-            )}
-
-            {activeTab === 'connections' && currentUser && (
-              <div className="animate-in fade-in">
-                <ConnectionsPanel currentUser={currentUser} onPendingInvitesChange={setHasPendingInvites} />
               </div>
             )}
 

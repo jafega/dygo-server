@@ -92,7 +92,7 @@ const InsightsPanel: React.FC<InsightsPanelProps> = ({ entries, mode = 'PERSONAL
     .sort((a, b) => a.timestamp - b.timestamp)
     .slice(-14) // Last 14 entries
     .map(e => ({
-      date: e.date.substring(5), // MM-DD
+      date: e.date ? e.date.substring(5) : new Date(e.timestamp).toISOString().substring(5, 10), // MM-DD
       score: e.sentimentScore
     }));
 

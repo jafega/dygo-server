@@ -21,7 +21,8 @@
     "dotenv": "^16.0.0",
     "better-sqlite3": "^8.2.0",
     "pg": "^8.10.0",
-    "@supabase/supabase-js": "^2.49.1"
+    "@supabase/supabase-js": "^2.49.1",
+    "busboy": "^1.6.0"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.23",
