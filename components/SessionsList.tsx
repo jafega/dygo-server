@@ -971,25 +971,25 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
 
       {/* Edit Session Modal */}
       {selectedSession && editedSession && (
-        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-0 sm:p-4">
+          <div className="bg-white rounded-none sm:rounded-2xl shadow-2xl max-w-2xl w-full h-full sm:h-auto sm:max-h-[90vh] flex flex-col">
             {/* Modal Header */}
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
-              <h3 className="text-xl font-bold text-slate-800">Editar Sesión</h3>
+            <div className="flex-shrink-0 bg-white border-b border-slate-200 px-4 py-3 sm:px-6 sm:py-4 flex items-center justify-between">
+              <h3 className="text-lg sm:text-xl font-bold text-slate-800">Editar Sesión</h3>
               <button
                 onClick={handleCloseModal}
-                className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                className="p-2 hover:bg-slate-100 active:bg-slate-200 rounded-lg transition-colors"
               >
                 <XIcon size={20} className="text-slate-500" />
               </button>
             </div>
 
             {/* Modal Body */}
-            <div className="p-6 space-y-4">
+            <div className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6 space-y-4">
               {/* Patient Name (Read-only) */}
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-2">Paciente</label>
-                <div className="px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg text-slate-700">
+                <div className="px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 text-base">
                   {patients.get(editedSession.patient_user_id || editedSession.patientId)?.name || 'Paciente no disponible'}
                 </div>
               </div>
@@ -1001,19 +1001,19 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                   type="date"
                   value={editedSession.date}
                   onChange={(e) => handleFieldChange('date', e.target.value)}
-                  className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base"
                 />
               </div>
 
               {/* Time Range */}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3 sm:gap-4">
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">Hora inicio</label>
                   <input
                     type="time"
                     value={editedSession.startTime}
                     onChange={(e) => handleFieldChange('startTime', e.target.value)}
-                    className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base"
                   />
                 </div>
                 <div>
@@ -1022,7 +1022,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                     type="time"
                     value={editedSession.endTime}
                     onChange={(e) => handleFieldChange('endTime', e.target.value)}
-                    className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base"
                   />
                 </div>
               </div>
@@ -1033,7 +1033,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                 <select
                   value={editedSession.type}
                   onChange={(e) => handleFieldChange('type', e.target.value as 'in-person' | 'online' | 'home-visit')}
-                  className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base bg-white"
                 >
                   <option value="online">Online</option>
                   <option value="in-person">Presencial</option>
@@ -1047,7 +1047,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                 <select
                   value={editedSession.status}
                   onChange={(e) => handleFieldChange('status', e.target.value as Session['status'])}
-                  className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base bg-white"
                 >
                   <option value="scheduled">Programada</option>
                   <option value="completed">Completada</option>
@@ -1073,22 +1073,22 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
               </div>
 
               {/* Price and Percent */}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3 sm:gap-4">
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Precio por hora (€)</label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Precio/h (€)</label>
                   <input
                     type="number"
                     step="0.01"
                     value={editedSession.price || 0}
                     onChange={(e) => handleFieldChange('price', parseFloat(e.target.value) || 0)}
-                    className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base"
                   />
                   <p className="text-xs text-slate-500 mt-1">
-                    Duración: {getSessionDurationHours(editedSession).toFixed(2)}h → Total: {getSessionTotalPrice(editedSession).toFixed(2)}€
+                    {getSessionDurationHours(editedSession).toFixed(2)}h → {getSessionTotalPrice(editedSession).toFixed(2)}€
                   </p>
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">% Psicólogo</label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">% Psic.</label>
                   <input
                     type="number"
                     step="0.01"
@@ -1096,7 +1096,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                     max="100"
                     value={editedSession.percent_psych || 0}
                     onChange={(e) => handleFieldChange('percent_psych', parseFloat(e.target.value) || 0)}
-                    className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base"
                   />
                 </div>
               </div>
@@ -1110,7 +1110,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                     value={editedSession.meetLink || ''}
                     onChange={(e) => handleFieldChange('meetLink', e.target.value)}
                     placeholder="https://meet.google.com/..."
-                    className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base"
                   />
                 </div>
               )}
@@ -1123,7 +1123,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                   onChange={(e) => handleFieldChange('notes', e.target.value)}
                   rows={4}
                   placeholder="Notas sobre la sesión..."
-                  className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+                  className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none text-base"
                 />
               </div>
 
@@ -1160,20 +1160,20 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
             </div>
 
             {/* Modal Footer */}
-            <div className="sticky bottom-0 bg-slate-50 border-t border-slate-200 px-6 py-4 flex items-center justify-between gap-3">
+            <div className="flex-shrink-0 bg-slate-50 border-t border-slate-200 px-4 py-3 sm:px-6 sm:py-4 flex items-center justify-between gap-2 sm:gap-3">
               <button
                 onClick={handleDeleteSession}
                 disabled={isSaving}
-                className="px-4 py-2 bg-red-600 text-white hover:bg-red-700 rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+                className="px-4 py-3 bg-red-600 text-white hover:bg-red-700 active:bg-red-800 rounded-xl font-medium transition-colors disabled:opacity-50 flex items-center gap-2 text-sm sm:text-base"
               >
                 <Trash2 size={16} />
-                Eliminar
+                <span className="hidden xs:inline">Eliminar</span>
               </button>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 sm:gap-3">
                 <button
                   onClick={handleCloseModal}
                   disabled={isSaving}
-                  className="px-4 py-2 text-slate-700 hover:bg-slate-200 rounded-lg font-medium transition-colors disabled:opacity-50"
+                  className="px-4 py-3 text-slate-700 hover:bg-slate-200 active:bg-slate-300 rounded-xl font-medium transition-colors disabled:opacity-50 text-sm sm:text-base"
                 >
                   Cancelar
                 </button>
