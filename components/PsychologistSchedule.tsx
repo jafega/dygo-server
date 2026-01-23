@@ -1999,16 +1999,16 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
 
       {/* New Session Modal */}
       {showNewSession && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full">
-            <div className="p-6 border-b border-slate-200">
-              <h3 className="text-xl font-bold text-slate-900">Nueva Sesión</h3>
-              <p className="text-sm text-slate-500 mt-1">Programa una sesión con un paciente</p>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-2 sm:p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-xl sm:rounded-2xl shadow-2xl max-w-md w-full max-h-[95vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white p-3 sm:p-6 border-b border-slate-200 rounded-t-xl sm:rounded-t-2xl">
+              <h3 className="text-lg sm:text-xl font-bold text-slate-900">Nueva Sesión</h3>
+              <p className="text-xs sm:text-sm text-slate-500 mt-1">Programa una sesión con un paciente</p>
             </div>
             
-            <div className="p-6 space-y-4">
+            <div className="p-3 sm:p-6 space-y-3 sm:space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Paciente *</label>
+                <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">Paciente *</label>
                 <select
                   value={newSession.patientId}
                   onChange={(e) => {
@@ -2028,7 +2028,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                       percent_psych: defaultPercent
                     });
                   }}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  className="w-full px-2 sm:px-4 py-2 sm:py-2.5 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent touch-manipulation"
                 >
                   <option value="">Selecciona un paciente</option>
                   {patients.map(patient => (
@@ -2038,36 +2038,36 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Fecha *</label>
+                <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">Fecha *</label>
                 <input
                   type="date"
                   value={newSession.date}
                   onChange={(e) => setNewSession({ ...newSession, date: e.target.value })}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  className="w-full px-2 sm:px-4 py-2 sm:py-2.5 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent touch-manipulation"
                   placeholder="dd/mm/yyyy"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-2 sm:gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Hora Inicio *</label>
+                  <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">Hora Inicio *</label>
                   <input
                     type="time"
                     value={newSession.startTime}
                     onChange={(e) => setNewSession({ ...newSession, startTime: e.target.value })}
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    className="w-full px-2 sm:px-4 py-2 sm:py-2.5 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent touch-manipulation"
                     step="900"
                     pattern="[0-9]{2}:[0-9]{2}"
                     placeholder="HH:MM"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Hora Fin *</label>
+                  <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">Hora Fin *</label>
                   <input
                     type="time"
                     value={newSession.endTime}
                     onChange={(e) => setNewSession({ ...newSession, endTime: e.target.value })}
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    className="w-full px-2 sm:px-4 py-2 sm:py-2.5 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent touch-manipulation"
                     step="900"
                     pattern="[0-9]{2}:[0-9]{2}"
                     placeholder="HH:MM"
@@ -2076,115 +2076,136 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Tipo *</label>
-                <select
-                  value={newSession.type}
-                  onChange={(e) => setNewSession({ ...newSession, type: e.target.value as 'in-person' | 'online' })}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                >
-                  <option value="online">Online</option>
-                  <option value="in-person">Presencial</option>
-                </select>
+                <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">Tipo de sesión *</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNewSession({ ...newSession, type: 'online' })}
+                    className={`flex items-center justify-center gap-1.5 sm:gap-2 px-3 py-2.5 rounded-lg font-medium text-xs sm:text-sm transition-all touch-manipulation ${
+                      newSession.type === 'online'
+                        ? 'bg-indigo-600 text-white shadow-md'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-300'
+                    }`}
+                  >
+                    <Video size={14} className="sm:w-4 sm:h-4 flex-shrink-0" />
+                    <span>Online</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewSession({ ...newSession, type: 'in-person' })}
+                    className={`flex items-center justify-center gap-1.5 sm:gap-2 px-3 py-2.5 rounded-lg font-medium text-xs sm:text-sm transition-all touch-manipulation ${
+                      newSession.type === 'in-person'
+                        ? 'bg-purple-600 text-white shadow-md'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-300'
+                    }`}
+                  >
+                    <MapPin size={14} className="sm:w-4 sm:h-4 flex-shrink-0" />
+                    <span>Presencial</span>
+                  </button>
+                </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Precio por hora (€) *</label>
-                  <input
-                    type="number"
-                    value={newSession.price}
-                    onChange={(e) => setNewSession({ ...newSession, price: parseFloat(e.target.value) || 0 })}
-                    min="0"
-                    step="0.01"
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                    placeholder="0.00"
-                  />
-                  {newSession.startTime && newSession.endTime && (
-                    <p className="text-xs text-slate-500 mt-1">
-                      Total: {getSessionTotalPrice(newSession as any).toFixed(2)}€
-                    </p>
-                  )}
+              <div className="space-y-2 sm:space-y-3">
+                <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                  <div>
+                    <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">Precio/hora (€) *</label>
+                    <input
+                      type="number"
+                      value={newSession.price}
+                      onChange={(e) => setNewSession({ ...newSession, price: parseFloat(e.target.value) || 0 })}
+                      min="0"
+                      step="0.01"
+                      className="w-full px-2 sm:px-4 py-2 sm:py-2.5 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent touch-manipulation"
+                      placeholder="0.00"
+                    />
+                    {newSession.startTime && newSession.endTime && (
+                      <p className="text-[10px] sm:text-xs text-slate-500 mt-1">
+                        Total: {getSessionTotalPrice(newSession as any).toFixed(2)}€
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">% Psicólogo *</label>
+                    <input
+                      type="number"
+                      value={newSession.percent_psych}
+                      onChange={(e) => setNewSession({ ...newSession, percent_psych: Math.min(parseFloat(e.target.value) || 0, 100) })}
+                      min="0"
+                      max="100"
+                      step="1"
+                      className="w-full px-2 sm:px-4 py-2 sm:py-2.5 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent touch-manipulation"
+                      placeholder="70"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">% Psicólogo *</label>
-                  <input
-                    type="number"
-                    value={newSession.percent_psych}
-                    onChange={(e) => setNewSession({ ...newSession, percent_psych: Math.min(parseFloat(e.target.value) || 0, 100) })}
-                    min="0"
-                    max="100"
-                    step="1"
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                    placeholder="70"
-                  />
-                </div>
-                <div className="flex items-end">
-                  <label className="flex items-center gap-2 cursor-pointer">
+                
+                <div className="flex items-center">
+                  <label className="flex items-center gap-2 cursor-pointer touch-manipulation">
                     <input
                       type="checkbox"
                       checked={newSession.paid}
                       onChange={(e) => setNewSession({ ...newSession, paid: e.target.checked })}
                       className="w-4 h-4 rounded border-slate-300 text-green-600 focus:ring-green-500"
                     />
-                    <span className="text-sm font-medium text-slate-700">Pagada</span>
+                    <span className="text-xs sm:text-sm font-medium text-slate-700">Marcar como pagada</span>
                   </label>
                 </div>
               </div>
 
               {/* Earnings Preview */}
               {newSession.price > 0 && newSession.percent_psych > 0 && (
-                <div className="bg-gradient-to-br from-green-50 to-green-100 border border-green-200 rounded-xl p-4">
-                  <div className="text-sm font-semibold text-green-700 mb-1">Tu ganancia estimada</div>
-                  <div className="text-2xl font-bold text-green-900">
+                <div className="bg-gradient-to-br from-green-50 to-green-100 border border-green-200 rounded-lg sm:rounded-xl p-3 sm:p-4">
+                  <div className="text-xs sm:text-sm font-semibold text-green-700 mb-1">Tu ganancia estimada</div>
+                  <div className="text-xl sm:text-2xl font-bold text-green-900">
                     {((newSession.price * newSession.percent_psych) / 100).toFixed(2)} €
                   </div>
-                  <div className="text-xs text-green-600 mt-1">
+                  <div className="text-[10px] sm:text-xs text-green-600 mt-1">
                     {newSession.percent_psych.toFixed(0)}% de {newSession.price.toFixed(2)}€
                   </div>
                 </div>
               )}
 
               {newSession.type === 'online' && (
-                <div className="flex items-center gap-3 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+                <div className="flex items-center gap-2 sm:gap-3 p-2.5 sm:p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
                   <input
                     type="checkbox"
                     id="generateMeetLink"
                     checked={newSession.generateMeetLink}
                     onChange={(e) => setNewSession({ ...newSession, generateMeetLink: e.target.checked })}
-                    className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
+                    className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500 touch-manipulation flex-shrink-0"
                   />
-                  <label htmlFor="generateMeetLink" className="text-sm font-medium text-indigo-900 cursor-pointer flex items-center gap-2">
-                    <Video size={16} />
+                  <label htmlFor="generateMeetLink" className="text-xs sm:text-sm font-medium text-indigo-900 cursor-pointer flex items-center gap-1.5 sm:gap-2 touch-manipulation">
+                    <Video size={14} className="flex-shrink-0" />
                     Generar enlace de Google Meet
                   </label>
                 </div>
               )}
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Notas</label>
+                <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">Notas</label>
                 <textarea
                   value={newSession.notes}
                   onChange={(e) => setNewSession({ ...newSession, notes: e.target.value })}
                   rows={3}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  className="w-full px-2 sm:px-4 py-2 sm:py-2.5 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent touch-manipulation"
                   placeholder="Notas adicionales sobre la sesión..."
                 />
               </div>
             </div>
 
-            <div className="p-6 border-t border-slate-200 flex gap-3 justify-end">
+            <div className="sticky bottom-0 bg-white p-3 sm:p-6 border-t border-slate-200 flex gap-2 sm:gap-3 rounded-b-xl sm:rounded-b-2xl">
               <button
                 onClick={() => {
                   setShowNewSession(false);
                   resetNewSession();
                 }}
-                className="px-4 py-2 text-slate-700 hover:bg-slate-100 rounded-lg transition-colors font-medium"
+                className="flex-1 sm:flex-none px-3 sm:px-4 py-2.5 sm:py-2 text-xs sm:text-sm text-slate-700 hover:bg-slate-100 rounded-lg transition-colors font-medium touch-manipulation"
               >
                 Cancelar
               </button>
               <button
                 onClick={handleCreateSession}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium shadow-md"
+                className="flex-1 sm:flex-none px-3 sm:px-4 py-2.5 sm:py-2 text-xs sm:text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium shadow-md touch-manipulation"
               >
                 Crear Sesión
               </button>
