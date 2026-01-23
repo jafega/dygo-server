@@ -5997,125 +5997,18 @@ app.get('/api/sessions', async (req, res) => {
       return res.json(sessionsWithDetails);
     }
     
-    // Fallback a caché en memoria si no hay Supabase
-    console.log(`📖 [GET /api/sessions] Usando caché en memoria (sin Supabase)`);
+    // Si no hay Supabase configurado, devolver error
+    console.error('❌ [GET /api/sessions] Supabase no configurado');
+    return res.status(503).json({ 
+      error: 'Supabase no está configurado. Las sesiones solo se cargan desde Supabase.' 
+    });
   } catch (error) {
-    console.error('❌ Error consultando Supabase, usando caché en memoria:', error);
-  }
-  
-  // Código original como fallback
-  const db = getDb();
-  if (!db.sessions) db.sessions = [];
-  if (!db.dispo) db.dispo = [];
-  if (!Array.isArray(db.users)) db.users = [];
-  
-  const userIndex = new Map(
-    db.users
-      .filter(user => user && user.id)
-      .map(user => [user.id, user])
-  );
-  
-  let sessions = db.sessions;
-  
-  // Si es psicólogo, también incluir disponibilidad desde tabla dispo
-  if (psychologistId && !patientId) {
-    const dispoSlots = db.dispo
-      .filter(d => d.psychologist_user_id === psychologistId)
-      .map(d => ({
-        id: d.id,
-        psychologistId: psychologistId,
-        psychologist_user_id: d.psychologist_user_id,
-        patientId: '',
-        patient_user_id: '',
-        patientName: 'Disponible',
-        patientPhone: '',
-        date: d.data?.date || '',
-        startTime: d.data?.startTime || '',
-        endTime: d.data?.endTime || '',
-        type: d.data?.type || 'online',
-        status: 'available',
-        isFromDispo: true
-      }));
-    sessions = [...sessions, ...dispoSlots];
-  }
-  
-  let sessionsFiltered = sessions;
-  
-  // Filter by psychologistId or patientId
-  if (psychologistId) {
-    sessionsFiltered = sessionsFiltered.filter(s => s.psychologistId === psychologistId || s.psychologist_user_id === psychologistId);
-  }
-  if (patientId) {
-    // Filtrar tanto por patientId (legacy) como por patient_user_id (Supabase)
-    sessionsFiltered = sessionsFiltered.filter(s => s.patientId === patientId || s.patient_user_id === patientId);
-  }
-  
-  // Filter by year and month if provided (legacy support)
-  if (year && month) {
-    const yearNum = parseInt(year);
-    const monthNum = parseInt(month);
-    sessionsFiltered = sessionsFiltered.filter(s => {
-      const date = new Date(s.date);
-      return date.getFullYear() === yearNum && date.getMonth() + 1 === monthNum;
+    console.error('❌ Error consultando Supabase:', error);
+    return res.status(500).json({ 
+      error: 'Error al cargar sesiones desde Supabase',
+      details: error?.message 
     });
   }
-  
-  // Filter by date range (more flexible than year/month)
-  if (startDate || endDate || futureOnly === 'true') {
-    const now = new Date().toISOString().split('T')[0];
-    sessionsFiltered = sessionsFiltered.filter(s => {
-      if (futureOnly === 'true' && s.date < now) return false;
-      if (startDate && s.date < startDate) return false;
-      if (endDate && s.date > endDate) return false;
-      return true;
-    });
-  }
-  
-  // Filter by status if provided
-  if (status) {
-    const statuses = status.split(',');
-    sessionsFiltered = sessionsFiltered.filter(s => statuses.includes(s.status));
-  }
-
-  const sessionsWithDetails = sessionsFiltered.map(session => {
-    const enriched = { ...session };
-    if (session.patientId) {
-      const patient = userIndex.get(session.patientId);
-      if (patient) {
-        const resolvedPhone = (patient.phone || '').trim() || enriched.patientPhone;
-        if (resolvedPhone && resolvedPhone !== enriched.patientPhone) {
-          enriched.patientPhone = resolvedPhone;
-        }
-        if (enriched.status !== 'available') {
-          enriched.patientName = enriched.patientName === 'Disponible' || !enriched.patientName ? patient.name : enriched.patientName;
-        }
-        enriched.patientEmail = patient.email;
-      }
-    }
-
-    if (session.psychologistId) {
-      const psychologist = userIndex.get(session.psychologistId);
-      if (psychologist) {
-        enriched.psychologistName = enriched.psychologistName || psychologist.name;
-        enriched.psychologistEmail = psychologist.email;
-      }
-      
-      // Agregar tags de la relación si existe
-      if (session.patientId && db.careRelationships) {
-        const relationship = db.careRelationships.find(rel => 
-          rel.psychologist_user_id === session.psychologistId && 
-          rel.patient_user_id === session.patientId
-        );
-        if (relationship) {
-          enriched.tags = relationship.tags || relationship.data?.tags || [];
-        }
-      }
-    }
-
-    return enriched;
-  });
-  
-  res.json(sessionsWithDetails);
 });
 
 app.post('/api/sessions', async (req, res) => {
@@ -6496,6 +6389,9 @@ app.delete('/api/sessions/:id', async (req, res) => {
 
     let session = null;
     let sessionEntryId = null;
+    
+    // Verificar que supabaseAdmin esté definido
+    console.log(`🔍 supabaseAdmin está definido: ${!!supabaseAdmin}`);
     
     // Si hay Supabase, buscar primero ahí
     if (supabaseAdmin) {
