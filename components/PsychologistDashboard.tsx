@@ -242,20 +242,22 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
             <Calendar className="text-slate-600" size={18} />
             <span className="text-xs sm:text-sm font-semibold text-slate-700">Rango de fechas:</span>
           </div>
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-            <input
-              type="date"
-              value={dateRange.start}
-              onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-              className="w-full sm:w-auto px-3 py-2 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-            />
-            <span className="text-slate-500 text-center sm:text-left">—</span>
-            <input
-              type="date"
-              value={dateRange.end}
-              onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-              className="w-full sm:w-auto px-3 py-2 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-            />
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={dateRange.start}
+                onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
+                className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              />
+              <span className="text-slate-500 text-xs flex-shrink-0">—</span>
+              <input
+                type="date"
+                value={dateRange.end}
+                onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
+                className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              />
+            </div>
             <button
               onClick={() => {
                 const end = new Date();
@@ -266,7 +268,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
                   end: end.toISOString().split('T')[0]
                 });
               }}
-              className="w-full sm:w-auto px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs sm:text-sm rounded-lg transition-colors whitespace-nowrap"
+              className="px-3 py-1.5 sm:py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs sm:text-sm rounded-lg transition-colors whitespace-nowrap"
             >
               Últimos 30 días
             </button>
@@ -275,66 +277,66 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
       </div>
 
       {/* Financial Overview */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 md:gap-4">
         {/* Total Revenue */}
-        <div className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl p-4 sm:p-4 text-white shadow-lg">
-          <div className="flex items-center justify-between mb-2 sm:mb-1.5">
-            <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
-              <DollarSign size={20} className="sm:w-5 sm:h-5" />
+        <div className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-lg sm:rounded-xl p-2.5 sm:p-3 md:p-4 text-white shadow-lg">
+          <div className="flex items-center justify-between mb-1 sm:mb-1.5">
+            <div className="p-1 sm:p-1.5 bg-white/20 rounded-lg backdrop-blur-sm">
+              <DollarSign size={16} className="sm:w-5 sm:h-5" />
             </div>
-            <span className="text-xs font-semibold bg-white/20 px-2 py-1 rounded-full backdrop-blur-sm">
+            <span className="text-[10px] sm:text-xs font-semibold bg-white/20 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full backdrop-blur-sm">
               Total
             </span>
           </div>
-          <div className="text-2xl sm:text-2xl font-bold mb-1">{totalBilling.toFixed(2)}€</div>
-          <div className="text-xs text-green-100">Facturación Total</div>
+          <div className="text-xl sm:text-2xl font-bold mb-0.5 sm:mb-1">{totalBilling.toFixed(2)}€</div>
+          <div className="text-[10px] sm:text-xs text-green-100">Facturación Total</div>
           {totalPending > 0 && (
-            <div className="text-[10px] text-green-200 mt-1">
+            <div className="text-[8px] sm:text-[10px] text-green-200 mt-0.5 sm:mt-1 line-clamp-2">
               ({totalRevenue.toFixed(2)}€ cobrado + {totalPending.toFixed(2)}€ pendiente)
             </div>
           )}
         </div>
 
         {/* Revenue in Range */}
-        <div className="bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl p-4 sm:p-4 text-white shadow-lg">
-          <div className="flex items-center justify-between mb-2 sm:mb-1.5">
-            <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
-              <TrendingUp size={20} className="sm:w-5 sm:h-5" />
+        <div className="bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg sm:rounded-xl p-2.5 sm:p-3 md:p-4 text-white shadow-lg">
+          <div className="flex items-center justify-between mb-1 sm:mb-1.5">
+            <div className="p-1 sm:p-1.5 bg-white/20 rounded-lg backdrop-blur-sm">
+              <TrendingUp size={16} className="sm:w-5 sm:h-5" />
             </div>
-            <span className="text-xs font-semibold bg-white/20 px-2 py-1 rounded-full backdrop-blur-sm">
+            <span className="text-[10px] sm:text-xs font-semibold bg-white/20 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full backdrop-blur-sm">
               Rango
             </span>
           </div>
-          <div className="text-2xl sm:text-2xl font-bold mb-1">{revenueInRange.toFixed(2)}€</div>
-          <div className="text-xs text-blue-100">Facturado en Período</div>
+          <div className="text-xl sm:text-2xl font-bold mb-0.5 sm:mb-1">{revenueInRange.toFixed(2)}€</div>
+          <div className="text-[10px] sm:text-xs text-blue-100">Facturado en Período</div>
         </div>
 
         {/* Paid Invoices */}
-        <div className="bg-gradient-to-br from-purple-500 to-pink-600 rounded-xl p-4 sm:p-4 text-white shadow-lg">
-          <div className="flex items-center justify-between mb-2 sm:mb-1.5">
-            <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
-              <CheckCircle size={20} className="sm:w-5 sm:h-5" />
+        <div className="bg-gradient-to-br from-purple-500 to-pink-600 rounded-lg sm:rounded-xl p-2.5 sm:p-3 md:p-4 text-white shadow-lg">
+          <div className="flex items-center justify-between mb-1 sm:mb-1.5">
+            <div className="p-1 sm:p-1.5 bg-white/20 rounded-lg backdrop-blur-sm">
+              <CheckCircle size={16} className="sm:w-5 sm:h-5" />
             </div>
-            <span className="text-xs font-semibold bg-white/20 px-2 py-1 rounded-full backdrop-blur-sm">
+            <span className="text-[10px] sm:text-xs font-semibold bg-white/20 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full backdrop-blur-sm">
               Pagadas
             </span>
           </div>
-          <div className="text-2xl sm:text-2xl font-bold mb-1">{totalRevenue.toFixed(2)}€</div>
-          <div className="text-xs text-purple-100">Cobrado ({paidInvoices.length} facturas)</div>
+          <div className="text-xl sm:text-2xl font-bold mb-0.5 sm:mb-1">{totalRevenue.toFixed(2)}€</div>
+          <div className="text-[10px] sm:text-xs text-purple-100">Cobrado ({paidInvoices.length})</div>
         </div>
 
         {/* Pending Invoices */}
-        <div className="bg-gradient-to-br from-amber-500 to-yellow-500 rounded-xl p-4 sm:p-4 text-white shadow-lg">
-          <div className="flex items-center justify-between mb-2 sm:mb-1.5">
-            <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
-              <Clock size={20} className="sm:w-5 sm:h-5" />
+        <div className="bg-gradient-to-br from-amber-500 to-yellow-500 rounded-lg sm:rounded-xl p-2.5 sm:p-3 md:p-4 text-white shadow-lg">
+          <div className="flex items-center justify-between mb-1 sm:mb-1.5">
+            <div className="p-1 sm:p-1.5 bg-white/20 rounded-lg backdrop-blur-sm">
+              <Clock size={16} className="sm:w-5 sm:h-5" />
             </div>
-            <span className="text-xs font-semibold bg-white/20 px-2 py-1 rounded-full backdrop-blur-sm">
+            <span className="text-[10px] sm:text-xs font-semibold bg-white/20 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full backdrop-blur-sm">
               Pendientes
             </span>
           </div>
-          <div className="text-2xl sm:text-2xl font-bold mb-1">{totalPending.toFixed(2)}€</div>
-          <div className="text-xs text-amber-100">Por Cobrar ({pendingInvoices.length} facturas)</div>
+          <div className="text-xl sm:text-2xl font-bold mb-0.5 sm:mb-1">{totalPending.toFixed(2)}€</div>
+          <div className="text-[10px] sm:text-xs text-amber-100">Por Cobrar ({pendingInvoices.length})</div>
         </div>
       </div>
 

@@ -455,96 +455,98 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 md:gap-4 mt-6">
-        <div className="bg-gradient-to-br from-white to-slate-50 rounded-lg border border-slate-200 px-4 py-4 shadow-sm hover:shadow-md transition-all">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="p-1.5 bg-slate-100 rounded">
-              <FileText size={16} className="text-slate-600" />
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2 sm:gap-3 md:gap-4 mt-3 sm:mt-4 md:mt-6">
+        <div className="bg-gradient-to-br from-white to-slate-50 rounded-lg border border-slate-200 px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4 shadow-sm hover:shadow-md transition-all">
+          <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 mb-1 sm:mb-1.5 md:mb-2">
+            <div className="p-1 sm:p-1.5 bg-slate-100 rounded">
+              <FileText size={12} className="text-slate-600 sm:w-4 sm:h-4" />
             </div>
-            <div className="text-[10px] text-slate-500 uppercase font-semibold tracking-wide">Total Facturas</div>
+            <div className="text-[8px] sm:text-[9px] md:text-[10px] text-slate-500 uppercase font-semibold tracking-wide leading-tight">Facturas</div>
           </div>
-          <div className="text-2xl font-bold text-slate-900">{invoices.length}</div>
+          <div className="text-lg sm:text-xl md:text-2xl font-bold text-slate-900">{invoices.length}</div>
         </div>
         
-        <div className="bg-gradient-to-br from-white to-green-50 rounded-lg border border-green-200 px-4 py-4 shadow-sm hover:shadow-md transition-all">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="p-1.5 bg-green-100 rounded">
-              <Check size={16} className="text-green-600" />
+        <div className="bg-gradient-to-br from-white to-green-50 rounded-lg border border-green-200 px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4 shadow-sm hover:shadow-md transition-all">
+          <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 mb-1 sm:mb-1.5 md:mb-2">
+            <div className="p-1 sm:p-1.5 bg-green-100 rounded">
+              <Check size={12} className="text-green-600 sm:w-4 sm:h-4" />
             </div>
-            <div className="text-[10px] text-green-600 uppercase font-semibold tracking-wide">Pagadas</div>
+            <div className="text-[8px] sm:text-[9px] md:text-[10px] text-green-600 uppercase font-semibold tracking-wide leading-tight">Pagadas</div>
           </div>
-          <div className="text-2xl font-bold text-green-600">
+          <div className="text-lg sm:text-xl md:text-2xl font-bold text-green-600">
             {invoices.filter(inv => inv.status === 'paid').length}
           </div>
         </div>
         
-        <div className="bg-gradient-to-br from-white to-yellow-50 rounded-lg border border-yellow-200 px-4 py-4 shadow-sm hover:shadow-md transition-all">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="p-1.5 bg-yellow-100 rounded">
-              <Clock size={16} className="text-yellow-600" />
+        <div className="bg-gradient-to-br from-white to-yellow-50 rounded-lg border border-yellow-200 px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4 shadow-sm hover:shadow-md transition-all">
+          <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 mb-1 sm:mb-1.5 md:mb-2">
+            <div className="p-1 sm:p-1.5 bg-yellow-100 rounded">
+              <Clock size={12} className="text-yellow-600 sm:w-4 sm:h-4" />
             </div>
-            <div className="text-[10px] text-yellow-600 uppercase font-semibold tracking-wide">Pendientes</div>
+            <div className="text-[8px] sm:text-[9px] md:text-[10px] text-yellow-600 uppercase font-semibold tracking-wide leading-tight">Pendientes</div>
           </div>
-          <div className="text-2xl font-bold text-yellow-600">
+          <div className="text-lg sm:text-xl md:text-2xl font-bold text-yellow-600">
             {invoices.filter(inv => inv.status === 'pending').length}
           </div>
         </div>
         
-        <div className="bg-gradient-to-br from-white to-orange-50 rounded-lg border border-orange-200 px-4 py-4 shadow-sm hover:shadow-md transition-all">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="p-1.5 bg-orange-100 rounded">
-              <DollarSign size={16} className="text-orange-600" />
+        <div className="bg-gradient-to-br from-white to-orange-50 rounded-lg border border-orange-200 px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4 shadow-sm hover:shadow-md transition-all">
+          <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 mb-1 sm:mb-1.5 md:mb-2">
+            <div className="p-1 sm:p-1.5 bg-orange-100 rounded">
+              <DollarSign size={12} className="text-orange-600 sm:w-4 sm:h-4" />
             </div>
-            <div className="text-[10px] text-orange-600 uppercase font-semibold tracking-wide">Total Pendiente</div>
+            <div className="text-[8px] sm:text-[9px] md:text-[10px] text-orange-600 uppercase font-semibold tracking-wide leading-tight">Pendiente</div>
           </div>
-          <div className="text-xl font-bold text-orange-600">
+          <div className="text-sm sm:text-base md:text-xl font-bold text-orange-600">
             €{invoices.filter(inv => inv.status === 'pending').reduce((sum, inv) => sum + (inv.total || inv.amount), 0).toFixed(2)}
           </div>
         </div>
         
-        <div className="bg-gradient-to-br from-white to-emerald-50 rounded-lg border border-emerald-200 px-4 py-4 shadow-sm hover:shadow-md transition-all">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="p-1.5 bg-emerald-100 rounded">
-              <DollarSign size={16} className="text-emerald-600" />
+        <div className="bg-gradient-to-br from-white to-emerald-50 rounded-lg border border-emerald-200 px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4 shadow-sm hover:shadow-md transition-all">
+          <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 mb-1 sm:mb-1.5 md:mb-2">
+            <div className="p-1 sm:p-1.5 bg-emerald-100 rounded">
+              <DollarSign size={12} className="text-emerald-600 sm:w-4 sm:h-4" />
             </div>
-            <div className="text-[10px] text-emerald-600 uppercase font-semibold tracking-wide">Total Ingresos</div>
+            <div className="text-[8px] sm:text-[9px] md:text-[10px] text-emerald-600 uppercase font-semibold tracking-wide leading-tight">Ingresos</div>
           </div>
-          <div className="text-xl font-bold text-emerald-600">
+          <div className="text-sm sm:text-base md:text-xl font-bold text-emerald-600">
             €{invoices.filter(inv => inv.status === 'paid').reduce((sum, inv) => sum + (inv.total || inv.amount), 0).toFixed(2)}
           </div>
         </div>
         
-        <div className="bg-gradient-to-br from-white to-indigo-50 rounded-lg border border-indigo-200 px-4 py-4 shadow-sm hover:shadow-md transition-all">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="p-1.5 bg-indigo-100 rounded">
-              <FileText size={16} className="text-indigo-600" />
+        <div className="bg-gradient-to-br from-white to-indigo-50 rounded-lg border border-indigo-200 px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4 shadow-sm hover:shadow-md transition-all">
+          <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 mb-1 sm:mb-1.5 md:mb-2">
+            <div className="p-1 sm:p-1.5 bg-indigo-100 rounded">
+              <FileText size={12} className="text-indigo-600 sm:w-4 sm:h-4" />
             </div>
-            <div className="text-[10px] text-indigo-600 uppercase font-semibold tracking-wide">Total Facturado</div>
+            <div className="text-[8px] sm:text-[9px] md:text-[10px] text-indigo-600 uppercase font-semibold tracking-wide leading-tight">Facturado</div>
           </div>
-          <div className="text-xl font-bold text-indigo-600">
+          <div className="text-sm sm:text-base md:text-xl font-bold text-indigo-600">
             €{invoices.filter(inv => inv.status !== 'cancelled').reduce((sum, inv) => sum + (inv.total || inv.amount), 0).toFixed(2)}
           </div>
         </div>
       </div>
 
       {/* Invoice List */}
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div className="bg-white rounded-lg sm:rounded-xl border border-slate-200 overflow-hidden">
         {selectedInvoices.size > 0 && (
-          <div className="bg-indigo-50 border-b border-indigo-200 px-6 py-4 flex items-center justify-between">
-            <span className="text-sm font-medium text-indigo-700">
-              {selectedInvoices.size} factura{selectedInvoices.size !== 1 ? 's' : ''} seleccionada{selectedInvoices.size !== 1 ? 's' : ''}
+          <div className="bg-indigo-50 border-b border-indigo-200 px-3 sm:px-4 md:px-6 py-2 sm:py-3 md:py-4 flex items-center justify-between gap-2">
+            <span className="text-[10px] sm:text-xs md:text-sm font-medium text-indigo-700 truncate">
+              {selectedInvoices.size} <span className="hidden sm:inline">factura{selectedInvoices.size !== 1 ? 's' : ''} seleccionada{selectedInvoices.size !== 1 ? 's' : ''}</span>
             </span>
             <button
               onClick={handleDownloadSelectedPDFs}
               disabled={isDownloadingBatch}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium disabled:opacity-50"
+              className="flex items-center gap-1 sm:gap-1.5 md:gap-2 px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-[10px] sm:text-xs md:text-sm font-medium disabled:opacity-50 flex-shrink-0"
             >
-              <Download size={16} />
-              {isDownloadingBatch ? 'Descargando...' : 'Descargar PDFs'}
+              <Download size={14} className="sm:w-4 sm:h-4" />
+              <span className="hidden sm:inline">{isDownloadingBatch ? 'Descargando...' : 'Descargar PDFs'}</span>
+              <span className="sm:hidden">PDF</span>
             </button>
           </div>
         )}
-        <div className="overflow-x-auto">
+        {/* Vista tabla (desktop) */}
+        <div className="hidden lg:block overflow-x-auto">
           <table className="w-full">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
@@ -661,6 +663,106 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Vista cards (móvil) */}
+        <div className="lg:hidden divide-y divide-slate-100">
+          {invoices.length === 0 ? (
+            <div className="px-3 py-8 text-center text-xs sm:text-sm text-slate-500">
+              No hay facturas todavía. Crea tu primera factura.
+            </div>
+          ) : (
+            invoices.map((invoice) => (
+              <div
+                key={invoice.id}
+                className={`p-3 hover:bg-slate-50 transition-colors ${invoice.status === 'cancelled' ? 'opacity-60' : ''}`}
+              >
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <div className="flex items-start gap-2 flex-1 min-w-0">
+                    <button
+                      onClick={() => toggleSelectInvoice(invoice.id)}
+                      className="p-1 hover:bg-slate-200 rounded transition-colors flex-shrink-0 mt-0.5"
+                    >
+                      {selectedInvoices.has(invoice.id) ? (
+                        <CheckSquare size={16} className="text-indigo-600" />
+                      ) : (
+                        <Square size={16} className="text-slate-400" />
+                      )}
+                    </button>
+                    <div className="flex-1 min-w-0">
+                      <div className={`text-sm font-semibold text-slate-900 truncate ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>
+                        {invoice.invoiceNumber}
+                      </div>
+                      <div className={`text-xs text-slate-600 truncate ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>
+                        {invoice.patientName}
+                      </div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-[10px] text-slate-500">
+                          {new Date(invoice.date).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })}
+                        </span>
+                        <span className="text-[10px] text-slate-400">→</span>
+                        <span className="text-[10px] text-slate-500">
+                          {new Date(invoice.dueDate).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <div className={`text-base font-bold text-slate-900 ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>
+                      €{((invoice.total || invoice.amount || 0)).toFixed(2)}
+                    </div>
+                    <div className="mt-1">
+                      <select
+                        value={invoice.status}
+                        onChange={(e) => handleChangeStatus(invoice.id, e.target.value as any)}
+                        className={`appearance-none text-[9px] font-semibold border rounded px-2 py-0.5 cursor-pointer transition-all ${getStatusColor(invoice.status)}`}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <option value="pending">⏱️ Pendiente</option>
+                        <option value="paid">✅ Pagada</option>
+                        <option value="cancelled">❌ Cancelada</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="flex items-center justify-end gap-2 mt-2 pt-2 border-t border-slate-100">
+                  <button
+                    onClick={() => setSelectedInvoice(invoice)}
+                    className="p-1.5 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                    title="Ver detalles"
+                  >
+                    <Eye size={14} />
+                  </button>
+                  <button
+                    onClick={() => handleDownloadPDF(invoice.id, invoice.invoiceNumber)}
+                    className="p-1.5 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                    title="Descargar PDF"
+                  >
+                    <Download size={14} />
+                  </button>
+                  {invoice.status !== 'paid' && invoice.status !== 'cancelled' && (
+                    <>
+                      <button
+                        onClick={() => handleGeneratePaymentLink(invoice.id)}
+                        className="p-1.5 text-slate-600 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                        title="Generar link de pago"
+                      >
+                        <ExternalLink size={14} />
+                      </button>
+                      <button
+                        onClick={() => handleCancelInvoice(invoice.id)}
+                        className="p-1.5 text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Cancelar factura"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
 
@@ -848,86 +950,86 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
 
       {/* Invoice Detail Modal */}
       {selectedInvoice && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b border-slate-200">
-              <div className="flex items-start justify-between">
-                <div>
-                  <h3 className="text-xl font-bold text-slate-900">Factura {selectedInvoice.invoiceNumber}</h3>
-                  <p className="text-sm text-slate-500 mt-1">{selectedInvoice.patientName}</p>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-2 sm:p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-xl sm:rounded-2xl shadow-2xl max-w-2xl w-full max-h-[95vh] sm:max-h-[90vh] overflow-y-auto">
+            <div className="p-3 sm:p-4 md:p-6 border-b border-slate-200">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-base sm:text-lg md:text-xl font-bold text-slate-900 truncate">Factura {selectedInvoice.invoiceNumber}</h3>
+                  <p className="text-xs sm:text-sm text-slate-500 mt-0.5 sm:mt-1 truncate">{selectedInvoice.patientName}</p>
                 </div>
-                <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium border ${getStatusColor(selectedInvoice.status)}`}>
+                <span className={`inline-flex items-center gap-1 px-2 sm:px-2.5 md:px-3 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs md:text-sm font-medium border flex-shrink-0 ${getStatusColor(selectedInvoice.status)}`}>
                   {getStatusIcon(selectedInvoice.status)}
                   {getStatusLabel(selectedInvoice.status)}
                 </span>
               </div>
             </div>
             
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+            <div className="p-3 sm:p-4 md:p-6 space-y-2 sm:space-y-3 md:space-y-4">
+              <div className="grid grid-cols-2 gap-2 sm:gap-3 md:gap-4">
                 <div>
-                  <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Fecha de emisión</div>
-                  <div className="text-sm text-slate-900">{new Date(selectedInvoice.date).toLocaleDateString()}</div>
+                  <div className="text-[9px] sm:text-[10px] md:text-xs text-slate-500 uppercase font-semibold mb-0.5 sm:mb-1">Emisión</div>
+                  <div className="text-xs sm:text-sm text-slate-900">{new Date(selectedInvoice.date).toLocaleDateString()}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Fecha de vencimiento</div>
-                  <div className="text-sm text-slate-900">{new Date(selectedInvoice.dueDate).toLocaleDateString()}</div>
+                  <div className="text-[9px] sm:text-[10px] md:text-xs text-slate-500 uppercase font-semibold mb-0.5 sm:mb-1">Vencimiento</div>
+                  <div className="text-xs sm:text-sm text-slate-900">{new Date(selectedInvoice.dueDate).toLocaleDateString()}</div>
                 </div>
               </div>
 
               {selectedInvoice.description && (
                 <div>
-                  <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Descripción</div>
-                  <div className="text-sm text-slate-700">{selectedInvoice.description}</div>
+                  <div className="text-[9px] sm:text-[10px] md:text-xs text-slate-500 uppercase font-semibold mb-0.5 sm:mb-1">Descripción</div>
+                  <div className="text-xs sm:text-sm text-slate-700">{selectedInvoice.description}</div>
                 </div>
               )}
 
               <div>
-                <div className="text-xs text-slate-500 uppercase font-semibold mb-2">Conceptos</div>
-                <div className="space-y-2">
+                <div className="text-[9px] sm:text-[10px] md:text-xs text-slate-500 uppercase font-semibold mb-1 sm:mb-1.5 md:mb-2">Conceptos</div>
+                <div className="space-y-1.5 sm:space-y-2">
                   {selectedInvoice.items.map((item, index) => (
-                    <div key={index} className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
-                      <div>
-                        <div className="text-sm font-medium text-slate-900">{item.description}</div>
-                        <div className="text-xs text-slate-500">{item.quantity} x €{item.unitPrice.toFixed(2)}</div>
+                    <div key={index} className="flex justify-between items-center p-2 sm:p-2.5 md:p-3 bg-slate-50 rounded-lg gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs sm:text-sm font-medium text-slate-900 truncate">{item.description}</div>
+                        <div className="text-[10px] sm:text-xs text-slate-500">{item.quantity} x €{item.unitPrice.toFixed(2)}</div>
                       </div>
-                      <div className="text-sm font-semibold text-slate-900">€{(item.quantity * item.unitPrice).toFixed(2)}</div>
+                      <div className="text-xs sm:text-sm font-semibold text-slate-900 flex-shrink-0">€{(item.quantity * item.unitPrice).toFixed(2)}</div>
                     </div>
                   ))}
                 </div>
               </div>
 
-              <div className="pt-4 border-t border-slate-200 space-y-2">
-                <div className="flex justify-between items-center text-sm">
-                  <span className="text-slate-600">Subtotal (Base imponible):</span>
+              <div className="pt-2 sm:pt-3 md:pt-4 border-t border-slate-200 space-y-1.5 sm:space-y-2">
+                <div className="flex justify-between items-center text-xs sm:text-sm">
+                  <span className="text-slate-600">Subtotal:</span>
                   <span className="font-semibold text-slate-900">€{selectedInvoice.amount.toFixed(2)}</span>
                 </div>
-                <div className="flex justify-between items-center text-sm">
+                <div className="flex justify-between items-center text-xs sm:text-sm">
                   <span className="text-slate-600">IVA ({selectedInvoice.taxRate || 21}%):</span>
                   <span className="font-semibold text-slate-900">€{(selectedInvoice.tax || (selectedInvoice.amount * 0.21)).toFixed(2)}</span>
                 </div>
-                <div className="flex justify-between items-center pt-2 border-t border-slate-100">
-                  <span className="text-lg font-semibold text-slate-900">Total:</span>
-                  <span className="text-2xl font-bold text-indigo-600">€{(selectedInvoice.total || (selectedInvoice.amount * 1.21)).toFixed(2)}</span>
+                <div className="flex justify-between items-center pt-1.5 sm:pt-2 border-t border-slate-100">
+                  <span className="text-base sm:text-lg font-semibold text-slate-900">Total:</span>
+                  <span className="text-xl sm:text-2xl font-bold text-indigo-600">€{(selectedInvoice.total || (selectedInvoice.amount * 1.21)).toFixed(2)}</span>
                 </div>
               </div>
 
               {selectedInvoice.stripePaymentLink && (
-                <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
-                  <div className="text-xs text-indigo-700 uppercase font-semibold mb-2">Link de Pago</div>
-                  <div className="flex items-center gap-2">
+                <div className="p-2 sm:p-3 md:p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
+                  <div className="text-[10px] sm:text-xs text-indigo-700 uppercase font-semibold mb-1.5 sm:mb-2">Link de Pago</div>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                     <input
                       type="text"
                       value={selectedInvoice.stripePaymentLink}
                       readOnly
-                      className="flex-1 px-3 py-2 bg-white border border-indigo-200 rounded-lg text-sm"
+                      className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 bg-white border border-indigo-200 rounded-lg text-[10px] sm:text-xs md:text-sm truncate"
                     />
                     <button
                       onClick={() => {
                         navigator.clipboard.writeText(selectedInvoice.stripePaymentLink!);
                         alert('Link copiado al portapapeles');
                       }}
-                      className="px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium"
+                      className="px-3 py-1.5 sm:py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-xs sm:text-sm font-medium"
                     >
                       Copiar
                     </button>
@@ -936,10 +1038,10 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
               )}
             </div>
 
-            <div className="p-6 border-t border-slate-200 flex gap-3 justify-end">
+            <div className="p-3 sm:p-4 md:p-6 border-t border-slate-200 flex gap-2 sm:gap-3 justify-end">
               <button
                 onClick={() => setSelectedInvoice(null)}
-                className="px-4 py-2 text-slate-700 hover:bg-slate-100 rounded-lg transition-colors font-medium"
+                className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm text-slate-700 hover:bg-slate-100 rounded-lg transition-colors font-medium"
               >
                 Cerrar
               </button>
@@ -949,10 +1051,11 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                     handleGeneratePaymentLink(selectedInvoice.id);
                     setSelectedInvoice(null);
                   }}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium shadow-md flex items-center gap-2"
+                  className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium shadow-md flex items-center gap-1.5 sm:gap-2"
                 >
-                  <ExternalLink size={16} />
-                  Generar Link de Pago
+                  <ExternalLink size={14} className="sm:w-4 sm:h-4" />
+                  <span className="hidden sm:inline">Generar Link de Pago</span>
+                  <span className="sm:hidden">Link Pago</span>
                 </button>
               )}
             </div>

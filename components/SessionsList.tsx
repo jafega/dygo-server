@@ -321,40 +321,42 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
             </div>
           </div>
           
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-1.5 sm:gap-2">
+          <div className="flex flex-col gap-2">
             <div className="flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs md:text-sm font-semibold text-slate-700">
               <Filter size={14} className="flex-shrink-0" />
               <span className="hidden sm:inline">Rango de fechas:</span>
               <span className="sm:hidden">Fechas:</span>
             </div>
-            <input
-              type="date"
-              value={dateRange.start}
-              onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-              className="px-2 sm:px-3 py-1.5 sm:py-2 border border-slate-300 rounded-lg text-[10px] sm:text-xs md:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-            />
-            <span className="text-slate-400 self-center text-xs">—</span>
-            <input
-              type="date"
-              value={dateRange.end}
-              onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-              className="px-2 sm:px-3 py-1.5 sm:py-2 border border-slate-300 rounded-lg text-[10px] sm:text-xs md:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-            />
-            <button
-              onClick={() => {
-                const now = new Date();
-                const start = new Date(now.getFullYear(), now.getMonth(), 1);
-                const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-                setDateRange({
-                  start: start.toISOString().split('T')[0],
-                  end: end.toISOString().split('T')[0]
-                });
-              }}
-              className="px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 bg-purple-100 text-purple-700 rounded-lg text-[10px] sm:text-xs md:text-sm font-medium hover:bg-purple-200 transition-colors"
-            >
-              <span className="hidden sm:inline">Mes actual</span>
-              <span className="sm:hidden">Este mes</span>
-            </button>
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <input
+                type="date"
+                value={dateRange.start}
+                onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
+                className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 border border-slate-300 rounded-lg text-[10px] sm:text-xs md:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              />
+              <span className="text-slate-400 text-xs flex-shrink-0">—</span>
+              <input
+                type="date"
+                value={dateRange.end}
+                onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
+                className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 border border-slate-300 rounded-lg text-[10px] sm:text-xs md:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              />
+              <button
+                onClick={() => {
+                  const now = new Date();
+                  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+                  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                  setDateRange({
+                    start: start.toISOString().split('T')[0],
+                    end: end.toISOString().split('T')[0]
+                  });
+                }}
+                className="px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 bg-purple-100 text-purple-700 rounded-lg text-[10px] sm:text-xs md:text-sm font-medium hover:bg-purple-200 transition-colors flex-shrink-0"
+              >
+                <span className="hidden sm:inline">Mes actual</span>
+                <span className="sm:hidden">Este mes</span>
+              </button>
+            </div>
           </div>
 
           {/* Filtros adicionales */}
