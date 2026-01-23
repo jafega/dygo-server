@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Video, MapPin, CheckCircle, XCircle, DollarSign, Filter, Save, X } from 'lucide-react';
+import { Calendar, Clock, Video, MapPin, CheckCircle, XCircle, DollarSign, Filter, Save, X, Trash2 } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser } from '../services/authService';
 
@@ -135,6 +135,45 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
     } catch (error) {
       console.error('Error updating session:', error);
       alert('Error al actualizar la sesión');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeleteSession = async () => {
+    if (!editedSession) return;
+
+    if (!confirm('¿Estás seguro de que quieres eliminar esta sesión? Esta acción no se puede deshacer.')) {
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const currentUser = await getCurrentUser();
+      if (!currentUser) {
+        alert('Error: Usuario no autenticado');
+        return;
+      }
+
+      const response = await fetch(`${API_URL}/sessions/${editedSession.id}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': currentUser.id
+        }
+      });
+
+      if (response.ok) {
+        await loadSessions();
+        handleCloseModal();
+        alert('Sesión eliminada correctamente');
+      } else {
+        const error = await response.json();
+        alert('Error al eliminar la sesión: ' + (error.error || 'Error desconocido'));
+      }
+    } catch (error) {
+      console.error('Error deleting session:', error);
+      alert('Error al eliminar la sesión');
     } finally {
       setIsSaving(false);
     }
@@ -569,13 +608,14 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
               </div>
             </div>
 
-            <div className="sticky bottom-0 bg-slate-50 border-t border-slate-200 px-6 py-4 flex items-center justify-end gap-3">
+            <div className="sticky bottom-0 bg-slate-50 border-t border-slate-200 px-6 py-4 flex items-center justify-between gap-3">
               <button
-                onClick={handleCloseModal}
+                onClick={handleDeleteSession}
                 disabled={isSaving}
-                className="px-4 py-2 text-slate-700 hover:bg-slate-200 rounded-lg font-medium transition-colors disabled:opacity-50"
+                className="px-4 py-2 bg-red-600 text-white hover:bg-red-700 rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
               >
-                Cancelar
+                <Trash2 size={16} />
+                Eliminar
               </button>
               <button
                 onClick={handleSaveSession}

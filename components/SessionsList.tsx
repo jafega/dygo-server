@@ -307,37 +307,38 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3 sm:space-y-4 md:space-y-6">
       {/* Header with Date Range Selector */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
-        <div className="flex flex-col gap-4">
+      <div className="bg-white rounded-lg sm:rounded-xl border border-slate-200 p-2 sm:p-3 md:p-4 shadow-sm">
+        <div className="flex flex-col gap-2 sm:gap-3 md:gap-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Calendar className="text-purple-600" size={24} />
-              <h2 className="text-xl font-bold text-slate-800">Sesiones</h2>
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <Calendar className="text-purple-600 flex-shrink-0" size={18} />
+              <h2 className="text-base sm:text-lg md:text-xl font-bold text-slate-800">Sesiones</h2>
             </div>
-            <div className="text-sm text-slate-500">
-              Total: <span className="font-bold text-slate-800">{sessions.length}</span> sesiones
+            <div className="text-[10px] sm:text-xs md:text-sm text-slate-500">
+              Total: <span className="font-bold text-slate-800">{sessions.length}</span>
             </div>
           </div>
           
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-            <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-              <Filter size={16} />
-              Rango de fechas:
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-1.5 sm:gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs md:text-sm font-semibold text-slate-700">
+              <Filter size={14} className="flex-shrink-0" />
+              <span className="hidden sm:inline">Rango de fechas:</span>
+              <span className="sm:hidden">Fechas:</span>
             </div>
             <input
               type="date"
               value={dateRange.start}
               onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-              className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className="px-2 sm:px-3 py-1.5 sm:py-2 border border-slate-300 rounded-lg text-[10px] sm:text-xs md:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
             />
-            <span className="text-slate-400 self-center">—</span>
+            <span className="text-slate-400 self-center text-xs">—</span>
             <input
               type="date"
               value={dateRange.end}
               onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-              className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className="px-2 sm:px-3 py-1.5 sm:py-2 border border-slate-300 rounded-lg text-[10px] sm:text-xs md:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
             />
             <button
               onClick={() => {
@@ -349,32 +350,33 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                   end: end.toISOString().split('T')[0]
                 });
               }}
-              className="px-4 py-2 bg-purple-100 text-purple-700 rounded-lg text-sm font-medium hover:bg-purple-200 transition-colors"
+              className="px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 bg-purple-100 text-purple-700 rounded-lg text-[10px] sm:text-xs md:text-sm font-medium hover:bg-purple-200 transition-colors"
             >
-              Mes actual
+              <span className="hidden sm:inline">Mes actual</span>
+              <span className="sm:hidden">Este mes</span>
             </button>
           </div>
 
           {/* Filtros adicionales */}
-          <div className="space-y-4 pt-4 border-t border-slate-200">
-            <div className="flex items-center gap-2 text-sm font-bold text-slate-700">
-              <Filter size={18} className="text-purple-600" />
+          <div className="space-y-2 sm:space-y-3 md:space-y-4 pt-2 sm:pt-3 md:pt-4 border-t border-slate-200">
+            <div className="flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs md:text-sm font-bold text-slate-700">
+              <Filter size={14} className="text-purple-600 flex-shrink-0" />
               Filtros
             </div>
             
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-start gap-4">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-start gap-2 sm:gap-3 md:gap-4">
               {/* Filtro por Paciente */}
-              <div className="flex flex-col gap-1.5 min-w-[200px]">
-                <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
-                  <User size={14} className="text-blue-600" />
+              <div className="flex flex-col gap-1 sm:gap-1.5 min-w-[140px] sm:min-w-[200px]">
+                <label className="flex items-center gap-1 sm:gap-1.5 text-[9px] sm:text-[10px] md:text-xs font-semibold text-slate-600">
+                  <User size={12} className="text-blue-600 flex-shrink-0" />
                   Paciente
                 </label>
                 <select
                   value={filterPatient}
                   onChange={(e) => setFilterPatient(e.target.value)}
-                  className="px-4 py-2.5 border-2 border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white hover:border-slate-400 transition-colors cursor-pointer"
+                  className="px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 md:py-2.5 border-2 border-slate-300 rounded-lg sm:rounded-xl text-[10px] sm:text-xs md:text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white hover:border-slate-400 transition-colors cursor-pointer"
                 >
-                  <option value="all">👥 Todos los pacientes</option>
+                  <option value="all">👥 Todos</option>
                   {Array.from(patients.values()).map((patient: Patient) => (
                     <option key={patient.id} value={patient.id}>
                       👤 {patient.name}
@@ -384,15 +386,16 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
               </div>
 
               {/* Filtro por Estado de Pago */}
-              <div className="flex flex-col gap-1.5 min-w-[180px]">
-                <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
-                  <DollarSign size={14} className="text-green-600" />
-                  Estado de Pago
+              <div className="flex flex-col gap-1 sm:gap-1.5 min-w-[140px] sm:min-w-[180px]">
+                <label className="flex items-center gap-1 sm:gap-1.5 text-[9px] sm:text-[10px] md:text-xs font-semibold text-slate-600">
+                  <DollarSign size={12} className="text-green-600 flex-shrink-0" />
+                  <span className="hidden sm:inline">Estado de Pago</span>
+                  <span className="sm:hidden">Pago</span>
                 </label>
                 <select
                   value={filterPayment}
                   onChange={(e) => setFilterPayment(e.target.value)}
-                  className="px-4 py-2.5 border-2 border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white hover:border-slate-400 transition-colors cursor-pointer"
+                  className="px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 md:py-2.5 border-2 border-slate-300 rounded-lg sm:rounded-xl text-[10px] sm:text-xs md:text-sm font-medium focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white hover:border-slate-400 transition-colors cursor-pointer"
                 >
                   <option value="all">💰 Todas</option>
                   <option value="paid">✅ Pagadas</option>
@@ -403,8 +406,8 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
 
             {/* Filtro por Estados (multi-selección) */}
             <div className="flex-1">
-              <label className="block text-xs font-semibold text-slate-600 mb-1.5">Estados</label>
-              <div className="flex flex-wrap items-center gap-2">
+              <label className="block text-[9px] sm:text-[10px] md:text-xs font-semibold text-slate-600 mb-1 sm:mb-1.5">Estados</label>
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                 {[{value: 'scheduled', label: 'Programada', icon: '📅'}, 
                   {value: 'completed', label: 'Completada', icon: '✅'}, 
                   {value: 'cancelled', label: 'Cancelada', icon: '❌'}].map(status => {
@@ -419,23 +422,23 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                           setFilterStatus([...filterStatus, status.value]);
                         }
                       }}
-                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
+                      className={`inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 md:px-3 py-1 sm:py-1.5 rounded-full text-[9px] sm:text-[10px] md:text-xs font-medium transition-all ${
                         isSelected
                           ? 'bg-indigo-600 text-white shadow-md hover:bg-indigo-700 hover:shadow-lg'
                           : 'bg-slate-100 text-slate-700 border border-slate-300 hover:bg-slate-200 hover:border-slate-400'
                       }`}
                     >
                       <span className={isSelected ? 'text-indigo-200' : 'text-slate-500'}>{status.icon}</span>
-                      {status.label}
+                      <span className="hidden sm:inline">{status.label}</span>
                       {isSelected && (
-                        <XIcon size={12} className="ml-0.5" />
+                        <XIcon size={10} className="ml-0.5" />
                       )}
                     </button>
                   );
                 })}
                 {filterStatus.length > 0 && (
-                  <span className="text-xs font-medium text-indigo-700 bg-indigo-50 px-2 py-1 rounded-full border border-indigo-200">
-                    {filterStatus.length} seleccionado{filterStatus.length !== 1 ? 's' : ''}
+                  <span className="text-[9px] sm:text-[10px] md:text-xs font-medium text-indigo-700 bg-indigo-50 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full border border-indigo-200">
+                    {filterStatus.length}
                   </span>
                 )}
               </div>
@@ -444,8 +447,8 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
             {/* Filtro por Tags */}
             {allTags.length > 0 && (
               <div className="flex-1">
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Tags</label>
-                <div className="flex flex-wrap items-center gap-2">
+                <label className="block text-[9px] sm:text-[10px] md:text-xs font-semibold text-slate-600 mb-1 sm:mb-1.5">Tags</label>
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                   {allTags.map(tag => {
                     const isSelected = filterTags.includes(tag);
                     return (
@@ -458,23 +461,23 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                             setFilterTags([...filterTags, tag]);
                           }
                         }}
-                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
+                        className={`inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 md:px-3 py-1 sm:py-1.5 rounded-full text-[9px] sm:text-[10px] md:text-xs font-medium transition-all ${
                           isSelected
                             ? 'bg-purple-600 text-white shadow-md hover:bg-purple-700 hover:shadow-lg'
                             : 'bg-slate-100 text-slate-700 border border-slate-300 hover:bg-slate-200 hover:border-slate-400'
                         }`}
                       >
                         <span className={isSelected ? 'text-purple-200' : 'text-slate-500'}>🏷️</span>
-                        {tag}
+                        <span className="truncate max-w-[100px] sm:max-w-none">{tag}</span>
                         {isSelected && (
-                          <XIcon size={12} className="ml-0.5" />
+                          <XIcon size={10} className="ml-0.5 flex-shrink-0" />
                         )}
                       </button>
                     );
                   })}
                   {filterTags.length > 0 && (
-                    <span className="text-xs font-medium text-purple-700 bg-purple-50 px-2 py-1 rounded-full border border-purple-200">
-                      {filterTags.length} seleccionada{filterTags.length !== 1 ? 's' : ''}
+                    <span className="text-[9px] sm:text-[10px] md:text-xs font-medium text-purple-700 bg-purple-50 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full border border-purple-200">
+                      {filterTags.length}
                     </span>
                   )}
                 </div>
@@ -483,7 +486,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
 
             {/* Botón para limpiar filtros */}
             {(filterPatient !== 'all' || filterStatus.length !== 2 || filterPayment !== 'all' || filterTags.length > 0) && (
-              <div className="flex justify-end pt-2">
+              <div className="flex justify-end pt-1.5 sm:pt-2">
                 <button
                   onClick={() => {
                     setFilterPatient('all');
@@ -491,10 +494,11 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                     setFilterPayment('all');
                     setFilterTags([]);
                   }}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg text-sm font-medium hover:bg-red-100 hover:border-red-300 transition-colors"
+                  className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 md:px-4 py-1.5 sm:py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg text-[10px] sm:text-xs md:text-sm font-medium hover:bg-red-100 hover:border-red-300 transition-colors"
                 >
-                  <XIcon size={16} />
-                  Limpiar filtros
+                  <XIcon size={14} className="flex-shrink-0" />
+                  <span className="hidden sm:inline">Limpiar filtros</span>
+                  <span className="sm:hidden">Limpiar</span>
                 </button>
               </div>
             )}
@@ -504,63 +508,67 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
 
       {/* Metrics Summary */}
       {sessions.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 md:gap-4">
           {/* Total Sessions Completed */}
-          <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl border border-purple-200 p-4 shadow-sm">
-            <div className="flex items-center justify-between mb-2">
-              <div className="text-sm font-semibold text-purple-700">Sesiones Completadas</div>
-              <Calendar className="text-purple-400" size={20} />
+          <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg sm:rounded-xl border border-purple-200 p-2 sm:p-3 md:p-4 shadow-sm">
+            <div className="flex items-center justify-between mb-1 sm:mb-1.5 md:mb-2">
+              <div className="text-[9px] sm:text-[10px] md:text-sm font-semibold text-purple-700 leading-tight">Completadas</div>
+              <Calendar className="text-purple-400 flex-shrink-0" size={14} />
             </div>
-            <div className="text-3xl font-bold text-purple-900">{completedSessions.length}</div>
-            <div className="text-xs text-purple-600 mt-1">en el periodo</div>
+            <div className="text-lg sm:text-2xl md:text-3xl font-bold text-purple-900">{completedSessions.length}</div>
+            <div className="text-[8px] sm:text-[9px] md:text-xs text-purple-600 mt-0.5 sm:mt-1">en el periodo</div>
           </div>
 
           {/* Total Earnings */}
-          <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-xl border border-green-200 p-4 shadow-sm">
-            <div className="flex items-center justify-between mb-2">
-              <div className="text-sm font-semibold text-green-700">Ganancias Totales</div>
-              <DollarSign className="text-green-400" size={20} />
+          <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg sm:rounded-xl border border-green-200 p-2 sm:p-3 md:p-4 shadow-sm">
+            <div className="flex items-center justify-between mb-1 sm:mb-1.5 md:mb-2">
+              <div className="text-[9px] sm:text-[10px] md:text-sm font-semibold text-green-700 leading-tight">Ganancias</div>
+              <DollarSign className="text-green-400 flex-shrink-0" size={14} />
             </div>
-            <div className="text-3xl font-bold text-green-900">{totalEarnings.toFixed(2)} €</div>
-            <div className="text-xs text-green-600 mt-1">completadas</div>
+            <div className="text-lg sm:text-2xl md:text-3xl font-bold text-green-900">{totalEarnings.toFixed(2)} €</div>
+            <div className="text-[8px] sm:text-[9px] md:text-xs text-green-600 mt-0.5 sm:mt-1">completadas</div>
           </div>
 
           {/* Potential Earnings */}
-          <div className="bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-xl border border-indigo-200 p-4 shadow-sm">
-            <div className="flex items-center justify-between mb-2">
-              <div className="text-sm font-semibold text-indigo-700">Ganancias Potenciales</div>
-              <DollarSign className="text-indigo-400" size={20} />
+          <div className="bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-lg sm:rounded-xl border border-indigo-200 p-2 sm:p-3 md:p-4 shadow-sm">
+            <div className="flex items-center justify-between mb-1 sm:mb-1.5 md:mb-2">
+              <div className="text-[9px] sm:text-[10px] md:text-sm font-semibold text-indigo-700 leading-tight">Potenciales</div>
+              <DollarSign className="text-indigo-400 flex-shrink-0" size={14} />
             </div>
-            <div className="text-3xl font-bold text-indigo-900">{potentialEarnings.toFixed(2)} €</div>
-            <div className="text-xs text-indigo-600 mt-1">
-              {completedSessions.length + scheduledSessions.length} sesiones (completadas + programadas)
+            <div className="text-lg sm:text-2xl md:text-3xl font-bold text-indigo-900">{potentialEarnings.toFixed(2)} €</div>
+            <div className="text-[8px] sm:text-[9px] md:text-xs text-indigo-600 mt-0.5 sm:mt-1">
+              <span className="hidden sm:inline">{completedSessions.length + scheduledSessions.length} sesiones</span>
+              <span className="sm:hidden">{completedSessions.length + scheduledSessions.length}</span>
             </div>
           </div>
 
           {/* Total Collected */}
-          <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl border border-blue-200 p-4 shadow-sm">
-            <div className="flex items-center justify-between mb-2">
-              <div className="text-sm font-semibold text-blue-700">Total Cobrado</div>
-              <CheckCircle className="text-blue-400" size={20} />
+          <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg sm:rounded-xl border border-blue-200 p-2 sm:p-3 md:p-4 shadow-sm">
+            <div className="flex items-center justify-between mb-1 sm:mb-1.5 md:mb-2">
+              <div className="text-[9px] sm:text-[10px] md:text-sm font-semibold text-blue-700 leading-tight">Cobrado</div>
+              <CheckCircle className="text-blue-400 flex-shrink-0" size={14} />
             </div>
-            <div className="text-3xl font-bold text-blue-900">{paidEarnings.toFixed(2)} €</div>
-            <div className="text-xs text-blue-600 mt-1">{paidSessions.length} sesiones pagadas</div>
+            <div className="text-lg sm:text-2xl md:text-3xl font-bold text-blue-900">{paidEarnings.toFixed(2)} €</div>
+            <div className="text-[8px] sm:text-[9px] md:text-xs text-blue-600 mt-0.5 sm:mt-1">
+              <span className="hidden sm:inline">{paidSessions.length} sesiones</span>
+              <span className="sm:hidden">{paidSessions.length}</span>
+            </div>
           </div>
         </div>
       )}
 
       {/* Sessions List */}
       {displayedSessions.length === 0 ? (
-        <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
-          <Calendar className="mx-auto text-slate-300 mb-3" size={48} />
-          <p className="text-slate-500">
+        <div className="bg-white rounded-lg sm:rounded-xl border border-slate-200 p-4 sm:p-6 md:p-8 text-center">
+          <Calendar className="mx-auto text-slate-300 mb-2 sm:mb-3" size={32} />
+          <p className="text-xs sm:text-sm text-slate-500">
             {sessions.length === 0 
               ? 'No hay sesiones en el rango de fechas seleccionado'
               : 'No hay sesiones para mostrar (todas están canceladas)'}
           </p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2 sm:space-y-3">
           {displayedSessions.map((session) => {
             const patientId = session.patient_user_id || session.patientId;
             const patient = patients.get(patientId);
@@ -571,44 +579,47 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
               <div
                 key={session.id}
                 onClick={() => handleOpenSession(session)}
-                className="bg-white rounded-xl border border-slate-200 p-4 hover:shadow-md transition-all cursor-pointer hover:border-purple-300"
+                className="bg-white rounded-lg sm:rounded-xl border border-slate-200 p-2 sm:p-3 md:p-4 hover:shadow-md transition-all cursor-pointer hover:border-purple-300"
               >
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3">
                   {/* Left: Date, Time & Patient */}
-                  <div className="flex items-start gap-3">
-                    <div className="bg-purple-100 rounded-lg p-3 text-center min-w-[60px]">
-                      <div className="text-xs font-semibold text-purple-600 uppercase">
+                  <div className="flex items-start gap-2 sm:gap-3">
+                    <div className="bg-purple-100 rounded-lg p-1.5 sm:p-2 md:p-3 text-center min-w-[45px] sm:min-w-[55px] md:min-w-[60px]">
+                      <div className="text-[8px] sm:text-[9px] md:text-xs font-semibold text-purple-600 uppercase">
                         {new Date(session.date).toLocaleDateString('es-ES', { month: 'short' })}
                       </div>
-                      <div className="text-2xl font-bold text-purple-900">
+                      <div className="text-base sm:text-xl md:text-2xl font-bold text-purple-900">
                         {new Date(session.date).getDate()}
                       </div>
                     </div>
                     
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <User size={16} className="text-slate-400" />
-                        <span className="font-semibold text-slate-800">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 sm:gap-2 mb-0.5 sm:mb-1">
+                        <User size={12} className="text-slate-400 flex-shrink-0" />
+                        <span className="font-semibold text-[10px] sm:text-xs md:text-sm text-slate-800 truncate">
                           {patient?.name || 'Paciente no disponible'}
                         </span>
                       </div>
-                      <div className="text-sm text-slate-500 flex items-center gap-2">
-                        <Clock size={14} />
+                      <div className="text-[9px] sm:text-xs md:text-sm text-slate-500 flex items-center gap-1 sm:gap-1.5 mb-1 sm:mb-2">
+                        <Clock size={10} className="flex-shrink-0" />
                         {session.startTime} - {session.endTime}
                       </div>
-                      <div className="mt-2 flex items-center gap-2 flex-wrap">
+                      <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 flex-wrap">
                         {getStatusBadge(session.status)}
                         {/* Tags */}
                         {session.tags && session.tags.length > 0 && (
                           <>
-                            {session.tags.map((tag, idx) => (
+                            {session.tags.slice(0, 2).map((tag, idx) => (
                               <span
                                 key={idx}
-                                className="inline-flex items-center px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full text-xs font-medium border border-purple-200"
+                                className="inline-flex items-center px-1.5 sm:px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full text-[8px] sm:text-[9px] md:text-xs font-medium border border-purple-200"
                               >
                                 {tag}
                               </span>
                             ))}
+                            {session.tags.length > 2 && (
+                              <span className="text-[8px] sm:text-[9px] text-slate-400">+{session.tags.length - 2}</span>
+                            )}
                           </>
                         )}
                       </div>
@@ -616,27 +627,29 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                   </div>
                   
                   {/* Right: Financial Info */}
-                  <div className="flex flex-col items-end gap-2">
-                    <div className="text-right">
-                      <div className="text-xs text-slate-500">Tu ganancia</div>
-                      <div className="text-2xl font-bold text-green-600 flex items-center gap-1">
+                  <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 sm:gap-2 pl-12 sm:pl-0">
+                    <div className="text-left sm:text-right">
+                      <div className="text-[8px] sm:text-[9px] md:text-xs text-slate-500 hidden sm:block">Tu ganancia</div>
+                      <div className="text-base sm:text-lg md:text-2xl font-bold text-green-600 flex items-center gap-1">
                         {earnings.toFixed(2)} €
                       </div>
-                      <div className="text-xs text-slate-400">
+                      <div className="text-[8px] sm:text-[9px] md:text-xs text-slate-400 hidden sm:block">
                         ({session.percent_psych || 70}% de {session.price?.toFixed(2) || '0.00'}€)
                       </div>
                     </div>
                     
-                    <div>
+                    <div className="flex-shrink-0">
                       {(isPaid || session.paid) ? (
-                        <span className="inline-flex items-center gap-1 px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-semibold border border-green-200">
-                          <CheckCircle size={12} />
-                          💵 Pagada
+                        <span className="inline-flex items-center gap-1 px-2 sm:px-2.5 md:px-3 py-0.5 sm:py-1 bg-green-100 text-green-700 rounded-full text-[8px] sm:text-[9px] md:text-xs font-semibold border border-green-200">
+                          <CheckCircle size={10} className="flex-shrink-0" />
+                          <span className="hidden sm:inline">💵 Pagada</span>
+                          <span className="sm:hidden">✓</span>
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 px-3 py-1 bg-amber-100 text-amber-700 rounded-full text-xs font-semibold border border-amber-200">
-                          <Clock size={12} />
-                          Pendiente
+                        <span className="inline-flex items-center gap-1 px-2 sm:px-2.5 md:px-3 py-0.5 sm:py-1 bg-amber-100 text-amber-700 rounded-full text-[8px] sm:text-[9px] md:text-xs font-semibold border border-amber-200">
+                          <Clock size={10} className="flex-shrink-0" />
+                          <span className="hidden sm:inline">Pendiente</span>
+                          <span className="sm:hidden">⏳</span>
                         </span>
                       )}
                     </div>

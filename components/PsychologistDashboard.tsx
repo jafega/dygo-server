@@ -458,15 +458,15 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
         </div>
         
         {/* Legend/Summary */}
-        <div className="mt-6 sm:mt-8 pt-3 sm:pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs">
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded bg-gradient-to-t from-green-600 to-green-400"></div>
+        <div className="mt-4 sm:mt-6 md:mt-8 pt-2 sm:pt-3 md:pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-[10px] sm:text-xs">
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+            <div className="flex items-center gap-1 sm:gap-2">
+              <div className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded bg-gradient-to-t from-green-600 to-green-400"></div>
               <span className="text-slate-600">Cobrado</span>
             </div>
             {showTotalBilling && (
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded bg-gradient-to-t from-amber-500 to-yellow-400"></div>
+              <div className="flex items-center gap-1 sm:gap-2">
+                <div className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded bg-gradient-to-t from-amber-500 to-yellow-400"></div>
                 <span className="text-slate-600">Pendiente</span>
               </div>
             )}
@@ -478,146 +478,146 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
       </div>
 
       {/* Main Stats Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 md:gap-4">
         {/* Total Patients */}
-        <div className="bg-white rounded-xl border border-slate-200 p-2 sm:p-4 hover:shadow-lg transition-shadow">
-          <div className="flex items-center justify-between mb-2">
-            <div className="p-1 sm:p-2 bg-blue-100 rounded-lg">
-              <Users className="text-blue-600" size={16} />
+        <div className="bg-white rounded-lg sm:rounded-xl border border-slate-200 p-2 sm:p-3 md:p-4 hover:shadow-lg transition-shadow">
+          <div className="flex items-center justify-between mb-1 sm:mb-2">
+            <div className="p-1 sm:p-1.5 md:p-2 bg-blue-100 rounded-lg">
+              <Users className="text-blue-600" size={14} />
             </div>
-            <span className="text-[9px] sm:text-xs font-semibold text-green-600 bg-green-100 px-1 sm:px-2 py-0.5 rounded-full leading-none">
+            <span className="text-[8px] sm:text-[9px] md:text-xs font-semibold text-green-600 bg-green-100 px-1 sm:px-1.5 md:px-2 py-0.5 rounded-full leading-none">
               {activePatients}
             </span>
           </div>
-          <div className="text-lg sm:text-2xl font-bold text-slate-900">{patients.length}</div>
-          <div className="text-[10px] sm:text-xs text-slate-500 mt-0.5">Pacientes</div>
+          <div className="text-base sm:text-lg md:text-2xl font-bold text-slate-900">{patients.length}</div>
+          <div className="text-[9px] sm:text-[10px] md:text-xs text-slate-500 mt-0.5">Pacientes</div>
         </div>
 
         {/* Scheduled Sessions */}
-        <div className="bg-white rounded-xl border border-slate-200 p-2 sm:p-4 hover:shadow-lg transition-shadow">
-          <div className="flex items-center justify-between mb-2">
-            <div className="p-1 sm:p-2 bg-green-100 rounded-lg">
-              <Calendar className="text-green-600" size={16} />
+        <div className="bg-white rounded-lg sm:rounded-xl border border-slate-200 p-2 sm:p-3 md:p-4 hover:shadow-lg transition-shadow">
+          <div className="flex items-center justify-between mb-1 sm:mb-2">
+            <div className="p-1 sm:p-1.5 md:p-2 bg-green-100 rounded-lg">
+              <Calendar className="text-green-600" size={14} />
             </div>
-            <span className="text-[9px] sm:text-xs font-semibold text-blue-600 bg-blue-100 px-1 sm:px-2 py-0.5 rounded-full leading-none">
+            <span className="text-[8px] sm:text-[9px] md:text-xs font-semibold text-blue-600 bg-blue-100 px-1 sm:px-1.5 md:px-2 py-0.5 rounded-full leading-none">
               +{sessionsNext7Days.length}
             </span>
           </div>
-          <div className="text-lg sm:text-2xl font-bold text-slate-900">{scheduledSessions.length}</div>
-          <div className="text-[10px] sm:text-xs text-slate-500 mt-0.5">Programadas</div>
+          <div className="text-base sm:text-lg md:text-2xl font-bold text-slate-900">{scheduledSessions.length}</div>
+          <div className="text-[9px] sm:text-[10px] md:text-xs text-slate-500 mt-0.5">Programadas</div>
         </div>
 
         {/* Available Slots */}
-        <div className="bg-white rounded-xl border border-slate-200 p-2 sm:p-4 hover:shadow-lg transition-shadow">
-          <div className="flex items-center justify-between mb-2">
-            <div className="p-1 sm:p-2 bg-purple-100 rounded-lg">
-              <Clock className="text-purple-600" size={16} />
+        <div className="bg-white rounded-lg sm:rounded-xl border border-slate-200 p-2 sm:p-3 md:p-4 hover:shadow-lg transition-shadow">
+          <div className="flex items-center justify-between mb-1 sm:mb-2">
+            <div className="p-1 sm:p-1.5 md:p-2 bg-purple-100 rounded-lg">
+              <Clock className="text-purple-600" size={14} />
             </div>
           </div>
-          <div className="text-lg sm:text-2xl font-bold text-slate-900">{availableSessions.length}</div>
-          <div className="text-[10px] sm:text-xs text-slate-500 mt-0.5">Disponibles</div>
+          <div className="text-base sm:text-lg md:text-2xl font-bold text-slate-900">{availableSessions.length}</div>
+          <div className="text-[9px] sm:text-[10px] md:text-xs text-slate-500 mt-0.5">Disponibles</div>
         </div>
 
         {/* Completion Rate */}
-        <div className="bg-white rounded-xl border border-slate-200 p-2 sm:p-4 hover:shadow-lg transition-shadow">
-          <div className="flex items-center justify-between mb-2">
-            <div className="p-1 sm:p-2 bg-amber-100 rounded-lg">
-              <Target className="text-amber-600" size={16} />
+        <div className="bg-white rounded-lg sm:rounded-xl border border-slate-200 p-2 sm:p-3 md:p-4 hover:shadow-lg transition-shadow">
+          <div className="flex items-center justify-between mb-1 sm:mb-2">
+            <div className="p-1 sm:p-1.5 md:p-2 bg-amber-100 rounded-lg">
+              <Target className="text-amber-600" size={14} />
             </div>
           </div>
-          <div className="text-lg sm:text-2xl font-bold text-slate-900">{completionRate}%</div>
-          <div className="text-[10px] sm:text-xs text-slate-500 mt-0.5">Asistencia</div>
+          <div className="text-base sm:text-lg md:text-2xl font-bold text-slate-900">{completionRate}%</div>
+          <div className="text-[9px] sm:text-[10px] md:text-xs text-slate-500 mt-0.5">Asistencia</div>
         </div>
       </div>
 
       {/* This Month Stats */}
-      <div className="bg-white rounded-xl border border-slate-200 p-2 sm:p-6">
-        <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 mb-3 sm:mb-6">
+      <div className="bg-white rounded-lg sm:rounded-xl border border-slate-200 p-3 sm:p-4 md:p-6">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 mb-3 sm:mb-4 md:mb-6">
           <div className="flex items-center gap-2">
-            <div className="p-2 bg-indigo-100 rounded-lg">
-              <Activity className="text-indigo-600" size={18} />
+            <div className="p-1.5 sm:p-2 bg-indigo-100 rounded-lg">
+              <Activity className="text-indigo-600" size={16} />
             </div>
-            <h2 className="text-base sm:text-xl font-bold text-slate-900">Estadísticas del Período</h2>
+            <h2 className="text-sm sm:text-base md:text-xl font-bold text-slate-900">Estadísticas del Período</h2>
           </div>
-          <span className="text-xs sm:text-sm text-slate-500">
+          <span className="text-[10px] sm:text-xs md:text-sm text-slate-500">
             ({new Date(dateRange.start).toLocaleDateString('es-ES', { month: 'short', day: 'numeric' })} - {new Date(dateRange.end).toLocaleDateString('es-ES', { month: 'short', day: 'numeric' })})
           </span>
         </div>
         
-        <div className="grid grid-cols-3 gap-2 sm:gap-6">
-          <div className="text-center p-2 sm:p-4 bg-green-50 rounded-xl border border-green-200">
-            <CheckCircle className="text-green-600 mx-auto mb-1 sm:mb-2" size={24} />
-            <div className="text-xl sm:text-3xl font-bold text-green-700">{rangeCompleted}</div>
-            <div className="text-[10px] sm:text-sm text-green-600 font-medium mt-0.5 sm:mt-1">Completadas</div>
+        <div className="grid grid-cols-3 gap-2 sm:gap-3 md:gap-6">
+          <div className="text-center p-2 sm:p-3 md:p-4 bg-green-50 rounded-lg sm:rounded-xl border border-green-200">
+            <CheckCircle className="text-green-600 mx-auto mb-1 sm:mb-2" size={18} />
+            <div className="text-lg sm:text-2xl md:text-3xl font-bold text-green-700">{rangeCompleted}</div>
+            <div className="text-[9px] sm:text-[10px] md:text-sm text-green-600 font-medium mt-0.5 sm:mt-1">Completadas</div>
           </div>
 
-          <div className="text-center p-2 sm:p-4 bg-blue-50 rounded-xl border border-blue-200">
-            <Activity className="text-blue-600 mx-auto mb-1 sm:mb-2" size={24} />
-            <div className="text-xl sm:text-3xl font-bold text-blue-700">{rangeScheduled}</div>
-            <div className="text-[10px] sm:text-sm text-blue-600 font-medium mt-0.5 sm:mt-1">Programadas</div>
+          <div className="text-center p-2 sm:p-3 md:p-4 bg-blue-50 rounded-lg sm:rounded-xl border border-blue-200">
+            <Activity className="text-blue-600 mx-auto mb-1 sm:mb-2" size={18} />
+            <div className="text-lg sm:text-2xl md:text-3xl font-bold text-blue-700">{rangeScheduled}</div>
+            <div className="text-[9px] sm:text-[10px] md:text-sm text-blue-600 font-medium mt-0.5 sm:mt-1">Programadas</div>
           </div>
 
-          <div className="text-center p-2 sm:p-4 bg-red-50 rounded-xl border border-red-200">
-            <XCircle className="text-red-600 mx-auto mb-1 sm:mb-2" size={24} />
-            <div className="text-xl sm:text-3xl font-bold text-red-700">{rangeCancelled}</div>
-            <div className="text-[10px] sm:text-sm text-red-600 font-medium mt-0.5 sm:mt-1">Canceladas</div>
+          <div className="text-center p-2 sm:p-3 md:p-4 bg-red-50 rounded-lg sm:rounded-xl border border-red-200">
+            <XCircle className="text-red-600 mx-auto mb-1 sm:mb-2" size={18} />
+            <div className="text-lg sm:text-2xl md:text-3xl font-bold text-red-700">{rangeCancelled}</div>
+            <div className="text-[9px] sm:text-[10px] md:text-sm text-red-600 font-medium mt-0.5 sm:mt-1">Canceladas</div>
           </div>
         </div>
         
         {/* Completion Rate for Range */}
-        <div className="mt-6 p-4 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg border border-purple-200">
+        <div className="mt-3 sm:mt-4 md:mt-6 p-3 sm:p-4 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg border border-purple-200">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold text-slate-700">Tasa de Asistencia en Período</span>
-            <span className="text-2xl font-bold text-purple-700">{rangeCompletionRate}%</span>
+            <span className="text-xs sm:text-sm font-semibold text-slate-700">Tasa de Asistencia en Período</span>
+            <span className="text-xl sm:text-2xl font-bold text-purple-700">{rangeCompletionRate}%</span>
           </div>
         </div>
       </div>
 
       {/* Session Types Distribution */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-xl border border-slate-200 p-6">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="p-2 bg-purple-100 rounded-lg">
-              <Activity className="text-purple-600" size={20} />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 md:gap-6">
+        <div className="bg-white rounded-lg sm:rounded-xl border border-slate-200 p-3 sm:p-4 md:p-6">
+          <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4 md:mb-6">
+            <div className="p-1.5 sm:p-2 bg-purple-100 rounded-lg">
+              <Activity className="text-purple-600" size={16} />
             </div>
-            <h2 className="text-xl font-bold text-slate-900">Distribución por Tipo</h2>
+            <h2 className="text-sm sm:text-base md:text-xl font-bold text-slate-900">Distribución por Tipo</h2>
           </div>
           
-          <div className="space-y-4">
+          <div className="space-y-3 sm:space-y-4">
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-slate-700">🎥 Online</span>
-                <span className="text-sm font-bold text-slate-900">{onlineSessions}</span>
+              <div className="flex items-center justify-between mb-1.5 sm:mb-2">
+                <span className="text-xs sm:text-sm font-medium text-slate-700">🎥 Online</span>
+                <span className="text-xs sm:text-sm font-bold text-slate-900">{onlineSessions}</span>
               </div>
-              <div className="w-full bg-slate-100 rounded-full h-2">
+              <div className="w-full bg-slate-100 rounded-full h-1.5 sm:h-2">
                 <div 
-                  className="bg-indigo-600 h-2 rounded-full transition-all duration-500"
+                  className="bg-indigo-600 h-1.5 sm:h-2 rounded-full transition-all duration-500"
                   style={{ width: `${scheduledSessions.length > 0 ? (onlineSessions / scheduledSessions.length) * 100 : 0}%` }}
                 />
               </div>
             </div>
 
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-slate-700">🏥 Consulta</span>
-                <span className="text-sm font-bold text-slate-900">{inPersonSessions}</span>
+              <div className="flex items-center justify-between mb-1.5 sm:mb-2">
+                <span className="text-xs sm:text-sm font-medium text-slate-700">🏥 Consulta</span>
+                <span className="text-xs sm:text-sm font-bold text-slate-900">{inPersonSessions}</span>
               </div>
-              <div className="w-full bg-slate-100 rounded-full h-2">
+              <div className="w-full bg-slate-100 rounded-full h-1.5 sm:h-2">
                 <div 
-                  className="bg-purple-600 h-2 rounded-full transition-all duration-500"
+                  className="bg-purple-600 h-1.5 sm:h-2 rounded-full transition-all duration-500"
                   style={{ width: `${scheduledSessions.length > 0 ? (inPersonSessions / scheduledSessions.length) * 100 : 0}%` }}
                 />
               </div>
             </div>
 
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-slate-700">🏠 Domicilio</span>
-                <span className="text-sm font-bold text-slate-900">{homeVisitSessions}</span>
+              <div className="flex items-center justify-between mb-1.5 sm:mb-2">
+                <span className="text-xs sm:text-sm font-medium text-slate-700">🏠 Domicilio</span>
+                <span className="text-xs sm:text-sm font-bold text-slate-900">{homeVisitSessions}</span>
               </div>
-              <div className="w-full bg-slate-100 rounded-full h-2">
+              <div className="w-full bg-slate-100 rounded-full h-1.5 sm:h-2">
                 <div 
-                  className="bg-green-600 h-2 rounded-full transition-all duration-500"
+                  className="bg-green-600 h-1.5 sm:h-2 rounded-full transition-all duration-500"
                   style={{ width: `${scheduledSessions.length > 0 ? (homeVisitSessions / scheduledSessions.length) * 100 : 0}%` }}
                 />
               </div>
@@ -626,28 +626,28 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
         </div>
 
         {/* Quick Stats */}
-        <div className="bg-white rounded-xl border border-slate-200 p-6">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="p-2 bg-green-100 rounded-lg">
-              <TrendingUp className="text-green-600" size={20} />
+        <div className="bg-white rounded-lg sm:rounded-xl border border-slate-200 p-3 sm:p-4 md:p-6">
+          <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4 md:mb-6">
+            <div className="p-1.5 sm:p-2 bg-green-100 rounded-lg">
+              <TrendingUp className="text-green-600" size={16} />
             </div>
-            <h2 className="text-xl font-bold text-slate-900">Resumen Global</h2>
+            <h2 className="text-sm sm:text-base md:text-xl font-bold text-slate-900">Resumen Global</h2>
           </div>
           
-          <div className="space-y-4">
-            <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-              <span className="text-sm font-medium text-slate-700">Total Sesiones</span>
-              <span className="text-lg font-bold text-slate-900">{totalRealSessions}</span>
+          <div className="space-y-2 sm:space-y-3 md:space-y-4">
+            <div className="flex items-center justify-between p-2 sm:p-3 bg-slate-50 rounded-lg">
+              <span className="text-xs sm:text-sm font-medium text-slate-700">Total Sesiones</span>
+              <span className="text-base sm:text-lg font-bold text-slate-900">{totalRealSessions}</span>
             </div>
 
-            <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-              <span className="text-sm font-medium text-slate-700">Próximas Sesiones</span>
-              <span className="text-lg font-bold text-blue-600">{futureSessions.length}</span>
+            <div className="flex items-center justify-between p-2 sm:p-3 bg-slate-50 rounded-lg">
+              <span className="text-xs sm:text-sm font-medium text-slate-700">Próximas Sesiones</span>
+              <span className="text-base sm:text-lg font-bold text-blue-600">{futureSessions.length}</span>
             </div>
 
-            <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-              <span className="text-sm font-medium text-slate-700">Sesiones Completadas</span>
-              <span className="text-lg font-bold text-green-600">{completedSessions.length}</span>
+            <div className="flex items-center justify-between p-2 sm:p-3 bg-slate-50 rounded-lg">
+              <span className="text-xs sm:text-sm font-medium text-slate-700">Sesiones Completadas</span>
+              <span className="text-base sm:text-lg font-bold text-green-600">{completedSessions.length}</span>
             </div>
 
             <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
