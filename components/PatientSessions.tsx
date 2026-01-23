@@ -349,29 +349,28 @@ const PatientSessions: React.FC = () => {
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+    <div className="bg-white md:rounded-2xl md:shadow-sm md:border md:border-slate-100 overflow-hidden">
       {/* Header */}
-      <div className="p-6 border-b border-slate-200">
-        <div className="flex items-center justify-between mb-4">
+      <div className="p-4 md:p-6 border-b border-slate-200 bg-white">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-3 md:mb-4">
           <div>
-            <h2 className="text-xl font-bold text-slate-900">Gestiona tus Citas</h2>
-            <p className="text-sm text-slate-500 mt-1">Gestiona tus citas con el psicólogo</p>
+            <h2 className="text-lg md:text-xl font-bold text-slate-900">Mis Citas</h2>
+            <p className="text-xs md:text-sm text-slate-500 mt-0.5 md:mt-1">Gestiona tus sesiones</p>
           </div>
           <button
             onClick={loadAvailability}
             disabled={isLoading}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium shadow-sm"
+            className="w-full md:w-auto flex items-center justify-center gap-2 px-4 py-2.5 md:py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl md:rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-semibold text-sm shadow-lg hover:shadow-xl"
           >
             {isLoading ? (
               <>
                 <Loader2 size={18} className="animate-spin" />
-                <span className="hidden sm:inline">Cargando...</span>
+                <span>Cargando...</span>
               </>
             ) : (
               <>
                 <Plus size={18} />
-                <span className="hidden sm:inline">Reservar Cita</span>
-                <span className="sm:hidden">Nueva</span>
+                <span>Reservar Cita</span>
               </>
             )}
           </button>
@@ -385,7 +384,7 @@ const PatientSessions: React.FC = () => {
             onChange={(e) => setShowPastSessions(e.target.checked)}
             className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
           />
-          <label htmlFor="showPast" className="text-sm text-slate-700 cursor-pointer">
+          <label htmlFor="showPast" className="text-xs md:text-sm text-slate-700 cursor-pointer">
             Mostrar citas pasadas
           </label>
         </div>
@@ -514,84 +513,118 @@ const PatientSessions: React.FC = () => {
           </div>
         ) : displayedSessions.length === 0 ? (
           <div className="text-center py-12 px-4">
-            <Calendar size={48} className="mx-auto text-slate-300 mb-4" />
-            <p className="text-slate-500 font-medium">No tienes citas {showPastSessions ? '' : 'futuras'} programadas</p>
-            <p className="text-sm text-slate-400 mt-2">Haz clic en "Nueva" para agendar una sesión</p>
+            <div className="w-16 h-16 mx-auto mb-4 bg-gradient-to-br from-indigo-100 to-purple-100 rounded-2xl flex items-center justify-center">
+              <Calendar size={32} className="text-indigo-600" />
+            </div>
+            <p className="text-slate-900 font-semibold text-base mb-1">No tienes citas {showPastSessions ? '' : 'futuras'}</p>
+            <p className="text-sm text-slate-500">Reserva tu primera sesión</p>
           </div>
         ) : (
-          <div className="p-4 space-y-3">
+          <div className="p-3 space-y-3">
             {displayedSessions.map((session) => {
               const isPast = new Date(session.date) < today || session.status !== 'scheduled';
               return (
                 <div
                   key={session.id}
-                  className={`p-4 border rounded-xl bg-white ${isPast ? 'border-slate-200 opacity-60' : 'border-indigo-200'}`}
+                  className={`rounded-2xl overflow-hidden shadow-sm border transition-all ${
+                    isPast 
+                      ? 'border-slate-200 bg-slate-50 opacity-60' 
+                      : 'border-indigo-200 bg-gradient-to-br from-white to-indigo-50/30'
+                  }`}
                 >
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <Calendar size={18} className="text-slate-600" />
-                      <span className="font-semibold text-slate-900 text-sm">
-                        {formatDate(session.date)}
+                  {/* Header de la card */}
+                  <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-3 flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-white">
+                      <Calendar size={18} />
+                      <span className="font-bold text-sm">
+                        {new Date(session.date).toLocaleDateString('es-ES', { 
+                          day: 'numeric',
+                          month: 'short'
+                        })}
                       </span>
                     </div>
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(session.status)}`}>
+                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
+                      session.status === 'scheduled' ? 'bg-white/20 text-white' :
+                      session.status === 'completed' ? 'bg-green-500 text-white' :
+                      'bg-red-500 text-white'
+                    }`}>
                       {getStatusLabel(session.status)}
                     </span>
                   </div>
-                  
-                  <div className="space-y-2 text-sm text-slate-600 mb-3">
-                    <div className="flex items-center gap-2">
-                      <Clock size={16} />
-                      <span>{session.startTime} - {session.endTime}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {session.type === 'online' ? (
-                        <>
-                          <Video size={16} className="text-indigo-600" />
-                          <span>En línea</span>
-                        </>
-                      ) : session.type === 'home-visit' ? (
-                        <>
-                          <MapPin size={16} className="text-green-600" />
-                          <span>A domicilio</span>
-                        </>
-                      ) : (
-                        <>
-                          <MapPin size={16} className="text-purple-600" />
-                          <span>Presencial</span>
-                        </>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Stethoscope size={16} className="text-indigo-600" />
+
+                  {/* Body de la card */}
+                  <div className="p-4 space-y-3">
+                    {/* Hora */}
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                        <Clock size={18} className="text-indigo-600" />
+                      </div>
                       <div>
-                        <span className="font-semibold text-slate-900 block leading-tight">{getPsychologistName(session)}</span>
+                        <div className="text-xs text-slate-500 font-medium">Horario</div>
+                        <div className="text-sm font-semibold text-slate-900">{session.startTime} - {session.endTime}</div>
+                      </div>
+                    </div>
+
+                    {/* Tipo */}
+                    <div className="flex items-center gap-3">
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                        session.type === 'online' ? 'bg-blue-100' :
+                        session.type === 'home-visit' ? 'bg-green-100' : 'bg-purple-100'
+                      }`}>
+                        {session.type === 'online' ? (
+                          <Video size={18} className="text-blue-600" />
+                        ) : session.type === 'home-visit' ? (
+                          <MapPin size={18} className="text-green-600" />
+                        ) : (
+                          <MapPin size={18} className="text-purple-600" />
+                        )}
+                      </div>
+                      <div>
+                        <div className="text-xs text-slate-500 font-medium">Modalidad</div>
+                        <div className="text-sm font-semibold text-slate-900">
+                          {session.type === 'online' ? 'En línea' :
+                           session.type === 'home-visit' ? 'A domicilio' : 'Presencial'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Especialista */}
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center flex-shrink-0">
+                        <Stethoscope size={18} className="text-white" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs text-slate-500 font-medium">Especialista</div>
+                        <div className="text-sm font-semibold text-slate-900 truncate">{getPsychologistName(session)}</div>
                         {getPsychologistEmail(session) && (
-                          <span className="text-xs text-slate-500">{getPsychologistEmail(session)}</span>
+                          <div className="text-xs text-slate-500 truncate">{getPsychologistEmail(session)}</div>
                         )}
                       </div>
                     </div>
-                  </div>
 
-                  {session.meetLink && session.status === 'scheduled' ? (
-                    <a
-                      href={session.meetLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
-                    >
-                      <Video size={16} />
-                      Unirse a la videollamada
-                    </a>
-                  ) : (
-                    <button
-                      onClick={() => setSelectedSession(session)}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-2 text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors text-sm font-medium"
-                    >
-                      <Eye size={16} />
-                      Ver detalles
-                    </button>
-                  )}
+                    {/* Botones de acción */}
+                    <div className="pt-2 flex gap-2">
+                      {session.meetLink && session.status === 'scheduled' ? (
+                        <a
+                          href={session.meetLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl hover:from-green-700 hover:to-emerald-700 transition-all text-sm font-bold shadow-md"
+                        >
+                          <Video size={16} />
+                          Unirse
+                        </a>
+                      ) : (
+                        <button
+                          onClick={() => setSelectedSession(session)}
+                          className="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all text-sm font-semibold"
+                        >
+                          <Eye size={16} />
+                          Ver detalles
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
               );
             })}
@@ -708,73 +741,89 @@ const PatientSessions: React.FC = () => {
 
       {/* Availability Modal */}
       {showAvailability && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto">
-            <div className="p-6 border-b border-slate-200 sticky top-0 bg-white">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-end md:items-center justify-center md:p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-t-3xl md:rounded-2xl shadow-2xl w-full md:max-w-2xl max-h-[85vh] md:max-h-[80vh] overflow-y-auto">
+            <div className="p-4 md:p-6 border-b border-slate-200 sticky top-0 bg-white z-10">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-xl font-bold text-slate-800">Horarios Disponibles</h2>
-                  <p className="text-sm text-slate-500 mt-1">Selecciona el horario que mejor te convenga</p>
+                  <h2 className="text-lg md:text-xl font-bold text-slate-800">Horarios Disponibles</h2>
+                  <p className="text-xs md:text-sm text-slate-500 mt-0.5 md:mt-1">Selecciona el que prefieras</p>
                 </div>
                 <button
                   onClick={() => setShowAvailability(false)}
-                  className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                  className="p-2 hover:bg-slate-100 rounded-xl transition-colors"
                 >
                   <X size={20} />
                 </button>
               </div>
             </div>
 
-            <div className="p-6">
+            <div className="p-3 md:p-6">
               {availableSlots.length === 0 ? (
                 <div className="text-center py-10">
-                  <AlertCircle size={48} className="mx-auto text-slate-300 mb-4" />
-                  <p className="text-slate-500 font-medium">No hay horarios disponibles</p>
-                  <p className="text-sm text-slate-400 mt-2">Contacta a tu psicólogo para coordinar una cita</p>
+                  <div className="w-16 h-16 mx-auto mb-4 bg-gradient-to-br from-slate-100 to-slate-200 rounded-2xl flex items-center justify-center">
+                    <AlertCircle size={32} className="text-slate-400" />
+                  </div>
+                  <p className="text-slate-900 font-semibold mb-1">No hay horarios disponibles</p>
+                  <p className="text-sm text-slate-500">Contacta a tu psicólogo para coordinar</p>
                 </div>
               ) : (
                 <div className="space-y-3">
                   {availableSlots.map((slot) => (
                     <div
                       key={slot.id}
-                      className="p-4 border border-slate-200 rounded-xl hover:border-indigo-300 hover:bg-indigo-50/30 transition-all"
+                      className="rounded-2xl overflow-hidden border border-slate-200 hover:border-indigo-300 hover:shadow-md transition-all bg-white"
                     >
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2">
-                            <Calendar size={18} className="text-slate-600" />
-                            <span className="font-semibold text-slate-900">
-                              {formatDate(slot.date)}
-                            </span>
+                      {/* Header con fecha */}
+                      <div className="bg-gradient-to-r from-indigo-50 to-purple-50 px-4 py-3 border-b border-slate-200">
+                        <div className="flex items-center gap-2 text-indigo-900">
+                          <Calendar size={18} />
+                          <span className="font-bold text-sm">
+                            {new Date(slot.date).toLocaleDateString('es-ES', { 
+                              weekday: 'long',
+                              day: 'numeric',
+                              month: 'long'
+                            })}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Body con detalles */}
+                      <div className="p-4">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                          {/* Hora */}
+                          <div className="flex items-center gap-2">
+                            <Clock size={16} className="text-slate-600" />
+                            <span className="text-sm font-medium text-slate-900">{slot.startTime} - {slot.endTime}</span>
                           </div>
-                          <div className="flex items-center gap-4 text-sm text-slate-600 ml-7">
-                            <div className="flex items-center gap-2">
-                              <Clock size={16} />
-                              <span>{slot.startTime} - {slot.endTime}</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {slot.type === 'online' ? (
-                                <>
-                                  <Video size={16} />
-                                  <span>En línea</span>
-                                </>
-                              ) : (
-                                <>
-                                  <MapPin size={16} />
-                                  <span>Presencial</span>
-                                </>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Stethoscope size={16} className="text-indigo-600" />
-                              <span>{getPsychologistName(slot)}</span>
-                            </div>
+
+                          {/* Tipo */}
+                          <div className="flex items-center gap-2">
+                            {slot.type === 'online' ? (
+                              <>
+                                <Video size={16} className="text-blue-600" />
+                                <span className="text-sm font-medium text-slate-900">En línea</span>
+                              </>
+                            ) : (
+                              <>
+                                <MapPin size={16} className="text-purple-600" />
+                                <span className="text-sm font-medium text-slate-900">Presencial</span>
+                              </>
+                            )}
+                          </div>
+
+                          {/* Especialista */}
+                          <div className="flex items-center gap-2">
+                            <Stethoscope size={16} className="text-indigo-600" />
+                            <span className="text-sm font-medium text-slate-900 truncate">{getPsychologistName(slot)}</span>
                           </div>
                         </div>
+
+                        {/* Botón de reserva */}
                         <button
                           onClick={() => bookSession(slot.id)}
                           disabled={bookingSlotId === slot.id}
-                          className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 whitespace-nowrap"
+                          className="w-full px-4 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl hover:from-indigo-700 hover:to-purple-700 transition-all font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-md text-sm"
                         >
                           {bookingSlotId === slot.id ? (
                             <>
@@ -784,7 +833,7 @@ const PatientSessions: React.FC = () => {
                           ) : (
                             <>
                               <CheckCircle size={16} />
-                              <span>Reservar</span>
+                              <span>Reservar esta cita</span>
                             </>
                           )}
                         </button>

@@ -5347,38 +5347,110 @@ app.put('/api/psychologist/:userId/profile', async (req, res) => {
 });
 
 // --- PATIENT PROFILE ---
-app.get('/api/patient/:userId/profile', (req, res) => {
-  const { userId } = req.params;
-  const db = getDb();
-  if (!db.patientProfiles) db.patientProfiles = {};
-  
-  const profile = db.patientProfiles[userId] || {
-    name: '',
-    phone: '',
-    email: '',
-    address: '',
-    city: '',
-    postalCode: '',
-    country: 'España'
-  };
-  
-  res.json(profile);
+app.get('/api/patient/:userId/profile', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    if (supabaseAdmin) {
+      // Cargar desde Supabase
+      const user = await readSupabaseRowById('users', userId);
+      if (!user) {
+        return res.status(404).json({ error: 'Usuario no encontrado' });
+      }
+      
+      const data = user.data || {};
+      const profile = {
+        firstName: data.firstName || '',
+        lastName: data.lastName || '',
+        phone: data.phone || '',
+        email: user.user_email || data.email || '',
+        address: data.address || '',
+        city: data.city || '',
+        postalCode: data.postalCode || '',
+        country: data.country || 'España'
+      };
+      
+      return res.json(profile);
+    } else {
+      // Fallback a db.json
+      const db = getDb();
+      if (!db.patientProfiles) db.patientProfiles = {};
+      
+      const profile = db.patientProfiles[userId] || {
+        firstName: '',
+        lastName: '',
+        phone: '',
+        email: '',
+        address: '',
+        city: '',
+        postalCode: '',
+        country: 'España'
+      };
+      
+      return res.json(profile);
+    }
+  } catch (err) {
+    console.error('Error loading patient profile:', err);
+    return res.status(500).json({ error: err?.message || 'Error cargando el perfil' });
+  }
 });
 
 app.put('/api/patient/:userId/profile', async (req, res) => {
   try {
     const { userId } = req.params;
-    const db = getDb();
-    if (!db.patientProfiles) db.patientProfiles = {};
-
     console.log('[API] Saving patient profile for:', userId);
     console.log('[API] Profile data:', req.body);
 
-    db.patientProfiles[userId] = req.body;
-    await saveDb(db, { awaitPersistence: true });
+    if (supabaseAdmin) {
+      // Guardar en Supabase
+      const user = await readSupabaseRowById('users', userId);
+      if (!user) {
+        return res.status(404).json({ error: 'Usuario no encontrado' });
+      }
 
-    console.log('[API] Patient profile saved successfully');
-    return res.json(req.body);
+      const currentData = user.data || {};
+      const updatedData = {
+        ...currentData,
+        firstName: req.body.firstName,
+        lastName: req.body.lastName,
+        phone: req.body.phone,
+        email: req.body.email,
+        address: req.body.address,
+        city: req.body.city,
+        postalCode: req.body.postalCode,
+        country: req.body.country
+      };
+
+      const updateFields = {
+        data: updatedData
+      };
+
+      // Si el email cambió, actualizar también user_email
+      if (req.body.email && normalizeEmail(req.body.email) !== normalizeEmail(user.user_email)) {
+        updateFields.user_email = normalizeEmail(req.body.email);
+      }
+
+      const { error: updateError } = await supabaseAdmin
+        .from('users')
+        .update(updateFields)
+        .eq('id', userId);
+
+      if (updateError) {
+        console.error('❌ Error actualizando perfil en Supabase:', updateError);
+        throw new Error(`Error actualizando perfil: ${updateError.message}`);
+      }
+
+      console.log('✅ Patient profile saved successfully in Supabase');
+      return res.json(req.body);
+    } else {
+      // Fallback a db.json
+      const db = getDb();
+      if (!db.patientProfiles) db.patientProfiles = {};
+      db.patientProfiles[userId] = req.body;
+      await saveDb(db, { awaitPersistence: true });
+      console.log('[API] Patient profile saved successfully in db.json');
+      return res.json(req.body);
+    }
   } catch (err) {
     console.error('❌ Error saving patient profile', err);
     return res.status(500).json({ error: err?.message || 'No se pudo guardar el perfil' });

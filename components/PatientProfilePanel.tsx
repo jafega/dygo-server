@@ -4,7 +4,8 @@ import { API_URL } from '../services/config';
 
 interface PatientProfile {
   // Personal Info
-  name: string;
+  firstName: string;
+  lastName: string;
   phone: string;
   email: string;
   
@@ -21,7 +22,8 @@ interface PatientProfilePanelProps {
 
 const PatientProfilePanel: React.FC<PatientProfilePanelProps> = ({ userId }) => {
   const [profile, setProfile] = useState<PatientProfile>({
-    name: '',
+    firstName: '',
+    lastName: '',
     phone: '',
     email: '',
     address: '',
@@ -105,13 +107,24 @@ const PatientProfilePanel: React.FC<PatientProfilePanelProps> = ({ userId }) => 
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Nombre Completo *</label>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Nombre *</label>
             <input
               type="text"
-              value={profile.name}
-              onChange={(e) => handleChange('name', e.target.value)}
+              value={profile.firstName}
+              onChange={(e) => handleChange('firstName', e.target.value)}
               className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-              placeholder="Juan Pérez"
+              placeholder="Juan"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Apellidos *</label>
+            <input
+              type="text"
+              value={profile.lastName}
+              onChange={(e) => handleChange('lastName', e.target.value)}
+              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              placeholder="Pérez García"
             />
           </div>
 
