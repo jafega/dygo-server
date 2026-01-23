@@ -846,11 +846,20 @@ Mantén un tono profesional y objetivo.`;
                   </label>
                   <button
                     onClick={() => generateAISummary(transcript)}
-                    disabled={isGenerating}
-                    className="text-[10px] sm:text-xs text-purple-600 hover:text-purple-700 font-medium flex items-center gap-1 touch-manipulation"
+                    disabled={isGenerating || !transcript.trim()}
+                    className="text-[10px] sm:text-xs text-purple-600 hover:text-purple-700 hover:bg-purple-50 active:bg-purple-100 font-medium flex items-center gap-1 touch-manipulation px-2 py-1 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <Sparkles size={12} className="sm:w-3.5 sm:h-3.5" />
-                    Regenerar
+                    {isGenerating ? (
+                      <>
+                        <Loader className="animate-spin" size={12} />
+                        <span>Regenerando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={12} className="sm:w-3.5 sm:h-3.5" />
+                        <span>Regenerar</span>
+                      </>
+                    )}
                   </button>
                 </div>
                 <textarea
