@@ -6487,44 +6487,125 @@ app.put('/api/sessions/:id', async (req, res) => {
 app.delete('/api/sessions/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    console.log(`🗑️ Intentando eliminar sesión: ${id}`);
+    
     const db = getDb();
     if (!db.sessions) db.sessions = [];
     if (!db.dispo) db.dispo = [];
     if (!db.sessionEntries) db.sessionEntries = [];
 
-    // Intentar eliminar de dispo primero
+    let session = null;
+    let sessionEntryId = null;
+    
+    // Si hay Supabase, buscar primero ahí
+    if (supabaseAdmin) {
+      // Buscar en tabla sessions
+      const { data: sessionData, error: sessionError } = await supabaseAdmin
+        .from('sessions')
+        .select('*')
+        .eq('id', id)
+        .single();
+      
+      if (!sessionError && sessionData) {
+        session = normalizeSupabaseRow(sessionData);
+        sessionEntryId = session.session_entry_id;
+        console.log(`📍 Sesión encontrada en Supabase (sessions): ${id}, status: ${session.status}`);
+        
+        // Eliminar session_entry si existe
+        if (sessionEntryId) {
+          const { error: entryDeleteError } = await supabaseAdmin
+            .from('session_entry')
+            .delete()
+            .eq('id', sessionEntryId);
+          
+          if (entryDeleteError) {
+            console.error(`⚠️ Error eliminando session_entry ${sessionEntryId}:`, entryDeleteError);
+          } else {
+            console.log(`✅ Session entry ${sessionEntryId} eliminada de Supabase`);
+          }
+        }
+        
+        // Eliminar sesión de Supabase
+        const { error: deleteError } = await supabaseAdmin
+          .from('sessions')
+          .delete()
+          .eq('id', id);
+        
+        if (deleteError) {
+          console.error(`⚠️ Error eliminando sesión de Supabase:`, deleteError);
+          return res.status(500).json({ error: 'Error eliminando sesión de Supabase' });
+        }
+        
+        console.log(`✅ Sesión ${id} eliminada de Supabase`);
+      } else {
+        // Buscar en tabla dispo
+        const { data: dispoData, error: dispoError } = await supabaseAdmin
+          .from('dispo')
+          .select('*')
+          .eq('id', id)
+          .single();
+        
+        if (!dispoError && dispoData) {
+          console.log(`📍 Sesión encontrada en Supabase (dispo): ${id}`);
+          
+          // Eliminar de dispo
+          const { error: deleteError } = await supabaseAdmin
+            .from('dispo')
+            .delete()
+            .eq('id', id);
+          
+          if (deleteError) {
+            console.error(`⚠️ Error eliminando dispo de Supabase:`, deleteError);
+            return res.status(500).json({ error: 'Error eliminando disponibilidad de Supabase' });
+          }
+          
+          console.log(`✅ Disponibilidad ${id} eliminada de Supabase`);
+          
+          // Eliminar de caché local
+          const dispoIdx = db.dispo.findIndex(d => d.id === id);
+          if (dispoIdx !== -1) {
+            db.dispo.splice(dispoIdx, 1);
+          }
+          
+          await saveDb(db, { awaitPersistence: true });
+          return res.json({ success: true, deletedFrom: 'dispo' });
+        }
+      }
+    }
+    
+    // Eliminar de caché local
+    const idx = db.sessions.findIndex(s => s.id === id);
+    if (idx !== -1) {
+      const localSession = db.sessions[idx];
+      if (localSession.session_entry_id) {
+        const entryIdx = db.sessionEntries.findIndex(e => e.id === localSession.session_entry_id);
+        if (entryIdx !== -1) {
+          db.sessionEntries.splice(entryIdx, 1);
+        }
+      }
+      db.sessions.splice(idx, 1);
+    }
+    
     const dispoIdx = db.dispo.findIndex(d => d.id === id);
     if (dispoIdx !== -1) {
       db.dispo.splice(dispoIdx, 1);
-      // Limpiar sesiones de disponibilidad antes de guardar
-      db.sessions = (db.sessions || []).filter(s => s.patient_user_id || s.patientId);
-      await saveDb(db, { awaitPersistence: true });
-      return res.json({ success: true, deletedFrom: 'dispo' });
     }
-
-    // Si no está en dispo, buscar en sessions
-    const idx = db.sessions.findIndex(s => s.id === id);
-    if (idx === -1) return res.status(404).json({ error: 'Session not found' });
-
-    const session = db.sessions[idx];
     
-    // Eliminar session_entry asociada si existe
-    if (session.session_entry_id) {
-      const entryIdx = db.sessionEntries.findIndex(e => e.id === session.session_entry_id);
-      if (entryIdx !== -1) {
-        db.sessionEntries.splice(entryIdx, 1);
-        console.log(`🗑️ Session entry ${session.session_entry_id} eliminada junto con la sesión`);
-      }
-    }
-
-    // Eliminar la sesión (permitir eliminar cualquier estado)
-    db.sessions.splice(idx, 1);
-    // Limpiar sesiones de disponibilidad antes de guardar
+    // Limpiar sesiones de disponibilidad
     db.sessions = db.sessions.filter(s => s.patient_user_id || s.patientId);
     await saveDb(db, { awaitPersistence: true });
     
-    console.log(`🗑️ Sesión ${id} eliminada correctamente (estado: ${session.status})`);
-    return res.json({ success: true, deletedFrom: 'sessions', sessionEntryDeleted: !!session.session_entry_id });
+    if (!session && idx === -1 && dispoIdx === -1) {
+      console.log(`⚠️ Sesión ${id} no encontrada en ninguna parte`);
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    
+    console.log(`🗑️ Sesión ${id} eliminada correctamente`);
+    return res.json({ 
+      success: true, 
+      deletedFrom: session ? 'sessions' : (dispoIdx !== -1 ? 'dispo' : 'cache'),
+      sessionEntryDeleted: !!sessionEntryId 
+    });
   } catch (err) {
     console.error('❌ Error deleting session', err);
     return res.status(500).json({ error: err?.message || 'No se pudo eliminar la sesión' });
