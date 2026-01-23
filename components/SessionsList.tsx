@@ -46,6 +46,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [editedSession, setEditedSession] = useState<Session | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [allPsychologistTags, setAllPsychologistTags] = useState<string[]>([]);
   
   // Filter states
   const [filterPatient, setFilterPatient] = useState<string>('all');
@@ -64,9 +65,60 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
     };
   });
 
+  // Colores predefinidos para las etiquetas (20 colores diferentes)
+  const tagColors = [
+    'bg-purple-100 text-purple-700 border-purple-200',
+    'bg-blue-100 text-blue-700 border-blue-200',
+    'bg-green-100 text-green-700 border-green-200',
+    'bg-yellow-100 text-yellow-700 border-yellow-200',
+    'bg-red-100 text-red-700 border-red-200',
+    'bg-pink-100 text-pink-700 border-pink-200',
+    'bg-indigo-100 text-indigo-700 border-indigo-200',
+    'bg-cyan-100 text-cyan-700 border-cyan-200',
+    'bg-teal-100 text-teal-700 border-teal-200',
+    'bg-orange-100 text-orange-700 border-orange-200',
+    'bg-lime-100 text-lime-700 border-lime-200',
+    'bg-emerald-100 text-emerald-700 border-emerald-200',
+    'bg-sky-100 text-sky-700 border-sky-200',
+    'bg-violet-100 text-violet-700 border-violet-200',
+    'bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200',
+    'bg-rose-100 text-rose-700 border-rose-200',
+    'bg-amber-100 text-amber-700 border-amber-200',
+    'bg-slate-100 text-slate-700 border-slate-200',
+    'bg-stone-100 text-stone-700 border-stone-200',
+    'bg-zinc-100 text-zinc-700 border-zinc-200'
+  ];
+
+  const getTagColor = (tag: string, index: number) => {
+    // Usar el índice global de todas las tags del psicólogo para colores consistentes
+    const globalIndex = allPsychologistTags.indexOf(tag);
+    return tagColors[globalIndex >= 0 ? globalIndex % tagColors.length : index % tagColors.length];
+  };
+
   useEffect(() => {
     loadData();
+    loadAllPsychologistTags();
   }, [psychologistId, dateRange]);
+
+  const loadAllPsychologistTags = async () => {
+    if (!psychologistId) return;
+    
+    try {
+      const response = await fetch(`${API_URL}/relationships?psychologistId=${psychologistId}`);
+      if (response.ok) {
+        const relationships = await response.json();
+        const allTags = new Set<string>();
+        relationships.forEach((rel: any) => {
+          if (rel.tags && Array.isArray(rel.tags)) {
+            rel.tags.forEach((tag: string) => allTags.add(tag));
+          }
+        });
+        setAllPsychologistTags(Array.from(allTags).sort());
+      }
+    } catch (error) {
+      console.error('Error loading psychologist tags:', error);
+    }
+  };
 
   const loadData = async () => {
     setIsLoading(true);
@@ -316,13 +368,13 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
               <Calendar className="text-purple-600 flex-shrink-0" size={18} />
               <h2 className="text-base sm:text-lg md:text-xl font-bold text-slate-800">Sesiones</h2>
             </div>
-            <div className="text-[10px] sm:text-xs md:text-sm text-slate-500">
+            <div className="text-xs sm:text-sm md:text-sm text-slate-500">
               Total: <span className="font-bold text-slate-800">{sessions.length}</span>
             </div>
           </div>
           
           <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs md:text-sm font-semibold text-slate-700">
+            <div className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm md:text-sm font-semibold text-slate-700">
               <Filter size={14} className="flex-shrink-0" />
               <span className="hidden sm:inline">Rango de fechas:</span>
               <span className="sm:hidden">Fechas:</span>
@@ -332,14 +384,14 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                 type="date"
                 value={dateRange.start}
                 onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-                className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 border border-slate-300 rounded-lg text-[10px] sm:text-xs md:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 border border-slate-300 rounded-lg text-xs sm:text-sm md:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
               />
               <span className="text-slate-400 text-xs flex-shrink-0">—</span>
               <input
                 type="date"
                 value={dateRange.end}
                 onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-                className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 border border-slate-300 rounded-lg text-[10px] sm:text-xs md:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 border border-slate-300 rounded-lg text-xs sm:text-sm md:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
               />
               <button
                 onClick={() => {
@@ -351,7 +403,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                     end: end.toISOString().split('T')[0]
                   });
                 }}
-                className="px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 bg-purple-100 text-purple-700 rounded-lg text-[10px] sm:text-xs md:text-sm font-medium hover:bg-purple-200 transition-colors flex-shrink-0"
+                className="px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 bg-purple-100 text-purple-700 rounded-lg text-xs sm:text-sm md:text-sm font-medium hover:bg-purple-200 transition-colors flex-shrink-0"
               >
                 <span className="hidden sm:inline">Mes actual</span>
                 <span className="sm:hidden">Este mes</span>
@@ -361,7 +413,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
 
           {/* Filtros adicionales */}
           <div className="space-y-2 sm:space-y-3 md:space-y-4 pt-2 sm:pt-3 md:pt-4 border-t border-slate-200">
-            <div className="flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs md:text-sm font-bold text-slate-700">
+            <div className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm md:text-sm font-bold text-slate-700">
               <Filter size={14} className="text-purple-600 flex-shrink-0" />
               Filtros
             </div>
@@ -369,14 +421,14 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
             <div className="flex flex-col sm:flex-row items-stretch sm:items-start gap-2 sm:gap-3 md:gap-4">
               {/* Filtro por Paciente */}
               <div className="flex flex-col gap-1 sm:gap-1.5 min-w-[140px] sm:min-w-[200px]">
-                <label className="flex items-center gap-1 sm:gap-1.5 text-[9px] sm:text-[10px] md:text-xs font-semibold text-slate-600">
+                <label className="flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-xs md:text-xs font-semibold text-slate-600">
                   <User size={12} className="text-blue-600 flex-shrink-0" />
                   Paciente
                 </label>
                 <select
                   value={filterPatient}
                   onChange={(e) => setFilterPatient(e.target.value)}
-                  className="px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 md:py-2.5 border-2 border-slate-300 rounded-lg sm:rounded-xl text-[10px] sm:text-xs md:text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white hover:border-slate-400 transition-colors cursor-pointer"
+                  className="px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 md:py-2.5 border-2 border-slate-300 rounded-lg sm:rounded-xl text-xs sm:text-sm md:text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white hover:border-slate-400 transition-colors cursor-pointer"
                 >
                   <option value="all">👥 Todos</option>
                   {Array.from(patients.values()).map((patient: Patient) => (
@@ -389,7 +441,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
 
               {/* Filtro por Estado de Pago */}
               <div className="flex flex-col gap-1 sm:gap-1.5 min-w-[140px] sm:min-w-[180px]">
-                <label className="flex items-center gap-1 sm:gap-1.5 text-[9px] sm:text-[10px] md:text-xs font-semibold text-slate-600">
+                <label className="flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-xs md:text-xs font-semibold text-slate-600">
                   <DollarSign size={12} className="text-green-600 flex-shrink-0" />
                   <span className="hidden sm:inline">Estado de Pago</span>
                   <span className="sm:hidden">Pago</span>
@@ -397,7 +449,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                 <select
                   value={filterPayment}
                   onChange={(e) => setFilterPayment(e.target.value)}
-                  className="px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 md:py-2.5 border-2 border-slate-300 rounded-lg sm:rounded-xl text-[10px] sm:text-xs md:text-sm font-medium focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white hover:border-slate-400 transition-colors cursor-pointer"
+                  className="px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 md:py-2.5 border-2 border-slate-300 rounded-lg sm:rounded-xl text-xs sm:text-sm md:text-sm font-medium focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white hover:border-slate-400 transition-colors cursor-pointer"
                 >
                   <option value="all">💰 Todas</option>
                   <option value="paid">✅ Pagadas</option>
@@ -408,7 +460,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
 
             {/* Filtro por Estados (multi-selección) */}
             <div className="flex-1">
-              <label className="block text-[9px] sm:text-[10px] md:text-xs font-semibold text-slate-600 mb-1 sm:mb-1.5">Estados</label>
+              <label className="block text-[10px] sm:text-xs md:text-xs font-semibold text-slate-600 mb-1 sm:mb-1.5">Estados</label>
               <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                 {[{value: 'scheduled', label: 'Programada', icon: '📅'}, 
                   {value: 'completed', label: 'Completada', icon: '✅'}, 
@@ -424,7 +476,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                           setFilterStatus([...filterStatus, status.value]);
                         }
                       }}
-                      className={`inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 md:px-3 py-1 sm:py-1.5 rounded-full text-[9px] sm:text-[10px] md:text-xs font-medium transition-all ${
+                      className={`inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 md:px-3 py-1 sm:py-1.5 rounded-full text-[10px] sm:text-xs md:text-xs font-medium transition-all ${
                         isSelected
                           ? 'bg-indigo-600 text-white shadow-md hover:bg-indigo-700 hover:shadow-lg'
                           : 'bg-slate-100 text-slate-700 border border-slate-300 hover:bg-slate-200 hover:border-slate-400'
@@ -439,7 +491,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                   );
                 })}
                 {filterStatus.length > 0 && (
-                  <span className="text-[9px] sm:text-[10px] md:text-xs font-medium text-indigo-700 bg-indigo-50 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full border border-indigo-200">
+                  <span className="text-[10px] sm:text-xs md:text-xs font-medium text-indigo-700 bg-indigo-50 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full border border-indigo-200">
                     {filterStatus.length}
                   </span>
                 )}
@@ -449,7 +501,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
             {/* Filtro por Tags */}
             {allTags.length > 0 && (
               <div className="flex-1">
-                <label className="block text-[9px] sm:text-[10px] md:text-xs font-semibold text-slate-600 mb-1 sm:mb-1.5">Tags</label>
+                <label className="block text-[10px] sm:text-xs md:text-xs font-semibold text-slate-600 mb-1 sm:mb-1.5">Tags</label>
                 <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                   {allTags.map(tag => {
                     const isSelected = filterTags.includes(tag);
@@ -463,7 +515,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                             setFilterTags([...filterTags, tag]);
                           }
                         }}
-                        className={`inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 md:px-3 py-1 sm:py-1.5 rounded-full text-[9px] sm:text-[10px] md:text-xs font-medium transition-all ${
+                        className={`inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 md:px-3 py-1 sm:py-1.5 rounded-full text-[10px] sm:text-xs md:text-xs font-medium transition-all ${
                           isSelected
                             ? 'bg-purple-600 text-white shadow-md hover:bg-purple-700 hover:shadow-lg'
                             : 'bg-slate-100 text-slate-700 border border-slate-300 hover:bg-slate-200 hover:border-slate-400'
@@ -478,7 +530,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                     );
                   })}
                   {filterTags.length > 0 && (
-                    <span className="text-[9px] sm:text-[10px] md:text-xs font-medium text-purple-700 bg-purple-50 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full border border-purple-200">
+                    <span className="text-[10px] sm:text-xs md:text-xs font-medium text-purple-700 bg-purple-50 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full border border-purple-200">
                       {filterTags.length}
                     </span>
                   )}
@@ -496,7 +548,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                     setFilterPayment('all');
                     setFilterTags([]);
                   }}
-                  className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 md:px-4 py-1.5 sm:py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg text-[10px] sm:text-xs md:text-sm font-medium hover:bg-red-100 hover:border-red-300 transition-colors"
+                  className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 md:px-4 py-1.5 sm:py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg text-xs sm:text-sm md:text-sm font-medium hover:bg-red-100 hover:border-red-300 transition-colors"
                 >
                   <XIcon size={14} className="flex-shrink-0" />
                   <span className="hidden sm:inline">Limpiar filtros</span>
@@ -514,31 +566,31 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
           {/* Total Sessions Completed */}
           <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg sm:rounded-xl border border-purple-200 p-2 sm:p-3 md:p-4 shadow-sm">
             <div className="flex items-center justify-between mb-1 sm:mb-1.5 md:mb-2">
-              <div className="text-[9px] sm:text-[10px] md:text-sm font-semibold text-purple-700 leading-tight">Completadas</div>
+              <div className="text-[10px] sm:text-xs md:text-sm font-semibold text-purple-700 leading-tight">Completadas</div>
               <Calendar className="text-purple-400 flex-shrink-0" size={14} />
             </div>
             <div className="text-lg sm:text-2xl md:text-3xl font-bold text-purple-900">{completedSessions.length}</div>
-            <div className="text-[8px] sm:text-[9px] md:text-xs text-purple-600 mt-0.5 sm:mt-1">en el periodo</div>
+            <div className="text-[9px] sm:text-[10px] md:text-xs text-purple-600 mt-0.5 sm:mt-1">en el periodo</div>
           </div>
 
           {/* Total Earnings */}
           <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg sm:rounded-xl border border-green-200 p-2 sm:p-3 md:p-4 shadow-sm">
             <div className="flex items-center justify-between mb-1 sm:mb-1.5 md:mb-2">
-              <div className="text-[9px] sm:text-[10px] md:text-sm font-semibold text-green-700 leading-tight">Ganancias</div>
+              <div className="text-[10px] sm:text-xs md:text-sm font-semibold text-green-700 leading-tight">Ganancias</div>
               <DollarSign className="text-green-400 flex-shrink-0" size={14} />
             </div>
             <div className="text-lg sm:text-2xl md:text-3xl font-bold text-green-900">{totalEarnings.toFixed(2)} €</div>
-            <div className="text-[8px] sm:text-[9px] md:text-xs text-green-600 mt-0.5 sm:mt-1">completadas</div>
+            <div className="text-[9px] sm:text-[10px] md:text-xs text-green-600 mt-0.5 sm:mt-1">completadas</div>
           </div>
 
           {/* Potential Earnings */}
           <div className="bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-lg sm:rounded-xl border border-indigo-200 p-2 sm:p-3 md:p-4 shadow-sm">
             <div className="flex items-center justify-between mb-1 sm:mb-1.5 md:mb-2">
-              <div className="text-[9px] sm:text-[10px] md:text-sm font-semibold text-indigo-700 leading-tight">Potenciales</div>
+              <div className="text-[10px] sm:text-xs md:text-sm font-semibold text-indigo-700 leading-tight">Potenciales</div>
               <DollarSign className="text-indigo-400 flex-shrink-0" size={14} />
             </div>
             <div className="text-lg sm:text-2xl md:text-3xl font-bold text-indigo-900">{potentialEarnings.toFixed(2)} €</div>
-            <div className="text-[8px] sm:text-[9px] md:text-xs text-indigo-600 mt-0.5 sm:mt-1">
+            <div className="text-[9px] sm:text-[10px] md:text-xs text-indigo-600 mt-0.5 sm:mt-1">
               <span className="hidden sm:inline">{completedSessions.length + scheduledSessions.length} sesiones</span>
               <span className="sm:hidden">{completedSessions.length + scheduledSessions.length}</span>
             </div>
@@ -547,11 +599,11 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
           {/* Total Collected */}
           <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg sm:rounded-xl border border-blue-200 p-2 sm:p-3 md:p-4 shadow-sm">
             <div className="flex items-center justify-between mb-1 sm:mb-1.5 md:mb-2">
-              <div className="text-[9px] sm:text-[10px] md:text-sm font-semibold text-blue-700 leading-tight">Cobrado</div>
+              <div className="text-[10px] sm:text-xs md:text-sm font-semibold text-blue-700 leading-tight">Cobrado</div>
               <CheckCircle className="text-blue-400 flex-shrink-0" size={14} />
             </div>
             <div className="text-lg sm:text-2xl md:text-3xl font-bold text-blue-900">{paidEarnings.toFixed(2)} €</div>
-            <div className="text-[8px] sm:text-[9px] md:text-xs text-blue-600 mt-0.5 sm:mt-1">
+            <div className="text-[9px] sm:text-[10px] md:text-xs text-blue-600 mt-0.5 sm:mt-1">
               <span className="hidden sm:inline">{paidSessions.length} sesiones</span>
               <span className="sm:hidden">{paidSessions.length}</span>
             </div>
@@ -587,7 +639,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                   {/* Left: Date, Time & Patient */}
                   <div className="flex items-start gap-2 sm:gap-3">
                     <div className="bg-purple-100 rounded-lg p-1.5 sm:p-2 md:p-3 text-center min-w-[45px] sm:min-w-[55px] md:min-w-[60px]">
-                      <div className="text-[8px] sm:text-[9px] md:text-xs font-semibold text-purple-600 uppercase">
+                      <div className="text-[9px] sm:text-[10px] md:text-xs font-semibold text-purple-600 uppercase">
                         {new Date(session.date).toLocaleDateString('es-ES', { month: 'short' })}
                       </div>
                       <div className="text-base sm:text-xl md:text-2xl font-bold text-purple-900">
@@ -598,11 +650,11 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5 sm:gap-2 mb-0.5 sm:mb-1">
                         <User size={12} className="text-slate-400 flex-shrink-0" />
-                        <span className="font-semibold text-[10px] sm:text-xs md:text-sm text-slate-800 truncate">
+                        <span className="font-semibold text-xs sm:text-sm md:text-sm text-slate-800 truncate">
                           {patient?.name || 'Paciente no disponible'}
                         </span>
                       </div>
-                      <div className="text-[9px] sm:text-xs md:text-sm text-slate-500 flex items-center gap-1 sm:gap-1.5 mb-1 sm:mb-2">
+                      <div className="text-xs sm:text-sm md:text-sm text-slate-500 flex items-center gap-1 sm:gap-1.5 mb-1 sm:mb-2">
                         <Clock size={10} className="flex-shrink-0" />
                         {session.startTime} - {session.endTime}
                       </div>
@@ -614,13 +666,13 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                             {session.tags.slice(0, 2).map((tag, idx) => (
                               <span
                                 key={idx}
-                                className="inline-flex items-center px-1.5 sm:px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full text-[8px] sm:text-[9px] md:text-xs font-medium border border-purple-200"
+                                className={`inline-flex items-center px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] md:text-xs font-medium border ${getTagColor(tag, idx)}`}
                               >
                                 {tag}
                               </span>
                             ))}
                             {session.tags.length > 2 && (
-                              <span className="text-[8px] sm:text-[9px] text-slate-400">+{session.tags.length - 2}</span>
+                              <span className="text-[9px] sm:text-[10px] text-slate-400">+{session.tags.length - 2}</span>
                             )}
                           </>
                         )}
@@ -635,20 +687,20 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                       <div className="text-base sm:text-lg md:text-2xl font-bold text-green-600 flex items-center gap-1">
                         {earnings.toFixed(2)} €
                       </div>
-                      <div className="text-[8px] sm:text-[9px] md:text-xs text-slate-400 hidden sm:block">
+                      <div className="text-[9px] sm:text-[10px] md:text-xs text-slate-400 hidden sm:block">
                         ({session.percent_psych || 70}% de {session.price?.toFixed(2) || '0.00'}€)
                       </div>
                     </div>
                     
                     <div className="flex-shrink-0">
                       {(isPaid || session.paid) ? (
-                        <span className="inline-flex items-center gap-1 px-2 sm:px-2.5 md:px-3 py-0.5 sm:py-1 bg-green-100 text-green-700 rounded-full text-[8px] sm:text-[9px] md:text-xs font-semibold border border-green-200">
+                        <span className="inline-flex items-center gap-1 px-2 sm:px-2.5 md:px-3 py-0.5 sm:py-1 bg-green-100 text-green-700 rounded-full text-[9px] sm:text-[10px] md:text-xs font-semibold border border-green-200">
                           <CheckCircle size={10} className="flex-shrink-0" />
                           <span className="hidden sm:inline">💵 Pagada</span>
                           <span className="sm:hidden">✓</span>
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 px-2 sm:px-2.5 md:px-3 py-0.5 sm:py-1 bg-amber-100 text-amber-700 rounded-full text-[8px] sm:text-[9px] md:text-xs font-semibold border border-amber-200">
+                        <span className="inline-flex items-center gap-1 px-2 sm:px-2.5 md:px-3 py-0.5 sm:py-1 bg-amber-100 text-amber-700 rounded-full text-[9px] sm:text-[10px] md:text-xs font-semibold border border-amber-200">
                           <Clock size={10} className="flex-shrink-0" />
                           <span className="hidden sm:inline">Pendiente</span>
                           <span className="sm:hidden">⏳</span>

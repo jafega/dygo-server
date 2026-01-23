@@ -408,7 +408,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                       />
                     ) : (
                       <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-4 bg-white border-2 border-slate-200 rounded-lg sm:rounded-xl">
-                        <span className="text-sm sm:text-base text-slate-900 font-medium">{editedPatientData.firstName || 'No especificado'}</span>
+                        <span className={`text-sm sm:text-base font-medium ${editedPatientData.firstName ? 'text-slate-900' : 'text-slate-400'}`}>{editedPatientData.firstName || 'No especificado'}</span>
                       </div>
                     )}
                   </div>
@@ -428,7 +428,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                       />
                     ) : (
                       <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-4 bg-white border-2 border-slate-200 rounded-lg sm:rounded-xl">
-                        <span className="text-sm sm:text-base text-slate-900 font-medium">{editedPatientData.lastName || 'No especificado'}</span>
+                        <span className={`text-sm sm:text-base font-medium ${editedPatientData.lastName ? 'text-slate-900' : 'text-slate-400'}`}>{editedPatientData.lastName || 'No especificado'}</span>
                       </div>
                     )}
                   </div>
@@ -450,7 +450,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                       />
                     ) : (
                       <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-4 bg-white border-2 border-slate-200 rounded-lg sm:rounded-xl">
-                        <span className="text-xs sm:text-sm md:text-base text-slate-900 font-medium break-all">{editedPatientData.email || patient.email || 'No especificado'}</span>
+                        <span className={`text-xs sm:text-sm md:text-base font-medium break-all ${(editedPatientData.email || patient.email) ? 'text-slate-900' : 'text-slate-400'}`}>{editedPatientData.email || patient.email || 'No especificado'}</span>
                       </div>
                     )}
                   </div>
@@ -469,7 +469,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                       />
                     ) : (
                       <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-4 bg-white border-2 border-slate-200 rounded-lg sm:rounded-xl">
-                        <span className="text-sm sm:text-base text-slate-900 font-medium">{editedPatientData.phone || patient.phone || 'No especificado'}</span>
+                        <span className={`text-sm sm:text-base font-medium ${(editedPatientData.phone || patient.phone) ? 'text-slate-900' : 'text-slate-400'}`}>{editedPatientData.phone || patient.phone || 'No especificado'}</span>
                       </div>
                     )}
                   </div>
@@ -488,7 +488,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                       />
                     ) : (
                       <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-4 bg-white border-2 border-slate-200 rounded-lg sm:rounded-xl">
-                        <span className="text-sm sm:text-base text-slate-900 font-medium">{editedPatientData.dni || 'No especificado'}</span>
+                        <span className={`text-sm sm:text-base font-medium ${editedPatientData.dni ? 'text-slate-900' : 'text-slate-400'}`}>{editedPatientData.dni || 'No especificado'}</span>
                       </div>
                     )}
                   </div>
@@ -507,7 +507,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                       />
                     ) : (
                       <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-4 bg-white border-2 border-slate-200 rounded-lg sm:rounded-xl">
-                        <span className="text-sm sm:text-base text-slate-900 font-medium">
+                        <span className={`text-sm sm:text-base font-medium ${editedPatientData.birthDate ? 'text-slate-900' : 'text-slate-400'}`}>
                           {editedPatientData.birthDate ? new Date(editedPatientData.birthDate).toLocaleDateString('es-ES', {
                             year: 'numeric',
                             month: 'long',
@@ -549,7 +549,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                       />
                     ) : (
                       <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-4 bg-white border-2 border-slate-200 rounded-lg sm:rounded-xl">
-                        <span className="text-xs sm:text-sm md:text-base text-slate-900 font-medium">{editedPatientData.address || 'No especificado'}</span>
+                        <span className={`text-xs sm:text-sm md:text-base font-medium ${editedPatientData.address ? 'text-slate-900' : 'text-slate-400'}`}>{editedPatientData.address || 'No especificado'}</span>
                       </div>
                     )}
                   </div>
