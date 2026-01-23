@@ -108,9 +108,9 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
             cursor: isDragging ? 'grabbing' : 'grab',
             transition: isDragging ? 'none' : 'all 0.3s'
           }}
-          className="lg:hidden fixed z-50 w-12 h-12 bg-white rounded-full shadow-lg border border-slate-200 hover:bg-slate-50 flex items-center justify-center"
+          className="lg:hidden fixed z-50 w-12 h-12 bg-gradient-to-br from-indigo-600 to-blue-600 rounded-full shadow-lg hover:shadow-xl hover:from-indigo-700 hover:to-blue-700 flex items-center justify-center transition-all"
         >
-          <DygoLogo className="w-7 h-7 text-indigo-600" />
+          <DygoLogo className="w-7 h-7 text-white" />
         </button>
       )}
 
@@ -136,7 +136,9 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
         <div className="p-4 border-b border-slate-200">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <DygoLogo className="w-8 h-8 text-indigo-600" />
+              <div className="w-8 h-8 bg-gradient-to-br from-indigo-600 to-blue-600 rounded-lg flex items-center justify-center">
+                <DygoLogo className="w-6 h-6 text-white" />
+              </div>
               <span className="font-dygo text-xl font-bold text-slate-900">dygo <span className="text-purple-600">pro</span></span>
             </div>
             {/* Close button for mobile - inside the menu */}
