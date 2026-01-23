@@ -1194,116 +1194,95 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
             )}
 
             {activeTab === 'insights' && (
-              <div className="space-y-6 animate-in fade-in">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
-                    <div className="text-[10px] uppercase tracking-wide text-slate-400 font-bold">Entradas</div>
-                    <div className="text-2xl font-bold text-slate-800 mt-2">{totalEntriesCount}</div>
+              <div className="space-y-4 md:space-y-6 animate-in fade-in">
+                {/* Stats Cards - Solo 2 cards principales */}
+                <div className="grid grid-cols-2 gap-3 md:gap-4">
+                  <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-2xl md:rounded-3xl border border-indigo-100 p-4 md:p-6 shadow-sm">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-indigo-100 flex items-center justify-center">
+                        <FileText className="w-4 h-4 md:w-5 md:h-5 text-indigo-600" />
+                      </div>
+                      <div className="text-xs md:text-sm font-semibold text-indigo-900">Entradas</div>
+                    </div>
+                    <div className="text-3xl md:text-4xl font-bold text-indigo-900">{totalEntriesCount}</div>
                   </div>
-                  <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
-                    <div className="text-[10px] uppercase tracking-wide text-slate-400 font-bold">Ánimo medio</div>
-                    <div className="text-2xl font-bold text-slate-800 mt-2">
+                  <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl md:rounded-3xl border border-green-100 p-4 md:p-6 shadow-sm">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-green-100 flex items-center justify-center">
+                        <Smile className="w-4 h-4 md:w-5 md:h-5 text-green-600" />
+                      </div>
+                      <div className="text-xs md:text-sm font-semibold text-green-900">Ánimo</div>
+                    </div>
+                    <div className="text-3xl md:text-4xl font-bold text-green-900">
                       {averageSentiment !== null ? averageSentiment.toFixed(1) : '—'}
-                      {averageSentiment !== null && <span className="text-sm text-slate-400 ml-1">/10</span>}
+                      {averageSentiment !== null && <span className="text-lg md:text-xl text-green-600 ml-1">/10</span>}
                     </div>
                   </div>
-                  <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
-                    <div className="text-[10px] uppercase tracking-wide text-slate-400 font-bold">Sesiones</div>
-                    <div className="text-2xl font-bold text-slate-800 mt-2">{totalSessionsCount}</div>
-                  </div>
-                  <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
-                    <div className="text-[10px] uppercase tracking-wide text-slate-400 font-bold">Feedback pendiente</div>
-                    <div className="text-2xl font-bold text-slate-800 mt-2">{unreadFeedbackCount}</div>
-                  </div>
                 </div>
+
+                {/* CTA Principal */}
                 {!hasTodayEntry && (
                   <button
                     onClick={() => handleStartSession()}
-                    className="w-full py-4 rounded-2xl bg-indigo-600 text-white font-semibold text-sm md:text-base shadow-md hover:bg-indigo-700 transition-colors"
+                    className="w-full py-4 md:py-5 rounded-2xl md:rounded-3xl bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold text-base md:text-lg shadow-lg hover:shadow-xl hover:from-indigo-700 hover:to-purple-700 transition-all flex items-center justify-center gap-2"
                   >
+                    <Mic className="w-5 h-5 md:w-6 md:h-6" />
                     ¿Qué tal estás hoy?
                   </button>
                 )}
-                <div className="bg-white rounded-2xl border border-slate-100 p-5 md:p-6 shadow-sm">
-                  <GoalsPanel goals={personalGoals} onAddGoal={handleAddGoal} onToggleGoal={handleToggleGoal} onDeleteGoal={handleDeleteGoal} />
-                </div>
-                <div className="bg-white rounded-2xl border border-slate-100 p-5 md:p-6 shadow-sm">
-                  <div className="flex items-center justify-between gap-2 mb-3">
-                    <h3 className="text-base md:text-lg font-semibold text-slate-800 flex items-center gap-2">
-                      <Calendar size={16} className="text-indigo-500" /> Última entrada del diario
+
+                {/* Goals Panel */}
+                <div className="bg-white rounded-2xl md:rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
+                  <div className="bg-gradient-to-r from-purple-50 to-indigo-50 px-4 md:px-6 py-3 md:py-4 border-b border-slate-200">
+                    <h3 className="font-bold text-slate-900 flex items-center gap-2 text-sm md:text-base">
+                      <Target className="w-4 h-4 md:w-5 md:h-5 text-purple-600" />
+                      Mis Objetivos
                     </h3>
-                    {latestDiaryEntry && (
-                      <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">
-                        {new Date(latestDiaryEntry.timestamp).toLocaleDateString()}
-                      </span>
-                    )}
                   </div>
-                  {latestDiaryEntry ? (
-                    <div className="space-y-3">
-                      <div className="text-xs text-slate-500">
-                        {new Date(latestDiaryEntry.timestamp).toLocaleString()}
-                      </div>
-                      <p className="text-sm text-slate-700 leading-relaxed line-clamp-4">
-                        {latestDiaryEntry.summary}
-                      </p>
-                      {latestDiaryEntry.emotions?.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5">
-                          {latestDiaryEntry.emotions.slice(0, 6).map(em => (
-                            <span key={em} className="text-[10px] px-2 py-0.5 bg-slate-50 text-slate-600 rounded-full border border-slate-200 font-semibold">
-                              {em}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="text-sm text-slate-500">Aún no hay entradas de diario.</div>
-                  )}
+                  <div className="p-4 md:p-6">
+                    <GoalsPanel goals={personalGoals} onAddGoal={handleAddGoal} onToggleGoal={handleToggleGoal} onDeleteGoal={handleDeleteGoal} />
+                  </div>
                 </div>
 
+                {/* Última Sesión */}
                 {latestSessionEntry && (
-                  <div className="bg-white rounded-2xl border border-slate-100 p-5 md:p-6 shadow-sm">
-                    <div className="flex items-center justify-between gap-2 mb-3">
-                      <h3 className="text-base md:text-lg font-semibold text-slate-800 flex items-center gap-2">
-                        <Stethoscope size={16} className="text-purple-500" /> Última sesión clínica
+                  <div className="bg-white rounded-2xl md:rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
+                    <div className="bg-gradient-to-r from-purple-50 to-pink-50 px-4 md:px-6 py-3 md:py-4 border-b border-slate-200 flex items-center justify-between">
+                      <h3 className="font-bold text-slate-900 flex items-center gap-2 text-sm md:text-base">
+                        <Stethoscope className="w-4 h-4 md:w-5 md:h-5 text-purple-600" />
+                        Última sesión
                       </h3>
-                      <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">
-                        {new Date(latestSessionEntry.timestamp).toLocaleDateString()}
+                      <span className="text-xs font-medium text-slate-600">
+                        {new Date(latestSessionEntry.timestamp).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
                       </span>
                     </div>
-                    <div className="space-y-3">
-                      <div className="text-xs text-slate-500">
-                        {new Date(latestSessionEntry.timestamp).toLocaleString()}
-                      </div>
-                      <p className="text-sm text-slate-700 leading-relaxed line-clamp-4">
+                    <div className="p-4 md:p-6 space-y-3">
+                      <p className="text-sm md:text-base text-slate-700 leading-relaxed line-clamp-3">
                         {latestSessionEntry.summary}
                       </p>
                       <button
                         onClick={() => { setSelectedDate(latestSessionEntry.date); setSelectedEntryId(latestSessionEntry.id); setSelectedEntryMode('single'); }}
-                        className="text-[11px] font-semibold text-purple-700 bg-purple-50 border border-purple-100 px-2.5 py-1 rounded-full hover:bg-purple-100 transition-colors w-fit"
+                        className="text-xs md:text-sm font-semibold text-purple-700 bg-purple-50 px-4 py-2 rounded-full hover:bg-purple-100 transition-colors"
                       >
-                        Ver detalle
+                        Ver detalle →
                       </button>
                     </div>
                   </div>
                 )}
 
-                <div className="bg-white rounded-2xl border border-slate-100 p-5 md:p-6 shadow-sm">
-                  <div className="flex items-center justify-between gap-3 mb-4">
-                    <div>
-                      <h2 className="text-base md:text-lg font-semibold text-slate-800 flex items-center gap-2">
-                        <LayoutDashboard size={18} className="text-indigo-500" /> Resumen personal
-                      </h2>
-                      <p className="text-xs text-slate-500">Tu evolución y recomendaciones</p>
-                    </div>
-                    <span className="text-[10px] font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">Últimos 14 días</span>
+                {/* Insights Panel */}
+                <div className="bg-white rounded-2xl md:rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
+                  <div className="bg-gradient-to-r from-indigo-50 to-blue-50 px-4 md:px-6 py-3 md:py-4 border-b border-slate-200">
+                    <h3 className="font-bold text-slate-900 flex items-center gap-2 text-sm md:text-base">
+                      <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-indigo-600" />
+                      Tu progreso
+                    </h3>
+                    <p className="text-xs text-slate-600 mt-1">Últimos 14 días</p>
                   </div>
-                  <InsightsPanel entries={entries} />
+                  <div className="p-4 md:p-6">
+                    <InsightsPanel entries={entries} />
+                  </div>
                 </div>
-
-                <button onClick={handleGenerateReport} className="w-full py-4 bg-gradient-to-r from-purple-500 to-indigo-500 text-white rounded-2xl shadow-md hover:shadow-lg transition-all font-semibold flex items-center justify-center gap-2">
-                  <BookOpen size={20} /> Ver Reporte Semanal
-                </button>
 
               </div>
             )}

@@ -252,7 +252,12 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
                           {showTranscript && (
                             <div className="px-4 pb-4 md:px-5 md:pb-5 pt-2 bg-white border-t border-slate-200">
                               <div className="max-h-60 md:max-h-80 overflow-y-auto">
-                                <p className="text-xs md:text-sm text-slate-600 leading-relaxed whitespace-pre-wrap">{entry.transcript}</p>
+                                <p className="text-xs md:text-sm text-slate-600 leading-relaxed whitespace-normal">{entry.transcript.replace(/\n{3,}/g, '\n\n').split('\n\n').map((para, i) => (
+                                  <span key={i}>
+                                    {para.replace(/\n/g, ' ')}
+                                    {i < entry.transcript.split('\n\n').length - 1 && <><br /><br /></>}
+                                  </span>
+                                ))}</p>
                               </div>
                             </div>
                           )}

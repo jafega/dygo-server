@@ -56,7 +56,7 @@ export async function analyzeJournalEntry(transcript: string, date: string, user
     - Si hay contexto clínico previo, asegúrate de que tu consejo sea coherente con él.
     
     Extrae:
-    1. Resumen conciso.
+    1. Resumen conciso EN PRIMERA PERSONA (como si fuera el usuario escribiendo su diario). Ejemplo: "Me sentí..." en lugar de "El usuario se sintió...".
     2. Sentimiento (1-10).
     3. Estructura de emociones (Nivel 1, 2, 3).
     4. Consejo Clínico (breve, 1-2 frases).
