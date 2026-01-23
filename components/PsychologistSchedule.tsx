@@ -2195,85 +2195,87 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
 
       {/* New Availability Modal */}
       {showNewAvailability && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full">
-            <div className="p-6 border-b border-slate-200">
-              <h3 className="text-xl font-bold text-slate-900">Añadir Disponibilidad</h3>
-              <p className="text-sm text-slate-500 mt-1">Crea espacios libres para que tus pacientes reserven</p>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-2 sm:p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-xl sm:rounded-2xl shadow-2xl max-w-md w-full max-h-[95vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white p-3 sm:p-6 border-b border-slate-200 rounded-t-xl sm:rounded-t-2xl">
+              <h3 className="text-lg sm:text-xl font-bold text-slate-900">Añadir Disponibilidad</h3>
+              <p className="text-xs sm:text-sm text-slate-500 mt-1">Crea espacios libres para que tus pacientes reserven</p>
             </div>
             
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+            <div className="p-3 sm:p-6 space-y-3 sm:space-y-4">
+              <div className="grid grid-cols-2 gap-2 sm:gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Fecha Inicio *</label>
+                  <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">Fecha Inicio *</label>
                   <input
                     type="date"
                     value={newAvailability.startDate}
                     onChange={(e) => setNewAvailability({ ...newAvailability, startDate: e.target.value })}
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full px-2 sm:px-4 py-2 sm:py-2.5 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent touch-manipulation"
                     placeholder="dd/mm/yyyy"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Fecha Fin *</label>
+                  <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">Fecha Fin *</label>
                   <input
                     type="date"
                     value={newAvailability.endDate}
                     onChange={(e) => setNewAvailability({ ...newAvailability, endDate: e.target.value })}
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full px-2 sm:px-4 py-2 sm:py-2.5 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent touch-manipulation"
                     placeholder="dd/mm/yyyy"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Días de la semana *</label>
-                <div className="flex gap-2 flex-wrap">
+                <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1.5 sm:mb-2">Días de la semana *</label>
+                <div className="grid grid-cols-7 gap-1 sm:gap-2">
                   {[
-                    { value: 1, label: 'Lun' },
-                    { value: 2, label: 'Mar' },
-                    { value: 3, label: 'Mié' },
-                    { value: 4, label: 'Jue' },
-                    { value: 5, label: 'Vie' },
-                    { value: 6, label: 'Sáb' },
-                    { value: 0, label: 'Dom' }
+                    { value: 1, label: 'L', fullLabel: 'Lun' },
+                    { value: 2, label: 'M', fullLabel: 'Mar' },
+                    { value: 3, label: 'X', fullLabel: 'Mié' },
+                    { value: 4, label: 'J', fullLabel: 'Jue' },
+                    { value: 5, label: 'V', fullLabel: 'Vie' },
+                    { value: 6, label: 'S', fullLabel: 'Sáb' },
+                    { value: 0, label: 'D', fullLabel: 'Dom' }
                   ].map(day => (
                     <button
                       key={day.value}
                       type="button"
                       onClick={() => toggleDayOfWeek(day.value)}
-                      className={`flex-1 min-w-[50px] px-3 py-2 rounded-lg font-medium text-sm transition-colors ${
+                      className={`w-full aspect-square flex items-center justify-center rounded-lg font-bold text-xs sm:text-sm transition-all touch-manipulation ${
                         newAvailability.daysOfWeek.includes(day.value)
-                          ? 'bg-purple-600 text-white'
+                          ? 'bg-purple-600 text-white shadow-md'
                           : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                       }`}
+                      title={day.fullLabel}
                     >
-                      {day.label}
+                      <span className="sm:hidden">{day.label}</span>
+                      <span className="hidden sm:inline">{day.fullLabel}</span>
                     </button>
                   ))}
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-2 sm:gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Desde *</label>
+                  <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">Desde *</label>
                   <input
                     type="time"
                     value={newAvailability.startTime}
                     onChange={(e) => setNewAvailability({ ...newAvailability, startTime: e.target.value })}
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full px-2 sm:px-4 py-2 sm:py-2.5 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent touch-manipulation"
                     step="900"
                     pattern="[0-9]{2}:[0-9]{2}"
                     placeholder="HH:MM"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Hasta *</label>
+                  <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">Hasta *</label>
                   <input
                     type="time"
                     value={newAvailability.endTime}
                     onChange={(e) => setNewAvailability({ ...newAvailability, endTime: e.target.value })}
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full px-2 sm:px-4 py-2 sm:py-2.5 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent touch-manipulation"
                     step="900"
                     pattern="[0-9]{2}:[0-9]{2}"
                     placeholder="HH:MM"
@@ -2282,11 +2284,11 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Duración de cada sesión (minutos) *</label>
+                <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">Duración de cada sesión *</label>
                 <select
                   value={newAvailability.duration}
                   onChange={(e) => setNewAvailability({ ...newAvailability, duration: parseInt(e.target.value) })}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  className="w-full px-2 sm:px-4 py-2 sm:py-2.5 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent touch-manipulation"
                 >
                   <option value="30">30 minutos</option>
                   <option value="45">45 minutos</option>
@@ -2296,67 +2298,67 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Tipo de sesión *</label>
-                <div className="grid grid-cols-3 gap-2">
+                <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1.5 sm:mb-2">Tipo de sesión *</label>
+                <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                   <button
                     type="button"
                     onClick={() => setNewAvailability({ ...newAvailability, type: 'online' })}
-                    className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg font-medium text-sm transition-all ${
+                    className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 sm:py-2.5 rounded-lg font-medium text-[10px] sm:text-sm transition-all touch-manipulation ${
                       newAvailability.type === 'online'
                         ? 'bg-indigo-600 text-white shadow-md'
                         : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                     }`}
                   >
-                    <Video size={16} />
-                    Online
+                    <Video size={14} className="sm:w-4 sm:h-4" />
+                    <span>Online</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setNewAvailability({ ...newAvailability, type: 'in-person' })}
-                    className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg font-medium text-sm transition-all ${
+                    className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 sm:py-2.5 rounded-lg font-medium text-[10px] sm:text-sm transition-all touch-manipulation ${
                       newAvailability.type === 'in-person'
                         ? 'bg-purple-600 text-white shadow-md'
                         : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                     }`}
                   >
-                    <MapPin size={16} />
-                    Consulta
+                    <MapPin size={14} className="sm:w-4 sm:h-4" />
+                    <span>Consulta</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setNewAvailability({ ...newAvailability, type: 'home-visit' })}
-                    className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg font-medium text-sm transition-all ${
+                    className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 sm:py-2.5 rounded-lg font-medium text-[10px] sm:text-sm transition-all touch-manipulation ${
                       newAvailability.type === 'home-visit'
                         ? 'bg-green-600 text-white shadow-md'
                         : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                     }`}
                   >
-                    <MapPin size={16} />
-                    Domicilio
+                    <MapPin size={14} className="sm:w-4 sm:h-4" />
+                    <span>Domicilio</span>
                   </button>
                 </div>
               </div>
 
-              <div className="p-4 bg-purple-50 border border-purple-200 rounded-lg">
-                <div className="text-xs text-purple-700 font-medium">
+              <div className="p-2.5 sm:p-4 bg-purple-50 border border-purple-200 rounded-lg">
+                <div className="text-[10px] sm:text-xs text-purple-700 font-medium">
                   Se crearán múltiples espacios de {newAvailability.duration} minutos en los días seleccionados entre las fechas y horas indicadas
                 </div>
               </div>
             </div>
 
-            <div className="p-6 border-t border-slate-200 flex gap-3 justify-end">
+            <div className="sticky bottom-0 bg-white p-3 sm:p-6 border-t border-slate-200 flex gap-2 sm:gap-3 rounded-b-xl sm:rounded-b-2xl">
               <button
                 onClick={() => {
                   setShowNewAvailability(false);
                   resetNewAvailability();
                 }}
-                className="px-4 py-2 text-slate-700 hover:bg-slate-100 rounded-lg transition-colors font-medium"
+                className="flex-1 sm:flex-none px-3 sm:px-4 py-2.5 sm:py-2 text-xs sm:text-sm text-slate-700 hover:bg-slate-100 rounded-lg transition-colors font-medium touch-manipulation"
               >
                 Cancelar
               </button>
               <button
                 onClick={handleCreateAvailability}
-                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium shadow-md"
+                className="flex-1 sm:flex-none px-3 sm:px-4 py-2.5 sm:py-2 text-xs sm:text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium shadow-md touch-manipulation"
               >
                 Crear Disponibilidad
               </button>

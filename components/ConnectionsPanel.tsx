@@ -348,10 +348,10 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
         </div>
       ) : (
         <div className="space-y-3 sm:space-y-6">
-          <div className="bg-white rounded-lg sm:rounded-2xl border border-slate-200 p-3 sm:p-6 shadow-sm">
-            <div className="flex flex-col gap-2 sm:gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200 p-4 sm:p-6 shadow-sm">
+            <div className="flex flex-col gap-2 sm:gap-3 md:flex-row md:items-center md:justify-between mb-4 sm:mb-6">
               <div>
-                <h3 className="text-base sm:text-lg font-semibold text-slate-900">Psicólogos con acceso a tu perfil</h3>
+                <h3 className="text-sm sm:text-lg font-semibold text-slate-900">Psicólogos con acceso a tu perfil</h3>
                 <p className="text-xs sm:text-sm text-slate-500">Controla quién puede ver tu evolución y encuentra nuevos profesionales.</p>
               </div>
               <button
@@ -398,12 +398,11 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
                       </div>
                       <button
                         onClick={() => handleConnect(psych.id)}
-                        className="px-2 sm:px-3 py-1 sm:py-1.5 text-[11px] sm:text-xs font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-1 whitespace-nowrap flex-shrink-0"
+                        className="px-3 sm:px-3 py-2 sm:py-1.5 text-xs sm:text-xs font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-1 whitespace-nowrap flex-shrink-0 touch-manipulation"
                         title="Enviar solicitud para que este psicólogo acceda a tu perfil"
                       >
-                        <Mail size={12} className="sm:w-3.5 sm:h-3.5" />
-                        <span className="hidden sm:inline">Solicitar</span>
-                        <span className="sm:hidden">Ir</span>
+                        <Mail size={14} className="sm:w-3.5 sm:h-3.5" />
+                        <span>Solicitar</span>
                       </button>
                     </div>
                   ))}
@@ -413,8 +412,8 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
 
             {/* Invitaciones recibidas de psicólogos */}
             {receivedInvitations.length > 0 && (
-              <div className="mt-3 sm:mt-6 pb-3 sm:pb-6 border-b border-slate-100">
-                <div className="flex items-center justify-between mb-2 sm:mb-4">
+              <div className="mt-4 sm:mt-6 pb-4 sm:pb-6 border-b border-slate-100">
+                <div className="flex items-center justify-between mb-3 sm:mb-4">
                   <h4 className="text-xs sm:text-sm font-bold text-amber-600 uppercase tracking-wide flex items-center gap-1.5 sm:gap-2">
                     <Mail size={12} className="sm:w-3.5 sm:h-3.5" /> Invitaciones Recibidas
                   </h4>
@@ -423,29 +422,27 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
                   </span>
                 </div>
                 <p className="text-[11px] sm:text-xs text-slate-500 mb-2 sm:mb-3">Psicólogos que quieren acceder a tu perfil</p>
-                <div className="space-y-2 sm:space-y-3">
+                <div className="space-y-3 sm:space-y-3">
                   {receivedInvitations.map(inv => (
-                    <div key={inv.id} className="p-2 sm:p-4 rounded-lg sm:rounded-xl border border-amber-100 bg-amber-50/30 flex flex-col gap-2 sm:gap-3 md:flex-row md:items-center md:justify-between">
+                    <div key={inv.id} className="p-3 sm:p-4 rounded-lg sm:rounded-xl border border-amber-100 bg-amber-50/30 flex flex-col gap-3 sm:gap-3 md:flex-row md:items-center md:justify-between">
                       <div className="min-w-0">
                         <p className="text-xs sm:text-sm font-semibold text-slate-900 truncate">{inv.psychologistName || inv.fromPsychologistName || 'Psicólogo'}</p>
                         <p className="text-[11px] sm:text-xs text-slate-500 truncate">{inv.psychologistEmail || inv.initiatorEmail}</p>
                       </div>
-                      <div className="flex gap-1.5 sm:gap-2 flex-shrink-0">
+                      <div className="flex gap-2 sm:gap-2 flex-shrink-0">
                         <button 
                           onClick={() => handleRejectInvitation(inv.id)} 
-                          className="px-2.5 sm:px-4 py-1 sm:py-2 rounded-lg sm:rounded-xl border border-slate-200 text-slate-600 hover:bg-white text-[11px] sm:text-sm flex items-center gap-1 whitespace-nowrap"
+                          className="flex-1 sm:flex-none px-3 sm:px-4 py-2 sm:py-2 rounded-lg sm:rounded-xl border border-slate-200 text-slate-600 hover:bg-white text-xs sm:text-sm flex items-center justify-center gap-1.5 whitespace-nowrap touch-manipulation"
                         >
-                          <X size={12} className="sm:w-3.5 sm:h-3.5" />
-                          <span className="hidden sm:inline">Rechazar</span>
-                          <span className="sm:hidden">No</span>
+                          <X size={14} className="sm:w-3.5 sm:h-3.5" />
+                          <span>Rechazar</span>
                         </button>
                         <button 
                           onClick={() => handleAcceptInvitation(inv.id)} 
-                          className="px-2.5 sm:px-4 py-1 sm:py-2 rounded-lg sm:rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 text-[11px] sm:text-sm flex items-center gap-1 whitespace-nowrap"
+                          className="flex-1 sm:flex-none px-3 sm:px-4 py-2 sm:py-2 rounded-lg sm:rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 text-xs sm:text-sm flex items-center justify-center gap-1.5 whitespace-nowrap touch-manipulation"
                         >
-                          <UserPlus size={12} className="sm:w-3.5 sm:h-3.5" />
-                          <span className="hidden sm:inline">Aceptar</span>
-                          <span className="sm:hidden">Sí</span>
+                          <UserPlus size={14} className="sm:w-3.5 sm:h-3.5" />
+                          <span>Aceptar</span>
                         </button>
                       </div>
                     </div>
@@ -456,7 +453,7 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
 
             {/* Solicitudes enviadas por mí como paciente */}
             {sentInvitationsAsPatient.length > 0 && (
-              <div className="mt-3 sm:mt-6 pb-3 sm:pb-6 border-b border-slate-100">
+              <div className="mt-4 sm:mt-6 pb-4 sm:pb-6 border-b border-slate-100">
                 <div className="flex items-center justify-between mb-2 sm:mb-4">
                   <h4 className="text-xs sm:text-sm font-bold text-blue-600 uppercase tracking-wide flex items-center gap-1.5 sm:gap-2">
                     <Send size={12} className="sm:w-3.5 sm:h-3.5" /> Solicitudes Enviadas
@@ -466,9 +463,9 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
                   </span>
                 </div>
                 <p className="text-[11px] sm:text-xs text-slate-500 mb-2 sm:mb-3">Psicólogos a los que has solicitado acceso</p>
-                <div className="space-y-2 sm:space-y-3">
+                <div className="space-y-3 sm:space-y-3">
                   {sentInvitationsAsPatient.map(inv => (
-                    <div key={inv.id} className="p-2 sm:p-4 rounded-lg sm:rounded-xl border border-blue-100 bg-blue-50/30 flex flex-col gap-2 sm:gap-3 md:flex-row md:items-center md:justify-between">
+                    <div key={inv.id} className="p-3 sm:p-4 rounded-lg sm:rounded-xl border border-blue-100 bg-blue-50/30 flex flex-col gap-3 sm:gap-3 md:flex-row md:items-center md:justify-between">
                       <div className="min-w-0">
                         <p className="text-xs sm:text-sm font-semibold text-slate-900 truncate">{inv.psychologistName || inv.fromPsychologistName || 'Psicólogo'}</p>
                         <p className="text-[11px] sm:text-xs text-slate-500 truncate">{inv.psychologistEmail}</p>
@@ -476,11 +473,10 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
                       </div>
                       <button 
                         onClick={() => handleRevokeSentInvitation(inv.id)} 
-                        className="px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 text-[11px] sm:text-xs flex items-center gap-1 whitespace-nowrap flex-shrink-0"
+                        className="w-full sm:w-auto px-3 sm:px-3 py-2 sm:py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs sm:text-xs flex items-center justify-center gap-1.5 whitespace-nowrap flex-shrink-0 touch-manipulation"
                       >
-                        <X size={12} className="sm:w-3.5 sm:h-3.5" /> 
-                        <span className="hidden sm:inline">Cancelar solicitud</span>
-                        <span className="sm:hidden">Cancelar</span>
+                        <X size={14} className="sm:w-3.5 sm:h-3.5" /> 
+                        <span>Cancelar solicitud</span>
                       </button>
                     </div>
                   ))}
@@ -489,7 +485,7 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
             )}
 
             {/* Psicólogos conectados */}
-            <div className="mt-3 sm:mt-6">
+            <div className="mt-4 sm:mt-6">
               <div className="flex items-center justify-between mb-2 sm:mb-4">
                 <h4 className="text-xs sm:text-sm font-bold text-green-700 uppercase tracking-wide flex items-center gap-1.5 sm:gap-2">
                   <UserCheck size={12} className="sm:w-3.5 sm:h-3.5" /> Psicólogos Conectados
@@ -502,20 +498,19 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
               {connectedPsychologists.length === 0 ? (
                 <p className="text-xs sm:text-sm text-slate-500 py-3 sm:py-4 text-center bg-slate-50 rounded-lg sm:rounded-xl">Aún no has autorizado a ningún especialista.</p>
               ) : (
-                <div className="space-y-2 sm:space-y-3">
+                <div className="space-y-3 sm:space-y-3">
                   {connectedPsychologists.map(psych => (
-                    <div key={psych.id} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border border-green-100 bg-green-50/30 rounded-lg sm:rounded-xl p-2 sm:p-4">
+                    <div key={psych.id} className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border border-green-100 bg-green-50/30 rounded-lg sm:rounded-xl p-3 sm:p-4">
                       <div className="min-w-0">
                         <p className="text-xs sm:text-sm font-semibold text-slate-900 truncate">{psych.name}</p>
                         <p className="text-[11px] sm:text-xs text-slate-500 truncate">{psych.email}</p>
                       </div>
                       <button 
                         onClick={() => handleRevoke(psych.id)} 
-                        className="px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg border border-orange-200 text-orange-600 hover:bg-orange-50 text-[11px] sm:text-xs flex items-center gap-1 whitespace-nowrap flex-shrink-0"
+                        className="w-full sm:w-auto px-3 sm:px-3 py-2 sm:py-1.5 rounded-lg border border-orange-200 text-orange-600 hover:bg-orange-50 text-xs sm:text-xs flex items-center justify-center gap-1.5 whitespace-nowrap flex-shrink-0 touch-manipulation"
                       >
-                        <Trash2 size={12} className="sm:w-3.5 sm:h-3.5" /> 
-                        <span className="hidden sm:inline">Finalizar relación</span>
-                        <span className="sm:hidden">Finalizar</span>
+                        <Trash2 size={14} className="sm:w-3.5 sm:h-3.5" /> 
+                        <span>Finalizar relación</span>
                       </button>
                     </div>
                   ))}

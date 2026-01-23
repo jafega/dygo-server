@@ -528,19 +528,19 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
               <span className="hidden sm:inline">Rango de fechas:</span>
               <span className="sm:hidden">Fechas:</span>
             </div>
-            <div className="flex items-center gap-1.5 sm:gap-2">
+            <div className="flex items-center gap-1 sm:gap-2">
               <input
                 type="date"
                 value={dateRange.start}
                 onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-                className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 border border-slate-300 rounded-lg text-xs sm:text-sm md:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                className="flex-1 px-1.5 sm:px-3 py-1 sm:py-2 border border-slate-300 rounded text-[11px] sm:text-sm md:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent min-w-0"
               />
-              <span className="text-slate-400 text-xs flex-shrink-0">—</span>
+              <span className="text-slate-400 text-[10px] flex-shrink-0">—</span>
               <input
                 type="date"
                 value={dateRange.end}
                 onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-                className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 border border-slate-300 rounded-lg text-xs sm:text-sm md:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                className="flex-1 px-1.5 sm:px-3 py-1 sm:py-2 border border-slate-300 rounded text-[11px] sm:text-sm md:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent min-w-0"
               />
               <button
                 onClick={() => {
@@ -552,7 +552,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                     end: end.toISOString().split('T')[0]
                   });
                 }}
-                className="px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 bg-purple-100 text-purple-700 rounded-lg text-xs sm:text-sm md:text-sm font-medium hover:bg-purple-200 transition-colors flex-shrink-0"
+                className="px-1.5 sm:px-3 md:px-4 py-1 sm:py-2 bg-purple-100 text-purple-700 rounded text-[10px] sm:text-sm md:text-sm font-medium hover:bg-purple-200 transition-colors flex-shrink-0 whitespace-nowrap"
               >
                 <span className="hidden sm:inline">Mes actual</span>
                 <span className="sm:hidden">Este mes</span>
@@ -821,13 +821,54 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                 className="bg-white rounded-lg sm:rounded-xl border border-slate-200 p-2 sm:p-3 md:p-4 hover:shadow-md transition-all cursor-pointer hover:border-purple-300"
               >
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3">
-                  {/* Left: Date, Time & Patient */}
-                  <div className="flex items-start gap-2 sm:gap-3">
-                    <div className="bg-purple-100 rounded-lg p-1.5 sm:p-2 md:p-3 text-center min-w-[45px] sm:min-w-[55px] md:min-w-[60px]">
-                      <div className="text-[9px] sm:text-[10px] md:text-xs font-semibold text-purple-600 uppercase">
+                  {/* Top row in mobile: Date + Session Details Button */}
+                  <div className="flex items-start justify-between gap-2 sm:hidden">
+                    <div className="bg-purple-100 rounded p-1.5 text-center min-w-[40px]">
+                      <div className="text-[9px] font-semibold text-purple-600 uppercase">
                         {new Date(session.date).toLocaleDateString('es-ES', { month: 'short' })}
                       </div>
-                      <div className="text-base sm:text-xl md:text-2xl font-bold text-purple-900">
+                      <div className="text-base font-bold text-purple-900">
+                        {new Date(session.date).getDate()}
+                      </div>
+                    </div>
+                    
+                    {/* Session Details Button for completed sessions - Mobile top right */}
+                    {isCompleted && (
+                      <button
+                        onClick={(e) => handleOpenSessionDetails(session, e)}
+                        className={`w-8 h-8 rounded-full border-2 transition-all flex items-center justify-center group flex-shrink-0 ${
+                          !session.session_entry_id
+                            ? 'border-red-300 bg-red-50 hover:border-red-500 hover:bg-red-100'
+                            : sessionEntries.get(session.session_entry_id)?.status === 'done'
+                            ? 'border-green-500 bg-green-50 hover:bg-green-100'
+                            : 'border-orange-400 bg-orange-50 hover:border-orange-500 hover:bg-orange-100'
+                        }`}
+                        title={
+                          !session.session_entry_id
+                            ? 'Rellenar detalles de sesión'
+                            : sessionEntries.get(session.session_entry_id)?.status === 'done'
+                            ? 'Detalles completados - Click para editar'
+                            : 'Detalles pendientes - Click para completar'
+                        }
+                      >
+                        {!session.session_entry_id ? (
+                          <FileText size={16} className="text-red-500 group-hover:text-red-600" />
+                        ) : sessionEntries.get(session.session_entry_id)?.status === 'done' ? (
+                          <CheckCircle size={16} className="text-green-600" />
+                        ) : (
+                          <FileText size={16} className="text-orange-500 group-hover:text-orange-600" />
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Left: Date, Time & Patient - Desktop */}
+                  <div className="flex items-start gap-2 sm:gap-3">
+                    <div className="hidden sm:block bg-purple-100 rounded-lg p-2 md:p-3 text-center min-w-[55px] md:min-w-[60px]">
+                      <div className="text-[10px] md:text-xs font-semibold text-purple-600 uppercase">
+                        {new Date(session.date).toLocaleDateString('es-ES', { month: 'short' })}
+                      </div>
+                      <div className="text-xl md:text-2xl font-bold text-purple-900">
                         {new Date(session.date).getDate()}
                       </div>
                     </div>
@@ -866,12 +907,12 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                   </div>
                   
                   {/* Right: Financial Info */}
-                  <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 sm:gap-2 pl-12 sm:pl-0">
-                    {/* Session Details Button for completed sessions */}
+                  <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 sm:gap-2 pl-0 sm:pl-0">
+                    {/* Session Details Button for completed sessions - Desktop only */}
                     {isCompleted && (
                       <button
                         onClick={(e) => handleOpenSessionDetails(session, e)}
-                        className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full border-2 transition-all flex items-center justify-center group flex-shrink-0 ${
+                        className={`hidden sm:flex w-8 h-8 rounded-full border-2 transition-all items-center justify-center group flex-shrink-0 ${
                           !session.session_entry_id
                             ? 'border-red-300 bg-red-50 hover:border-red-500 hover:bg-red-100'
                             : sessionEntries.get(session.session_entry_id)?.status === 'done'
