@@ -8,8 +8,14 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import Stripe from 'stripe';
 import dotenv from 'dotenv';
+import Busboy from 'busboy';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import FormData from 'form-data';
 
 dotenv.config();
+
+// Inicializar Google Generative AI (Gemini)
+const genAI = process.env.GEMINI_API_KEY ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY) : null;
 
 
 // --- CONFIGURACIÓN PARA ES MODULES ---
@@ -35,6 +41,7 @@ const SUPABASE_TABLES_TO_ENSURE = [
   'invitations',
   'settings',
   'sessions',
+  'session_entry',
   'dispo',
   'care_relationships',
   'invoices',
@@ -206,6 +213,7 @@ const ensureDbShape = (db) => {
   if (!Array.isArray(db.invitations)) db.invitations = [];
   if (!db.settings || typeof db.settings !== 'object') db.settings = {};
   if (!Array.isArray(db.sessions)) db.sessions = [];
+  if (!Array.isArray(db.sessionEntries)) db.sessionEntries = [];
   if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
   if (!Array.isArray(db.invoices)) db.invoices = [];
   if (!db.psychologistProfiles || typeof db.psychologistProfiles !== 'object') db.psychologistProfiles = {};
@@ -296,6 +304,36 @@ const executeSupabaseSql = async (sql) => {
   if (!response.ok) {
     const text = await response.text().catch(() => response.statusText);
     throw new Error(text || `Supabase SQL error (${response.status})`);
+  }
+};
+
+const ensureSessionEntryTable = async () => {
+  if (!supabaseAdmin || !SUPABASE_SQL_ENDPOINT || !SUPABASE_SERVICE_ROLE_KEY) return;
+  
+  try {
+    const { error } = await supabaseAdmin.from('session_entry').select('id').limit(1);
+    if (error && isMissingRelationError(error)) {
+      const sql = `
+        CREATE TABLE IF NOT EXISTS public.session_entry (
+          id TEXT PRIMARY KEY,
+          data JSONB NOT NULL DEFAULT '{}'::jsonb,
+          creator_user_id TEXT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+          target_user_id TEXT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+          status TEXT NOT NULL DEFAULT 'pending',
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        
+        CREATE INDEX IF NOT EXISTS idx_session_entry_creator ON public.session_entry(creator_user_id);
+        CREATE INDEX IF NOT EXISTS idx_session_entry_target ON public.session_entry(target_user_id);
+        CREATE INDEX IF NOT EXISTS idx_session_entry_status ON public.session_entry(status);
+        
+        ALTER TABLE public.session_entry ENABLE ROW LEVEL SECURITY;
+      `;
+      await executeSupabaseSql(sql);
+      console.log('✅ Tabla session_entry creada en Supabase');
+    }
+  } catch (err) {
+    console.error('❌ Error asegurando tabla session_entry:', err?.message || err);
   }
 };
 
@@ -1021,6 +1059,7 @@ async function loadSupabaseCache() {
   const invitationsRows = await readTableLocal('invitations');
   const settingsRows = await readTableLocal('settings');
   const sessionsRows = await readTableLocal('sessions');
+  const sessionEntriesRows = await readTableLocal('session_entry');
   const invoicesRows = await readTableLocal('invoices');
   const relationshipsRows = await readTableLocal('care_relationships');
   const profilesRows = await readTableLocal('psychologist_profiles');
@@ -1057,6 +1096,18 @@ async function loadSupabaseCache() {
     return normalized;
   });
   const invoices = invoicesRows.map(normalizeSupabaseRow);
+  const sessionEntries = sessionEntriesRows.map(row => {
+    // session_entry tiene status como columna separada, resto en data
+    const normalized = normalizeSupabaseRow(row);
+    // Asegurar que status esté disponible tanto en el nivel superior como en data
+    if (row.status) {
+      normalized.status = row.status;
+      if (normalized.data) {
+        normalized.data.status = row.status;
+      }
+    }
+    return normalized;
+  });
   const careRelationships = relationshipsRows.map(row => {
     const normalized = normalizeSupabaseRow(row);
     // Asegurar que default_session_price y default_psych_percent tengan valores
@@ -1071,7 +1122,7 @@ async function loadSupabaseCache() {
   const settings = Object.fromEntries(settingsRows.map(row => [row.id, (row.data && typeof row.data === 'object') ? row.data : normalizeSupabaseRow(row)]));
   const psychologistProfiles = Object.fromEntries(profilesRows.map(row => [row.id, (row.data && typeof row.data === 'object') ? row.data : normalizeSupabaseRow(row)]));
 
-  return { users, entries, goals, invitations, settings, sessions, invoices, careRelationships, psychologistProfiles };
+  return { users, entries, goals, invitations, settings, sessions, sessionEntries, invoices, careRelationships, psychologistProfiles };
 }
 
 async function readSupabaseTable(table) {
@@ -1358,6 +1409,27 @@ async function saveSupabaseDb(data, prevCache = null) {
     .filter(inv => inv.psychologist_user_id || inv.psychologistId) // Filtrar facturas sin psicólogo
     .map(inv => buildSupabaseInvoiceRow(inv));
 
+  // Session entry: guardar status como columna separada, resto (incluyendo session_id) en data
+  const sessionEntriesRows = (data.sessionEntries || []).map(se => {
+    const seData = se.data || se;
+    return {
+      id: se.id,
+      creator_user_id: se.creator_user_id || null,
+      target_user_id: se.target_user_id || null,
+      status: seData.status || 'pending',
+      data: {
+        session_id: se.session_id || seData.session_id || null,
+        transcript: seData.transcript || '',
+        summary: seData.summary || '',
+        file: seData.file || null,
+        file_name: seData.file_name || null,
+        file_type: seData.file_type || null,
+        entry_type: seData.entry_type || 'session_note',
+        created_at: seData.created_at || new Date().toISOString()
+      }
+    };
+  });
+
   // Care relationships: extraer campos según el nuevo schema (psychologist_user_id, patient_user_id, default_session_price, default_psych_percent)
   const relationshipsRows = (data.careRelationships || [])
     .filter(rel => {
@@ -1395,6 +1467,7 @@ async function saveSupabaseDb(data, prevCache = null) {
   await upsertTable('invitations', invitationsRows);
   await upsertTable('settings', settingsRows);
   await upsertTable('sessions', sessionsRows);
+  await upsertTable('session_entry', sessionEntriesRows);
   await upsertTable('care_relationships', relationshipsRows);
   
   if (invoicesRows.length === 0) {
@@ -1417,6 +1490,7 @@ async function saveSupabaseDb(data, prevCache = null) {
     await deleteMissing('invitations', (prevCache.invitations || []).map(i => i.id), invitationsRows.map(r => r.id));
     await deleteMissing('settings', Object.keys(prevCache.settings || {}), settingsRows.map(r => r.id));
     await deleteMissing('sessions', (prevCache.sessions || []).map(s => s.id), sessionsRows.map(r => r.id));
+    await deleteMissing('session_entry', (prevCache.sessionEntries || []).map(se => se.id), sessionEntriesRows.map(r => r.id));
     await deleteMissing('care_relationships', (prevCache.careRelationships || []).map(rel => rel.id), relationshipsRows.map(r => r.id));
     await deleteMissing('invoices', (prevCache.invoices || []).map(inv => inv.id), invoicesRows.map(r => r.id));
     await deleteMissing('psychologist_profiles', Object.keys(prevCache.psychologistProfiles || {}), profilesRows.map(r => r.id));
@@ -1460,10 +1534,11 @@ const getDb = () => {
     const settingsArr = read('settings');
     const settings = Object.fromEntries(settingsArr.map((s) => [s.id, s]));
     const sessions = read('sessions');
+    const sessionEntries = read('session_entry');
     const invoices = read('invoices');
     const profilesArr = read('psychologist_profiles');
     const psychologistProfiles = Object.fromEntries(profilesArr.map((p) => [p.id, p]));
-    return ensureDbShape({ users, entries, goals, invitations, settings, sessions, invoices, careRelationships: read('care_relationships'), psychologistProfiles });
+    return ensureDbShape({ users, entries, goals, invitations, settings, sessions, sessionEntries, invoices, careRelationships: read('care_relationships'), psychologistProfiles });
   }
 
   // 1. Si no existe, crearla
@@ -1519,6 +1594,7 @@ const saveDb = (data, options = {}) => {
         await client.query('DELETE FROM invitations');
         await client.query('DELETE FROM settings');
         await client.query('DELETE FROM sessions');
+        await client.query('DELETE FROM session_entry');
         await client.query('DELETE FROM care_relationships');
         await client.query('DELETE FROM invoices');
         await client.query('DELETE FROM psychologist_profiles');
@@ -1537,6 +1613,7 @@ const saveDb = (data, options = {}) => {
             await insert('sessions', s.id, s);
           }
         }
+        for (const se of (data.sessionEntries || [])) await insert('session_entry', se.id, se);
         for (const rel of (data.careRelationships || [])) await insert('care_relationships', rel.id, rel);
         for (const inv of (data.invoices || [])) await insert('invoices', inv.id, inv);
         const profiles = data.psychologistProfiles || {};
@@ -1577,6 +1654,7 @@ const saveDb = (data, options = {}) => {
       del.run('invitations');
       del.run('settings');
       del.run('sessions');
+      del.run('session_entry');
       del.run('care_relationships');
       del.run('invoices');
       del.run('psychologist_profiles');
@@ -1593,6 +1671,7 @@ const saveDb = (data, options = {}) => {
           insert.run({ table: 'sessions', id: s.id, data: JSON.stringify(s) });
         }
       });
+      (dbObj.sessionEntries || []).forEach(se => insert.run({ table: 'session_entry', id: se.id, data: JSON.stringify(se) }));
       (dbObj.careRelationships || []).forEach(rel => insert.run({ table: 'care_relationships', id: rel.id, data: JSON.stringify(rel) }));
       (dbObj.invoices || []).forEach(inv => insert.run({ table: 'invoices', id: inv.id, data: JSON.stringify(inv) }));
       const profiles = dbObj.psychologistProfiles || {};
@@ -6262,6 +6341,11 @@ app.patch('/api/sessions/:id', async (req, res) => {
           paid: updatedSession.paid ?? false
         };
         
+        // Incluir session_entry_id si se proporcionó
+        if (req.body.session_entry_id !== undefined) {
+          supabaseRow.session_entry_id = req.body.session_entry_id;
+        }
+        
         // Solo incluir patient_user_id si se proporcionó explícitamente en el body
         if (req.body.patient_user_id !== undefined || req.body.patientId !== undefined) {
           supabaseRow.patient_user_id = updatedSession.patient_user_id || updatedSession.patientId;
@@ -6406,6 +6490,7 @@ app.delete('/api/sessions/:id', async (req, res) => {
     const db = getDb();
     if (!db.sessions) db.sessions = [];
     if (!db.dispo) db.dispo = [];
+    if (!db.sessionEntries) db.sessionEntries = [];
 
     // Intentar eliminar de dispo primero
     const dispoIdx = db.dispo.findIndex(d => d.id === id);
@@ -6422,18 +6507,392 @@ app.delete('/api/sessions/:id', async (req, res) => {
     if (idx === -1) return res.status(404).json({ error: 'Session not found' });
 
     const session = db.sessions[idx];
-    if (session.status !== 'available') {
-      return res.status(400).json({ error: 'Solo se pueden eliminar espacios con estado Disponible' });
+    
+    // Eliminar session_entry asociada si existe
+    if (session.session_entry_id) {
+      const entryIdx = db.sessionEntries.findIndex(e => e.id === session.session_entry_id);
+      if (entryIdx !== -1) {
+        db.sessionEntries.splice(entryIdx, 1);
+        console.log(`🗑️ Session entry ${session.session_entry_id} eliminada junto con la sesión`);
+      }
     }
 
+    // Eliminar la sesión (permitir eliminar cualquier estado)
     db.sessions.splice(idx, 1);
     // Limpiar sesiones de disponibilidad antes de guardar
     db.sessions = db.sessions.filter(s => s.patient_user_id || s.patientId);
     await saveDb(db, { awaitPersistence: true });
-    return res.json({ success: true, deletedFrom: 'sessions' });
+    
+    console.log(`🗑️ Sesión ${id} eliminada correctamente (estado: ${session.status})`);
+    return res.json({ success: true, deletedFrom: 'sessions', sessionEntryDeleted: !!session.session_entry_id });
   } catch (err) {
     console.error('❌ Error deleting session', err);
     return res.status(500).json({ error: err?.message || 'No se pudo eliminar la sesión' });
+  }
+});
+
+// --- TRANSCRIPTION ENDPOINT ---
+app.post('/api/transcribe', async (req, res) => {
+  try {
+    console.log('📝 Procesando solicitud de transcripción...');
+
+    if (!genAI) {
+      console.error('❌ GEMINI_API_KEY no configurada');
+      return res.status(500).json({ 
+        error: 'API de transcripción no configurada. Por favor, configura GEMINI_API_KEY en las variables de entorno.' 
+      });
+    }
+
+    const busboy = Busboy({ headers: req.headers });
+    let fileBuffer = null;
+    let fileName = '';
+    let mimeType = '';
+
+    busboy.on('file', (fieldname, file, info) => {
+      const { filename, encoding, mimeType: mime } = info;
+      fileName = filename;
+      mimeType = mime;
+      const chunks = [];
+      
+      file.on('data', (data) => {
+        chunks.push(data);
+      });
+
+      file.on('end', () => {
+        fileBuffer = Buffer.concat(chunks);
+        console.log(`✅ Archivo recibido: ${fileName} (${fileBuffer.length} bytes)`);
+      });
+    });
+
+    busboy.on('finish', async () => {
+      if (!fileBuffer) {
+        return res.status(400).json({ error: 'No se recibió ningún archivo' });
+      }
+
+      try {
+        // Si es un archivo de texto, extraer texto directamente
+        if (mimeType.startsWith('text/')) {
+          const text = fileBuffer.toString('utf-8');
+          console.log('✅ Texto extraído del archivo de texto');
+          return res.json({ transcript: text });
+        }
+
+        // Si es PDF, usar Gemini para extraer texto
+        if (mimeType === 'application/pdf') {
+          console.log('📄 Extrayendo texto de PDF con Gemini...');
+          
+          try {
+            const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+            
+            const result = await model.generateContent([
+              {
+                inlineData: {
+                  data: fileBuffer.toString('base64'),
+                  mimeType: 'application/pdf'
+                }
+              },
+              'Extrae todo el texto de este documento PDF. Devuelve únicamente el texto extraído sin comentarios adicionales.'
+            ]);
+
+            const text = result.response.text();
+            console.log('✅ Texto extraído del PDF');
+            return res.json({ transcript: text });
+          } catch (pdfError) {
+            console.error('❌ Error extrayendo PDF:', pdfError);
+            throw pdfError;
+          }
+        }
+
+        // Si es audio/video, transcribir con Gemini
+        if (mimeType.startsWith('audio/') || mimeType.startsWith('video/')) {
+          console.log('🎤 Transcribiendo audio con Gemini...');
+
+          try {
+            const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+            
+            const result = await model.generateContent([
+              {
+                inlineData: {
+                  data: fileBuffer.toString('base64'),
+                  mimeType: mimeType
+                }
+              },
+              'Transcribe el contenido de este audio/video. Devuelve únicamente la transcripción en español sin comentarios adicionales. Si detectas diferentes personas hablando, indica quién habla en cada momento.'
+            ]);
+
+            const transcript = result.response.text();
+            console.log('✅ Transcripción completada');
+            return res.json({ transcript: transcript });
+          } catch (transcribeError) {
+            console.error('❌ Error transcribiendo:', transcribeError);
+            throw transcribeError;
+          }
+        }
+
+        return res.status(400).json({ 
+          error: 'Tipo de archivo no soportado. Usa archivos de texto, PDF, audio o video.' 
+        });
+      } catch (error) {
+        console.error('❌ Error en transcripción:', error);
+        return res.status(500).json({ 
+          error: 'Error al procesar el archivo: ' + (error.message || 'Error desconocido') 
+        });
+      }
+    });
+
+    req.pipe(busboy);
+  } catch (error) {
+    console.error('❌ Error en endpoint de transcripción:', error);
+    return res.status(500).json({ 
+      error: 'Error al procesar la solicitud: ' + (error.message || 'Error desconocido') 
+    });
+  }
+});
+
+// --- SESSION ENTRIES ---
+app.post('/api/session-entries', async (req, res) => {
+  try {
+    const db = getDb();
+    if (!db.sessionEntries) db.sessionEntries = [];
+
+    const userId = req.headers['x-user-id'] || req.headers['x-userid'];
+    
+    if (!userId) {
+      console.error('❌ Missing userId from session');
+      return res.status(401).json({ error: 'Usuario no autenticado' });
+    }
+
+    const {
+      session_id,
+      creator_user_id,
+      target_user_id,
+      transcript,
+      summary,
+      status,
+      file,
+      file_name,
+      file_type,
+      entry_type
+    } = req.body;
+
+    if (!session_id) {
+      return res.status(400).json({ 
+        error: 'session_id es requerido' 
+      });
+    }
+
+    // transcript y summary pueden ser vacíos al crear una entrada inicial
+    if (transcript === undefined || summary === undefined) {
+      return res.status(400).json({ 
+        error: 'transcript y summary deben estar presentes (pueden ser cadenas vacías)' 
+      });
+    }
+
+    const sessionEntryId = crypto.randomUUID();
+    const sessionEntryData = {
+      session_id,
+      transcript,
+      summary,
+      file,
+      file_name,
+      file_type,
+      entry_type: entry_type || 'session_note',
+      created_at: new Date().toISOString()
+    };
+
+    // Crear directamente en Supabase primero
+    if (supabaseAdmin) {
+      try {
+        // Asegurar que la tabla existe
+        await ensureSessionEntryTable();
+
+        // Insertar en Supabase (session_id va dentro de data)
+        const { error: insertError } = await supabaseAdmin
+          .from('session_entry')
+          .insert({
+            id: sessionEntryId,
+            creator_user_id: creator_user_id || userId,
+            target_user_id,
+            status: status || 'pending',
+            data: sessionEntryData
+          });
+
+        if (insertError) {
+          console.error('❌ Error insertando session_entry en Supabase:', insertError);
+          throw insertError;
+        }
+
+        console.log('✅ Session_entry creada en Supabase:', sessionEntryId);
+
+        // Actualizar la sesión con el session_entry_id
+        const { error: updateError } = await supabaseAdmin
+          .from('sessions')
+          .update({ session_entry_id: sessionEntryId })
+          .eq('id', session_id);
+        
+        if (updateError) {
+          console.error('❌ Error actualizando session_entry_id en Supabase:', updateError);
+        } else {
+          console.log('✅ session_entry_id actualizado en Supabase para session:', session_id);
+        }
+      } catch (supabaseErr) {
+        console.error('❌ Error en operaciones de Supabase:', supabaseErr);
+        throw supabaseErr;
+      }
+    }
+
+    // Actualizar caché en memoria
+    const sessionEntry = {
+      id: sessionEntryId,
+      session_id,
+      creator_user_id: creator_user_id || userId,
+      target_user_id,
+      data: {
+        ...sessionEntryData,
+        status: status || 'pending'
+      },
+      created_at: new Date().toISOString()
+    };
+
+    db.sessionEntries.push(sessionEntry);
+
+    // Ligar session_entry con session en memoria
+    if (!db.sessions) db.sessions = [];
+    const sessionIdx = db.sessions.findIndex(s => s.id === session_id);
+    if (sessionIdx !== -1) {
+      db.sessions[sessionIdx].session_entry_id = sessionEntryId;
+      console.log('✅ Linked session_entry to session in memory:', session_id);
+    }
+
+    console.log('✅ Session entry created:', sessionEntryId);
+    return res.json(sessionEntry);
+  } catch (err) {
+    console.error('❌ Error creating session entry', err);
+    return res.status(500).json({ error: err?.message || 'No se pudo crear la entrada de sesión' });
+  }
+});
+
+app.get('/api/session-entries', async (req, res) => {
+  try {
+    const { session_id, target_user_id, creator_user_id } = req.query;
+    const db = getDb();
+
+    let entries = db.sessionEntries || [];
+
+    if (session_id) {
+      entries = entries.filter(e => e.session_id === session_id);
+    }
+
+    if (target_user_id) {
+      entries = entries.filter(e => e.target_user_id === target_user_id);
+    }
+
+    if (creator_user_id) {
+      entries = entries.filter(e => e.creator_user_id === creator_user_id);
+    }
+
+    return res.json(entries);
+  } catch (err) {
+    console.error('❌ Error fetching session entries', err);
+    return res.status(500).json({ error: err?.message || 'No se pudieron obtener las entradas' });
+  }
+});
+
+app.get('/api/session-entries/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const db = getDb();
+
+    if (!db.sessionEntries) db.sessionEntries = [];
+
+    const entry = db.sessionEntries.find(e => e.id === id);
+    if (!entry) {
+      return res.status(404).json({ error: 'Session entry not found' });
+    }
+
+    return res.json(entry);
+  } catch (err) {
+    console.error('❌ Error fetching session entry by ID', err);
+    return res.status(500).json({ error: err?.message || 'No se pudo obtener la entrada' });
+  }
+});
+
+app.patch('/api/session-entries/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const db = getDb();
+
+    if (!db.sessionEntries) db.sessionEntries = [];
+
+    const idx = db.sessionEntries.findIndex(e => e.id === id);
+    if (idx === -1) {
+      return res.status(404).json({ error: 'Session entry not found' });
+    }
+
+    const { summary, status, transcript, file, file_name, file_type } = req.body;
+    const entry = db.sessionEntries[idx];
+    const updates = {};
+    const dataUpdates = { ...entry.data };
+
+    if (summary !== undefined) {
+      dataUpdates.summary = summary;
+    }
+
+    if (status !== undefined) {
+      updates.status = status;
+      console.log('✅ Session entry status updated to:', status);
+    }
+
+    if (transcript !== undefined) {
+      dataUpdates.transcript = transcript;
+    }
+
+    if (file !== undefined) {
+      dataUpdates.file = file;
+    }
+
+    if (file_name !== undefined) {
+      dataUpdates.file_name = file_name;
+    }
+
+    if (file_type !== undefined) {
+      dataUpdates.file_type = file_type;
+    }
+
+    dataUpdates.updated_at = new Date().toISOString();
+    updates.data = dataUpdates;
+
+    // Actualizar directamente en Supabase
+    if (supabaseAdmin) {
+      try {
+        const { error: updateError } = await supabaseAdmin
+          .from('session_entry')
+          .update(updates)
+          .eq('id', id);
+
+        if (updateError) {
+          console.error('❌ Error actualizando session_entry en Supabase:', updateError);
+          throw updateError;
+        }
+
+        console.log('✅ Session_entry actualizada en Supabase:', id);
+      } catch (supabaseErr) {
+        console.error('❌ Error en operación de Supabase:', supabaseErr);
+        throw supabaseErr;
+      }
+    }
+
+    // Actualizar caché en memoria
+    db.sessionEntries[idx].data = dataUpdates;
+    if (status !== undefined) {
+      db.sessionEntries[idx].data.status = status;
+    }
+
+    console.log('✅ Session entry updated:', id);
+    return res.json(db.sessionEntries[idx]);
+  } catch (err) {
+    console.error('❌ Error updating session entry', err);
+    return res.status(500).json({ error: err?.message || 'No se pudo actualizar la entrada' });
   }
 });
 

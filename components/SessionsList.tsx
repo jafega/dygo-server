@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, CheckCircle, XCircle, Clock, DollarSign, User, Filter, Edit2, Save, X as XIcon } from 'lucide-react';
+import { Calendar, CheckCircle, XCircle, Clock, DollarSign, User, Filter, Edit2, Save, X as XIcon, FileText, Trash2 } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser } from '../services/authService';
+import SessionDetailsModal from './SessionDetailsModal';
 
 interface Session {
   id: string;
@@ -19,6 +20,7 @@ interface Session {
   meetLink?: string;
   paid?: boolean;
   tags?: string[]; // Tags heredadas de la relación
+  session_entry_id?: string;
 }
 
 interface Invoice {
@@ -47,11 +49,15 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
   const [editedSession, setEditedSession] = useState<Session | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [allPsychologistTags, setAllPsychologistTags] = useState<string[]>([]);
+  const [sessionDetailsModalOpen, setSessionDetailsModalOpen] = useState(false);
+  const [selectedSessionForDetails, setSelectedSessionForDetails] = useState<Session | null>(null);
+  const [sessionEntries, setSessionEntries] = useState<Map<string, { status: 'pending' | 'done' }>>(new Map());
   
   // Filter states
   const [filterPatient, setFilterPatient] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string[]>(['scheduled', 'completed']); // Por defecto todas menos canceladas
   const [filterPayment, setFilterPayment] = useState<string>('all'); // 'all', 'paid', 'unpaid'
+  const [filterEntry, setFilterEntry] = useState<string[]>(['with-entry', 'without-entry']);
   const [filterTags, setFilterTags] = useState<string[]>([]);
   
   // Date range state - default to current month
@@ -138,6 +144,18 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
           s.status !== 'available' && (s.patientId || s.patient_user_id)
         );
         setSessions(actualSessions);
+        
+        // Cargar session_entries para mostrar estados
+        const entriesResponse = await fetch(`${API_URL}/session-entries?creator_user_id=${psychologistId}`);
+        if (entriesResponse.ok) {
+          const entries = await entriesResponse.json();
+          const entriesMap = new Map();
+          entries.forEach((entry: any) => {
+            // Usar entry.id como clave para que coincida con session.session_entry_id
+            entriesMap.set(entry.id, { status: entry.data?.status || entry.status || 'pending' });
+          });
+          setSessionEntries(entriesMap);
+        }
         
         // Load patient names
         const patientIds = new Set<string>();
@@ -243,6 +261,45 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
     setEditedSession(null);
   };
 
+  const handleDeleteSession = async () => {
+    if (!editedSession) return;
+
+    if (!confirm('¿Estás seguro de que quieres eliminar esta sesión? Esta acción no se puede deshacer.')) {
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const currentUser = await getCurrentUser();
+      if (!currentUser) {
+        alert('Error: Usuario no autenticado');
+        return;
+      }
+
+      const response = await fetch(`${API_URL}/sessions/${editedSession.id}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': currentUser.id
+        }
+      });
+
+      if (response.ok) {
+        await loadData();
+        handleCloseModal();
+        alert('Sesión eliminada correctamente');
+      } else {
+        const error = await response.json();
+        alert('Error al eliminar la sesión: ' + (error.error || 'Error desconocido'));
+      }
+    } catch (error) {
+      console.error('Error deleting session:', error);
+      alert('Error al eliminar la sesión');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleSaveSession = async () => {
     if (!editedSession) return;
 
@@ -299,6 +356,71 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
     setEditedSession({ ...editedSession, [field]: value });
   };
 
+  const handleOpenSessionDetails = async (session: Session, e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    // Si ya tiene entrada, abrir directamente para editar
+    if (session.session_entry_id) {
+      setSelectedSessionForDetails(session);
+      setSessionDetailsModalOpen(true);
+    } else {
+      // Si no tiene entrada, crear una vacía automáticamente
+      try {
+        const currentUser = await getCurrentUser();
+        if (!currentUser) {
+          alert('Error: Usuario no autenticado');
+          return;
+        }
+
+        const sessionEntryData = {
+          session_id: session.id,
+          creator_user_id: currentUser.id,
+          target_user_id: session.patient_user_id || session.patientId,
+          transcript: '',
+          summary: '',
+          status: 'pending',
+          entry_type: 'session_note'
+        };
+
+        const response = await fetch(`${API_URL}/session-entries`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-user-id': currentUser.id
+          },
+          body: JSON.stringify(sessionEntryData)
+        });
+
+        if (response.ok) {
+          const savedEntry = await response.json();
+          console.log('✅ Session entry creada automáticamente:', savedEntry.id);
+          
+          // Actualizar la sesión con el session_entry_id (el backend ya lo hace en Supabase)
+          session.session_entry_id = savedEntry.id;
+          
+          setSelectedSessionForDetails(session);
+          setSessionDetailsModalOpen(true);
+        } else {
+          const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+          console.error('Error creando session entry automáticamente:', response.status, errorData);
+          alert(`Error al crear la entrada de sesión: ${errorData.error || 'Error desconocido'}`);
+        }
+      } catch (error) {
+        console.error('Error creando session entry:', error);
+        alert('Error al crear la entrada de sesión');
+      }
+    }
+  };
+
+  const handleCloseSessionDetails = () => {
+    setSessionDetailsModalOpen(false);
+    setSelectedSessionForDetails(null);
+  };
+
+  const handleSaveSessionDetails = () => {
+    loadData();
+  };
+
 
   const sortedSessions = [...sessions].sort((a, b) => {
     const dateA = new Date(`${a.date} ${a.startTime}`);
@@ -332,6 +454,33 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
       const sessionTags = session.tags || [];
       const hasMatchingTag = filterTags.some(tag => sessionTags.includes(tag));
       if (!hasMatchingTag) return false;
+    }
+    
+    // Filtro de entradas
+    if (filterEntry.length > 0) {
+      const hasEntry = session.session_entry_id;
+      const entryStatus = hasEntry ? sessionEntries.get(session.session_entry_id)?.status : undefined;
+      const hasCompletedEntry = hasEntry && entryStatus === 'done';
+      const hasIncompleteEntry = hasEntry && entryStatus !== 'done';
+      
+      const showWithEntry = filterEntry.includes('with-entry');
+      const showWithoutEntry = filterEntry.includes('without-entry');
+      
+      // Si no hay filtros seleccionados, no mostrar nada
+      if (!showWithEntry && !showWithoutEntry) return false;
+      
+      // Si ambos están seleccionados, mostrar todo
+      if (showWithEntry && showWithoutEntry) return true;
+      
+      // Si solo "Completada" está seleccionado, mostrar solo las que tienen entrada completada
+      if (showWithEntry && !showWithoutEntry) {
+        return hasCompletedEntry;
+      }
+      
+      // Si solo "Sin completar" está seleccionado, mostrar las que no tienen entrada o la tienen incompleta
+      if (showWithoutEntry && !showWithEntry) {
+        return !hasEntry || hasIncompleteEntry;
+      }
     }
     
     return true;
@@ -458,6 +607,40 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
               </div>
             </div>
 
+            {/* Filtro por Estado de Entrada */}
+            <div className="flex-1">
+              <label className="block text-[10px] sm:text-xs md:text-xs font-semibold text-slate-600 mb-1 sm:mb-1.5">Entrada</label>
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                {[{value: 'with-entry', label: 'Completada', icon: '✅'}, 
+                  {value: 'without-entry', label: 'Sin completar', icon: '⏳'}].map(entry => {
+                  const isSelected = filterEntry.includes(entry.value);
+                  return (
+                    <button
+                      key={entry.value}
+                      onClick={() => {
+                        if (isSelected) {
+                          setFilterEntry(filterEntry.filter(e => e !== entry.value));
+                        } else {
+                          setFilterEntry([...filterEntry, entry.value]);
+                        }
+                      }}
+                      className={`inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 md:px-3 py-1 sm:py-1.5 rounded-full text-[10px] sm:text-xs md:text-xs font-medium transition-all ${
+                        isSelected
+                          ? 'bg-blue-600 text-white shadow-md hover:bg-blue-700 hover:shadow-lg'
+                          : 'bg-slate-100 text-slate-700 border border-slate-300 hover:bg-slate-200 hover:border-slate-400'
+                      }`}
+                    >
+                      <span className={isSelected ? 'text-blue-200' : 'text-slate-500'}>{entry.icon}</span>
+                      <span className="hidden sm:inline">{entry.label}</span>
+                      {isSelected && (
+                        <XIcon size={10} className="ml-0.5" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* Filtro por Estados (multi-selección) */}
             <div className="flex-1">
               <label className="block text-[10px] sm:text-xs md:text-xs font-semibold text-slate-600 mb-1 sm:mb-1.5">Estados</label>
@@ -539,13 +722,14 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
             )}
 
             {/* Botón para limpiar filtros */}
-            {(filterPatient !== 'all' || filterStatus.length !== 2 || filterPayment !== 'all' || filterTags.length > 0) && (
+            {(filterPatient !== 'all' || filterStatus.length !== 2 || filterPayment !== 'all' || filterEntry.length !== 2 || filterTags.length > 0) && (
               <div className="flex justify-end pt-1.5 sm:pt-2">
                 <button
                   onClick={() => {
                     setFilterPatient('all');
                     setFilterStatus(['scheduled', 'completed']);
                     setFilterPayment('all');
+                    setFilterEntry(['with-entry', 'without-entry']);
                     setFilterTags([]);
                   }}
                   className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 md:px-4 py-1.5 sm:py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg text-xs sm:text-sm md:text-sm font-medium hover:bg-red-100 hover:border-red-300 transition-colors"
@@ -628,6 +812,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
             const patient = patients.get(patientId);
             const earnings = getPsychologistEarnings(session);
             const isPaid = isSessionPaid(session.id);
+            const isCompleted = session.status === 'completed';
             
             return (
               <div
@@ -682,6 +867,34 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                   
                   {/* Right: Financial Info */}
                   <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 sm:gap-2 pl-12 sm:pl-0">
+                    {/* Session Details Button for completed sessions */}
+                    {isCompleted && (
+                      <button
+                        onClick={(e) => handleOpenSessionDetails(session, e)}
+                        className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full border-2 transition-all flex items-center justify-center group flex-shrink-0 ${
+                          !session.session_entry_id
+                            ? 'border-red-300 bg-red-50 hover:border-red-500 hover:bg-red-100'
+                            : sessionEntries.get(session.session_entry_id)?.status === 'done'
+                            ? 'border-green-500 bg-green-50 hover:bg-green-100'
+                            : 'border-orange-400 bg-orange-50 hover:border-orange-500 hover:bg-orange-100'
+                        }`}
+                        title={
+                          !session.session_entry_id
+                            ? 'Rellenar detalles de sesión'
+                            : sessionEntries.get(session.session_entry_id)?.status === 'done'
+                            ? 'Detalles completados - Click para editar'
+                            : 'Detalles pendientes - Click para completar'
+                        }
+                      >
+                        {!session.session_entry_id ? (
+                          <FileText size={14} className="text-red-500 group-hover:text-red-600" />
+                        ) : sessionEntries.get(session.session_entry_id)?.status === 'done' ? (
+                          <CheckCircle size={14} className="text-green-600" />
+                        ) : (
+                          <FileText size={14} className="text-orange-500 group-hover:text-orange-600" />
+                        )}
+                      </button>
+                    )}
                     <div className="text-left sm:text-right">
                       <div className="text-[8px] sm:text-[9px] md:text-xs text-slate-500 hidden sm:block">Tu ganancia</div>
                       <div className="text-base sm:text-lg md:text-2xl font-bold text-green-600 flex items-center gap-1">
@@ -717,7 +930,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
 
       {/* Edit Session Modal */}
       {selectedSession && editedSession && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             {/* Modal Header */}
             <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
@@ -906,34 +1119,53 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
             </div>
 
             {/* Modal Footer */}
-            <div className="sticky bottom-0 bg-slate-50 border-t border-slate-200 px-6 py-4 flex items-center justify-end gap-3">
+            <div className="sticky bottom-0 bg-slate-50 border-t border-slate-200 px-6 py-4 flex items-center justify-between gap-3">
               <button
-                onClick={handleCloseModal}
+                onClick={handleDeleteSession}
                 disabled={isSaving}
-                className="px-4 py-2 text-slate-700 hover:bg-slate-200 rounded-lg font-medium transition-colors disabled:opacity-50"
+                className="px-4 py-2 bg-red-600 text-white hover:bg-red-700 rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
               >
-                Cancelar
+                <Trash2 size={16} />
+                Eliminar
               </button>
-              <button
-                onClick={handleSaveSession}
-                disabled={isSaving}
-                className="px-6 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition-colors flex items-center gap-2 disabled:opacity-50"
-              >
-                {isSaving ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    Guardando...
-                  </>
-                ) : (
-                  <>
-                    <Save size={16} />
-                    Guardar cambios
-                  </>
-                )}
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleCloseModal}
+                  disabled={isSaving}
+                  className="px-4 py-2 text-slate-700 hover:bg-slate-200 rounded-lg font-medium transition-colors disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleSaveSession}
+                  disabled={isSaving}
+                  className="px-6 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+                >
+                  {isSaving ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      Guardando...
+                    </>
+                  ) : (
+                    <>
+                      <Save size={16} />
+                      Guardar
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Session Details Modal */}
+      {sessionDetailsModalOpen && selectedSessionForDetails && (
+        <SessionDetailsModal
+          session={selectedSessionForDetails}
+          onClose={handleCloseSessionDetails}
+          onSave={handleSaveSessionDetails}
+        />
       )}
     </div>
   );

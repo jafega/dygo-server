@@ -719,6 +719,45 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
     setEditedSession(null);
   };
 
+  const handleDeleteSession = async () => {
+    if (!editedSession) return;
+
+    if (!confirm('¿Estás seguro de que quieres eliminar esta sesión? Esta acción no se puede deshacer.')) {
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const currentUser = await getCurrentUser();
+      if (!currentUser) {
+        alert('Error: Usuario no autenticado');
+        return;
+      }
+
+      const response = await fetch(`${API_URL}/sessions/${editedSession.id}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': currentUser.id
+        }
+      });
+
+      if (response.ok) {
+        await loadSessions();
+        handleCloseModal();
+        alert('Sesión eliminada correctamente');
+      } else {
+        const error = await response.json();
+        alert('Error al eliminar la sesión: ' + (error.error || 'Error desconocido'));
+      }
+    } catch (error) {
+      console.error('Error deleting session:', error);
+      alert('Error al eliminar la sesión');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleFieldChange = (field: keyof Session, value: any) => {
     if (!editedSession) return;
     setEditedSession({ ...editedSession, [field]: value });
@@ -1729,7 +1768,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
 
       {/* Edit Session Modal */}
       {selectedSession && editedSession && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             {/* Modal Header */}
             <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
@@ -1918,31 +1957,41 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
             </div>
 
             {/* Modal Footer */}
-            <div className="sticky bottom-0 bg-slate-50 border-t border-slate-200 px-6 py-4 flex items-center justify-end gap-3">
+            <div className="sticky bottom-0 bg-slate-50 border-t border-slate-200 px-6 py-4 flex items-center justify-between gap-3">
               <button
-                onClick={handleCloseModal}
+                onClick={handleDeleteSession}
                 disabled={isSaving}
-                className="px-4 py-2 text-slate-700 hover:bg-slate-200 rounded-lg font-medium transition-colors disabled:opacity-50"
+                className="px-4 py-2 bg-red-600 text-white hover:bg-red-700 rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
               >
-                Cancelar
+                <Trash2 size={16} />
+                Eliminar
               </button>
-              <button
-                onClick={handleSaveSession}
-                disabled={isSaving}
-                className="px-6 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition-colors flex items-center gap-2 disabled:opacity-50"
-              >
-                {isSaving ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    Guardando...
-                  </>
-                ) : (
-                  <>
-                    <Save size={16} />
-                    Guardar cambios
-                  </>
-                )}
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleCloseModal}
+                  disabled={isSaving}
+                  className="px-4 py-2 text-slate-700 hover:bg-slate-200 rounded-lg font-medium transition-colors disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleSaveSession}
+                  disabled={isSaving}
+                  className="px-6 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+                >
+                  {isSaving ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      Guardando...
+                    </>
+                  ) : (
+                    <>
+                      <Save size={16} />
+                      Guardar
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>

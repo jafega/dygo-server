@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Video, MapPin, CheckCircle, XCircle, DollarSign, Filter, Save, X, Trash2 } from 'lucide-react';
+import { Calendar, Clock, Video, MapPin, CheckCircle, XCircle, DollarSign, Filter, Save, X, Trash2, FileText } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser } from '../services/authService';
+import SessionDetailsModal from './SessionDetailsModal';
 
 interface Session {
   id: string;
@@ -20,6 +21,7 @@ interface Session {
   paid: boolean;
   percent_psych: number;
   tags?: string[];
+  session_entry_id?: string;
 }
 
 interface PsychologistPatientSessionsProps {
@@ -35,6 +37,10 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
   const [isLoading, setIsLoading] = useState(false);
   const [filterStatus, setFilterStatus] = useState<string[]>(['scheduled', 'completed']);
   const [filterPayment, setFilterPayment] = useState<string>('all');
+  const [filterEntry, setFilterEntry] = useState<string[]>(['with-entry', 'without-entry']);
+  const [sessionDetailsModalOpen, setSessionDetailsModalOpen] = useState(false);
+  const [selectedSessionForDetails, setSelectedSessionForDetails] = useState<Session | null>(null);
+  const [sessionEntries, setSessionEntries] = useState<Map<string, { status: 'pending' | 'done' }>>(new Map());
   
   // Date range state - default to current month
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>(() => {
@@ -68,6 +74,18 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
           s.status !== 'available'
         );
         setSessions(patientSessions);
+        
+        // Cargar session_entries para mostrar estados
+        const entriesResponse = await fetch(`${API_URL}/session-entries?target_user_id=${patientId}`);
+        if (entriesResponse.ok) {
+          const entries = await entriesResponse.json();
+          const entriesMap = new Map();
+          entries.forEach((entry: any) => {
+            // Usar entry.id como clave para que coincida con session.session_entry_id
+            entriesMap.set(entry.id, { status: entry.data?.status || entry.status || 'pending' });
+          });
+          setSessionEntries(entriesMap);
+        }
       }
     } catch (error) {
       console.error('Error loading sessions:', error);
@@ -79,6 +97,70 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
   const handleOpenSession = (session: Session) => {
     setSelectedSession(session);
     setEditedSession({ ...session });
+  };
+
+  const handleOpenSessionDetails = async (session: Session, e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    // Si ya tiene entrada, abrir directamente para editar
+    if (session.session_entry_id) {
+      setSelectedSessionForDetails(session);
+      setSessionDetailsModalOpen(true);
+    } else {
+      // Si no tiene entrada, crear una vacía automáticamente
+      try {
+        const currentUser = await getCurrentUser();
+        if (!currentUser) {
+          alert('Error: Usuario no autenticado');
+          return;
+        }
+
+        const sessionEntryData = {
+          session_id: session.id,
+          creator_user_id: currentUser.id,
+          target_user_id: session.patient_user_id || session.patientId,
+          transcript: '',
+          summary: '',
+          status: 'pending',
+          entry_type: 'session_note'
+        };
+
+        const response = await fetch(`${API_URL}/session-entries`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-user-id': currentUser.id
+          },
+          body: JSON.stringify(sessionEntryData)
+        });
+
+        if (response.ok) {
+          const savedEntry = await response.json();
+          console.log('✅ Session entry creada automáticamente:', savedEntry.id);
+          
+          // Actualizar la sesión con el session_entry_id (el backend ya lo hace en Supabase)
+          session.session_entry_id = savedEntry.id;
+          
+          setSelectedSessionForDetails(session);
+          setSessionDetailsModalOpen(true);
+        } else {
+          console.error('Error creando session entry automáticamente');
+          alert('Error al crear la entrada de sesión');
+        }
+      } catch (error) {
+        console.error('Error creando session entry:', error);
+        alert('Error al crear la entrada de sesión');
+      }
+    }
+  };
+
+  const handleCloseSessionDetails = () => {
+    setSessionDetailsModalOpen(false);
+    setSelectedSessionForDetails(null);
+  };
+
+  const handleSaveSessionDetails = () => {
+    loadSessions();
   };
 
   const handleCloseModal = () => {
@@ -216,6 +298,14 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
     }
   };
 
+  const toggleEntryFilter = (option: string) => {
+    if (filterEntry.includes(option)) {
+      setFilterEntry(filterEntry.filter(e => e !== option));
+    } else {
+      setFilterEntry([...filterEntry, option]);
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     const badges = {
       scheduled: { label: 'Programada', color: 'bg-blue-100 text-blue-700 border-blue-200', icon: Clock },
@@ -245,7 +335,34 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
     const matchesPayment = filterPayment === 'all' || 
                           (filterPayment === 'paid' && isPaid) || 
                           (filterPayment === 'unpaid' && !isPaid);
-    return matchesStatus && matchesPayment;
+    
+    // Filtro de entradas
+    if (filterEntry.length === 0) return false;
+    
+    const hasEntry = session.session_entry_id;
+    const entryStatus = hasEntry ? sessionEntries.get(session.session_entry_id)?.status : undefined;
+    const hasCompletedEntry = hasEntry && entryStatus === 'done';
+    const hasIncompleteEntry = hasEntry && entryStatus !== 'done';
+    
+    const showWithEntry = filterEntry.includes('with-entry');
+    const showWithoutEntry = filterEntry.includes('without-entry');
+    
+    let matchesEntry = false;
+    
+    // Si ambos están seleccionados, mostrar todo
+    if (showWithEntry && showWithoutEntry) {
+      matchesEntry = true;
+    }
+    // Si solo "Completada" está seleccionado, mostrar solo las que tienen entrada completada
+    else if (showWithEntry && !showWithoutEntry) {
+      matchesEntry = hasCompletedEntry;
+    }
+    // Si solo "Sin completar" está seleccionado, mostrar las que no tienen entrada o la tienen incompleta
+    else if (showWithoutEntry && !showWithEntry) {
+      matchesEntry = !hasEntry || hasIncompleteEntry;
+    }
+    
+    return matchesStatus && matchesPayment && matchesEntry;
   });
 
   const completedSessions = displayedSessions.filter(s => s.status === 'completed');
@@ -267,7 +384,7 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
       <div className="bg-white rounded-lg sm:rounded-xl border border-slate-200 p-3 sm:p-4 shadow-sm space-y-3 sm:space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0">
           <div className="flex items-center gap-2">
-            <Calendar className="text-purple-600" size={18} className="sm:w-5 sm:h-5" />
+            <Calendar className="text-purple-600 w-[18px] h-[18px] sm:w-5 sm:h-5" />
             <h3 className="text-base sm:text-lg font-bold text-slate-800">Sesiones del Paciente</h3>
           </div>
           <div className="text-xs sm:text-sm text-slate-500">
@@ -360,6 +477,29 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
             ))}
           </div>
         </div>
+
+        {/* Entry Filter */}
+        <div className="space-y-2">
+          <label className="text-[10px] sm:text-xs font-semibold text-slate-600 uppercase">Entrada</label>
+          <div className="flex gap-1.5 sm:gap-2">
+            {[
+              { value: 'with-entry', label: 'Completada' },
+              { value: 'without-entry', label: 'Sin completar' }
+            ].map(option => (
+              <button
+                key={option.value}
+                onClick={() => toggleEntryFilter(option.value)}
+                className={`flex-1 sm:flex-none px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-medium transition-colors ${
+                  filterEntry.includes(option.value)
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Metrics */}
@@ -402,6 +542,7 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
         <div className="space-y-2">
           {displayedSessions.map((session) => {
             const earnings = getPsychologistEarnings(session);
+            const isCompleted = session.status === 'completed';
             
             return (
               <div
@@ -446,9 +587,38 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
                     </div>
                   </div>
 
-                  <div className="text-right flex-shrink-0">
-                    <div className="text-base sm:text-lg font-bold text-purple-900">{earnings.toFixed(2)} €</div>
-                    <div className="text-[9px] sm:text-xs text-slate-500">ganancia</div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {isCompleted && (
+                      <button
+                        onClick={(e) => handleOpenSessionDetails(session, e)}
+                        className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full border-2 transition-all flex items-center justify-center group ${
+                          !session.session_entry_id
+                            ? 'border-red-300 bg-red-50 hover:border-red-500 hover:bg-red-100'
+                            : sessionEntries.get(session.session_entry_id)?.status === 'done'
+                            ? 'border-green-500 bg-green-50 hover:bg-green-100'
+                            : 'border-orange-400 bg-orange-50 hover:border-orange-500 hover:bg-orange-100'
+                        }`}
+                        title={
+                          !session.session_entry_id
+                            ? 'Rellenar detalles de sesión'
+                            : sessionEntries.get(session.session_entry_id)?.status === 'done'
+                            ? 'Detalles completados - Click para editar'
+                            : 'Detalles pendientes - Click para completar'
+                        }
+                      >
+                        {!session.session_entry_id ? (
+                          <FileText size={16} className="text-red-500 group-hover:text-red-600" />
+                        ) : sessionEntries.get(session.session_entry_id)?.status === 'done' ? (
+                          <CheckCircle size={16} className="text-green-600" />
+                        ) : (
+                          <FileText size={16} className="text-orange-500 group-hover:text-orange-600" />
+                        )}
+                      </button>
+                    )}
+                    <div className="text-right">
+                      <div className="text-base sm:text-lg font-bold text-purple-900">{earnings.toFixed(2)} €</div>
+                      <div className="text-[9px] sm:text-xs text-slate-500">ganancia</div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -637,6 +807,15 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
             </div>
           </div>
         </div>
+      )}
+
+      {/* Session Details Modal */}
+      {sessionDetailsModalOpen && selectedSessionForDetails && (
+        <SessionDetailsModal
+          session={selectedSessionForDetails}
+          onClose={handleCloseSessionDetails}
+          onSave={handleSaveSessionDetails}
+        />
       )}
     </div>
   );
