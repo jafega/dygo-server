@@ -379,7 +379,7 @@ Mantén un tono profesional y objetivo.`;
                 method: 'PATCH',
                 headers: {
                   'Content-Type': 'application/json',
-                  'x-user-id': userId
+                  'x-user-id': currentUser.id
                 },
                 body: JSON.stringify({ session_entry_id: existingEntry.id })
               });
@@ -426,7 +426,7 @@ Mantén un tono profesional y objetivo.`;
             method: 'PATCH',
             headers: {
               'Content-Type': 'application/json',
-              'x-user-id': userId
+              'x-user-id': currentUser.id
             },
             body: JSON.stringify({ session_entry_id: savedEntry.id })
           });

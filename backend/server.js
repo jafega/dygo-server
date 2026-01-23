@@ -1852,9 +1852,7 @@ const handleSupabaseAuth = async (req, res) => {
         console.log('🔍 Verificación final: buscando usuario existente por email...');
         const allUsers = await readSupabaseTable('users');
         existingUser = (allUsers || []).find(u => 
-          (u.user_email && normalizeEmail(u.user_email) === normalizedEmail) ||
-          (u.email && normalizeEmail(u.email) === normalizedEmail) ||
-          (u.data?.email && normalizeEmail(u.data.email) === normalizedEmail)
+          normalizeEmail(u.user_email || '') === normalizedEmail
         );
         
         if (existingUser) {
@@ -1879,8 +1877,7 @@ const handleSupabaseAuth = async (req, res) => {
         // Verificar en db.json
         const db = getDb();
         existingUser = db.users.find(u => 
-          (u.email && normalizeEmail(u.email) === normalizedEmail) ||
-          (u.user_email && normalizeEmail(u.user_email) === normalizedEmail)
+          normalizeEmail(u.user_email || u.email || '') === normalizedEmail
         );
         
         if (existingUser) {
@@ -1935,7 +1932,7 @@ const handleSupabaseAuth = async (req, res) => {
             if (error.code === '23505' || error.message?.includes('duplicate') || error.message?.includes('unique')) {
               console.log('⚠️ Error de duplicado, buscando usuario existente...');
               const users = await readSupabaseTable('users');
-              const duplicate = users.find(u => normalizeEmail(u.user_email || u.email) === normalizedEmail);
+              const duplicate = users.find(u => normalizeEmail(u.user_email || '') === normalizedEmail);
               if (duplicate) {
                 console.log('✅ Usuario duplicado encontrado, usando existente:', duplicate.id);
                 user = duplicate;
@@ -2045,9 +2042,9 @@ app.post('/api/auth/login', async (req, res) => {
     
     if (supabaseAdmin) {
       const users = await readSupabaseTable('users');
-      // Buscar por user_email (columna de tabla) o email en data
+      // Buscar por user_email (columna de tabla)
       user = (users || []).find((u) => {
-        const emailMatch = normalizeEmail(u.user_email || u.data?.email || u.email || '') === normalizedEmail;
+        const emailMatch = normalizeEmail(u.user_email || '') === normalizedEmail;
         const passwordMatch = (u.data?.password || u.password) === password;
         return emailMatch && passwordMatch;
       });
@@ -2814,19 +2811,19 @@ app.put('/api/users/:id', async (req, res) => {
 
     if (idx === -1) return res.status(404).json({ error: 'Usuario no encontrado' });
 
-    if (req.body?.email) {
-      const normalizedEmail = normalizeEmail(req.body.email);
-      const duplicate = db.users.find((u, i) => i !== idx && normalizeEmail(u.email) === normalizedEmail);
-      if (duplicate) return res.status(400).json({ error: 'Email ya en uso' });
+    // IMPORTANTE: El email NUNCA se puede cambiar
+    if (req.body?.email && req.body.email !== db.users[idx].email) {
+      return res.status(400).json({ error: 'No se puede cambiar el email del usuario' });
     }
 
-    const updated = { ...db.users[idx], ...req.body };
-    if (updated.email) updated.email = normalizeEmail(updated.email);
+    // Eliminar email del body para asegurar que no se modifique
+    const { email, user_email, ...bodyWithoutEmail } = req.body;
+
+    const updated = { ...db.users[idx], ...bodyWithoutEmail };
     if (updated.role) {
       updated.isPsychologist = String(updated.role).toUpperCase() === 'PSYCHOLOGIST';
       updated.is_psychologist = String(updated.role).toUpperCase() === 'PSYCHOLOGIST';
     }
-    if (updated.email && !updated.user_email) updated.user_email = updated.email;
     db.users[idx] = updated;
     await saveDb(db, { awaitPersistence: true });
     return res.json(db.users[idx]);
@@ -2847,24 +2844,23 @@ app.patch('/api/users/:id', async (req, res) => {
       const idx = db.users.findIndex((u) => u.id === userId);
       if (idx === -1) return res.status(404).json({ error: 'Usuario no encontrado' });
       
-      if (req.body?.email) {
-        const normalizedEmail = normalizeEmail(req.body.email);
-        const duplicate = db.users.find((u, i) => i !== idx && normalizeEmail(u.email) === normalizedEmail);
-        if (duplicate) return res.status(400).json({ error: 'Email ya en uso' });
+      // IMPORTANTE: El email NUNCA se puede cambiar
+      if (req.body?.email && req.body.email !== db.users[idx].email) {
+        return res.status(400).json({ error: 'No se puede cambiar el email del usuario' });
       }
+      
+      // Eliminar email del body para asegurar que no se modifique
+      const { email, user_email, ...bodyWithoutEmail } = req.body;
       
       // Merge data fields
       const currentData = db.users[idx].data || {};
-      const newData = req.body.data || {};
+      const newData = bodyWithoutEmail.data || {};
       
       const updated = { 
         ...db.users[idx], 
-        ...req.body,
+        ...bodyWithoutEmail,
         data: { ...currentData, ...newData }
       };
-      
-      if (updated.email) updated.email = normalizeEmail(updated.email);
-      if (updated.email && !updated.user_email) updated.user_email = updated.email;
       
       db.users[idx] = updated;
       await saveDb(db, { awaitPersistence: true });
@@ -2878,21 +2874,17 @@ app.patch('/api/users/:id', async (req, res) => {
       return res.status(404).json({ error: 'Usuario no encontrado' });
     }
 
-    // Verificar email duplicado si se está actualizando
-    if (req.body?.email) {
-      const normalizedEmail = normalizeEmail(req.body.email);
-      const users = (await readSupabaseTable('users')) || [];
-      const duplicate = users.find(u => u.id !== userId && normalizeEmail(u.email || u.user_email) === normalizedEmail);
-      if (duplicate) return res.status(400).json({ error: 'Email ya en uso' });
+    // IMPORTANTE: El email NUNCA se puede cambiar
+    const currentEmail = existingUser.user_email || existingUser.email;
+    if (req.body?.email && normalizeEmail(req.body.email) !== normalizeEmail(currentEmail)) {
+      return res.status(400).json({ error: 'No se puede cambiar el email del usuario' });
+    }
+    if (req.body?.user_email && normalizeEmail(req.body.user_email) !== normalizeEmail(currentEmail)) {
+      return res.status(400).json({ error: 'No se puede cambiar el email del usuario' });
     }
 
-    // Preparar datos para actualizar
+    // Preparar datos para actualizar (sin email)
     const updateFields = {};
-    
-    // user_email es la única columna directa para email
-    if (req.body.email !== undefined) {
-      updateFields.user_email = normalizeEmail(req.body.email);
-    }
     
     // Merge data field (JSONB column) - name, phone y otros campos van aquí
     const currentData = existingUser.data || {};
@@ -2904,7 +2896,6 @@ app.patch('/api/users/:id', async (req, res) => {
     if (req.body.firstName !== undefined) mergedData.firstName = req.body.firstName;
     if (req.body.lastName !== undefined) mergedData.lastName = req.body.lastName;
     if (req.body.phone !== undefined) mergedData.phone = req.body.phone;
-    if (req.body.email !== undefined) mergedData.email = normalizeEmail(req.body.email);
     
     updateFields.data = mergedData;
 
@@ -2944,15 +2935,19 @@ app.put('/api/users', async (req, res) => {
       return res.status(404).json({ error: 'Usuario no encontrado' });
     }
 
-    if (req.body?.email) {
-      const normalizedEmail = normalizeEmail(req.body.email);
-      const users = (await readSupabaseTable('users')) || [];
-      const duplicate = users.find(u => u.id !== id && normalizeEmail(u.email) === normalizedEmail);
-      if (duplicate) return res.status(400).json({ error: 'Email ya en uso' });
+    // IMPORTANTE: El email NUNCA se puede cambiar
+    const currentEmail = existingUser.user_email || existingUser.email;
+    if (req.body?.email && normalizeEmail(req.body.email) !== normalizeEmail(currentEmail)) {
+      return res.status(400).json({ error: 'No se puede cambiar el email del usuario' });
+    }
+    if (req.body?.user_email && normalizeEmail(req.body.user_email) !== normalizeEmail(currentEmail)) {
+      return res.status(400).json({ error: 'No se puede cambiar el email del usuario' });
     }
 
-    const updated = { ...existingUser, ...req.body };
-    if (updated.email) updated.email = normalizeEmail(updated.email);
+    // Eliminar email del body para asegurar que no se modifique
+    const { email, user_email, ...bodyWithoutEmail } = req.body;
+
+    const updated = { ...existingUser, ...bodyWithoutEmail };
     
     // Si el usuario se está convirtiendo en psicólogo
     const isBecomingPsychologist = updated.is_psychologist === true || updated.isPsychologist === true;
@@ -2995,15 +2990,12 @@ app.put('/api/users', async (req, res) => {
       updated.psychologist_profile_id = profileId;
     }
     
-    if (updated.email && !updated.user_email) updated.user_email = updated.email;
-    
-    // Actualizar en Supabase
-    const { is_psychologist, isPsychologist, role, user_email, psychologist_profile_id, auth_user_id, ...dataFields } = updated;
+    // Actualizar en Supabase (sin cambiar el email)
+    const { is_psychologist, isPsychologist, role, email: emailField, user_email: userEmailField, psychologist_profile_id, auth_user_id, ...dataFields } = updated;
     
     const { error: updateError } = await supabaseAdmin
       .from('users')
       .update({
-        user_email: user_email || updated.email,
         is_psychologist: is_psychologist || false,
         psychologist_profile_id: psychologist_profile_id || null,
         data: dataFields
@@ -4689,13 +4681,13 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
               ...profileData.data,
               // Usar datos del usuario si no están en el perfil
               name: profileData.data.name || userData.name || psychProfile.name,
-              email: profileData.data.email || userData.email || psychProfile.email
+              email: userData.user_email || psychProfile.email
             };
           }
         } else if (userData) {
           // Si no tiene perfil, al menos usar nombre y email del usuario
           psychProfile.name = userData.name || psychProfile.name;
-          psychProfile.email = userData.email || psychProfile.email;
+          psychProfile.email = userData.user_email || psychProfile.email;
         }
       } catch (err) {
         console.error('Error obteniendo perfil del psicólogo para factura:', err);
@@ -6889,6 +6881,7 @@ app.patch('/api/session-entries/:id', async (req, res) => {
 
     if (status !== undefined) {
       updates.status = status;
+      dataUpdates.status = status;
       console.log('✅ Session entry status updated to:', status);
     }
 
@@ -6914,17 +6907,19 @@ app.patch('/api/session-entries/:id', async (req, res) => {
     // Actualizar directamente en Supabase
     if (supabaseAdmin) {
       try {
-        const { error: updateError } = await supabaseAdmin
+        console.log('📝 Actualizando session_entry en Supabase:', { id, updates });
+        const { data: updatedData, error: updateError } = await supabaseAdmin
           .from('session_entry')
           .update(updates)
-          .eq('id', id);
+          .eq('id', id)
+          .select();
 
         if (updateError) {
           console.error('❌ Error actualizando session_entry en Supabase:', updateError);
           throw updateError;
         }
 
-        console.log('✅ Session_entry actualizada en Supabase:', id);
+        console.log('✅ Session_entry actualizada en Supabase:', updatedData);
       } catch (supabaseErr) {
         console.error('❌ Error en operación de Supabase:', supabaseErr);
         throw supabaseErr;
@@ -6932,10 +6927,8 @@ app.patch('/api/session-entries/:id', async (req, res) => {
     }
 
     // Actualizar caché en memoria
+    db.sessionEntries[idx] = { ...entry, ...updates };
     db.sessionEntries[idx].data = dataUpdates;
-    if (status !== undefined) {
-      db.sessionEntries[idx].data.status = status;
-    }
 
     console.log('✅ Session entry updated:', id);
     return res.json(db.sessionEntries[idx]);
@@ -6985,7 +6978,7 @@ app.get('/api/psychologist/:psychologistId/patients', (req, res) => {
       }).map(u => ({
         id: u.id,
         name: u.name,
-        email: u.email,
+        email: u.user_email,
         phone: u.phone || ''
       }))
     : [];

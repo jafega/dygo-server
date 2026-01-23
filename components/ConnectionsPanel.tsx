@@ -16,10 +16,18 @@ import {
   clearConnectionsCache
 } from '../services/storageService';
 import { Shield, Loader2, Search, X, UserPlus, UserCheck, Trash2, Mail, Link2, Send } from 'lucide-react';
+import { API_URL } from '../services/config';
 
 interface ConnectionsPanelProps {
   currentUser: User | null;
   onPendingInvitesChange?: (hasPending: boolean) => void;
+}
+
+interface SimplePatient {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
 }
 
 const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPendingInvitesChange }) => {
@@ -35,7 +43,7 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
   // Para PSICÓLOGOS
   const [sentInvitationsAsPsych, setSentInvitationsAsPsych] = useState<Invitation[]>([]); // Invitaciones enviadas a pacientes
   const [receivedInvitationsAsPsych, setReceivedInvitationsAsPsych] = useState<Invitation[]>([]); // Solicitudes recibidas de pacientes
-  const [connectedPatients, setConnectedPatients] = useState<PatientSummary[]>([]); // Pacientes con relación activa
+  const [connectedPatients, setConnectedPatients] = useState<SimplePatient[]>([]); // Pacientes con relación activa
 
   const [showDirectory, setShowDirectory] = useState(false);
   const [directorySearch, setDirectorySearch] = useState('');
@@ -93,12 +101,13 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
         // 2. Solicitudes RECIBIDAS (donde me piden como psicólogo)
         const receivedAsPsych = await getPendingPsychologistInvitationsForEmail(currentUser.email);
         
-        // 3. Pacientes conectados
-        const patients = await getPatientsForPsychologist(currentUser.id);
+        // 3. Pacientes conectados - usar endpoint directo del backend
+        const patientsResponse = await fetch(`${API_URL}/psychologist/${currentUser.id}/patients`);
+        const patientsData = patientsResponse.ok ? await patientsResponse.json() : [];
         
         setSentInvitationsAsPsych(sentAsPsych);
         setReceivedInvitationsAsPsych(receivedAsPsych);
-        setConnectedPatients(patients.filter(p => !p.isSelf));
+        setConnectedPatients(patientsData);
         
         onPendingInvitesChange?.(receivedAsPatient.length > 0 || receivedAsPsych.length > 0);
       } else {
