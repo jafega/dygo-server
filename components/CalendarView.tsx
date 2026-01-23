@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { JournalEntry } from '../types';
-import { ChevronLeft, ChevronRight, Layers, Plus, Calendar as CalendarIcon, LayoutGrid, Clock, Lightbulb, FileText, MessageCircle, Mic, Heart, Smile } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Layers, Plus, Calendar as CalendarIcon, LayoutGrid, Clock, Lightbulb, FileText, MessageCircle, Mic, Heart, Smile, ChevronDown, ChevronUp, Sparkles, TrendingUp } from 'lucide-react';
 
 interface CalendarViewProps {
   entries: JournalEntry[];
@@ -11,6 +11,7 @@ interface CalendarViewProps {
 
 const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSelectEntry, currentUserId }) => {
   const [expandedTranscripts, setExpandedTranscripts] = useState<{ [key: string]: boolean }>({});
+  const [expandedSections, setExpandedSections] = useState<{ [key: string]: { advice: boolean; feedback: boolean } }>({});
 
   // Toggle transcript visibility for a specific entry
   const toggleTranscript = (entryId: string) => {
@@ -18,6 +19,33 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
       ...prev,
       [entryId]: !prev[entryId]
     }));
+  };
+
+  const toggleSection = (entryId: string, section: 'advice' | 'feedback') => {
+    setExpandedSections(prev => ({
+      ...prev,
+      [entryId]: {
+        ...prev[entryId],
+        [section]: !prev[entryId]?.[section]
+      }
+    }));
+  };
+
+  const getTimeAgo = (timestamp: number) => {
+    const now = Date.now();
+    const diff = now - timestamp;
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+    
+    if (minutes < 1) return 'Ahora mismo';
+    if (minutes < 60) return `Hace ${minutes}m`;
+    if (hours < 24) return `Hace ${hours}h`;
+    if (days === 1) return 'Ayer';
+    if (days < 7) return `Hace ${days} días`;
+    
+    const date = new Date(timestamp);
+    return date.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
   };
 
     const listEntries = [...entries]
@@ -36,166 +64,223 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
       .sort((a, b) => b.timestamp - a.timestamp);
 
   return (
-  <>
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 md:p-6 transition-all duration-300">
-
-      {/* Content Container - Solo vista de lista */}
-      <div className="flex flex-col gap-4">
-          {listEntries.length === 0 ? (
-            <div className="text-center py-16 text-slate-400">
-              <div className="mb-4">
-                <svg className="w-20 h-20 mx-auto opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                </svg>
-              </div>
-              <p className="text-lg font-medium">No hay entradas aún</p>
-              <p className="text-sm mt-2">Comienza hablando con la IA para crear tu primera entrada</p>
+    <div className="max-w-2xl mx-auto">
+      {/* Feed Container */}
+      <div className="space-y-3 md:space-y-4">
+        {listEntries.length === 0 ? (
+          <div className="bg-white rounded-2xl md:rounded-3xl shadow-sm border border-slate-200 p-8 md:p-12 text-center">
+            <div className="w-20 h-20 md:w-24 md:h-24 mx-auto mb-4 bg-gradient-to-br from-purple-100 to-indigo-100 rounded-full flex items-center justify-center">
+              <Sparkles className="w-10 h-10 md:w-12 md:h-12 text-purple-600" />
             </div>
-          ) : (
-            listEntries.map((entry) => {
-              const entryDate = new Date(entry.timestamp);
-              const entryType = entry.entry_type || entry.entryType;
-              const isVoiceSession = entryType === 'voice_session' || entryType === 'voiceSession';
-              const isFeedback = entryType === 'feedback';
-              
-              const feedback = typeof entry.psychologistFeedback === 'string' 
-                ? { text: entry.psychologistFeedback, attachments: [] } 
-                : entry.psychologistFeedback;
+            <h3 className="text-lg md:text-xl font-bold text-slate-800 mb-2">Tu historia comienza aquí</h3>
+            <p className="text-sm md:text-base text-slate-500 max-w-md mx-auto">
+              Comienza hablando con la IA para crear tu primera entrada y comenzar tu viaje de autodescubrimiento
+            </p>
+          </div>
+        ) : (
+          listEntries.map((entry) => {
+            const entryDate = new Date(entry.timestamp);
+            const entryType = entry.entry_type || entry.entryType;
+            const isVoiceSession = entryType === 'voice_session' || entryType === 'voiceSession';
+            const isFeedback = entryType === 'feedback';
+            
+            const feedback = typeof entry.psychologistFeedback === 'string' 
+              ? { text: entry.psychologistFeedback, attachments: [] } 
+              : entry.psychologistFeedback;
 
-              const showTranscript = expandedTranscripts[entry.id] || false;
+            const showTranscript = expandedTranscripts[entry.id] || false;
+            const isAdviceExpanded = expandedSections[entry.id]?.advice || false;
+            const isFeedbackExpanded = expandedSections[entry.id]?.feedback || false;
 
-              return (
-                <div
-                  key={entry.id}
-                  className={`bg-gradient-to-br rounded-2xl p-5 md:p-6 shadow-sm border transition-all hover:shadow-md ${
-                    isFeedback 
-                      ? 'from-blue-50 to-indigo-50 border-indigo-200' 
-                      : 'from-white to-purple-50/30 border-slate-200'
-                  }`}
-                >
-                  {/* Header con fecha y tipo */}
-                  <div className="flex items-start justify-between gap-3 mb-4">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
+            return (
+              <article
+                key={entry.id}
+                className="bg-white rounded-2xl md:rounded-3xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-shadow"
+              >
+                {/* Card Header - Estilo redes sociales */}
+                <div className="px-4 md:px-6 py-3 md:py-4 border-b border-slate-100">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      {/* Avatar/Icon */}
+                      <div className={`w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center flex-shrink-0 ${
+                        isFeedback 
+                          ? 'bg-gradient-to-br from-blue-500 to-indigo-600' 
+                          : 'bg-gradient-to-br from-purple-500 to-pink-600'
+                      }`}>
                         {isFeedback ? (
-                          <span className="inline-flex items-center gap-1.5 text-sm font-bold text-indigo-700 bg-indigo-100 px-3 py-1.5 rounded-full">
-                            <MessageCircle size={14} /> Feedback del Psicólogo
-                          </span>
+                          <MessageCircle className="w-5 h-5 md:w-6 md:h-6 text-white" />
                         ) : (
-                          <span className="inline-flex items-center gap-1.5 text-sm font-bold text-purple-700 bg-purple-100 px-3 py-1.5 rounded-full">
-                            <Mic size={14} /> Sesión con IA
-                          </span>
+                          <Mic className="w-5 h-5 md:w-6 md:h-6 text-white" />
                         )}
                       </div>
-                      <div className="text-sm text-slate-600 mt-2">
-                        {entryDate.toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-                        <span className="text-slate-400 ml-2">•</span>
-                        <span className="ml-2">{entryDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      
+                      {/* Tipo y timestamp */}
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-sm md:text-base text-slate-900">
+                          {isFeedback ? 'Feedback de tu psicólogo' : 'Tu sesión con IA'}
+                        </div>
+                        <div className="text-xs md:text-sm text-slate-500 flex items-center gap-1.5">
+                          <Clock className="w-3 h-3 md:w-3.5 md:h-3.5" />
+                          {getTimeAgo(entry.timestamp)}
+                        </div>
                       </div>
                     </div>
-                    {/* Puntuación de ánimo */}
+
+                    {/* Badge de ánimo (solo en voice sessions) */}
                     {!isFeedback && typeof entry.sentimentScore === 'number' && (
-                      <div className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-lg border-2 ${
+                      <div className={`flex items-center gap-1.5 px-3 py-1.5 md:px-4 md:py-2 rounded-full font-bold text-sm md:text-base ${
                         entry.sentimentScore >= 7 
-                          ? 'bg-green-50 text-green-700 border-green-300' 
+                          ? 'bg-green-100 text-green-700' 
                           : entry.sentimentScore >= 4 
-                          ? 'bg-yellow-50 text-yellow-700 border-yellow-300' 
-                          : 'bg-red-50 text-red-700 border-red-300'
+                          ? 'bg-yellow-100 text-yellow-700' 
+                          : 'bg-red-100 text-red-700'
                       }`}>
-                        <Smile size={20} />
-                        {entry.sentimentScore}/10
+                        <Smile className="w-4 h-4 md:w-5 md:h-5" />
+                        <span className="hidden sm:inline">{entry.sentimentScore}/10</span>
+                        <span className="sm:hidden">{entry.sentimentScore}</span>
                       </div>
                     )}
                   </div>
+                </div>
 
-                  {/* Contenido específico para Feedback */}
+                {/* Card Content */}
+                <div className="p-4 md:p-6 space-y-3 md:space-y-4">
+                  
+                  {/* Feedback Content */}
                   {isFeedback && feedback?.text && (
-                    <div className="bg-white/70 backdrop-blur-sm rounded-xl p-5 border border-indigo-100">
-                      <p className="text-base text-slate-800 leading-relaxed whitespace-pre-wrap">{feedback.text}</p>
+                    <div className="prose prose-sm md:prose-base max-w-none">
+                      <p className="text-slate-700 leading-relaxed whitespace-pre-wrap">{feedback.text}</p>
                     </div>
                   )}
 
-                  {/* Contenido específico para Voice Session */}
+                  {/* Voice Session Content */}
                   {isVoiceSession && (
-                    <div className="space-y-4">
-                      {/* Resumen */}
+                    <>
+                      {/* Resumen Principal */}
                       {entry.summary && (
-                        <div className="bg-white/70 backdrop-blur-sm rounded-xl p-5 border border-slate-200">
-                          <div className="flex items-center gap-2 mb-3">
-                            <FileText size={16} className="text-purple-600" />
-                            <h4 className="text-sm font-bold text-slate-700">Resumen</h4>
-                          </div>
-                          <p className="text-base text-slate-800 leading-relaxed">{entry.summary}</p>
+                        <div className="prose prose-sm md:prose-base max-w-none">
+                          <p className="text-slate-800 leading-relaxed">{entry.summary}</p>
                         </div>
                       )}
 
-                      {/* Emociones */}
+                      {/* Emociones - Pills style */}
                       {entry.emotions && entry.emotions.length > 0 && (
-                        <div>
-                          <h4 className="text-sm font-bold text-slate-600 mb-3 flex items-center gap-2">
-                            <Heart size={16} className="text-pink-500" /> Emociones detectadas
-                          </h4>
-                          <div className="flex flex-wrap gap-2">
-                            {entry.emotions.map((em, idx) => (
-                              <span key={`${em}-${idx}`} className="px-4 py-2 bg-white text-slate-700 rounded-full border-2 border-purple-200 font-medium text-sm hover:bg-purple-50 transition-colors">
-                                {em}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Consejo */}
-                      {entry.advice && (
-                        <div className="bg-amber-50 rounded-xl p-5 border-2 border-amber-200">
-                          <div className="flex items-center gap-2 mb-3">
-                            <Lightbulb size={18} className="text-amber-600" />
-                            <h4 className="text-sm font-bold text-amber-800">Consejo de la IA</h4>
-                          </div>
-                          <p className="text-base text-slate-800 leading-relaxed">{entry.advice}</p>
-                        </div>
-                      )}
-
-                      {/* Feedback del psicólogo (si existe en sesión de voz) */}
-                      {feedback?.text && (
-                        <div className="bg-indigo-50 rounded-xl p-5 border-2 border-indigo-200">
-                          <div className="flex items-center gap-2 mb-3">
-                            <MessageCircle size={18} className="text-indigo-600" />
-                            <h4 className="text-sm font-bold text-indigo-800">Feedback del Psicólogo</h4>
-                          </div>
-                          <p className="text-base text-slate-800 leading-relaxed whitespace-pre-wrap">{feedback.text}</p>
-                        </div>
-                      )}
-
-                      {/* Transcripción (colapsable) */}
-                      {entry.transcript && entry.transcript.length > 50 && (
-                        <div className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden">
-                          <button
-                            onClick={() => toggleTranscript(entry.id)}
-                            className="w-full px-5 py-3 text-left font-semibold text-slate-700 hover:bg-slate-100 transition-colors flex items-center justify-between"
-                          >
-                            <span className="flex items-center gap-2">
-                              <FileText size={16} />
-                              Transcripción completa
+                        <div className="flex flex-wrap gap-2">
+                          {entry.emotions.slice(0, 6).map((em, idx) => (
+                            <span 
+                              key={`${em}-${idx}`} 
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-700 rounded-full text-xs md:text-sm font-medium"
+                            >
+                              <Heart className="w-3 h-3 md:w-3.5 md:h-3.5 text-pink-500" />
+                              {em}
                             </span>
-                            <span className="text-slate-400">{showTranscript ? '▼' : '▶'}</span>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Consejo - Collapsible */}
+                      {entry.advice && (
+                        <div className="border border-amber-200 rounded-xl md:rounded-2xl overflow-hidden bg-gradient-to-br from-amber-50 to-yellow-50">
+                          <button
+                            onClick={() => toggleSection(entry.id, 'advice')}
+                            className="w-full px-4 py-3 md:px-5 md:py-4 flex items-center justify-between hover:bg-amber-100/50 transition-colors"
+                          >
+                            <div className="flex items-center gap-2 md:gap-3">
+                              <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-amber-200 flex items-center justify-center">
+                                <Lightbulb className="w-4 h-4 md:w-5 md:h-5 text-amber-700" />
+                              </div>
+                              <span className="font-semibold text-sm md:text-base text-amber-900">Consejo de la IA</span>
+                            </div>
+                            {isAdviceExpanded ? (
+                              <ChevronUp className="w-5 h-5 text-amber-600" />
+                            ) : (
+                              <ChevronDown className="w-5 h-5 text-amber-600" />
+                            )}
                           </button>
-                          {showTranscript && (
-                            <div className="px-5 py-4 border-t border-slate-200 bg-white">
-                              <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap max-h-80 overflow-y-auto">{entry.transcript}</p>
+                          {isAdviceExpanded && (
+                            <div className="px-4 pb-4 md:px-5 md:pb-5 pt-2">
+                              <p className="text-sm md:text-base text-slate-700 leading-relaxed">{entry.advice}</p>
                             </div>
                           )}
                         </div>
                       )}
-                    </div>
+
+                      {/* Feedback del psicólogo - Collapsible */}
+                      {feedback?.text && (
+                        <div className="border border-indigo-200 rounded-xl md:rounded-2xl overflow-hidden bg-gradient-to-br from-indigo-50 to-blue-50">
+                          <button
+                            onClick={() => toggleSection(entry.id, 'feedback')}
+                            className="w-full px-4 py-3 md:px-5 md:py-4 flex items-center justify-between hover:bg-indigo-100/50 transition-colors"
+                          >
+                            <div className="flex items-center gap-2 md:gap-3">
+                              <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-indigo-200 flex items-center justify-center">
+                                <MessageCircle className="w-4 h-4 md:w-5 md:h-5 text-indigo-700" />
+                              </div>
+                              <span className="font-semibold text-sm md:text-base text-indigo-900">Feedback del Psicólogo</span>
+                            </div>
+                            {isFeedbackExpanded ? (
+                              <ChevronUp className="w-5 h-5 text-indigo-600" />
+                            ) : (
+                              <ChevronDown className="w-5 h-5 text-indigo-600" />
+                            )}
+                          </button>
+                          {isFeedbackExpanded && (
+                            <div className="px-4 pb-4 md:px-5 md:pb-5 pt-2">
+                              <p className="text-sm md:text-base text-slate-700 leading-relaxed whitespace-pre-wrap">{feedback.text}</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Transcripción - Collapsible */}
+                      {entry.transcript && entry.transcript.length > 50 && (
+                        <div className="border border-slate-200 rounded-xl md:rounded-2xl overflow-hidden bg-slate-50">
+                          <button
+                            onClick={() => toggleTranscript(entry.id)}
+                            className="w-full px-4 py-3 md:px-5 md:py-4 flex items-center justify-between hover:bg-slate-100 transition-colors"
+                          >
+                            <div className="flex items-center gap-2 md:gap-3">
+                              <FileText className="w-4 h-4 md:w-5 md:h-5 text-slate-600" />
+                              <span className="font-medium text-sm md:text-base text-slate-700">Ver transcripción completa</span>
+                            </div>
+                            {showTranscript ? (
+                              <ChevronUp className="w-5 h-5 text-slate-500" />
+                            ) : (
+                              <ChevronDown className="w-5 h-5 text-slate-500" />
+                            )}
+                          </button>
+                          {showTranscript && (
+                            <div className="px-4 pb-4 md:px-5 md:pb-5 pt-2 bg-white border-t border-slate-200">
+                              <div className="max-h-60 md:max-h-80 overflow-y-auto">
+                                <p className="text-xs md:text-sm text-slate-600 leading-relaxed whitespace-pre-wrap">{entry.transcript}</p>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
-              );
-            })
-          )}
-        </div>
+
+                {/* Card Footer - Metadata */}
+                <div className="px-4 md:px-6 py-3 bg-slate-50 border-t border-slate-100">
+                  <div className="flex items-center justify-between text-xs md:text-sm text-slate-500">
+                    <span>
+                      {entryDate.toLocaleDateString('es-ES', { 
+                        day: 'numeric', 
+                        month: 'long',
+                        year: entryDate.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined
+                      })}
+                    </span>
+                    <span>{entryDate.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</span>
+                  </div>
+                </div>
+              </article>
+            );
+          })
+        )}
+      </div>
     </div>
-  </>
   );
 };
 

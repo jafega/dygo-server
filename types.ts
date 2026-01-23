@@ -155,6 +155,7 @@ export interface UserSettings {
   notificationTime: string;
   language: string; // 'es-ES' | 'en-US'
   voice: string;    // 'Kore' | 'Puck' | 'Charon' | 'Fenrir' | 'Aoede'
+  allowPsychologistAccess?: boolean; // Si el psicólogo puede ver las entradas
 }
 
 export interface WeeklyReport {

@@ -18,6 +18,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
   const [time, setTime] = useState(settings.notificationTime);
   const [language, setLanguage] = useState(settings.language || 'es-ES');
   const [voice, setVoice] = useState(settings.voice || 'Kore');
+  const [allowPsychologistAccess, setAllowPsychologistAccess] = useState(settings.allowPsychologistAccess ?? true);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -51,7 +52,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
   }, []);
 
   const handleSave = () => {
-    const newSettings: UserSettings = { notificationsEnabled: enabled, feedbackNotificationsEnabled: feedbackEnabled, notificationTime: time, language, voice };
+    const newSettings: UserSettings = { notificationsEnabled: enabled, feedbackNotificationsEnabled: feedbackEnabled, notificationTime: time, language, voice, allowPsychologistAccess };
     if ((enabled || feedbackEnabled) && Notification.permission !== 'granted') {
         Notification.requestPermission().then(permission => {
             const granted = permission === 'granted';
@@ -145,35 +146,60 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
 
                     <div className="space-y-4 pt-2">
                         <h3 className="text-xs font-bold uppercase text-slate-400">Notificaciones</h3>
-                        <div className={`rounded-2xl border ${enabled ? 'border-indigo-200 bg-indigo-50/60' : 'border-slate-100 bg-white'} p-4 transition-colors`}
+                        <div className={`rounded-2xl border ${enabled ? 'border-indigo-200 bg-indigo-50/60' : 'border-slate-100 bg-white'} p-5 transition-colors`}
                         >
-                            <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                    <div className="font-semibold text-slate-800">Recordatorio diario</div>
-                                    <div className="text-xs text-slate-500">Te avisaremos para mantener tu rutina de bienestar.</div>
+                            <div className="flex items-center justify-between gap-4">
+                                <div className="min-w-0 flex-1">
+                                    <div className="font-semibold text-slate-800 text-base">Recordatorio diario</div>
+                                    <div className="text-sm text-slate-500 mt-1">Te avisaremos para mantener tu rutina de bienestar.</div>
                                 </div>
-                                <button onClick={() => setEnabled(!enabled)} className={`w-12 h-6 rounded-full transition-colors relative ${enabled ? 'bg-indigo-500' : 'bg-slate-300'}`}>
-                                    <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${enabled ? 'left-7' : 'left-1'}`}></div>
+                                <button 
+                                    onClick={() => setEnabled(!enabled)} 
+                                    className={`shrink-0 w-14 h-7 rounded-full transition-all relative ${enabled ? 'bg-indigo-500' : 'bg-slate-300'}`}
+                                    aria-label="Toggle recordatorio diario"
+                                >
+                                    <div className={`w-5 h-5 bg-white rounded-full absolute top-1 transition-all shadow-sm ${enabled ? 'left-8' : 'left-1'}`}></div>
                                 </button>
                             </div>
                             {enabled && (
-                                <div className="mt-4 grid gap-2">
-                                    <label className="text-xs text-slate-500 flex items-center gap-2"><Clock size={14} /> Hora del recordatorio</label>
-                                    <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl" />
-                                    <div className="text-[11px] text-slate-400">Puedes cambiarla cuando quieras.</div>
+                                <div className="mt-5 grid gap-2">
+                                    <label className="text-sm text-slate-600 flex items-center gap-2 font-medium"><Clock size={16} /> Hora del recordatorio</label>
+                                    <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="w-full p-4 text-base bg-white border border-slate-200 rounded-xl focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 outline-none" />
+                                    <div className="text-xs text-slate-400 mt-1">Puedes cambiarla cuando quieras.</div>
                                 </div>
                             )}
                         </div>
                         {!currentUser?.is_psychologist && (
-                            <div className={`rounded-2xl border ${feedbackEnabled ? 'border-indigo-200 bg-indigo-50/60' : 'border-slate-100 bg-white'} p-4 transition-colors`}
+                            <div className={`rounded-2xl border ${feedbackEnabled ? 'border-indigo-200 bg-indigo-50/60' : 'border-slate-100 bg-white'} p-5 transition-colors`}
                             >
-                                <div className="flex items-start justify-between gap-3">
-                                    <div className="min-w-0">
-                                        <div className="font-semibold text-slate-800">Feedback del psicólogo</div>
-                                        <div className="text-xs text-slate-500">Te avisaremos cuando tengas nuevo feedback.</div>
+                                <div className="flex items-center justify-between gap-4">
+                                    <div className="min-w-0 flex-1">
+                                        <div className="font-semibold text-slate-800 text-base">Feedback del psicólogo</div>
+                                        <div className="text-sm text-slate-500 mt-1">Te avisaremos cuando tengas nuevo feedback.</div>
                                     </div>
-                                    <button onClick={() => setFeedbackEnabled(!feedbackEnabled)} className={`w-12 h-6 rounded-full transition-colors relative ${feedbackEnabled ? 'bg-indigo-500' : 'bg-slate-300'}`}>
-                                        <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${feedbackEnabled ? 'left-7' : 'left-1'}`}></div>
+                                    <button 
+                                        onClick={() => setFeedbackEnabled(!feedbackEnabled)} 
+                                        className={`shrink-0 w-14 h-7 rounded-full transition-all relative ${feedbackEnabled ? 'bg-indigo-500' : 'bg-slate-300'}`}
+                                        aria-label="Toggle feedback del psicólogo"
+                                    >
+                                        <div className={`w-5 h-5 bg-white rounded-full absolute top-1 transition-all shadow-sm ${feedbackEnabled ? 'left-8' : 'left-1'}`}></div>
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                        {!currentUser?.is_psychologist && (
+                            <div className={`rounded-2xl border ${allowPsychologistAccess ? 'border-indigo-200 bg-indigo-50/60' : 'border-slate-100 bg-white'} p-5 transition-colors`}>
+                                <div className="flex items-center justify-between gap-4">
+                                    <div className="min-w-0 flex-1">
+                                        <div className="font-semibold text-slate-800 text-base">Acceso del psicólogo</div>
+                                        <div className="text-sm text-slate-500 mt-1">Permite que tu psicólogo vea tus entradas de diario.</div>
+                                    </div>
+                                    <button 
+                                        onClick={() => setAllowPsychologistAccess(!allowPsychologistAccess)} 
+                                        className={`shrink-0 w-14 h-7 rounded-full transition-all relative ${allowPsychologistAccess ? 'bg-indigo-500' : 'bg-slate-300'}`}
+                                        aria-label="Toggle acceso del psicólogo"
+                                    >
+                                        <div className={`w-5 h-5 bg-white rounded-full absolute top-1 transition-all shadow-sm ${allowPsychologistAccess ? 'left-8' : 'left-1'}`}></div>
                                     </button>
                                 </div>
                             </div>
