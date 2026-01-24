@@ -85,6 +85,11 @@ const App: React.FC = () => {
   const [error, setError] = useState('');
 
   const getFeedbackText = (entry: JournalEntry) => {
+    // Nuevo formato: entryType: 'feedback' con content
+    if (entry.entryType === 'feedback' && entry.content) {
+      return entry.content;
+    }
+    // Formato antiguo
     if (typeof entry.psychologistFeedback === 'string') return entry.psychologistFeedback;
     if (entry.psychologistFeedback?.text) return entry.psychologistFeedback.text;
     if (entry.psychologistEntryType === 'FEEDBACK') {
@@ -102,11 +107,14 @@ const App: React.FC = () => {
 
   const hasFeedbackContent = (entry: JournalEntry) => {
     const textHas = getFeedbackText(entry).trim().length > 0;
+    // Nuevo formato: entryType: 'feedback' con attachments
+    const newFormatAttHas = entry.entryType === 'feedback' && entry.attachments && Array.isArray(entry.attachments) && entry.attachments.length > 0;
+    // Formato antiguo
     const attHas = typeof entry.psychologistFeedback === 'object' && 
                    entry.psychologistFeedback?.attachments && 
                    Array.isArray(entry.psychologistFeedback.attachments) && 
                    entry.psychologistFeedback.attachments.length > 0;
-    return Boolean(textHas || attHas);
+    return Boolean(textHas || attHas || newFormatAttHas);
   };
 
   useEffect(() => {
@@ -612,8 +620,9 @@ const dayEntries = selectedDate
       .filter(e => {
         // Mostrar entradas del usuario (diario)
         if (e.createdBy !== 'PSYCHOLOGIST') return true;
-        // Mostrar sesiones y feedback del psicólogo
+        // Mostrar sesiones y feedback del psicólogo (formatos antiguo y nuevo)
         if (e.psychologistEntryType === 'SESSION' || e.psychologistEntryType === 'FEEDBACK') return true;
+        if (e.entryType === 'feedback') return true;
         // NO mostrar notas internas
         return false;
       })
@@ -634,11 +643,13 @@ const personalGoals = safeGoals.filter(
 );
 
 const feedbackEntries = [...safeEntries]
-  .filter(e => hasFeedbackContent(e) || e.psychologistEntryType === 'FEEDBACK')
+  .filter(e => hasFeedbackContent(e) || e.psychologistEntryType === 'FEEDBACK' || e.entryType === 'feedback')
   .sort((a, b) => b.timestamp - a.timestamp);
 
 const isSessionEntry = (entry: JournalEntry) => {
   if (entry.psychologistEntryType === 'SESSION') return true;
+  // Incluir entradas de feedback creadas por el psicólogo
+  if (entry.entryType === 'feedback' && entry.createdBy === 'PSYCHOLOGIST') return true;
   if (entry.createdBy === 'PSYCHOLOGIST') {
     return Boolean(entry.transcript && entry.transcript.trim().length > 0);
   }
@@ -1299,9 +1310,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                     <div className="space-y-3 max-h-[520px] overflow-y-auto">
                       {sessionEntries.map(entry => {
                         const timeLabel = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-                        const sessionFeedbackText = typeof entry.psychologistFeedback === 'string'
-                          ? entry.psychologistFeedback
-                          : entry.psychologistFeedback?.text || '';
+                        const sessionFeedbackText = getFeedbackText(entry);
                         const summaryText = (entry.summary || '').trim();
                         const emotions = Array.isArray(entry.emotions) ? entry.emotions : [];
                         const sentimentScore = typeof entry.sentimentScore === 'number' ? entry.sentimentScore : null;
