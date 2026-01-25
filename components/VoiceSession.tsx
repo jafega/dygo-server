@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { LiveServerMessage, Modality } from '@google/genai';
 import { ai } from '../services/genaiService';
 import { createPcmBlob, decodeAudioData, base64ToUint8Array } from '../services/audioUtils';
-import { getLastDaysEntries } from '../services/storageService';
+import { getLastDaysEntriesSummary } from '../services/storageService';
 import { getCurrentUser } from '../services/authService';
 import { Mic, MicOff, PhoneOff, Phone, User, Signal } from 'lucide-react';
 import { ClinicalNoteContent, UserSettings } from '../types';
@@ -81,7 +81,16 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
 
         // 2. Prepare Context (Updated to include Psychologist Feedback)
         // Sort explicitly by date descending to ensure index 0 is the most recent
-        const recentEntries = user ? await getLastDaysEntries(user.id, 5) : [];
+        // Usamos versión optimizada que excluye transcripts y archivos para ahorrar tokens
+        // Reducido de 5 a 3 días para minimizar consumo de tokens
+        const recentEntries = user ? await getLastDaysEntriesSummary(user.id, 3) : [];
+        
+        // Función para truncar texto y reducir tokens
+        const truncate = (text: string | undefined, maxChars: number = 200) => {
+          if (!text) return '';
+          return text.length > maxChars ? text.slice(0, maxChars) + '...' : text;
+        };
+        
         const contextStr = recentEntries.length > 0 
           ? `HISTORIAL RECIENTE Y FEEDBACK DEL PSICÓLOGO (ORDENADO DEL MÁS RECIENTE AL MÁS ANTIGUO):
              ${recentEntries.map((e, index) => {
@@ -89,8 +98,8 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
                 const recencyLabel = index === 0 ? "!!! ÚLTIMO FEEDBACK (MÁXIMA PRIORIDAD) !!!" : "Feedback previo";
                 return `
                 - Día ${e.date}:
-                  Resumen: ${e.summary}
-                  ${feedbackText ? `NOTA DEL PSICÓLOGO (${recencyLabel}): "${feedbackText}".` : 'Sin nota del psicólogo.'}
+                  Resumen: ${truncate(e.summary, 150)}
+                  ${feedbackText ? `NOTA DEL PSICÓLOGO (${recencyLabel}): "${truncate(feedbackText, 200)}".` : 'Sin nota del psicólogo.'}
              `}).join('\n')}`
           : "Esta es la primera vez que hablas con el usuario.";
 

@@ -408,6 +408,21 @@ export const getLastDaysEntries = async (userId: string, days: number): Promise<
   return entries.slice(0, days);
 };
 
+// Versión optimizada que solo retorna datos esenciales para contexto de IA (sin transcripts ni archivos)
+export const getLastDaysEntriesSummary = async (userId: string, days: number): Promise<Partial<JournalEntry>[]> => {
+  const entries = await getEntriesForUser(userId);
+  return entries.slice(0, days).map(entry => ({
+    id: entry.id,
+    date: entry.date,
+    summary: entry.summary,
+    sentimentScore: entry.sentimentScore,
+    emotions: entry.emotions,
+    psychologistFeedback: entry.psychologistFeedback,
+    advice: entry.advice
+    // Excluimos: transcript (puede ser muy largo), file (base64 audio), y otros datos pesados
+  }));
+};
+
 // Migrate localStorage data to backend for a user (called at init when backend is available)
 export const migrateLocalToBackend = async (userId: string) => {
     if (!USE_BACKEND || !ALLOW_LOCAL_FALLBACK) return;
