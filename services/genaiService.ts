@@ -110,6 +110,7 @@ export async function analyzeJournalEntry(transcript: string, date: string, user
     userId: userId,
     creator_user_id: userId,  // El creador es el mismo usuario
     target_user_id: userId,   // El objetivo es el mismo usuario (diario personal)
+    entry_type: 'voice_session',  // Tipo de entrada para sesiones de voz
     date: date,
     timestamp: Date.now(),
     transcript: transcript,

@@ -100,6 +100,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
         if (data && data.length > 0) {
           const rel = data[0];
           console.log('[PatientDetailModal] Relationship loaded:', rel);
+          console.log('[PatientDetailModal] uses_bonos:', rel.uses_bonos, 'usesBonos:', rel.usesBonos);
           setRelationship(rel);
           setRelationshipSettings({
             defaultPrice: rel.defaultPrice || rel.default_session_price || 0,
@@ -107,6 +108,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
             tags: rel.tags || [],
             usesBonos: rel.usesBonos || rel.uses_bonos || false
           });
+          console.log('[PatientDetailModal] relationshipSettings.usesBonos:', rel.usesBonos || rel.uses_bonos || false);
           setClinicalNotes(rel.data?.clinicalNotes || '');
         }
       }
@@ -512,21 +514,27 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
         return;
       }
 
+      const payload = {
+        default_session_price: relationshipSettings.defaultPrice,
+        default_psych_percent: relationshipSettings.defaultPercent,
+        tags: relationshipSettings.tags,
+        uses_bonos: relationshipSettings.usesBonos
+      };
+      
+      console.log('[PatientDetailModal] Guardando configuración:', payload);
+
       const response = await fetch(`${API_URL}/relationships/${relationship.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           'x-user-id': currentUser.id
         },
-        body: JSON.stringify({
-          default_session_price: relationshipSettings.defaultPrice,
-          default_psych_percent: relationshipSettings.defaultPercent,
-          tags: relationshipSettings.tags,
-          uses_bonos: relationshipSettings.usesBonos
-        })
+        body: JSON.stringify(payload)
       });
 
       if (response.ok) {
+        const updatedRelationship = await response.json();
+        console.log('[PatientDetailModal] Relación actualizada:', updatedRelationship);
         alert('Configuración guardada correctamente');
         await loadRelationship();
         await loadAllPsychologistTags(); // Recargar todas las tags del psicólogo
@@ -988,6 +996,8 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
             <BonosPanel
               patientId={patientUserId}
               psychologistId={currentPsychologistId}
+              patientName={patient.name}
+              patientEmail={patient.email}
             />
           )}
 

@@ -649,6 +649,7 @@ function normalizeSupabaseRow(row) {
     delete cleanData.paid;                 // Usar columna de tabla (sessions)
     delete cleanData.default_session_price; // Usar columna de tabla (care_relationships)
     delete cleanData.default_psych_percent; // Usar columna de tabla (care_relationships)
+    // NOTA: uses_bonos NO se elimina porque está en data JSONB, no en columna de tabla
     
     // Combinar: primero data limpia, luego columnas de tabla
     const merged = { ...cleanData, ...base };
@@ -762,6 +763,12 @@ function normalizeSupabaseRow(row) {
     if (base.default_psych_percent !== undefined && base.default_psych_percent !== null) {
       merged.default_psych_percent = parseFloat(base.default_psych_percent);
       merged.defaultPercent = parseFloat(base.default_psych_percent); // Compatibilidad frontend
+    }
+    
+    // Para care_relationships: uses_bonos viene del JSONB data
+    if (cleanData.uses_bonos !== undefined && cleanData.uses_bonos !== null) {
+      merged.uses_bonos = cleanData.uses_bonos;
+      merged.usesBonos = cleanData.uses_bonos; // Compatibilidad frontend camelCase
     }
     
     // Tags vienen del JSONB data
@@ -5800,6 +5807,11 @@ app.put('/api/relationships/:id', async (req, res) => {
           newData.tags = updatedData.tags;
         }
         
+        // Si se envía uses_bonos, guardarlo en data
+        if (updatedData.uses_bonos !== undefined) {
+          newData.uses_bonos = updatedData.uses_bonos;
+        }
+        
         // Merge cualquier otro campo de data que venga
         if (updatedData.data) {
           Object.assign(newData, updatedData.data);
@@ -5829,7 +5841,9 @@ app.put('/api/relationships/:id', async (req, res) => {
 
         if (fetchErr) throw fetchErr;
         
+        console.log('[PUT /api/relationships/:id] Raw updated row from Supabase:', updatedRows[0]);
         const updated = updatedRows && updatedRows[0] ? normalizeSupabaseRow(updatedRows[0]) : null;
+        console.log('[PUT /api/relationships/:id] Normalized updated row:', updated);
 
         // Actualizar cache
         if (supabaseDbCache?.careRelationships && updated) {
@@ -5873,6 +5887,9 @@ app.put('/api/relationships/:id', async (req, res) => {
       default_psych_percent: updatedData.default_psych_percent !== undefined 
         ? Math.min(updatedData.default_psych_percent, 100) 
         : (db.careRelationships[idx].default_psych_percent ?? 100),
+      uses_bonos: updatedData.uses_bonos !== undefined 
+        ? updatedData.uses_bonos 
+        : (db.careRelationships[idx].uses_bonos ?? false),
       data: newData
     };
 
@@ -5882,6 +5899,210 @@ app.put('/api/relationships/:id', async (req, res) => {
   } catch (err) {
     console.error('❌ Error updating relationship', err);
     return res.status(500).json({ error: err?.message || 'No se pudo actualizar la relación' });
+  }
+});
+
+// --- BONOS ---
+app.get('/api/bonos', async (req, res) => {
+  try {
+    const { pacient_user_id, psychologist_user_id } = req.query;
+    
+    console.log('[GET /api/bonos] Consultando bonos:', { pacient_user_id, psychologist_user_id });
+    
+    if (!pacient_user_id && !psychologist_user_id) {
+      return res.status(400).json({ error: 'Se requiere pacient_user_id o psychologist_user_id' });
+    }
+
+    if (supabaseAdmin) {
+      let query = supabaseAdmin
+        .from('bono')
+        .select('*');
+      
+      if (pacient_user_id) {
+        query = query.eq('pacient_user_id', pacient_user_id);
+      }
+      if (psychologist_user_id) {
+        query = query.eq('psychologist_user_id', psychologist_user_id);
+      }
+      
+      const { data, error } = await query.order('created_at', { ascending: false });
+      
+      if (error) {
+        console.error('[GET /api/bonos] Error en Supabase:', error);
+        throw error;
+      }
+      
+      console.log(`[GET /api/bonos] ✓ Encontrados ${data?.length || 0} bonos en Supabase`);
+      return res.json(data || []);
+    }
+    
+    // Fallback a DB local (si se implementa)
+    return res.json([]);
+  } catch (error) {
+    console.error('[GET /api/bonos] Error:', error);
+    res.status(500).json({ error: 'Error al obtener bonos' });
+  }
+});
+
+app.post('/api/bonos', async (req, res) => {
+  try {
+    const { psychologist_user_id, pacient_user_id, total_sessions_amount, total_price_bono_amount, paid = false } = req.body;
+    
+    console.log('[POST /api/bonos] Creando bono:', req.body);
+    
+    // Validaciones
+    if (!psychologist_user_id || !pacient_user_id) {
+      return res.status(400).json({ error: 'Se requiere psychologist_user_id y pacient_user_id' });
+    }
+    
+    if (!total_sessions_amount || total_sessions_amount < 1) {
+      return res.status(400).json({ error: 'total_sessions_amount debe ser al menos 1' });
+    }
+    
+    if (!total_price_bono_amount || total_price_bono_amount <= 0) {
+      return res.status(400).json({ error: 'total_price_bono_amount debe ser mayor a 0' });
+    }
+
+    if (supabaseAdmin) {
+      const { data, error } = await supabaseAdmin
+        .from('bono')
+        .insert({
+          psychologist_user_id,
+          pacient_user_id,
+          total_sessions_amount: parseInt(total_sessions_amount),
+          total_price_bono_amount: parseFloat(total_price_bono_amount),
+          paid: Boolean(paid)
+        })
+        .select()
+        .single();
+      
+      if (error) {
+        console.error('[POST /api/bonos] Error en Supabase:', error);
+        throw error;
+      }
+      
+      console.log('[POST /api/bonos] ✓ Bono creado en Supabase:', data);
+      return res.status(201).json(data);
+    }
+    
+    // Fallback a DB local (si se implementa)
+    return res.status(501).json({ error: 'Creación de bonos solo disponible con Supabase' });
+  } catch (error) {
+    console.error('[POST /api/bonos] Error:', error);
+    res.status(500).json({ error: 'Error al crear el bono' });
+  }
+});
+
+// PUT: Actualizar un bono
+app.put('/api/bonos/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { total_price_bono_amount, paid } = req.body;
+    
+    console.log('[PUT /api/bonos/:id] Actualizando bono:', { id, body: req.body });
+    
+    // Validaciones
+    if (!total_price_bono_amount || total_price_bono_amount <= 0) {
+      return res.status(400).json({ error: 'total_price_bono_amount debe ser mayor a 0' });
+    }
+
+    if (supabaseAdmin) {
+      const updateData = {
+        total_price_bono_amount: parseFloat(total_price_bono_amount),
+        paid: Boolean(paid)
+      };
+
+      const { data, error } = await supabaseAdmin
+        .from('bono')
+        .update(updateData)
+        .eq('id', id)
+        .select()
+        .single();
+      
+      if (error) {
+        console.error('[PUT /api/bonos/:id] Error en Supabase:', error);
+        throw error;
+      }
+      
+      if (!data) {
+        return res.status(404).json({ error: 'Bono no encontrado' });
+      }
+      
+      console.log('[PUT /api/bonos/:id] ✓ Bono actualizado en Supabase:', data);
+      return res.json(data);
+    }
+    
+    return res.status(501).json({ error: 'Actualización de bonos solo disponible con Supabase' });
+  } catch (error) {
+    console.error('[PUT /api/bonos/:id] Error:', error);
+    res.status(500).json({ error: 'Error al actualizar el bono' });
+  }
+});
+
+// DELETE: Eliminar un bono
+app.delete('/api/bonos/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    console.log('[DELETE /api/bonos/:id] Eliminando bono:', { id });
+
+    if (supabaseAdmin) {
+      // Primero verificamos si el bono existe y obtenemos sus datos
+      const { data: bono, error: fetchError } = await supabaseAdmin
+        .from('bono')
+        .select('*, sessions!sessions_invoice_id_fkey(id)')
+        .eq('id', id)
+        .single();
+      
+      if (fetchError) {
+        console.error('[DELETE /api/bonos/:id] Error al buscar bono:', fetchError);
+        if (fetchError.code === 'PGRST116') {
+          return res.status(404).json({ error: 'Bono no encontrado' });
+        }
+        throw fetchError;
+      }
+
+      // Verificar si tiene sesiones asignadas (a través de invoice_id)
+      if (bono.invoice_id) {
+        // Verificar si hay sesiones asociadas a esta factura
+        const { data: sessions, error: sessionsError } = await supabaseAdmin
+          .from('sessions')
+          .select('id')
+          .eq('invoice_id', bono.invoice_id)
+          .limit(1);
+        
+        if (sessionsError) {
+          console.error('[DELETE /api/bonos/:id] Error al verificar sesiones:', sessionsError);
+          throw sessionsError;
+        }
+        
+        if (sessions && sessions.length > 0) {
+          return res.status(400).json({ 
+            error: 'No se puede eliminar un bono que tiene sesiones asignadas',
+            message: 'Este bono tiene sesiones asociadas y no puede ser eliminado'
+          });
+        }
+      }
+
+      // Si no tiene sesiones, procedemos a eliminar
+      const { error: deleteError } = await supabaseAdmin
+        .from('bono')
+        .delete()
+        .eq('id', id);
+      
+      if (deleteError) {
+        console.error('[DELETE /api/bonos/:id] Error al eliminar:', deleteError);
+        throw deleteError;
+      }
+      
+      console.log('[DELETE /api/bonos/:id] ✓ Bono eliminado en Supabase');
+      return res.json({ success: true, message: 'Bono eliminado correctamente' });
+    }
+    
+    return res.status(501).json({ error: 'Eliminación de bonos solo disponible con Supabase' });
+  } catch (error) {
+    console.error('[DELETE /api/bonos/:id] Error:', error);
+    res.status(500).json({ error: 'Error al eliminar el bono' });
   }
 });
 
