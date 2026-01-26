@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, FileText, User as UserIcon, Calendar, Menu, X, ArrowLeftRight, ShieldCheck, Link2, BarChart3, AlertCircle, ClipboardList } from 'lucide-react';
+import { Users, FileText, User as UserIcon, Calendar, Menu, X, ArrowLeftRight, ShieldCheck, Link2, BarChart3, AlertCircle, ClipboardList, Building2 } from 'lucide-react';
 
 const DygoLogo: React.FC<{ className?: string }> = ({ className = "w-8 h-8" }) => (
   <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
@@ -8,8 +8,8 @@ const DygoLogo: React.FC<{ className?: string }> = ({ className = "w-8 h-8" }) =
 );
 
 interface PsychologistSidebarProps {
-  activeView: 'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule';
-  onViewChange: (view: 'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule') => void;
+  activeView: 'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule' | 'centros';
+  onViewChange: (view: 'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule' | 'centros') => void;
   isOpen: boolean;
   onToggle: () => void;
   userName?: string;
@@ -38,6 +38,7 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
     { id: 'sessions' as const, label: 'Sesiones', icon: ClipboardList },
     { id: 'dashboard' as const, label: 'Métricas', icon: BarChart3 },
     { id: 'billing' as const, label: 'Facturación', icon: FileText },
+    { id: 'centros' as const, label: 'Centros', icon: Building2 },
     { id: 'profile' as const, label: 'Mi Perfil Profesional', icon: UserIcon },
   ];
 

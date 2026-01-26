@@ -23,7 +23,9 @@ import PatientProfilePanel from './components/PatientProfilePanel';
 import PsychologistSchedule from './components/PsychologistSchedule';
 import PsychologistDashboard from './components/PsychologistDashboard';
 import SessionsList from './components/SessionsList';
-import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock, AlertCircle, Smile, Shield } from 'lucide-react';
+import CentrosPanel, { CentrosPanelRef } from './components/CentrosPanel';
+import ConnectionsPanel from './components/ConnectionsPanel';
+import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock, AlertCircle, Smile, Shield, Building2 } from 'lucide-react';
 
 // Custom Dygo Logo Component
 const DygoLogo: React.FC<{ className?: string }> = ({ className = "w-8 h-8" }) => (
@@ -39,11 +41,12 @@ const App: React.FC = () => {
   const [pendingRole, setPendingRole] = useState<'PATIENT' | 'PSYCHOLOGIST' | null>(null);
   
   const [psychViewMode, setPsychViewMode] = useState<'DASHBOARD' | 'PERSONAL'>('DASHBOARD');
-  const [psychPanelView, setPsychPanelView] = useState<'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule'>('schedule');
+  const [psychPanelView, setPsychPanelView] = useState<'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule' | 'centros'>('schedule');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   
   // Ref para controlar PatientDashboard
   const patientDashboardRef = useRef<PatientDashboardHandle>(null);
+  const centrosPanelRef = useRef<CentrosPanelRef>(null);
   
   // State for draggable menu button position (unified across personal/professional)
   const [menuButtonPos, setMenuButtonPos] = useState(() => {
@@ -730,9 +733,9 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                />
                
                {/* Main Content */}
-               <div className="flex-1 overflow-y-auto px-4 md:px-8 py-4 md:py-6">
+               <div className="flex-1 overflow-y-auto px-4 md:px-8 py-2 md:py-3">
                     {/* Mobile Header with page titles, icon and description */}
-                    <header className="lg:hidden mb-6">
+                    <header className="lg:hidden mb-3">
                       <div className="flex items-center gap-3 mb-2">
                         {psychPanelView === 'dashboard' && <LayoutDashboard className="w-6 h-6 text-indigo-600" />}
                         {psychPanelView === 'patients' && <Users className="w-6 h-6 text-indigo-600" />}
@@ -741,6 +744,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                         {psychPanelView === 'schedule' && <CalendarIcon className="w-6 h-6 text-indigo-600" />}
                         {psychPanelView === 'connections' && <Link2 className="w-6 h-6 text-indigo-600" />}
                         {psychPanelView === 'sessions' && <FileText className="w-6 h-6 text-indigo-600" />}
+                        {psychPanelView === 'centros' && <Building2 className="w-6 h-6 text-indigo-600" />}
                         <h1 className="text-2xl font-bold text-slate-900">
                           {psychPanelView === 'dashboard' && 'Métricas'}
                           {psychPanelView === 'patients' && 'Pacientes'}
@@ -749,6 +753,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                           {psychPanelView === 'schedule' && 'Agenda'}
                           {psychPanelView === 'connections' && 'Conexiones'}
                           {psychPanelView === 'sessions' && 'Sesiones'}
+                          {psychPanelView === 'centros' && 'Centros'}
                         </h1>
                       </div>
                       <p className="text-sm text-slate-500">
@@ -759,11 +764,12 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                         {psychPanelView === 'schedule' && 'Vista semanal de tu agenda'}
                         {psychPanelView === 'connections' && 'Gestiona quién puede verte y a quién acompañas'}
                         {psychPanelView === 'sessions' && 'Gestión de sesiones'}
+                        {psychPanelView === 'centros' && 'Gestiona tus centros de trabajo'}
                       </p>
                     </header>
 
                     {/* Desktop Header */}
-                    <header className="hidden lg:flex justify-between items-center mb-6">
+                    <header className="hidden lg:flex justify-between items-center mb-3">
                       <div>
                         <h1 className="text-3xl font-bold text-slate-900">
                           {psychPanelView === 'dashboard' && 'Dashboard'}
@@ -773,6 +779,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                           {psychPanelView === 'schedule' && 'Agenda'}
                           {psychPanelView === 'connections' && 'Conexiones'}
                           {psychPanelView === 'sessions' && 'Sesiones'}
+                          {psychPanelView === 'centros' && 'Centros'}
                         </h1>
                         <p className="text-slate-500 mt-1">
                           {psychPanelView === 'dashboard' && 'Resumen completo de tu actividad profesional'}
@@ -782,6 +789,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                           {psychPanelView === 'schedule' && 'Vista semanal de tu agenda con filtros'}
                           {psychPanelView === 'connections' && 'Gestiona quién puede verte y a quién acompañas'}
                           {psychPanelView === 'sessions' && 'Gestión completa de sesiones con métricas'}
+                          {psychPanelView === 'centros' && 'Gestiona los centros donde ofreces tus servicios'}
                         </p>
                       </div>
                       {/* Action Buttons */}
@@ -810,16 +818,15 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                             </button>
                           </>
                         )}
-                        {psychPanelView === 'billing' && (
+                        {psychPanelView === 'centros' && (
                           <button
                             onClick={() => {
-                              const billing = document.querySelector('[data-billing-component]') as any;
-                              if (billing && billing.openNewInvoice) billing.openNewInvoice();
+                              centrosPanelRef.current?.openNewCenter();
                             }}
                             className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-md"
                           >
                             <Plus size={18} />
-                            Nueva Factura
+                            Nuevo Centro
                           </button>
                         )}
                       </div>
@@ -829,6 +836,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                     {psychPanelView === 'patients' && <PatientDashboard ref={patientDashboardRef} />}
                     {psychPanelView === 'sessions' && <SessionsList psychologistId={currentUser.id} />}
                     {psychPanelView === 'billing' && <BillingPanel psychologistId={currentUser.id} />}
+                    {psychPanelView === 'centros' && <CentrosPanel ref={centrosPanelRef} psychologistId={currentUser.id} />}
                     {psychPanelView === 'profile' && <PsychologistProfilePanel userId={currentUser.id} userEmail={currentUser.email} />}
                     {psychPanelView === 'schedule' && <PsychologistSchedule psychologistId={currentUser.id} />}
                     {psychPanelView === 'connections' && <ConnectionsPanel currentUser={currentUser} />}

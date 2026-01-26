@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X, FileText, Upload, Mic, Save, Loader, CheckCircle, Sparkles, AlertCircle, Check, XCircle as XCircleIcon } from 'lucide-react';
+import { X, FileText, Upload, Mic, Save, Loader, CheckCircle, Sparkles, AlertCircle, Check, XCircle } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser } from '../services/authService';
 import { ai } from '../services/genaiService';
@@ -17,6 +17,20 @@ interface Session {
   notes?: string;
   price: number;
   session_entry_id?: string;
+  invoice_id?: string;
+  bonus_id?: string;
+}
+
+interface Bono {
+  id: string;
+  pacient_user_id: string;
+  psychologist_user_id: string;
+  total_sessions_amount: number;
+  total_price_bono_amount: number;
+  paid: boolean;
+  sessions_used?: number;
+  sessions_remaining?: number;
+  created_at: string;
 }
 
 interface SessionEntry {
@@ -60,6 +74,11 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session, onCl
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [existingEntry, setExistingEntry] = useState<SessionEntry | null>(null);
   const [isLoadingEntry, setIsLoadingEntry] = useState(false);
+  
+  // Estados para bonos
+  const [availableBonos, setAvailableBonos] = useState<Bono[]>([]);
+  const [isLoadingBonos, setIsLoadingBonos] = useState(false);
+  const [isAssigningBono, setIsAssigningBono] = useState(false);
 
   // Cargar session_entry existente si existe
   useEffect(() => {
@@ -104,6 +123,89 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session, onCl
 
     loadExistingEntry();
   }, [session.id, session.session_entry_id]);
+  
+  // Cargar bonos disponibles del paciente
+  useEffect(() => {
+    const loadAvailableBonos = async () => {
+      if (!session.patient_user_id && !session.patientId) return;
+      
+      setIsLoadingBonos(true);
+      try {
+        const currentUser = await getCurrentUser();
+        if (!currentUser) return;
+        
+        const patientUserId = session.patient_user_id || session.patientId;
+        const psychologistUserId = currentUser.id;
+        
+        const response = await fetch(
+          `${API_URL}/bonos/available/${patientUserId}?psychologist_user_id=${psychologistUserId}`
+        );
+        
+        if (response.ok) {
+          const bonos = await response.json();
+          setAvailableBonos(bonos);
+        }
+      } catch (error) {
+        console.error('Error loading available bonos:', error);
+      } finally {
+        setIsLoadingBonos(false);
+      }
+    };
+
+    loadAvailableBonos();
+  }, [session.patient_user_id, session.patientId]);
+
+  const handleAssignBono = async (bonoId: string) => {
+    setIsAssigningBono(true);
+    try {
+      const response = await fetch(`${API_URL}/sessions/${session.id}/assign-bonus`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ bonus_id: bonoId })
+      });
+      
+      if (response.ok) {
+        alert('Sesión asignada al bono correctamente');
+        onSave();
+        onClose();
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Error al asignar sesión al bono');
+      }
+    } catch (error) {
+      console.error('Error assigning bono:', error);
+      alert('Error al asignar sesión al bono');
+    } finally {
+      setIsAssigningBono(false);
+    }
+  };
+
+  const handleUnassignBono = async () => {
+    if (!confirm('¿Estás seguro de que quieres desasignar esta sesión del bono?')) return;
+    
+    setIsAssigningBono(true);
+    try {
+      const response = await fetch(`${API_URL}/sessions/${session.id}/assign-bonus`, {
+        method: 'DELETE'
+      });
+      
+      if (response.ok) {
+        alert('Sesión desasignada del bono correctamente');
+        onSave();
+        onClose();
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Error al desasignar sesión del bono');
+      }
+    } catch (error) {
+      console.error('Error unassigning bono:', error);
+      alert('Error al desasignar sesión del bono');
+    } finally {
+      setIsAssigningBono(false);
+    }
+  };
 
   const generateAISummary = async (text: string) => {
     if (!text.trim()) {
@@ -621,6 +723,85 @@ Mantén un tono profesional y objetivo.`;
         </div>
       ) : (
         <>
+          {/* Payment Status Section */}
+          <div className="px-4 sm:px-6 pt-4 sm:pt-6 space-y-3">
+            {/* Invoice Status */}
+            {session.invoice_id && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                <div className="flex items-center gap-2 text-green-700">
+                  <CheckCircle size={16} />
+                  <span className="text-sm font-medium">Facturada</span>
+                </div>
+                <p className="text-xs text-green-600 mt-1">Esta sesión está asociada a una factura</p>
+              </div>
+            )}
+            
+            {/* Bonus Section - Solo mostrar si NO tiene invoice_id */}
+            {!session.invoice_id && (
+              <>
+                {session.bonus_id ? (
+                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-purple-700">
+                        <CheckCircle size={16} />
+                        <span className="text-sm font-medium">Asignada a bono</span>
+                      </div>
+                      <button
+                        onClick={handleUnassignBono}
+                        disabled={isAssigningBono}
+                        className="text-xs text-purple-600 hover:text-purple-800 underline disabled:opacity-50"
+                      >
+                        Desasignar
+                      </button>
+                    </div>
+                    <p className="text-xs text-purple-600 mt-1">Esta sesión pertenece a un bono del paciente</p>
+                  </div>
+                ) : availableBonos.length > 0 ? (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                    <div className="mb-2">
+                      <span className="text-sm font-medium text-blue-900">Asignar a bono</span>
+                      <p className="text-xs text-blue-600 mt-0.5">El paciente tiene bonos disponibles</p>
+                    </div>
+                    <div className="space-y-2">
+                      {availableBonos.map(bono => (
+                        <button
+                          key={bono.id}
+                          onClick={() => handleAssignBono(bono.id)}
+                          disabled={isAssigningBono}
+                          className="w-full text-left px-3 py-2 bg-white border border-blue-300 rounded-lg hover:bg-blue-50 hover:border-blue-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <div className="text-sm font-medium text-blue-900">
+                                Bono - {bono.total_price_bono_amount}€
+                              </div>
+                              <div className="text-xs text-blue-600">
+                                {bono.sessions_remaining} sesión{bono.sessions_remaining !== 1 ? 'es' : ''} disponible{bono.sessions_remaining !== 1 ? 's' : ''}
+                              </div>
+                            </div>
+                            <div className="text-xs text-blue-500">
+                              {new Date(bono.created_at).toLocaleDateString('es-ES')}
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                    <div className="flex items-center gap-2 text-slate-600">
+                      <XCircle size={16} />
+                      <span className="text-sm font-medium">Sin asignar</span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {isLoadingBonos ? 'Cargando bonos...' : 'El paciente no tiene bonos disponibles'}
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
           {/* Content Area */}
           <div className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6 space-y-4 sm:space-y-6">
             {/* Mode Selection - Compact & Mobile Friendly */}
@@ -732,7 +913,7 @@ Mantén un tono profesional y objetivo.`;
                           onClick={handleReplaceTranscript}
                           className="flex-1 min-w-[140px] px-3 py-2 bg-gradient-to-r from-orange-600 to-red-600 text-white rounded-lg text-xs font-medium hover:from-orange-700 hover:to-red-700 transition-all flex items-center justify-center gap-1.5"
                         >
-                          <XCircleIcon size={12} />
+                          <XCircle size={12} />
                           Sustituir transcript
                         </button>
                       </div>

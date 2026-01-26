@@ -7,12 +7,14 @@ Este documento describe todas las optimizaciones implementadas para reducir el c
 | Optimización | Ahorro Estimado | Impacto |
 |-------------|-----------------|---------|
 | Exclusión de transcripts del contexto | ~80% | Alto |
-| Reducción de días de historial (5→3) | ~40% | Medio |
-| Truncamiento de resúmenes y feedback | ~60% | Alto |
+| Reducción de días de historial (5→2) | ~60% | Alto |
+| Truncamiento agresivo (summary 100, feedback 120 chars) | ~70% | Muy Alto |
+| Formato de contexto compactado | ~40% | Alto |
+| System instruction compactado | ~65% | Alto |
 | Caché de contexto | ~30-50% en sesiones repetidas | Medio |
 | Buffer de audio aumentado (4096→8192) | ~15% overhead | Bajo |
-| Compresión de transcripts | ~60-70% tamaño almacenado | Alto |
-| **TOTAL ESTIMADO** | **~70-85%** | **Muy Alto** |
+| Compresión de transcripts al guardar | ~60-70% almacenamiento | Alto |
+| **TOTAL ESTIMADO** | **~80-92%** | **Muy Alto** |
 
 ---
 
@@ -49,12 +51,92 @@ export const getLastDaysEntriesSummary = async (userId: string, days: number): P
 **Archivo:** `components/VoiceSession.tsx`
 
 **Antes:** `getLastDaysEntries(user.id, 5)`  
-**Ahora:** `getLastDaysEntriesSummary(user.id, 3)`
+**Después v1:** `getLastDaysEntriesSummary(user.id, 3)`  
+**AHORA v2:** `getLastDaysEntriesSummary(user.id, 2)` ← **Optimización final**
 
 **Beneficios:**
-- ✅ Menos entradas cargadas (3 vs 5)
+- ✅ Solo los 2 días más recientes (suficiente para contexto)
 - ✅ Usa versión optimizada sin transcripts
-- 💰 **Ahorro: ~40% menos datos de contexto**
+- 💰 **Ahorro: ~60% menos datos de contexto vs original**
+
+---
+
+### 3. **Truncamiento agresivo de texto**
+**Archivo:** `components/VoiceSession.tsx`
+
+**Antes:**
+```typescript
+const truncate = (text: string | undefined, maxChars: number = 200) => {...}
+// Usaba: summary sin límite, feedback 200 chars
+```
+
+**AHORA:**
+```typescript
+const truncate = (text: string | undefined, maxChars: number = 120) => {...}
+// Usa: summary 100 chars, feedback 120 chars (límites muy agresivos)
+```
+
+**Beneficios:**
+- ✅ Summaries reducidos a 100 caracteres (antes ~500-1000)
+- ✅ Feedback del psicólogo limitado a 120 caracteres
+- ✅ Información esencial preservada
+- 💰 **Ahorro: ~70% en longitud de textos**
+
+---
+
+### 4. **Formato de contexto ultra-compactado**
+**Archivo:** `components/VoiceSession.tsx`
+
+**Antes:**
+```
+HISTORIAL RECIENTE Y FEEDBACK DEL PSICÓLOGO (ORDENADO DEL MÁS RECIENTE AL MÁS ANTIGUO):
+  - Día 2026-01-26:
+    Resumen: El usuario tuvo un día difícil en el trabajo...
+    NOTA DEL PSICÓLOGO (!!! ÚLTIMO FEEDBACK (MÁXIMA PRIORIDAD) !!!): "Indagar sobre relación con compañeros"
+  - Día 2026-01-25:
+    Resumen: El usuario se sintió ansioso...
+    Sin nota del psicólogo.
+```
+
+**AHORA:**
+```
+2026-01-26[PRIORIDAD]: Día difícil trabajo... | Psicólogo: Indagar relación compañeros
+2026-01-25: Se sintió ansioso...
+```
+
+**Beneficios:**
+- ✅ Sin encabezados verbosos
+- ✅ Sin etiquetas repetitivas
+- ✅ Formato lineal compacto
+- ✅ Marcador [PRIORIDAD] solo en día más reciente
+- 💰 **Ahorro: ~40% en formato de contexto**
+
+---
+
+### 5. **System Instruction compactado**
+**Archivo:** `components/VoiceSession.tsx`
+
+**Antes (>600 caracteres):**
+```
+Eres "dygo", un compañero de diario inteligente, empático y curioso.
+
+SALUDO INICIAL: Cuando comience la sesión, saluda brevemente...
+[... muchas líneas de instrucciones detalladas ...]
+```
+
+**AHORA (~180 caracteres):**
+```
+Eres dygo, compañero de diario empático. Inicia: saluda y pregunta cómo le fue (1-2 frases). 
+Si hay nota del psicólogo (marcada [PRIORIDAD]), pregunta sobre ESO primero. 
+Estilo: breve (máx 2 oraciones), pregunta por emociones siempre, explora más temas. 
+No aconsejes ni juzgues. Idioma: ${languageInstruction}.
+```
+
+**Beneficios:**
+- ✅ Instrucciones concisas pero completas
+- ✅ Sin formato Markdown innecesario
+- ✅ Mantiene comportamiento deseado
+- 💰 **Ahorro: ~65% en system instruction**
 
 ---
 
@@ -83,7 +165,7 @@ NOTA DEL PSICÓLOGO: "${truncate(feedbackText, 200)}"
 
 ---
 
-### 4. **Caché de contexto**
+### 6. **Caché de contexto**
 **Archivo:** `components/VoiceSession.tsx`
 
 ```typescript
@@ -108,7 +190,7 @@ if (cachedKey === entriesKey && contextCacheRef.current) {
 
 ---
 
-### 5. **Buffer de audio aumentado**
+### 7. **Buffer de audio aumentado**
 **Archivo:** `components/VoiceSession.tsx`
 
 **Antes:** `createScriptProcessor(4096, 1, 1)`  
@@ -124,7 +206,7 @@ if (cachedKey === entriesKey && contextCacheRef.current) {
 
 ---
 
-### 6. **Compresión de transcripts con pako**
+### 8. **Compresión de transcripts con pako**
 **Archivo:** `services/genaiService.ts`
 
 ```typescript
@@ -184,21 +266,147 @@ npm install pako @types/pako
 
 ### Antes de las optimizaciones:
 ```
-VoiceSession context = 5 entradas × (transcript completo + summary + feedback + file)
-≈ 5 × (3000 + 500 + 300 + 5000) chars ≈ 44,000 chars ≈ 11,000 tokens
+VoiceSession context:
+- 5 días de historial
+- Transcript completo (~3000 chars/día)
+- Summary sin truncar (~500 chars/día)
+- Feedback sin truncar (~300 chars/día)
+- System instruction verboso (~600 chars)
+
+Total ≈ 5 × (3000 + 500 + 300) + 600 ≈ 19,600 chars ≈ 4,900 tokens
 ```
 
-### Después de las optimizaciones:
+### Después de optimizaciones v1:
 ```
-VoiceSession context = 3 entradas × (summary[150] + feedback[200])
-≈ 3 × (150 + 200) chars ≈ 1,050 chars ≈ 260 tokens
+VoiceSession context:
+- 3 días de historial
+- Sin transcripts (excluidos)
+- Summary truncado (150 chars/día)
+- Feedback truncado (200 chars/día)
+- System instruction original
+
+Total ≈ 3 × (150 + 200) + 600 ≈ 1,650 chars ≈ 410 tokens
+Reducción: ~92%
 ```
 
-### **Reducción total: ~97% menos tokens en contexto de voz** 🎉
+### **AHORA v2 (optimización final):**
+```
+VoiceSession context:
+- 2 días de historial (último = [PRIORIDAD])
+- Sin transcripts (excluidos)
+- Summary ultra-truncado (100 chars/día)
+- Feedback ultra-truncado (120 chars/día)
+- System instruction compactado (~180 chars)
+- Formato compacto (sin headers/labels verbosos)
+
+Total ≈ 2 × (100 + 120) + 180 ≈ 620 chars ≈ 155 tokens
+```
+
+### **Reducción total: ~97% menos tokens** 🎉
+**De ~4,900 tokens → ~155 tokens por sesión de voz**
 
 ---
 
-## 🚀 Recomendaciones Adicionales (No Implementadas)
+## � Cálculo de Costos por Conversación
+
+### Pricing de Gemini 2.0 Flash (Live API)
+
+Según la [documentación oficial de Google AI](https://ai.google.dev/pricing):
+
+- **Audio Input**: $0.00001875 USD por segundo (~$1.125 por hora)
+- **Audio Output**: $0.000075 USD por segundo (~$4.50 por hora)  
+- **Text Input**: $0.000000075 USD por token
+- **Text Output**: $0.0000003 USD por token
+
+---
+
+### Escenario: Conversación de 5 minutos
+
+**Asunciones:**
+- Duración total: 300 segundos (5 minutos)
+- Usuario habla: ~150 segundos (50% del tiempo)
+- IA responde: ~150 segundos (50% del tiempo)
+- Contexto inicial: ~155 tokens de texto
+
+**Desglose de costos:**
+
+1. **Audio Input (usuario hablando):**
+   ```
+   150 segundos × $0.00001875/seg = $0.0028125
+   ```
+
+2. **Audio Output (IA respondiendo):**
+   ```
+   150 segundos × $0.000075/seg = $0.01125
+   ```
+
+3. **Text Input (contexto + transcripción):**
+   ```
+   155 tokens (contexto) × $0.000000075 = $0.000011625
+   ~1000 tokens (transcripción procesada) × $0.000000075 = $0.000075
+   Total text input ≈ $0.000086625
+   ```
+
+4. **Text Output (respuestas de IA):**
+   ```
+   ~500 tokens × $0.0000003 = $0.00015
+   ```
+
+**COSTO TOTAL POR SESIÓN DE 5 MINUTOS:**
+```
+$0.0028125 + $0.01125 + $0.000086625 + $0.00015 ≈ $0.0143 USD
+```
+
+### 📊 Comparativa con versión SIN optimizaciones:
+
+**Antes de optimizaciones:**
+- Contexto: ~4,900 tokens × $0.000000075 = $0.0003675
+- Audio input: $0.0028125
+- Audio output: $0.01125  
+- Text output: $0.00015
+- **Total: ~$0.0146 USD** (por sesión de 5 min)
+
+**AHORA (optimizado):**
+- Contexto: ~155 tokens × $0.000000075 = $0.000011625
+- Audio input: $0.0028125
+- Audio output: $0.01125
+- Text output: $0.00015
+- **Total: ~$0.0143 USD** (por sesión de 5 min)
+
+**Ahorro por sesión:** ~$0.0003 USD (~2%)
+
+> **Nota:** El mayor costo es el audio output (~77% del total), no el contexto. Las optimizaciones de tokens tienen mayor impacto en:
+> - Análisis de transcripts con `analyzeJournalEntry` (reduce 97% de tokens)
+> - Carga de historial para UI (reduce tamaño de base de datos)
+> - Velocidad de respuesta (menos datos = más rápido)
+
+---
+
+### 💡 Estimación de costos mensuales
+
+**Usuario activo típico:**
+- 2 sesiones de voz por día
+- 5 minutos por sesión  
+- 30 días al mes
+
+**Costo mensual por usuario:**
+```
+2 sesiones × $0.0143 × 30 días = $0.858 USD/mes
+```
+
+**Con 100 usuarios activos:**
+```
+100 usuarios × $0.858 = $85.80 USD/mes
+```
+
+**Con 1,000 usuarios activos:**
+```
+1,000 usuarios × $0.858 = $858 USD/mes
+```
+
+---
+
+## �🚀 Recomendaciones Adicionales (No Implementadas)
 
 ### 1. Cambiar a modelo más barato
 ```typescript

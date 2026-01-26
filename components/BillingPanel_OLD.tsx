@@ -1,0 +1,1181 @@
+import React, { useState, useEffect } from 'react';
+import { FileText, Plus, DollarSign, Check, Clock, ExternalLink, Download, Eye, Edit, Trash2, Send, CheckSquare, Square, Search } from 'lucide-react';
+import { API_URL } from '../services/config';
+
+interface Invoice {
+  id: string;
+  invoiceNumber: string;
+  patientId: string;
+  patient_user_id?: string;
+  patientName: string;
+  amount: number;
+  tax?: number; // IVA
+  total?: number; // Total con IVA
+  taxRate?: number; // Porcentaje de IVA aplicado
+  date: string;
+  dueDate: string;
+  status: 'paid' | 'pending' | 'overdue' | 'cancelled' | 'draft';
+  stripePaymentLink?: string;
+  description: string;
+  items: InvoiceItem[];
+  cancelledAt?: string;
+  psychologist_user_id?: string;
+  psychologistId?: string; // Compatibilidad legacy
+  psychologist_user?: {
+    id: string;
+    name?: string;
+    email?: string;
+    is_psychologist?: boolean;
+    isPsychologist?: boolean;
+    role?: string;
+    avatarUrl?: string;
+  };
+}
+
+interface InvoiceItem {
+  description: string;
+  quantity: number;
+  unitPrice: number;
+}
+
+interface BillingPanelProps {
+  psychologistId: string;
+  patientId?: string;
+}
+
+const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }) => {
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [patients, setPatients] = useState<any[]>([]);
+  const [showNewInvoice, setShowNewInvoice] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [selectedInvoices, setSelectedInvoices] = useState<Set<string>>(new Set());
+  const [isDownloadingBatch, setIsDownloadingBatch] = useState(false);
+  const [showDrafts, setShowDrafts] = useState(false); // Toggle para mostrar drafts o resto de facturas
+  
+  // Filtros de fecha (mes actual por defecto)
+  const [dateFrom, setDateFrom] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+  });
+  const [dateTo, setDateTo] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+  });
+  const [searchQuery, setSearchQuery] = useState(''); // Búsqueda por paciente
+  
+  // New invoice form
+  const [formData, setFormData] = useState({
+    patientId: '',
+    date: new Date().toISOString().split('T')[0],
+    dueDate: '',
+    description: '',
+    items: [{ description: 'Sesión de terapia', quantity: 1, unitPrice: 0 }],
+    taxRate: 21 // Porcentaje de IVA por defecto
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    loadInvoices();
+    if (!patientId) {
+      loadPatients();
+    }
+  }, [psychologistId, patientId]);
+
+  const loadInvoices = async () => {
+    setIsLoading(true);
+    try {
+      const url = patientId 
+        ? `${API_URL}/invoices?psychologist_user_id=${psychologistId}&patient_user_id=${patientId}`
+        : `${API_URL}/invoices?psychologist_user_id=${psychologistId}`;
+      console.log('[BillingPanel] Loading invoices from:', url);
+      console.log('[BillingPanel] psychologistId:', psychologistId);
+      console.log('[BillingPanel] patientId:', patientId);
+      const response = await fetch(url);
+      if (response.ok) {
+        const data = await response.json();
+        console.log('[BillingPanel] Invoices loaded:', data.length, 'invoices');
+        if (data.length > 0) {
+          console.log('[BillingPanel] Primera factura:', {
+            id: data[0].id,
+            invoiceNumber: data[0].invoiceNumber,
+            amount: data[0].amount,
+            tax: data[0].tax,
+            total: data[0].total,
+            status: data[0].status
+          });
+        }
+        setInvoices(data);
+      } else {
+        console.error('[BillingPanel] Error response:', response.status, response.statusText);
+      }
+    } catch (error) {
+      console.error('Error loading invoices:', error);
+    }
+    setIsLoading(false);
+  };
+
+  const loadPatients = async () => {
+    try {
+      const response = await fetch(`${API_URL}/psychologist/${psychologistId}/patients`);
+      if (response.ok) {
+        const data = await response.json();
+        setPatients(data);
+      }
+    } catch (error) {
+      console.error('Error loading patients:', error);
+    }
+  };
+
+  const calculateTotal = () => {
+    const subtotal = formData.items.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
+    const tax = subtotal * (formData.taxRate / 100);
+    const total = subtotal + tax;
+    return { subtotal, tax, total };
+  };
+
+  const generateInvoiceNumber = async () => {
+    try {
+      // Fetch ALL invoices for this psychologist (not filtered by patient) to get correct numbering
+      const response = await fetch(`${API_URL}/invoices?psychologist_user_id=${psychologistId}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch invoices for numbering');
+      }
+      
+      const allInvoices = await response.json();
+      const year = new Date().getFullYear();
+      
+      // Find the highest invoice number for the current year
+      const yearPrefix = `${year}-`;
+      const invoicesThisYear = allInvoices.filter((inv: any) => 
+        inv.invoiceNumber && inv.invoiceNumber.startsWith(yearPrefix)
+      );
+      
+      if (invoicesThisYear.length === 0) {
+        return `${year}-0001`;
+      }
+      
+      // Extract numbers and find max
+      const numbers = invoicesThisYear.map((inv: any) => {
+        const parts = inv.invoiceNumber.split('-');
+        return parseInt(parts[1] || '0', 10);
+      });
+      
+      const maxNumber = Math.max(...numbers);
+      const nextNumber = maxNumber + 1;
+      
+      return `${year}-${String(nextNumber).padStart(4, '0')}`;
+    } catch (error) {
+      console.error('Error generating invoice number:', error);
+      // Fallback to simple counting if fetch fails
+      const year = new Date().getFullYear();
+      return `${year}-${String(Date.now()).slice(-4)}`;
+    }
+  };
+
+  const handleCreateInvoice = async () => {
+    if (isSubmitting) {
+      console.log('[BillingPanel] ⚠️ Ya hay un submit en proceso, ignorando...');
+      return;
+    }
+    
+    if (!formData.patientId || !formData.date || !formData.dueDate) {
+      alert('Por favor completa todos los campos requeridos');
+      return;
+    }
+
+    const activePsychologistId = psychologistId || localStorage.getItem('ai_diary_current_user_id') || '';
+    if (!activePsychologistId) {
+      alert('No se pudo determinar el usuario activo (psychologist_user_id)');
+      return;
+    }
+
+    // Validar que la fecha de factura sea anterior a la fecha de vencimiento
+    const invoiceDate = new Date(formData.date);
+    const dueDate = new Date(formData.dueDate);
+    
+    if (invoiceDate >= dueDate) {
+      alert('La fecha de factura debe ser anterior a la fecha de vencimiento');
+      return;
+    }
+
+    const patient = patients.find(p => p.id === formData.patientId);
+    if (!patient) return;
+
+    setIsSubmitting(true);
+    
+    try {
+      // Generate invoice number asynchronously
+      const invoiceNumber = await generateInvoiceNumber();
+
+      // Calcular totales
+      const totals = calculateTotal();
+      
+      console.log('[BillingPanel] 📊 Totales calculados:', totals);
+
+      const newInvoice: Invoice = {
+        id: Date.now().toString(),
+        invoiceNumber,
+        patientId: formData.patientId,
+        patient_user_id: formData.patientId, // Campo canónico para schema
+        patientName: patient.name,
+        amount: totals.subtotal, // Amount es el subtotal (sin IVA)
+        date: formData.date,
+        dueDate: formData.dueDate,
+        status: 'pending',
+        description: formData.description,
+        items: formData.items,
+        psychologist_user_id: activePsychologistId,
+        psychologistId: activePsychologistId,
+        tax: totals.tax, // IVA calculado
+        total: totals.total, // Total con IVA
+        taxRate: formData.taxRate // Guardar el porcentaje aplicado
+      } as any;
+      
+      console.log('[BillingPanel] 📤 Enviando factura:', { id: newInvoice.id, amount: newInvoice.amount, tax: newInvoice.tax, total: newInvoice.total, status: newInvoice.status });
+
+      const response = await fetch(`${API_URL}/invoices`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-User-Id': activePsychologistId },
+        body: JSON.stringify({ 
+          ...newInvoice, 
+          psychologist_user_id: activePsychologistId // Campo canónico para schema
+        })
+      });
+
+      if (response.ok) {
+        console.log('[BillingPanel] ✅ Factura creada exitosamente');
+        await loadInvoices();
+        setShowNewInvoice(false);
+        resetForm();
+        alert('Factura creada correctamente');
+      } else {
+        const errorData = await response.json();
+        console.error('[BillingPanel] ❌ Error del servidor:', errorData);
+        
+        // Mensaje específico para sesiones con bonos
+        if (errorData.sessionIds && errorData.sessionIds.length > 0) {
+          alert(`Error: Las siguientes sesiones ya tienen un bono asignado y no pueden facturarse:\n${errorData.sessionIds.join(', ')}\n\nPor favor, desasigna los bonos de estas sesiones antes de crear la factura.`);
+        } else {
+          alert('Error al crear la factura: ' + (errorData.error || 'Error desconocido'));
+        }
+      }
+    } catch (error) {
+      console.error('[BillingPanel] ❌ Error creating invoice:', error);
+      alert('Error al crear la factura');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleGeneratePaymentLink = async (invoiceId: string) => {
+    try {
+      const response = await fetch(`${API_URL}/invoices/payment-link`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invoiceId })
+      });
+
+      if (response.ok) {
+        const { paymentLink } = await response.json();
+        await loadInvoices();
+        // Copy to clipboard
+        navigator.clipboard.writeText(paymentLink);
+        alert('Link de pago generado y copiado al portapapeles');
+      }
+    } catch (error) {
+      console.error('Error generating payment link:', error);
+      alert('Error al generar el link de pago');
+    }
+  };
+
+  const resetForm = () => {
+    setFormData({
+      patientId: '',
+      date: new Date().toISOString().split('T')[0],
+      dueDate: '',
+      description: '',
+      items: [{ description: 'Sesión de terapia', quantity: 1, unitPrice: 0 }]
+    });
+  };
+
+  const handleChangeStatus = async (invoiceId: string, newStatus: 'paid' | 'pending' | 'overdue' | 'cancelled') => {
+    try {
+      const response = await fetch(`${API_URL}/invoices/${invoiceId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      });
+
+      if (response.ok) {
+        await loadInvoices();
+        alert('Estado actualizado correctamente');
+      }
+    } catch (error) {
+      console.error('Error updating invoice status:', error);
+      alert('Error al actualizar el estado');
+    }
+  };
+
+  const toggleSelectInvoice = (invoiceId: string) => {
+    const newSelected = new Set(selectedInvoices);
+    if (newSelected.has(invoiceId)) {
+      newSelected.delete(invoiceId);
+    } else {
+      newSelected.add(invoiceId);
+    }
+    setSelectedInvoices(newSelected);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedInvoices.size === filteredInvoices.length) {
+      setSelectedInvoices(new Set());
+    } else {
+      setSelectedInvoices(new Set(filteredInvoices.map(inv => inv.id)));
+    }
+  };
+
+  const handleDownloadSelectedPDFs = async () => {
+    if (selectedInvoices.size === 0) {
+      alert('Selecciona al menos una factura');
+      return;
+    }
+
+    setIsDownloadingBatch(true);
+    
+    for (const invoiceId of Array.from(selectedInvoices)) {
+      const invoice = invoices.find(inv => inv.id === invoiceId);
+      if (invoice && typeof invoiceId === 'string') {
+        handleDownloadPDF(invoiceId, invoice.invoiceNumber);
+        // Pequeña pausa entre descargas
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+    
+    setIsDownloadingBatch(false);
+    setSelectedInvoices(new Set());
+    alert(`${selectedInvoices.size} facturas descargadas`);
+  };
+
+  const addItem = () => {
+    setFormData({
+      ...formData,
+      items: [...formData.items, { description: '', quantity: 1, unitPrice: 0 }]
+    });
+  };
+
+  const removeItem = (index: number) => {
+    setFormData({
+      ...formData,
+      items: formData.items.filter((_, i) => i !== index)
+    });
+  };
+
+  const updateItem = (index: number, field: keyof InvoiceItem, value: any) => {
+    const newItems = [...formData.items];
+    newItems[index] = { ...newItems[index], [field]: value };
+    setFormData({ ...formData, items: newItems });
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'paid': return 'bg-green-100 text-green-700 border-green-200';
+      case 'pending': return 'bg-yellow-100 text-yellow-700 border-yellow-200';
+      case 'overdue': return 'bg-red-100 text-red-700 border-red-200';
+      case 'cancelled': return 'bg-slate-100 text-slate-700 border-slate-200';
+      case 'draft': return 'bg-gray-100 text-gray-600 border-gray-300';
+      default: return 'bg-slate-100 text-slate-700 border-slate-200';
+    }
+  };
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'paid': return <Check size={14} />;
+      case 'pending': return <Clock size={14} />;
+      case 'overdue': return <Clock size={14} />;
+      case 'cancelled': return <Trash2 size={14} />;
+      case 'draft': return <Edit size={14} />;
+      default: return null;
+    }
+  };
+
+  const getStatusLabel = (status: string) => {
+    switch (status) {
+      case 'paid': return 'Pagada';
+      case 'pending': return 'Pendiente';
+      case 'overdue': return 'Vencida';
+      case 'cancelled': return 'Cancelada';
+      case 'draft': return 'Borrador';
+      default: return status;
+    }
+  };
+
+  const handleUpdateStatus = async (invoiceId: string, newStatus: string) => {
+    try {
+      const response = await fetch(`${API_URL}/invoices/${invoiceId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      });
+
+      if (response.ok) {
+        await loadInvoices();
+        alert('Estado actualizado correctamente');
+      }
+    } catch (error) {
+      console.error('Error updating invoice status:', error);
+      alert('Error al actualizar el estado');
+    }
+  };
+
+  const handleCancelInvoice = async (invoiceId: string) => {
+    if (!confirm('¿Estás seguro de que quieres cancelar esta factura?')) return;
+
+    try {
+      const response = await fetch(`${API_URL}/invoices/${invoiceId}/cancel`, {
+        method: 'POST'
+      });
+
+      if (response.ok) {
+        await loadInvoices();
+        alert('Factura cancelada correctamente');
+      }
+    } catch (error) {
+      console.error('Error cancelling invoice:', error);
+      alert('Error al cancelar la factura');
+    }
+  };
+
+  const handleDownloadPDF = (invoiceId: string, invoiceNumber: string) => {
+    const url = `${API_URL}/invoices/${invoiceId}/pdf`;
+    console.log('[BillingPanel] Descargando PDF:', {
+      invoiceId,
+      invoiceNumber,
+      url
+    });
+    window.open(url, '_blank');
+  };
+
+  // Facturas para métricas (siempre excluye drafts)
+  const invoicesForMetrics = invoices.filter(inv => inv.status !== 'draft');
+
+  // Filtrar facturas según toggle, fecha y búsqueda
+  const filteredInvoices = invoices
+    .filter(inv => showDrafts ? inv.status === 'draft' : inv.status !== 'draft')
+    .filter(inv => {
+      if (!dateFrom || !dateTo || !inv.date) return true;
+      try {
+        // Extraer solo la fecha (YYYY-MM-DD) del string de fecha
+        const invoiceDate = inv.date.split('T')[0];
+        return invoiceDate >= dateFrom && invoiceDate <= dateTo;
+      } catch (e) {
+        return true; // Si hay error en la fecha, mostrar la factura
+      }
+    })
+    .filter(inv => {
+      if (!searchQuery.trim()) return true;
+      return inv.patientName.toLowerCase().includes(searchQuery.toLowerCase());
+    });
+
+  return (
+    <div className="space-y-8 px-2 md:px-4" data-billing-component ref={(el) => {
+      if (el) {
+        (el as any).openNewInvoice = () => setShowNewInvoice(true);
+      }
+    }}>
+      {/* Header - Only visible on mobile */}
+      <div className="lg:hidden">
+        {!patientId && (
+          <button
+            onClick={() => setShowNewInvoice(true)}
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors shadow-md font-medium"
+          >
+            <Plus size={18} />
+            Nueva Factura
+          </button>
+        )}
+      </div>
+
+      {/* Filtros de fecha y búsqueda */}
+      <div className="bg-white rounded-lg border border-slate-200 p-3 sm:p-4 shadow-sm mt-3 sm:mt-4">
+        {/* Toggle para mostrar drafts o resto */}
+        <div className="flex justify-center mb-4">
+          <div className="inline-flex rounded-lg border border-slate-300 bg-slate-50 p-1">
+            <button
+              onClick={() => setShowDrafts(false)}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                !showDrafts 
+                  ? 'bg-indigo-600 text-white shadow-sm' 
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Facturas
+            </button>
+            <button
+              onClick={() => setShowDrafts(true)}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                showDrafts 
+                  ? 'bg-slate-600 text-white shadow-sm' 
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Borradores
+            </button>
+          </div>
+        </div>
+        
+        <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
+          {/* Filtro de fecha */}
+          <div className="flex-1 grid grid-cols-2 gap-2 sm:gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">Desde</label>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">Hasta</label>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              />
+            </div>
+          </div>
+          
+          {/* Buscador por paciente */}
+          <div className="flex-1">
+            <label className="block text-xs font-medium text-slate-700 mb-1">Buscar paciente</label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={16} />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Nombre del paciente..."
+                className="w-full pl-10 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2 sm:gap-3 md:gap-4 mt-3 sm:mt-4 md:mt-6">
+        <div className="bg-gradient-to-br from-white to-slate-50 rounded-lg border border-slate-200 px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4 shadow-sm hover:shadow-md transition-all">
+          <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 mb-1 sm:mb-1.5 md:mb-2">
+            <div className="p-1 sm:p-1.5 bg-slate-100 rounded">
+              <FileText size={12} className="text-slate-600 sm:w-4 sm:h-4" />
+            </div>
+            <div className="text-[8px] sm:text-[9px] md:text-[10px] text-slate-500 uppercase font-semibold tracking-wide leading-tight">Facturas</div>
+          </div>
+          <div className="text-lg sm:text-xl md:text-2xl font-bold text-slate-900">{invoicesForMetrics.length}</div>
+        </div>
+        
+        <div className="bg-gradient-to-br from-white to-green-50 rounded-lg border border-green-200 px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4 shadow-sm hover:shadow-md transition-all">
+          <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 mb-1 sm:mb-1.5 md:mb-2">
+            <div className="p-1 sm:p-1.5 bg-green-100 rounded">
+              <Check size={12} className="text-green-600 sm:w-4 sm:h-4" />
+            </div>
+            <div className="text-[8px] sm:text-[9px] md:text-[10px] text-green-600 uppercase font-semibold tracking-wide leading-tight">Pagadas</div>
+          </div>
+          <div className="text-lg sm:text-xl md:text-2xl font-bold text-green-600">
+            {invoicesForMetrics.filter(inv => inv.status === 'paid').length}
+          </div>
+        </div>
+        
+        <div className="bg-gradient-to-br from-white to-yellow-50 rounded-lg border border-yellow-200 px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4 shadow-sm hover:shadow-md transition-all">
+          <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 mb-1 sm:mb-1.5 md:mb-2">
+            <div className="p-1 sm:p-1.5 bg-yellow-100 rounded">
+              <Clock size={12} className="text-yellow-600 sm:w-4 sm:h-4" />
+            </div>
+            <div className="text-[8px] sm:text-[9px] md:text-[10px] text-yellow-600 uppercase font-semibold tracking-wide leading-tight">Pendientes</div>
+          </div>
+          <div className="text-lg sm:text-xl md:text-2xl font-bold text-yellow-600">
+            {invoicesForMetrics.filter(inv => inv.status === 'pending').length}
+          </div>
+        </div>
+        
+        <div className="bg-gradient-to-br from-white to-orange-50 rounded-lg border border-orange-200 px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4 shadow-sm hover:shadow-md transition-all">
+          <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 mb-1 sm:mb-1.5 md:mb-2">
+            <div className="p-1 sm:p-1.5 bg-orange-100 rounded">
+              <DollarSign size={12} className="text-orange-600 sm:w-4 sm:h-4" />
+            </div>
+            <div className="text-[8px] sm:text-[9px] md:text-[10px] text-orange-600 uppercase font-semibold tracking-wide leading-tight">Pendiente</div>
+          </div>
+          <div className="text-sm sm:text-base md:text-xl font-bold text-orange-600">
+            €{invoicesForMetrics.filter(inv => inv.status === 'pending').reduce((sum, inv) => sum + (inv.total || inv.amount), 0).toFixed(2)}
+          </div>
+        </div>
+        
+        <div className="bg-gradient-to-br from-white to-emerald-50 rounded-lg border border-emerald-200 px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4 shadow-sm hover:shadow-md transition-all">
+          <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 mb-1 sm:mb-1.5 md:mb-2">
+            <div className="p-1 sm:p-1.5 bg-emerald-100 rounded">
+              <DollarSign size={12} className="text-emerald-600 sm:w-4 sm:h-4" />
+            </div>
+            <div className="text-[8px] sm:text-[9px] md:text-[10px] text-emerald-600 uppercase font-semibold tracking-wide leading-tight">Ingresos</div>
+          </div>
+          <div className="text-sm sm:text-base md:text-xl font-bold text-emerald-600">
+            €{invoicesForMetrics.filter(inv => inv.status === 'paid').reduce((sum, inv) => sum + (inv.total || inv.amount), 0).toFixed(2)}
+          </div>
+        </div>
+        
+        <div className="bg-gradient-to-br from-white to-indigo-50 rounded-lg border border-indigo-200 px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4 shadow-sm hover:shadow-md transition-all">
+          <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 mb-1 sm:mb-1.5 md:mb-2">
+            <div className="p-1 sm:p-1.5 bg-indigo-100 rounded">
+              <FileText size={12} className="text-indigo-600 sm:w-4 sm:h-4" />
+            </div>
+            <div className="text-[8px] sm:text-[9px] md:text-[10px] text-indigo-600 uppercase font-semibold tracking-wide leading-tight">Facturado</div>
+          </div>
+          <div className="text-sm sm:text-base md:text-xl font-bold text-indigo-600">
+            €{invoicesForMetrics.filter(inv => inv.status !== 'cancelled').reduce((sum, inv) => sum + (inv.total || inv.amount), 0).toFixed(2)}
+          </div>
+        </div>
+      </div>
+
+      {/* Invoice List */}
+      <div className="bg-white rounded-lg sm:rounded-xl border border-slate-200 overflow-hidden">
+        {selectedInvoices.size > 0 && (
+          <div className="bg-indigo-50 border-b border-indigo-200 px-3 sm:px-4 md:px-6 py-2 sm:py-3 md:py-4 flex items-center justify-between gap-2">
+            <span className="text-[10px] sm:text-xs md:text-sm font-medium text-indigo-700 truncate">
+              {selectedInvoices.size} <span className="hidden sm:inline">factura{selectedInvoices.size !== 1 ? 's' : ''} seleccionada{selectedInvoices.size !== 1 ? 's' : ''}</span>
+            </span>
+            <button
+              onClick={handleDownloadSelectedPDFs}
+              disabled={isDownloadingBatch}
+              className="flex items-center gap-1 sm:gap-1.5 md:gap-2 px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-[10px] sm:text-xs md:text-sm font-medium disabled:opacity-50 flex-shrink-0"
+            >
+              <Download size={14} className="sm:w-4 sm:h-4" />
+              <span className="hidden sm:inline">{isDownloadingBatch ? 'Descargando...' : 'Descargar PDFs'}</span>
+              <span className="sm:hidden">PDF</span>
+            </button>
+          </div>
+        )}
+        {/* Vista tabla (desktop) */}
+        <div className="hidden lg:block overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-slate-50 border-b border-slate-200">
+              <tr>
+                <th className="px-4 py-3">
+                  <button
+                    onClick={toggleSelectAll}
+                    className="p-1 hover:bg-slate-200 rounded transition-colors"
+                  >
+                    {selectedInvoices.size === filteredInvoices.length && filteredInvoices.length > 0 ? (
+                      <CheckSquare size={18} className="text-indigo-600" />
+                    ) : (
+                      <Square size={18} className="text-slate-400" />
+                    )}
+                  </button>
+                </th>
+                <th className="text-left px-6 py-4 text-xs font-semibold text-slate-600 uppercase tracking-wider">Nº Factura</th>
+                <th className="text-left px-6 py-4 text-xs font-semibold text-slate-600 uppercase tracking-wider">Paciente</th>
+                <th className="text-left px-6 py-4 text-xs font-semibold text-slate-600 uppercase tracking-wider">Fecha</th>
+                <th className="text-left px-6 py-4 text-xs font-semibold text-slate-600 uppercase tracking-wider">Vencimiento</th>
+                <th className="text-right px-6 py-4 text-xs font-semibold text-slate-600 uppercase tracking-wider">Importe</th>
+                <th className="text-center px-6 py-4 text-xs font-semibold text-slate-600 uppercase tracking-wider">Estado</th>
+                <th className="text-center px-6 py-4 text-xs font-semibold text-slate-600 uppercase tracking-wider">Acciones</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filteredInvoices.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
+                    No hay facturas todavía. Crea tu primera factura.
+                  </td>
+                </tr>
+              ) : (
+                filteredInvoices.map((invoice) => (
+                  <tr key={invoice.id} className={`hover:bg-slate-50 transition-colors ${invoice.status === 'cancelled' ? 'opacity-60' : ''}`}>
+                    <td className="px-6 py-4">
+                      <button
+                        onClick={() => toggleSelectInvoice(invoice.id)}
+                        className="p-1 hover:bg-slate-200 rounded transition-colors"
+                      >
+                        {selectedInvoices.has(invoice.id) ? (
+                          <CheckSquare size={18} className="text-indigo-600" />
+                        ) : (
+                          <Square size={18} className="text-slate-400" />
+                        )}
+                      </button>
+                    </td>
+                    <td className={`px-6 py-4 text-sm font-medium text-slate-900 ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>{invoice.invoiceNumber}</td>
+                    <td className={`px-6 py-4 text-sm text-slate-700 ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>{invoice.patientName}</td>
+                    <td className={`px-6 py-4 text-sm text-slate-600 ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>{new Date(invoice.date).toLocaleDateString()}</td>
+                    <td className={`px-6 py-4 text-sm text-slate-600 ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>{new Date(invoice.dueDate).toLocaleDateString()}</td>
+                    <td className={`px-6 py-4 text-sm font-semibold text-slate-900 text-right ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>€{((invoice.total || invoice.amount || 0)).toFixed(2)}</td>
+                    <td className="px-6 py-4">
+                      <div className="flex justify-center">
+                        <div className="relative group">
+                          <select
+                            value={invoice.status}
+                            onChange={(e) => handleChangeStatus(invoice.id, e.target.value as any)}
+                            className={`appearance-none text-xs font-semibold border-2 rounded-lg pl-3 pr-8 py-2 cursor-pointer transition-all hover:shadow-md focus:ring-2 focus:ring-indigo-500 focus:border-transparent focus:outline-none ${getStatusColor(invoice.status)}`}
+                            style={{ minWidth: '120px' }}
+                          >
+                            <option value="draft">📝 Borrador</option>
+                            <option value="pending">⏱️ Pendiente</option>
+                            <option value="paid">✅ Pagada</option>
+                            <option value="cancelled">❌ Cancelada</option>
+                          </select>
+                          <div className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
+                            <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center justify-center gap-3">
+                        <button
+                          onClick={() => setSelectedInvoice(invoice)}
+                          className="p-1.5 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                          title="Ver detalles"
+                        >
+                          <Eye size={16} />
+                        </button>
+                        <button
+                          onClick={() => {
+                            console.log('[BillingPanel] Click en descarga, invoice:', { id: invoice.id, invoiceNumber: invoice.invoiceNumber });
+                            handleDownloadPDF(invoice.id, invoice.invoiceNumber);
+                          }}
+                          className="p-1.5 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          title="Descargar PDF"
+                        >
+                          <Download size={16} />
+                        </button>
+                        {invoice.status !== 'paid' && invoice.status !== 'cancelled' && (
+                          <>
+                            <button
+                              onClick={() => handleGeneratePaymentLink(invoice.id)}
+                              className="p-1.5 text-slate-600 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                              title="Generar link de pago"
+                            >
+                              <ExternalLink size={16} />
+                            </button>
+                            <button
+                              onClick={() => handleCancelInvoice(invoice.id)}
+                              className="p-1.5 text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Cancelar factura"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Vista cards (móvil) */}
+        <div className="lg:hidden divide-y divide-slate-100">
+          {filteredInvoices.length === 0 ? (
+            <div className="px-3 py-8 text-center text-xs sm:text-sm text-slate-500">
+              No hay facturas todavía. Crea tu primera factura.
+            </div>
+          ) : (
+            filteredInvoices.map((invoice) => (
+              <div
+                key={invoice.id}
+                className={`p-3 hover:bg-slate-50 transition-colors ${invoice.status === 'cancelled' ? 'opacity-60' : ''}`}
+              >
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <div className="flex items-start gap-2 flex-1 min-w-0">
+                    <button
+                      onClick={() => toggleSelectInvoice(invoice.id)}
+                      className="p-1 hover:bg-slate-200 rounded transition-colors flex-shrink-0 mt-0.5"
+                    >
+                      {selectedInvoices.has(invoice.id) ? (
+                        <CheckSquare size={16} className="text-indigo-600" />
+                      ) : (
+                        <Square size={16} className="text-slate-400" />
+                      )}
+                    </button>
+                    <div className="flex-1 min-w-0">
+                      <div className={`text-sm font-semibold text-slate-900 truncate ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>
+                        {invoice.invoiceNumber}
+                      </div>
+                      <div className={`text-xs text-slate-600 truncate ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>
+                        {invoice.patientName}
+                      </div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-[10px] text-slate-500">
+                          {new Date(invoice.date).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })}
+                        </span>
+                        <span className="text-[10px] text-slate-400">→</span>
+                        <span className="text-[10px] text-slate-500">
+                          {new Date(invoice.dueDate).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <div className={`text-base font-bold text-slate-900 ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>
+                      €{((invoice.total || invoice.amount || 0)).toFixed(2)}
+                    </div>
+                    <div className="mt-1">
+                      <select
+                        value={invoice.status}
+                        onChange={(e) => handleChangeStatus(invoice.id, e.target.value as any)}
+                        className={`appearance-none text-[9px] font-semibold border rounded px-2 py-0.5 cursor-pointer transition-all ${getStatusColor(invoice.status)}`}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <option value="draft">📝 Borrador</option>
+                        <option value="pending">⏱️ Pendiente</option>
+                        <option value="paid">✅ Pagada</option>
+                        <option value="cancelled">❌ Cancelada</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="flex items-center justify-end gap-2 mt-2 pt-2 border-t border-slate-100">
+                  <button
+                    onClick={() => setSelectedInvoice(invoice)}
+                    className="p-1.5 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                    title="Ver detalles"
+                  >
+                    <Eye size={14} />
+                  </button>
+                  <button
+                    onClick={() => handleDownloadPDF(invoice.id, invoice.invoiceNumber)}
+                    className="p-1.5 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                    title="Descargar PDF"
+                  >
+                    <Download size={14} />
+                  </button>
+                  {invoice.status !== 'paid' && invoice.status !== 'cancelled' && (
+                    <>
+                      <button
+                        onClick={() => handleGeneratePaymentLink(invoice.id)}
+                        className="p-1.5 text-slate-600 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                        title="Generar link de pago"
+                      >
+                        <ExternalLink size={14} />
+                      </button>
+                      <button
+                        onClick={() => handleCancelInvoice(invoice.id)}
+                        className="p-1.5 text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Cancelar factura"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* New Invoice Modal */}
+      {showNewInvoice && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-2 sm:p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-xl sm:rounded-2xl shadow-2xl max-w-2xl w-full max-h-[95vh] sm:max-h-[90vh] overflow-y-auto">
+            <div className="p-3 sm:p-6 border-b border-slate-200">
+              <h3 className="text-base sm:text-xl font-bold text-slate-900">Nueva Factura</h3>
+              <p className="text-xs sm:text-sm text-slate-500 mt-0.5 sm:mt-1">Crea una nueva factura para un paciente</p>
+            </div>
+            
+            <div className="p-3 sm:p-6 space-y-3 sm:space-y-4">
+              {/* Patient Selection */}
+              <div>
+                <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1.5 sm:mb-2">Paciente *</label>
+                <select
+                  value={formData.patientId}
+                  onChange={(e) => setFormData({ ...formData, patientId: e.target.value })}
+                  className="w-full px-3 sm:px-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                >
+                  <option value="">-- Selecciona un paciente --</option>
+                  {patients.map((patient) => (
+                    <option key={patient.id} value={patient.id}>
+                      {patient.name} ({patient.email})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] sm:text-xs text-slate-500 mt-1">
+                  {patients.length === 0 
+                    ? 'No tienes pacientes asociados' 
+                    : `${patients.length} paciente${patients.length !== 1 ? 's' : ''} disponible${patients.length !== 1 ? 's' : ''}`
+                  }
+                </p>
+              </div>
+
+              {/* Invoice Date */}
+              <div>
+                <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1.5 sm:mb-2">Fecha de Factura *</label>
+                <input
+                  type="date"
+                  value={formData.date}
+                  onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                  className="w-full px-3 sm:px-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+              </div>
+
+              {/* Due Date */}
+              <div>
+                <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1.5 sm:mb-2">Fecha de Vencimiento *</label>
+                <input
+                  type="date"
+                  value={formData.dueDate}
+                  onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
+                  min={formData.date}
+                  className="w-full px-3 sm:px-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+                <p className="text-[10px] sm:text-xs text-slate-500 mt-1">Debe ser posterior a la fecha de factura</p>
+              </div>
+
+              {/* Description */}
+              <div>
+                <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1.5 sm:mb-2">Descripción</label>
+                <textarea
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  rows={2}
+                  className="w-full px-3 sm:px-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  placeholder="Notas adicionales sobre la factura..."
+                />
+              </div>
+
+              {/* Items */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5 sm:mb-2">
+                  <label className="block text-xs sm:text-sm font-medium text-slate-700">Conceptos *</label>
+                  <button
+                    onClick={addItem}
+                    className="text-xs sm:text-sm text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-1"
+                  >
+                    <Plus size={12} className="sm:w-3.5 sm:h-3.5" />
+                    <span className="hidden sm:inline">Añadir concepto</span>
+                    <span className="sm:hidden">Añadir</span>
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {formData.items.map((item, index) => (
+                    <div key={index} className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-start bg-slate-50 sm:bg-transparent p-2 sm:p-0 rounded-lg sm:rounded-none">
+                      <input
+                        type="text"
+                        value={item.description}
+                        onChange={(e) => updateItem(index, 'description', e.target.value)}
+                        placeholder="Descripción"
+                        className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      />
+                      <div className="flex gap-2">
+                        <input
+                          type="number"
+                          value={item.quantity}
+                          onChange={(e) => updateItem(index, 'quantity', parseInt(e.target.value) || 0)}
+                          placeholder="Cant."
+                          min="1"
+                          className="w-16 sm:w-20 px-2 sm:px-3 py-1.5 sm:py-2 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        />
+                        <input
+                          type="number"
+                          value={item.unitPrice}
+                          onChange={(e) => updateItem(index, 'unitPrice', parseFloat(e.target.value) || 0)}
+                          placeholder="Precio"
+                          step="0.01"
+                          className="flex-1 sm:w-24 px-2 sm:px-3 py-1.5 sm:py-2 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        />
+                        {formData.items.length > 1 && (
+                          <button
+                            onClick={() => removeItem(index)}
+                            className="p-1.5 sm:p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                          >
+                            <Trash2 size={14} className="sm:w-4 sm:h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Totales con IVA */}
+              <div className="pt-3 sm:pt-4 border-t border-slate-200 space-y-2">
+                {/* Subtotal */}
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-slate-600">Subtotal:</span>
+                  <span className="font-semibold text-slate-900">€{calculateTotal().subtotal.toFixed(2)}</span>
+                </div>
+                
+                {/* IVA con campo editable */}
+                <div className="flex justify-between items-center text-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-600">IVA:</span>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        value={formData.taxRate}
+                        onChange={(e) => setFormData({ ...formData, taxRate: parseFloat(e.target.value) || 0 })}
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        className="w-14 px-2 py-0.5 border border-slate-300 rounded text-xs text-center focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      />
+                      <span className="text-slate-500 text-xs">%</span>
+                    </div>
+                  </div>
+                  <span className="font-semibold text-slate-900">€{calculateTotal().tax.toFixed(2)}</span>
+                </div>
+                
+                {/* Total */}
+                <div className="flex justify-between items-center pt-2 border-t border-slate-100">
+                  <span className="text-sm sm:text-lg font-semibold text-slate-900">Total:</span>
+                  <span className="text-xl sm:text-2xl font-bold text-indigo-600">€{calculateTotal().total.toFixed(2)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-3 sm:p-6 border-t border-slate-200 flex gap-2 sm:gap-3 justify-end">
+              <button
+                onClick={() => {
+                  setShowNewInvoice(false);
+                  resetForm();
+                }}
+                disabled={isSubmitting}
+                className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm text-slate-700 hover:bg-slate-100 rounded-lg transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleCreateInvoice}
+                disabled={isSubmitting}
+                className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isSubmitting ? 'Creando...' : 'Crear Factura'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Invoice Detail Modal */}
+      {selectedInvoice && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-2 sm:p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-xl sm:rounded-2xl shadow-2xl max-w-2xl w-full max-h-[95vh] sm:max-h-[90vh] overflow-y-auto">
+            <div className="p-3 sm:p-4 md:p-6 border-b border-slate-200">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-base sm:text-lg md:text-xl font-bold text-slate-900 truncate">Factura {selectedInvoice.invoiceNumber}</h3>
+                  <p className="text-xs sm:text-sm text-slate-500 mt-0.5 sm:mt-1 truncate">{selectedInvoice.patientName}</p>
+                </div>
+                <span className={`inline-flex items-center gap-1 px-2 sm:px-2.5 md:px-3 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs md:text-sm font-medium border flex-shrink-0 ${getStatusColor(selectedInvoice.status)}`}>
+                  {getStatusIcon(selectedInvoice.status)}
+                  {getStatusLabel(selectedInvoice.status)}
+                </span>
+              </div>
+            </div>
+            
+            <div className="p-3 sm:p-4 md:p-6 space-y-2 sm:space-y-3 md:space-y-4">
+              <div className="grid grid-cols-2 gap-2 sm:gap-3 md:gap-4">
+                <div>
+                  <div className="text-[9px] sm:text-[10px] md:text-xs text-slate-500 uppercase font-semibold mb-0.5 sm:mb-1">Emisión</div>
+                  <div className="text-xs sm:text-sm text-slate-900">{new Date(selectedInvoice.date).toLocaleDateString()}</div>
+                </div>
+                <div>
+                  <div className="text-[9px] sm:text-[10px] md:text-xs text-slate-500 uppercase font-semibold mb-0.5 sm:mb-1">Vencimiento</div>
+                  <div className="text-xs sm:text-sm text-slate-900">{new Date(selectedInvoice.dueDate).toLocaleDateString()}</div>
+                </div>
+              </div>
+
+              {selectedInvoice.description && (
+                <div>
+                  <div className="text-[9px] sm:text-[10px] md:text-xs text-slate-500 uppercase font-semibold mb-0.5 sm:mb-1">Descripción</div>
+                  <div className="text-xs sm:text-sm text-slate-700">{selectedInvoice.description}</div>
+                </div>
+              )}
+
+              <div>
+                <div className="text-[9px] sm:text-[10px] md:text-xs text-slate-500 uppercase font-semibold mb-1 sm:mb-1.5 md:mb-2">Conceptos</div>
+                <div className="space-y-1.5 sm:space-y-2">
+                  {selectedInvoice.items.map((item, index) => (
+                    <div key={index} className="flex justify-between items-center p-2 sm:p-2.5 md:p-3 bg-slate-50 rounded-lg gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs sm:text-sm font-medium text-slate-900 truncate">{item.description}</div>
+                        <div className="text-[10px] sm:text-xs text-slate-500">{item.quantity} x €{item.unitPrice.toFixed(2)}</div>
+                      </div>
+                      <div className="text-xs sm:text-sm font-semibold text-slate-900 flex-shrink-0">€{(item.quantity * item.unitPrice).toFixed(2)}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pt-2 sm:pt-3 md:pt-4 border-t border-slate-200 space-y-1.5 sm:space-y-2">
+                <div className="flex justify-between items-center text-xs sm:text-sm">
+                  <span className="text-slate-600">Subtotal:</span>
+                  <span className="font-semibold text-slate-900">€{selectedInvoice.amount.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between items-center text-xs sm:text-sm">
+                  <span className="text-slate-600">IVA ({selectedInvoice.taxRate || 21}%):</span>
+                  <span className="font-semibold text-slate-900">€{(selectedInvoice.tax || (selectedInvoice.amount * 0.21)).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between items-center pt-1.5 sm:pt-2 border-t border-slate-100">
+                  <span className="text-base sm:text-lg font-semibold text-slate-900">Total:</span>
+                  <span className="text-xl sm:text-2xl font-bold text-indigo-600">€{(selectedInvoice.total || (selectedInvoice.amount * 1.21)).toFixed(2)}</span>
+                </div>
+              </div>
+
+              {selectedInvoice.stripePaymentLink && (
+                <div className="p-2 sm:p-3 md:p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
+                  <div className="text-[10px] sm:text-xs text-indigo-700 uppercase font-semibold mb-1.5 sm:mb-2">Link de Pago</div>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <input
+                      type="text"
+                      value={selectedInvoice.stripePaymentLink}
+                      readOnly
+                      className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 bg-white border border-indigo-200 rounded-lg text-[10px] sm:text-xs md:text-sm truncate"
+                    />
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(selectedInvoice.stripePaymentLink!);
+                        alert('Link copiado al portapapeles');
+                      }}
+                      className="px-3 py-1.5 sm:py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-xs sm:text-sm font-medium"
+                    >
+                      Copiar
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="p-3 sm:p-4 md:p-6 border-t border-slate-200 flex gap-2 sm:gap-3 justify-end">
+              <button
+                onClick={() => setSelectedInvoice(null)}
+                className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm text-slate-700 hover:bg-slate-100 rounded-lg transition-colors font-medium"
+              >
+                Cerrar
+              </button>
+              {selectedInvoice.status !== 'paid' && !selectedInvoice.stripePaymentLink && (
+                <button
+                  onClick={() => {
+                    handleGeneratePaymentLink(selectedInvoice.id);
+                    setSelectedInvoice(null);
+                  }}
+                  className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium shadow-md flex items-center gap-1.5 sm:gap-2"
+                >
+                  <ExternalLink size={14} className="sm:w-4 sm:h-4" />
+                  <span className="hidden sm:inline">Generar Link de Pago</span>
+                  <span className="sm:hidden">Link Pago</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default BillingPanel;

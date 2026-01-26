@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, CheckCircle, XCircle, Clock, DollarSign, User, Filter, Edit2, Save, X as XIcon, FileText, Trash2 } from 'lucide-react';
+import { Calendar, CheckCircle, XCircle, Clock, DollarSign, User, Filter, Edit2, Save, X as XIcon, FileText, Trash2, Receipt, Ticket } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser } from '../services/authService';
 import SessionDetailsModal from './SessionDetailsModal';
@@ -21,6 +21,8 @@ interface Session {
   paid?: boolean;
   tags?: string[]; // Tags heredadas de la relación
   session_entry_id?: string;
+  invoice_id?: string;
+  bonus_id?: string;
 }
 
 interface Invoice {
@@ -52,6 +54,11 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
   const [sessionDetailsModalOpen, setSessionDetailsModalOpen] = useState(false);
   const [selectedSessionForDetails, setSelectedSessionForDetails] = useState<Session | null>(null);
   const [sessionEntries, setSessionEntries] = useState<Map<string, { status: 'pending' | 'done' }>>(new Map());
+  
+  // Estados para bonos
+  const [availableBonos, setAvailableBonos] = useState<any[]>([]);
+  const [isLoadingBonos, setIsLoadingBonos] = useState(false);
+  const [isAssigningBono, setIsAssigningBono] = useState(false);
   
   // Filter states
   const [filterPatient, setFilterPatient] = useState<string>('all');
@@ -254,6 +261,88 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
   const handleOpenSession = (session: Session) => {
     setSelectedSession(session);
     setEditedSession({ ...session });
+    loadAvailableBonos(session.patient_user_id || session.patientId);
+  };
+  
+  const loadAvailableBonos = async (patientUserId: string) => {
+    if (!patientUserId) return;
+    
+    setIsLoadingBonos(true);
+    try {
+      const currentUser = await getCurrentUser();
+      if (!currentUser) return;
+      
+      const response = await fetch(
+        `${API_URL}/bonos/available/${patientUserId}?psychologist_user_id=${currentUser.id}`
+      );
+      
+      if (response.ok) {
+        const bonos = await response.json();
+        setAvailableBonos(bonos);
+      }
+    } catch (error) {
+      console.error('Error loading available bonos:', error);
+    } finally {
+      setIsLoadingBonos(false);
+    }
+  };
+
+  const handleAssignBono = async (bonoId: string) => {
+    if (!editedSession) return;
+    
+    setIsAssigningBono(true);
+    try {
+      const response = await fetch(`${API_URL}/sessions/${editedSession.id}/assign-bonus`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ bonus_id: bonoId })
+      });
+      
+      if (response.ok) {
+        alert('Sesión asignada al bono correctamente');
+        setEditedSession({ ...editedSession, bonus_id: bonoId });
+        await loadAvailableBonos(editedSession.patient_user_id || editedSession.patientId);
+        await loadData(); // Recargar la lista de sesiones
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Error al asignar sesión al bono');
+      }
+    } catch (error) {
+      console.error('Error assigning bono:', error);
+      alert('Error al asignar sesión al bono');
+    } finally {
+      setIsAssigningBono(false);
+    }
+  };
+
+  const handleUnassignBono = async () => {
+    if (!editedSession) return;
+    
+    if (!confirm('¿Estás seguro de que quieres desasignar esta sesión del bono?')) return;
+    
+    setIsAssigningBono(true);
+    try {
+      const response = await fetch(`${API_URL}/sessions/${editedSession.id}/assign-bonus`, {
+        method: 'DELETE'
+      });
+      
+      if (response.ok) {
+        alert('Sesión desasignada del bono correctamente');
+        setEditedSession({ ...editedSession, bonus_id: undefined });
+        await loadAvailableBonos(editedSession.patient_user_id || editedSession.patientId);
+        await loadData(); // Recargar la lista de sesiones
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Error al desasignar sesión del bono');
+      }
+    } catch (error) {
+      console.error('Error unassigning bono:', error);
+      alert('Error al desasignar sesión del bono');
+    } finally {
+      setIsAssigningBono(false);
+    }
   };
 
   const handleCloseModal = () => {
@@ -886,6 +975,18 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                       </div>
                       <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 flex-wrap">
                         {getStatusBadge(session.status)}
+                        {session.invoice_id && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 sm:px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full text-[9px] sm:text-[10px] md:text-xs font-medium border border-emerald-200">
+                            <Receipt size={10} />
+                            <span className="hidden sm:inline">Facturada</span>
+                          </span>
+                        )}
+                        {session.bonus_id && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 sm:px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full text-[9px] sm:text-[10px] md:text-xs font-medium border border-purple-200">
+                            <Ticket size={10} />
+                            <span className="hidden sm:inline">Bono</span>
+                          </span>
+                        )}
                         {/* Tags */}
                         {session.tags && session.tags.length > 0 && (
                           <>
@@ -1126,6 +1227,83 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                   className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none text-base"
                 />
               </div>
+
+              {/* Sección de Bonos - Solo si no tiene invoice_id */}
+              {!editedSession.invoice_id && (
+                <div className="space-y-3">
+                  <label className="block text-sm font-semibold text-slate-700">Gestión de Bonos</label>
+                  
+                  {editedSession.bonus_id ? (
+                    <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-purple-700">
+                          <Ticket size={16} />
+                          <span className="text-sm font-medium">Asignada a bono</span>
+                        </div>
+                        <button
+                          onClick={handleUnassignBono}
+                          disabled={isAssigningBono}
+                          className="text-xs text-purple-600 hover:text-purple-800 underline disabled:opacity-50"
+                        >
+                          Desasignar
+                        </button>
+                      </div>
+                      <p className="text-xs text-purple-600 mt-1">Esta sesión pertenece a un bono del paciente</p>
+                    </div>
+                  ) : availableBonos.length > 0 ? (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                      <div className="mb-2">
+                        <span className="text-sm font-medium text-blue-900">Asignar a bono</span>
+                        <p className="text-xs text-blue-600 mt-0.5">El paciente tiene bonos disponibles</p>
+                      </div>
+                      <div className="space-y-2 max-h-40 overflow-y-auto">
+                        {availableBonos.map(bono => (
+                          <button
+                            key={bono.id}
+                            onClick={() => handleAssignBono(bono.id)}
+                            disabled={isAssigningBono}
+                            className="w-full text-left px-3 py-2 bg-white border border-blue-300 rounded-lg hover:bg-blue-50 hover:border-blue-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <div className="text-sm font-medium text-blue-900">
+                                  Bono - {bono.total_price_bono_amount}€
+                                </div>
+                                <div className="text-xs text-blue-600">
+                                  {bono.sessions_remaining} sesión{bono.sessions_remaining !== 1 ? 'es' : ''} disponible{bono.sessions_remaining !== 1 ? 's' : ''}
+                                </div>
+                              </div>
+                              <div className="text-xs text-blue-500">
+                                {new Date(bono.created_at).toLocaleDateString('es-ES')}
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                      <div className="flex items-center gap-2 text-slate-600">
+                        <XCircle size={16} />
+                        <span className="text-sm font-medium">Sin asignar</span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-1">
+                        {isLoadingBonos ? 'Cargando bonos...' : 'El paciente no tiene bonos disponibles'}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {editedSession.invoice_id && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                  <div className="flex items-center gap-2 text-green-700">
+                    <Receipt size={16} />
+                    <span className="text-sm font-medium">Facturada</span>
+                  </div>
+                  <p className="text-xs text-green-600 mt-1">Esta sesión está asociada a una factura</p>
+                </div>
+              )}
 
               {/* Tags (Read-only - heredadas de la relación) */}
               {editedSession.tags && editedSession.tags.length > 0 && (

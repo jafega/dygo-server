@@ -641,6 +641,8 @@ function normalizeSupabaseRow(row) {
     delete cleanData.patient_user_id;      // Usar columna de tabla (goals/invoices/sessions)
     delete cleanData.psychologist_user_id; // Usar columna de tabla (invoices/sessions)
     delete cleanData.status;               // Usar columna de tabla (sessions/invoices)
+    delete cleanData.invoiceNumber;        // Usar columna de tabla (invoices)
+    delete cleanData.invoice_date;         // Usar columna de tabla (invoices)
     delete cleanData.date;                 // Usar starts_on/ends_on (sessions)
     delete cleanData.startTime;            // Usar starts_on (sessions)
     delete cleanData.endTime;              // Usar ends_on (sessions)
@@ -862,16 +864,19 @@ function buildSupabaseEntryRow(entry) {
 
 // Función específica para invoices que maneja columnas directas + JSONB
 function buildSupabaseInvoiceRow(invoice) {
-  const { id, psychologist_user_id, patient_user_id, amount, status, tax, total, created_at, ...restData } = invoice;
+  const { id, psychologist_user_id, patient_user_id, amount, status, tax, total, created_at, date, invoice_date, invoiceNumber, ...restData } = invoice;
   
-  console.log('[buildSupabaseInvoiceRow] 🔍 Valores recibidos:', { id, amount, tax, total, status });
+  console.log('[buildSupabaseInvoiceRow] 🔍 Valores recibidos:', { id, amount, tax, total, status, date, invoice_date, invoiceNumber });
   
   // Si vienen tax y total del frontend, usarlos; si no, calcular con 21% por defecto
   const finalAmount = parseFloat(amount) || 0;
   const finalTax = tax !== undefined && tax !== null ? parseFloat(tax) : (finalAmount * 0.21);
   const finalTotal = total !== undefined && total !== null ? parseFloat(total) : (finalAmount + finalTax);
   
-  console.log('[buildSupabaseInvoiceRow] ✅ Valores finales:', { finalAmount, finalTax, finalTotal, status: status || 'pending' });
+  // Usar invoice_date si está disponible, si no usar date
+  const finalInvoiceDate = invoice_date || (date ? date.split('T')[0] : null);
+  
+  console.log('[buildSupabaseInvoiceRow] ✅ Valores finales:', { finalAmount, finalTax, finalTotal, status: status || 'pending', invoice_date: finalInvoiceDate, invoiceNumber });
   
   return {
     id,
@@ -881,6 +886,8 @@ function buildSupabaseInvoiceRow(invoice) {
     status: status || 'pending',
     tax: finalTax,
     total: finalTotal,
+    invoice_date: finalInvoiceDate,
+    invoiceNumber: invoiceNumber || '',
     created_at: created_at || new Date().toISOString(),
     data: { ...invoice } // Todo el objeto completo en data para compatibilidad
   };
@@ -4375,7 +4382,8 @@ app.get('/api/invoices', async (req, res) => {
     // Filter by date range
     if (startDate || endDate) {
       invoices = invoices.filter(inv => {
-        const invDate = inv.date || inv.created_at?.split('T')[0];
+        // Usar invoice_date primero, luego date, luego created_at como fallback
+        const invDate = inv.invoice_date || inv.date || inv.created_at?.split('T')[0];
         if (!invDate) return true;
         if (startDate && invDate < startDate) return false;
         if (endDate && invDate > endDate) return false;
@@ -4409,15 +4417,109 @@ app.post('/api/invoices', async (req, res) => {
     if (!invoice.patient_user_id && invoice.patientId) {
       invoice.patient_user_id = invoice.patientId;
     }
+    
+    // Manejar tipo de factura (patient o center)
+    if (!invoice.invoice_type) {
+      invoice.invoice_type = 'patient';
+    }
+    
+    // Manejar status: draft o issued
+    if (!invoice.status || !['draft', 'pending', 'paid', 'overdue', 'cancelled'].includes(invoice.status)) {
+      invoice.status = 'draft';
+    }
 
     // Guardar en Supabase si está disponible (PRIMERO)
     if (supabaseAdmin) {
       try {
         console.log('📤 [POST /api/invoices] Invoice recibido:', JSON.stringify(invoice, null, 2).substring(0, 800));
+        
+        // Validar que ninguna sesión tenga bonus_id asignado
+        if (invoice.sessionIds && invoice.sessionIds.length > 0) {
+          const { data: sessionsWithBonus, error: bonusCheckError } = await supabaseAdmin
+            .from('sessions')
+            .select('id, bonus_id, invoice_id')
+            .in('id', invoice.sessionIds)
+            .not('bonus_id', 'is', null);
+          
+          if (bonusCheckError) {
+            console.error('❌ Error verificando bonus_id en sesiones:', bonusCheckError);
+            throw bonusCheckError;
+          }
+          
+          if (sessionsWithBonus && sessionsWithBonus.length > 0) {
+            const sessionIdsWithBonus = sessionsWithBonus.map(s => s.id).join(', ');
+            console.error('[POST /api/invoices] Sesiones con bonus_id detectadas:', sessionIdsWithBonus);
+            return res.status(400).json({ 
+              error: 'No se puede crear una factura con sesiones que ya tienen un bono asignado',
+              sessionIds: sessionsWithBonus.map(s => s.id)
+            });
+          }
+          
+          // Validar que ninguna sesión ya esté facturada (a menos que sea un borrador)
+          const sessionsAlreadyInvoiced = sessionsWithBonus.filter(s => s.invoice_id && s.invoice_id !== invoice.id);
+          if (sessionsAlreadyInvoiced.length > 0) {
+            return res.status(400).json({ 
+              error: 'Algunas sesiones ya están facturadas',
+              sessionIds: sessionsAlreadyInvoiced.map(s => s.id)
+            });
+          }
+        }
+        
+        // Validar bonos
+        if (invoice.bonoIds && invoice.bonoIds.length > 0) {
+          const { data: bonosAlreadyInvoiced, error: bonoCheckError } = await supabaseAdmin
+            .from('bono')
+            .select('id, invoice_id')
+            .in('id', invoice.bonoIds)
+            .not('invoice_id', 'is', null);
+          
+          if (bonoCheckError) {
+            console.error('❌ Error verificando invoice_id en bonos:', bonoCheckError);
+            throw bonoCheckError;
+          }
+          
+          const bonosWithInvoice = (bonosAlreadyInvoiced || []).filter(b => b.invoice_id && b.invoice_id !== invoice.id);
+          if (bonosWithInvoice.length > 0) {
+            return res.status(400).json({ 
+              error: 'Algunos bonos ya están facturados',
+              bonoIds: bonosWithInvoice.map(b => b.id)
+            });
+          }
+        }
+        
         const supabasePayload = buildSupabaseInvoiceRow(invoice);
         console.log('📦 [POST /api/invoices] Payload para Supabase:', JSON.stringify(supabasePayload, null, 2));
         await trySupabaseUpsert('invoices', [supabasePayload]);
         console.log('✅ Factura guardada en Supabase con ID:', invoice.id);
+        
+        // Si no es borrador, asignar invoice_id a sesiones y bonos
+        if (invoice.status !== 'draft') {
+          if (invoice.sessionIds && invoice.sessionIds.length > 0) {
+            const { error: sessionUpdateError } = await supabaseAdmin
+              .from('sessions')
+              .update({ invoice_id: invoice.id })
+              .in('id', invoice.sessionIds);
+            
+            if (sessionUpdateError) {
+              console.error('⚠️ Error asignando invoice_id a sesiones:', sessionUpdateError);
+            } else {
+              console.log(`✅ invoice_id asignado a ${invoice.sessionIds.length} sesiones`);
+            }
+          }
+          
+          if (invoice.bonoIds && invoice.bonoIds.length > 0) {
+            const { error: bonoUpdateError } = await supabaseAdmin
+              .from('bono')
+              .update({ invoice_id: invoice.id })
+              .in('id', invoice.bonoIds);
+            
+            if (bonoUpdateError) {
+              console.error('⚠️ Error asignando invoice_id a bonos:', bonoUpdateError);
+            } else {
+              console.log(`✅ invoice_id asignado a ${invoice.bonoIds.length} bonos`);
+            }
+          }
+        }
         
         // Verificar que se guardó correctamente leyendo desde Supabase
         const { data: verifyData, error: verifyError } = await supabaseAdmin
@@ -4489,13 +4591,13 @@ app.post('/api/invoices/payment-link', (req, res) => {
   res.json({ paymentLink });
 });
 
-// Update invoice status
+// Update invoice (solo si es draft)
 app.patch('/api/invoices/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const updates = req.body;
     
-    console.log(`📝 [PATCH /api/invoices/${id}] Actualizando factura con:`, req.body);
+    console.log(`📝 [PATCH /api/invoices/${id}] Actualizando factura con:`, updates);
     
     // SIEMPRE consultar desde Supabase primero si está disponible
     if (supabaseAdmin) {
@@ -4518,7 +4620,47 @@ app.patch('/api/invoices/:id', async (req, res) => {
         }
         
         const currentInvoice = normalizeSupabaseRow(currentInvoices[0]);
-        const updatedInvoice = { ...currentInvoice, ...req.body };
+        
+        // Si solo se está actualizando el estado (paid/pending), permitirlo
+        const isStatusOnlyUpdate = Object.keys(updates).length === 1 && 
+                                    updates.status && 
+                                    (updates.status === 'paid' || updates.status === 'pending');
+        
+        // Solo permitir editar completamente si es draft, pero permitir cambio de estado siempre
+        if (currentInvoice.status !== 'draft' && !isStatusOnlyUpdate) {
+          return res.status(403).json({ error: 'Solo se pueden editar facturas en estado borrador' });
+        }
+        
+        const updatedInvoice = { ...currentInvoice, ...updates };
+        
+        // Si se está convirtiendo de draft a issued/pending, asignar invoice_id a sesiones y bonos
+        if (currentInvoice.status === 'draft' && updates.status && updates.status !== 'draft') {
+          if (updatedInvoice.sessionIds && updatedInvoice.sessionIds.length > 0) {
+            const { error: sessionUpdateError } = await supabaseAdmin
+              .from('sessions')
+              .update({ invoice_id: id })
+              .in('id', updatedInvoice.sessionIds);
+            
+            if (sessionUpdateError) {
+              console.error('⚠️ Error asignando invoice_id a sesiones:', sessionUpdateError);
+            } else {
+              console.log(`✅ invoice_id asignado a ${updatedInvoice.sessionIds.length} sesiones`);
+            }
+          }
+          
+          if (updatedInvoice.bonoIds && updatedInvoice.bonoIds.length > 0) {
+            const { error: bonoUpdateError } = await supabaseAdmin
+              .from('bono')
+              .update({ invoice_id: id })
+              .in('id', updatedInvoice.bonoIds);
+            
+            if (bonoUpdateError) {
+              console.error('⚠️ Error asignando invoice_id a bonos:', bonoUpdateError);
+            } else {
+              console.log(`✅ invoice_id asignado a ${updatedInvoice.bonoIds.length} bonos`);
+            }
+          }
+        }
         
         console.log('📤 [PATCH /api/invoices/:id] Actualizando en Supabase:', updatedInvoice);
         
@@ -4556,7 +4698,17 @@ app.patch('/api/invoices/:id', async (req, res) => {
     const idx = db.invoices.findIndex(inv => inv.id === id);
     if (idx === -1) return res.status(404).json({ error: 'Invoice not found' });
     
-    db.invoices[idx] = { ...db.invoices[idx], ...req.body };
+    // Si solo se está actualizando el estado (paid/pending), permitirlo
+    const isStatusOnlyUpdate = Object.keys(updates).length === 1 && 
+                                updates.status && 
+                                (updates.status === 'paid' || updates.status === 'pending');
+    
+    // Solo permitir editar completamente si es draft, pero permitir cambio de estado siempre
+    if (db.invoices[idx].status !== 'draft' && !isStatusOnlyUpdate) {
+      return res.status(403).json({ error: 'Solo se pueden editar facturas en estado borrador' });
+    }
+    
+    db.invoices[idx] = { ...db.invoices[idx], ...updates };
     saveDb(db);
 
     res.json(db.invoices[idx]);
@@ -4594,6 +4746,601 @@ app.post('/api/invoices/:id/cancel', async (req, res) => {
     res.json(db.invoices[idx]);
   } catch (error) {
     console.error('Error in POST /api/invoices/:id/cancel:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// Rectify invoice (cancel and create corrective invoice)
+app.post('/api/invoices/:id/rectify', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const psychologistId = req.headers['x-user-id'];
+    
+    console.log(`🔄 [POST /api/invoices/${id}/rectify] Creando factura rectificativa`);
+    
+    if (supabaseAdmin) {
+      try {
+        // Leer la factura original
+        const { data: invoiceRows, error: readError } = await supabaseAdmin
+          .from('invoices')
+          .select('*')
+          .eq('id', id)
+          .limit(1);
+        
+        if (readError) {
+          console.error('❌ Error leyendo factura desde Supabase:', readError);
+          throw readError;
+        }
+        
+        if (!invoiceRows || invoiceRows.length === 0) {
+          return res.status(404).json({ error: 'Factura no encontrada' });
+        }
+        
+        const originalInvoice = normalizeSupabaseRow(invoiceRows[0]);
+        
+        // No se pueden rectificar borradores o facturas ya canceladas
+        if (originalInvoice.status === 'draft') {
+          return res.status(403).json({ error: 'No se pueden rectificar borradores' });
+        }
+        if (originalInvoice.status === 'cancelled') {
+          return res.status(403).json({ error: 'Esta factura ya está cancelada' });
+        }
+        
+        // Generar número de factura rectificativa
+        const { data: allInvoices } = await supabaseAdmin
+          .from('invoices')
+          .select('*')
+          .eq('psychologist_user_id', psychologistId || originalInvoice.psychologist_user_id)
+          .ilike('data->>invoiceNumber', 'R%');
+        
+        const year = new Date().getFullYear();
+        const rectPrefix = `R${year}`;
+        
+        let maxRectNumber = 0;
+        if (allInvoices && allInvoices.length > 0) {
+          allInvoices.forEach(inv => {
+            const normalized = normalizeSupabaseRow(inv);
+            if (normalized.invoiceNumber && normalized.invoiceNumber.startsWith(rectPrefix)) {
+              const numPart = normalized.invoiceNumber.replace(rectPrefix, '');
+              const num = parseInt(numPart, 10);
+              if (!isNaN(num) && num > maxRectNumber) {
+                maxRectNumber = num;
+              }
+            }
+          });
+        }
+        
+        const rectificativaNumber = `${rectPrefix}${String(maxRectNumber + 1).padStart(5, '0')}`;
+        
+        // Crear factura rectificativa (con valores en negativo)
+        const rectificativa = {
+          id: Date.now().toString(),
+          invoiceNumber: rectificativaNumber,
+          patientId: originalInvoice.patientId,
+          patient_user_id: originalInvoice.patient_user_id,
+          patientName: originalInvoice.patientName,
+          amount: -originalInvoice.amount, // Negativo
+          tax: originalInvoice.tax ? -originalInvoice.tax : undefined,
+          total: originalInvoice.total ? -originalInvoice.total : undefined,
+          taxRate: originalInvoice.taxRate,
+          date: new Date().toISOString().split('T')[0],
+          dueDate: new Date().toISOString().split('T')[0],
+          status: 'paid', // Las rectificativas se marcan como pagadas automáticamente
+          description: `Factura rectificativa de ${originalInvoice.invoiceNumber}`,
+          items: (originalInvoice.items || []).map(item => ({
+            ...item,
+            quantity: -item.quantity // Cantidades negativas
+          })),
+          psychologist_user_id: originalInvoice.psychologist_user_id,
+          psychologistId: originalInvoice.psychologistId,
+          invoice_type: originalInvoice.invoice_type,
+          sessionIds: [], // No asignar sesiones a rectificativa
+          bonoIds: [], // No asignar bonos a rectificativa
+          billing_client_name: originalInvoice.billing_client_name,
+          billing_client_address: originalInvoice.billing_client_address,
+          billing_client_tax_id: originalInvoice.billing_client_tax_id,
+          billing_psychologist_name: originalInvoice.billing_psychologist_name,
+          billing_psychologist_address: originalInvoice.billing_psychologist_address,
+          billing_psychologist_tax_id: originalInvoice.billing_psychologist_tax_id,
+          is_rectificativa: true,
+          rectifies_invoice_id: originalInvoice.id
+        };
+        
+        // Cancelar la factura original
+        const cancelledOriginal = {
+          ...originalInvoice,
+          status: 'cancelled',
+          cancelledAt: new Date().toISOString(),
+          rectified_by_invoice_id: rectificativa.id
+        };
+        
+        // Desasignar invoice_id de sesiones y bonos de la factura original
+        if (originalInvoice.sessionIds && originalInvoice.sessionIds.length > 0) {
+          const { error: sessionUpdateError } = await supabaseAdmin
+            .from('sessions')
+            .update({ invoice_id: null })
+            .in('id', originalInvoice.sessionIds);
+          
+          if (sessionUpdateError) {
+            console.error('⚠️ Error desasignando sesiones:', sessionUpdateError);
+          } else {
+            console.log(`✅ Desasignadas ${originalInvoice.sessionIds.length} sesiones`);
+          }
+        }
+        
+        if (originalInvoice.bonoIds && originalInvoice.bonoIds.length > 0) {
+          const { error: bonoUpdateError } = await supabaseAdmin
+            .from('bono')
+            .update({ invoice_id: null })
+            .in('id', originalInvoice.bonoIds);
+          
+          if (bonoUpdateError) {
+            console.error('⚠️ Error desasignando bonos:', bonoUpdateError);
+          } else {
+            console.log(`✅ Desasignados ${originalInvoice.bonoIds.length} bonos`);
+          }
+        }
+        
+        // Guardar ambas facturas en Supabase
+        const originalPayload = buildSupabaseInvoiceRow(cancelledOriginal);
+        const rectificativaPayload = buildSupabaseInvoiceRow(rectificativa);
+        
+        await trySupabaseUpsert('invoices', [originalPayload]);
+        await trySupabaseUpsert('invoices', [rectificativaPayload]);
+        
+        // Actualizar caché local
+        const db = getDb();
+        if (!db.invoices) db.invoices = [];
+        
+        const idx = db.invoices.findIndex(inv => inv.id === id);
+        if (idx >= 0) {
+          db.invoices[idx] = cancelledOriginal;
+        }
+        db.invoices.push(rectificativa);
+        saveDb(db);
+        
+        console.log('✅ Factura rectificativa creada:', rectificativaNumber);
+        return res.json({ 
+          original: cancelledOriginal, 
+          rectificativa: rectificativa 
+        });
+        
+      } catch (err) {
+        console.error('❌ Error creando factura rectificativa:', err);
+        return res.status(500).json({ error: 'Error creando factura rectificativa' });
+      }
+    }
+    
+    // Fallback a DB local
+    const db = getDb();
+    if (!db.invoices) db.invoices = [];
+    
+    const idx = db.invoices.findIndex(inv => inv.id === id);
+    if (idx === -1) return res.status(404).json({ error: 'Factura no encontrada' });
+    
+    const originalInvoice = db.invoices[idx];
+    
+    if (originalInvoice.status === 'draft') {
+      return res.status(403).json({ error: 'No se pueden rectificar borradores' });
+    }
+    
+    // Generar número rectificativo
+    const year = new Date().getFullYear();
+    const rectPrefix = `R${year}`;
+    const rectInvoices = db.invoices.filter(inv => 
+      inv.invoiceNumber && inv.invoiceNumber.startsWith(rectPrefix)
+    );
+    const maxNumber = rectInvoices.length > 0 
+      ? Math.max(...rectInvoices.map(inv => parseInt(inv.invoiceNumber.replace(rectPrefix, ''), 10))) 
+      : 0;
+    const rectificativaNumber = `${rectPrefix}${String(maxNumber + 1).padStart(5, '0')}`;
+    
+    // Crear rectificativa
+    const rectificativa = {
+      ...originalInvoice,
+      id: Date.now().toString(),
+      invoiceNumber: rectificativaNumber,
+      amount: -originalInvoice.amount,
+      tax: originalInvoice.tax ? -originalInvoice.tax : undefined,
+      total: originalInvoice.total ? -originalInvoice.total : undefined,
+      date: new Date().toISOString().split('T')[0],
+      status: 'paid',
+      description: `Factura rectificativa de ${originalInvoice.invoiceNumber}`,
+      sessionIds: [],
+      bonoIds: [],
+      is_rectificativa: true,
+      rectifies_invoice_id: originalInvoice.id
+    };
+    
+    // Cancelar original
+    db.invoices[idx].status = 'cancelled';
+    db.invoices[idx].cancelledAt = new Date().toISOString();
+    db.invoices[idx].rectified_by_invoice_id = rectificativa.id;
+    
+    db.invoices.push(rectificativa);
+    saveDb(db);
+    
+    res.json({ original: db.invoices[idx], rectificativa });
+    
+  } catch (error) {
+    console.error('Error in POST /api/invoices/:id/rectify:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// Delete draft invoice and unassign from sessions/bonos
+app.delete('/api/invoices/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    console.log(`🗑️ [DELETE /api/invoices/${id}] Eliminando factura`);
+    
+    if (supabaseAdmin) {
+      try {
+        // Verificar que sea un borrador
+        const { data: invoiceRows, error: readError } = await supabaseAdmin
+          .from('invoices')
+          .select('*')
+          .eq('id', id)
+          .limit(1);
+        
+        if (readError) {
+          console.error('❌ Error leyendo factura desde Supabase:', readError);
+          throw readError;
+        }
+        
+        if (!invoiceRows || invoiceRows.length === 0) {
+          return res.status(404).json({ error: 'Factura no encontrada' });
+        }
+        
+        const invoice = normalizeSupabaseRow(invoiceRows[0]);
+        
+        // Solo permitir eliminar borradores
+        if (invoice.status !== 'draft') {
+          return res.status(403).json({ error: 'Solo se pueden eliminar facturas en estado borrador' });
+        }
+        
+        // Desasignar invoice_id de sesiones
+        if (invoice.sessionIds && invoice.sessionIds.length > 0) {
+          const { error: sessionUpdateError } = await supabaseAdmin
+            .from('sessions')
+            .update({ invoice_id: null })
+            .eq('invoice_id', id);
+          
+          if (sessionUpdateError) {
+            console.error('⚠️ Error desasignando invoice_id de sesiones:', sessionUpdateError);
+          } else {
+            console.log(`✅ invoice_id desasignado de sesiones`);
+          }
+        }
+        
+        // Desasignar invoice_id de bonos
+        if (invoice.bonoIds && invoice.bonoIds.length > 0) {
+          const { error: bonoUpdateError } = await supabaseAdmin
+            .from('bono')
+            .update({ invoice_id: null })
+            .eq('invoice_id', id);
+          
+          if (bonoUpdateError) {
+            console.error('⚠️ Error desasignando invoice_id de bonos:', bonoUpdateError);
+          } else {
+            console.log(`✅ invoice_id desasignado de bonos`);
+          }
+        }
+        
+        // Eliminar la factura
+        const { error: deleteError } = await supabaseAdmin
+          .from('invoices')
+          .delete()
+          .eq('id', id);
+        
+        if (deleteError) {
+          console.error('❌ Error eliminando factura de Supabase:', deleteError);
+          throw deleteError;
+        }
+        
+        console.log('✅ Factura eliminada correctamente de Supabase:', id);
+        
+        // Actualizar caché local
+        const db = getDb();
+        if (db.invoices) {
+          db.invoices = db.invoices.filter(inv => inv.id !== id);
+          saveDb(db);
+        }
+        
+        return res.json({ message: 'Factura eliminada correctamente' });
+        
+      } catch (err) {
+        console.error('❌ Error eliminando factura en Supabase:', err);
+        return res.status(500).json({ error: 'Error eliminando factura en Supabase' });
+      }
+    }
+    
+    // Fallback a DB local
+    const db = getDb();
+    if (!db.invoices) db.invoices = [];
+    
+    const idx = db.invoices.findIndex(inv => inv.id === id);
+    if (idx === -1) return res.status(404).json({ error: 'Factura no encontrada' });
+    
+    // Solo permitir eliminar borradores
+    if (db.invoices[idx].status !== 'draft') {
+      return res.status(403).json({ error: 'Solo se pueden eliminar facturas en estado borrador' });
+    }
+    
+    db.invoices.splice(idx, 1);
+    saveDb(db);
+
+    res.json({ message: 'Factura eliminada correctamente' });
+  } catch (error) {
+    console.error('Error in DELETE /api/invoices/:id:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// Get unbilled sessions and bonos for a patient
+app.get('/api/patient/:patientId/unbilled', async (req, res) => {
+  try {
+    const { patientId } = req.params;
+    const { psychologistId } = req.query;
+    
+    console.log(`📋 [GET /api/patient/${patientId}/unbilled] Obteniendo sesiones y bonos sin facturar`);
+    
+    if (supabaseAdmin) {
+      try {
+        // Obtener sesiones sin facturar y sin bono asignado
+        let sessionQuery = supabaseAdmin
+          .from('sessions')
+          .select('*')
+          .eq('patient_user_id', patientId)
+          .is('invoice_id', null)
+          .is('bonus_id', null)
+          .eq('status', 'completed');
+        
+        if (psychologistId) {
+          sessionQuery = sessionQuery.eq('psychologist_user_id', psychologistId);
+        }
+        
+        const { data: sessions, error: sessionsError } = await sessionQuery
+          .order('starts_on', { ascending: false });
+        
+        if (sessionsError) {
+          console.error('❌ Error obteniendo sesiones sin facturar:', sessionsError);
+          throw sessionsError;
+        }
+        
+        // Obtener bonos sin facturar
+        let bonoQuery = supabaseAdmin
+          .from('bono')
+          .select('*')
+          .eq('pacient_user_id', patientId)
+          .is('invoice_id', null);
+        
+        if (psychologistId) {
+          bonoQuery = bonoQuery.eq('psychologist_user_id', psychologistId);
+        }
+        
+        const { data: bonos, error: bonosError } = await bonoQuery
+          .order('created_at', { ascending: false });
+        
+        if (bonosError) {
+          console.error('❌ Error obteniendo bonos sin facturar:', bonosError);
+          throw bonosError;
+        }
+        
+        console.log(`✅ Encontradas ${sessions?.length || 0} sesiones y ${bonos?.length || 0} bonos sin facturar`);
+        
+        return res.json({
+          sessions: sessions || [],
+          bonos: bonos || []
+        });
+        
+      } catch (err) {
+        console.error('❌ Error obteniendo datos sin facturar:', err);
+        return res.status(500).json({ error: 'Error obteniendo datos sin facturar' });
+      }
+    }
+    
+    // Fallback a DB local
+    return res.json({ sessions: [], bonos: [] });
+  } catch (error) {
+    console.error('Error in GET /api/patient/:patientId/unbilled:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// GET /api/patient-stats/:patientId - Obtener estadísticas del paciente
+app.get('/api/patient-stats/:patientId', async (req, res) => {
+  try {
+    const { patientId } = req.params;
+    const { psychologistId } = req.query;
+    
+    console.log(`📊 [GET /api/patient-stats/${patientId}] Obteniendo estadísticas para psychologistId: ${psychologistId}`);
+    
+    if (!psychologistId) {
+      return res.status(400).json({ error: 'psychologistId es requerido' });
+    }
+    
+    if (supabaseAdmin) {
+      try {
+        // Obtener todas las sesiones completadas del paciente con este psicólogo
+        const { data: allSessions, error: sessionsError } = await supabaseAdmin
+          .from('sessions')
+          .select('*')
+          .eq('patient_user_id', patientId)
+          .eq('psychologist_user_id', psychologistId)
+          .order('starts_on', { ascending: false });
+        
+        if (sessionsError) {
+          console.error('❌ Error obteniendo sesiones:', sessionsError);
+          throw sessionsError;
+        }
+        
+        // Obtener facturas del paciente
+        const { data: invoices, error: invoicesError } = await supabaseAdmin
+          .from('invoices')
+          .select('*')
+          .eq('patient_user_id', patientId)
+          .eq('psychologist_user_id', psychologistId);
+        
+        if (invoicesError) {
+          console.error('❌ Error obteniendo facturas:', invoicesError);
+          throw invoicesError;
+        }
+        
+        // Calcular estadísticas
+        const completedSessions = allSessions.filter(s => s.status === 'completed');
+        const scheduledSessions = allSessions.filter(s => s.status === 'scheduled' || s.status === 'confirmed');
+        
+        // Valor total de sesiones completadas
+        const totalSessionValue = completedSessions.reduce((sum, s) => sum + (s.price || 0), 0);
+        
+        // Calcular ganancia del psicólogo
+        const psychologistEarnings = completedSessions.reduce((sum, s) => {
+          const price = s.price || 0;
+          const percent = s.psychologist_percent || 70;
+          return sum + (price * percent / 100);
+        }, 0);
+        
+        const avgPercent = completedSessions.length > 0
+          ? completedSessions.reduce((sum, s) => sum + (s.psychologist_percent || 70), 0) / completedSessions.length
+          : 70;
+        
+        // Sesiones facturadas (con invoice_id)
+        const sessionsWithInvoice = completedSessions.filter(s => s.invoice_id);
+        
+        // Calcular total facturado (del campo data de facturas)
+        const totalInvoiced = invoices.reduce((sum, inv) => {
+          const invoiceData = inv.data || inv;
+          const amount = invoiceData.total || invoiceData.amount || 0;
+          if (invoiceData.status !== 'cancelled' && invoiceData.status !== 'draft') {
+            return sum + amount;
+          }
+          return sum;
+        }, 0);
+        
+        // Sesiones pendientes de facturar
+        const sessionsWithoutInvoice = completedSessions.filter(s => !s.invoice_id && !s.bonus_id);
+        const pendingToInvoice = sessionsWithoutInvoice.reduce((sum, s) => sum + (s.price || 0), 0);
+        
+        // Facturas pagadas
+        const paidInvoices = invoices.filter(inv => {
+          const invoiceData = inv.data || inv;
+          return invoiceData.status === 'paid';
+        });
+        
+        // Sesiones pagadas (de facturas pagadas)
+        const paidSessionIds = new Set();
+        paidInvoices.forEach(inv => {
+          const invoiceData = inv.data || inv;
+          const sessionIds = invoiceData.sessionIds || [];
+          sessionIds.forEach((id) => paidSessionIds.add(id));
+        });
+        
+        const paidSessions = completedSessions.filter(s => paidSessionIds.has(s.id)).length;
+        const unpaidSessions = completedSessions.length - paidSessions;
+        
+        // Total cobrado y por cobrar de facturas
+        const totalCollected = paidInvoices.reduce((sum, inv) => {
+          const invoiceData = inv.data || inv;
+          return sum + (invoiceData.total || invoiceData.amount || 0);
+        }, 0);
+        
+        const pendingInvoices = invoices.filter(inv => {
+          const invoiceData = inv.data || inv;
+          return invoiceData.status === 'sent' || invoiceData.status === 'pending';
+        });
+        
+        const totalPending = pendingInvoices.reduce((sum, inv) => {
+          const invoiceData = inv.data || inv;
+          return sum + (invoiceData.total || invoiceData.amount || 0);
+        }, 0);
+        
+        // Datos mensuales (últimos 12 meses)
+        const now = new Date();
+        const monthlyData = [];
+        
+        for (let i = 11; i >= 0; i--) {
+          const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          const monthStart = new Date(date.getFullYear(), date.getMonth(), 1);
+          const monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+          
+          const monthName = date.toLocaleDateString('es-ES', { month: 'short', year: '2-digit' });
+          
+          const monthSessions = completedSessions.filter(s => {
+            const sessionDate = new Date(s.starts_on);
+            return sessionDate >= monthStart && sessionDate <= monthEnd;
+          });
+          
+          const monthRevenue = monthSessions.reduce((sum, s) => sum + (s.price || 0), 0);
+          
+          // Calcular ganancia del psicólogo para este mes
+          const monthPsychEarnings = monthSessions.reduce((sum, s) => {
+            const price = s.price || 0;
+            const percent = s.psychologist_percent || 70;
+            return sum + (price * percent / 100);
+          }, 0);
+          
+          monthlyData.push({
+            month: monthName,
+            sessions: monthSessions.length,
+            revenue: monthRevenue,
+            psychEarnings: monthPsychEarnings
+          });
+        }
+        
+        const stats = {
+          totalSessionValue,
+          psychologistEarnings,
+          avgPercent,
+          totalInvoiced,
+          totalCollected,
+          totalPending,
+          pendingToInvoice,
+          completedSessions: completedSessions.length,
+          scheduledSessions: scheduledSessions.length,
+          paidSessions,
+          unpaidSessions,
+          totalInvoices: invoices.length,
+          paidInvoices: paidInvoices.length,
+          pendingInvoicesCount: pendingInvoices.length,
+          monthlyData
+        };
+        
+        console.log(`✅ Estadísticas calculadas:`, {
+          completedSessions: stats.completedSessions,
+          totalSessionValue: stats.totalSessionValue,
+          totalInvoiced: stats.totalInvoiced
+        });
+        
+        return res.json(stats);
+        
+      } catch (err) {
+        console.error('❌ Error obteniendo estadísticas:', err);
+        return res.status(500).json({ error: 'Error obteniendo estadísticas del paciente' });
+      }
+    }
+    
+    // Fallback
+    return res.json({
+      totalSessionValue: 0,
+      psychologistEarnings: 0,
+      avgPercent: 70,
+      totalInvoiced: 0,
+      totalCollected: 0,
+      totalPending: 0,
+      pendingToInvoice: 0,
+      completedSessions: 0,
+      scheduledSessions: 0,
+      paidSessions: 0,
+      unpaidSessions: 0,
+      totalInvoices: 0,
+      paidInvoices: 0,
+      pendingInvoicesCount: 0,
+      monthlyData: []
+    });
+  } catch (error) {
+    console.error('Error in GET /api/patient-stats/:patientId:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
@@ -4646,7 +5393,9 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
       total: invoice.total, 
       taxRate: invoice.taxRate,
       status: invoice.status,
-      invoiceNumber: invoice.invoiceNumber
+      invoiceNumber: invoice.invoiceNumber,
+      billing_client_tax_id: invoice.billing_client_tax_id,
+      billing_psychologist_tax_id: invoice.billing_psychologist_tax_id
     });
   } catch (err) {
     console.error('❌ [PDF] Error obteniendo factura desde Supabase:', err);
@@ -4658,13 +5407,22 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
     return res.status(404).json({ error: 'Invoice not found' });
   }
 
-  // Obtener perfil del psicólogo para datos de la empresa
-  const psychologistUserId = invoice.psychologist_user_id || invoice.psychologistId;
-  let psychProfile = {
-    name: 'Psicólogo',
-    businessName: 'Servicios Profesionales de Psicología',
-    taxId: '',
-    address: '',
+  // Usar los datos de facturación guardados en la factura (billing_psychologist_* y billing_client_*)
+  // Estos campos ya contienen la información que el usuario completó al crear la factura
+  console.log('📋 [PDF] Datos de facturación en invoice:', {
+    billing_psychologist_name: invoice.billing_psychologist_name,
+    billing_psychologist_tax_id: invoice.billing_psychologist_tax_id,
+    billing_psychologist_address: invoice.billing_psychologist_address,
+    billing_client_name: invoice.billing_client_name,
+    billing_client_tax_id: invoice.billing_client_tax_id,
+    billing_client_address: invoice.billing_client_address
+  });
+  
+  const psychProfile = {
+    name: invoice.billing_psychologist_name || 'Psicólogo',
+    businessName: invoice.billing_psychologist_name || 'Servicios Profesionales de Psicología',
+    taxId: invoice.billing_psychologist_tax_id || '',
+    address: invoice.billing_psychologist_address || '',
     city: '',
     postalCode: '',
     country: 'España',
@@ -4672,95 +5430,18 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
     email: ''
   };
 
-  // Intentar obtener el perfil real del psicólogo desde Supabase o DB local
-  if (psychologistUserId) {
-    if (supabaseAdmin) {
-      try {
-        // Obtener el psychologist_profile_id del usuario
-        const { data: userData, error: userError } = await supabaseAdmin
-          .from('users')
-          .select('psychologist_profile_id, name, email')
-          .eq('id', psychologistUserId)
-          .single();
-
-        if (userData?.psychologist_profile_id) {
-          // Obtener el perfil de psicólogo
-          const { data: profileData, error: profileError } = await supabaseAdmin
-            .from('psychologist_profiles')
-            .select('data')
-            .eq('id', userData.psychologist_profile_id)
-            .single();
-
-          if (profileData?.data) {
-            psychProfile = {
-              ...psychProfile,
-              ...profileData.data,
-              // Usar datos del usuario si no están en el perfil
-              name: profileData.data.name || userData.name || psychProfile.name,
-              email: userData.user_email || psychProfile.email
-            };
-          }
-        } else if (userData) {
-          // Si no tiene perfil, al menos usar nombre y email del usuario
-          psychProfile.name = userData.name || psychProfile.name;
-          psychProfile.email = userData.user_email || psychProfile.email;
-        }
-      } catch (err) {
-        console.error('Error obteniendo perfil del psicólogo para factura:', err);
-      }
-    } else {
-      // Fallback a DB local
-      if (db.psychologistProfiles && db.psychologistProfiles[psychologistUserId]) {
-        psychProfile = { ...psychProfile, ...db.psychologistProfiles[psychologistUserId] };
-      }
-      // Intentar obtener datos del usuario si no hay perfil
-      const psychUser = (db.users || []).find(u => u.id === psychologistUserId);
-      if (psychUser) {
-        psychProfile.name = psychProfile.name || psychUser.name || 'Psicólogo';
-        psychProfile.email = psychProfile.email || psychUser.email || '';
-      }
-    }
-  }
-
-  // Obtener datos del paciente
-  const patientUserId = invoice.patient_user_id || invoice.patientId;
-  let patientData = {
-    name: invoice.patientName || 'Paciente',
+  const patientData = {
+    name: invoice.billing_client_name || invoice.patientName || 'Paciente',
+    taxId: invoice.billing_client_tax_id || '',
+    dni: invoice.billing_client_tax_id || '',
+    address: invoice.billing_client_address || '',
     email: '',
-    phone: ''
+    phone: '',
+    postalCode: '',
+    city: ''
   };
-
-  if (patientUserId) {
-    if (supabaseAdmin) {
-      try {
-        const { data: patientUser, error: patientError } = await supabaseAdmin
-          .from('users')
-          .select('name, email')
-          .eq('id', patientUserId)
-          .single();
-
-        if (patientUser) {
-          patientData = {
-            name: patientUser.name || invoice.patientName || 'Paciente',
-            email: patientUser.email || '',
-            phone: ''
-          };
-        }
-      } catch (err) {
-        console.error('Error obteniendo datos del paciente para factura:', err);
-      }
-    } else {
-      // Fallback a DB local
-      const patient = (db.users || []).find(u => u.id === patientUserId);
-      if (patient) {
-        patientData = {
-          name: patient.name || invoice.patientName || 'Paciente',
-          email: patient.email || '',
-          phone: patient.phone || ''
-        };
-      }
-    }
-  }
+  
+  console.log('👤 [PDF] patientData construido:', patientData);
 
   // Usar los campos directos del nuevo schema, con fallback al cálculo antiguo
   console.log('📊 [PDF] Invoice raw data:', { 
@@ -4768,6 +5449,8 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
     tax: invoice.tax, 
     total: invoice.total, 
     taxRate: invoice.taxRate,
+    irpf: invoice.irpf,
+    invoice_type: invoice.invoice_type,
     items: invoice.items 
   });
   
@@ -4784,21 +5467,93 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
     iva = subtotal * (taxRate / 100);
   }
   
-  // total debe ser subtotal + IVA
+  // IRPF (solo para facturas a centros)
+  let irpfAmount = 0;
+  if (invoice.invoice_type === 'center' && invoice.irpf) {
+    irpfAmount = subtotal * (parseFloat(invoice.irpf) / 100);
+  }
+  
+  // total debe ser subtotal + IVA - IRPF
   let totalAmount = 0;
   if (invoice.total !== undefined && invoice.total !== null) {
     totalAmount = parseFloat(invoice.total);
   } else {
     // Fallback: calcular total
-    totalAmount = subtotal + iva;
+    totalAmount = subtotal + iva - irpfAmount;
   }
   
   console.log('📊 [PDF] Calculated values:', { 
     subtotal: subtotal.toFixed(2), 
     iva: iva.toFixed(2), 
+    irpfAmount: irpfAmount.toFixed(2),
     totalAmount: totalAmount.toFixed(2),
-    taxRate: invoice.taxRate || 21
+    taxRate: invoice.taxRate || 21,
+    irpfRate: invoice.irpf || 0
   });
+  
+  // Obtener detalles de sesiones y bonos para mostrar en el PDF
+  let detailedItems = [];
+  
+  if (invoice.sessionIds && invoice.sessionIds.length > 0) {
+    // Obtener sesiones desde Supabase
+    try {
+      const { data: sessions, error: sessionsError } = await supabaseAdmin
+        .from('sessions')
+        .select('*')
+        .in('id', invoice.sessionIds);
+      
+      if (!sessionsError && sessions) {
+        sessions.forEach(session => {
+          const sessionData = session.data || {};
+          const sessionPrice = session.price || sessionData.price || 0;
+          const startDate = session.starts_on ? new Date(session.starts_on).toLocaleDateString('es-ES') : 'Fecha no disponible';
+          detailedItems.push({
+            description: `Sesión de psicología - ${startDate}${sessionData.notes ? ` (${sessionData.notes})` : ''}`,
+            quantity: 1,
+            unitPrice: sessionPrice
+          });
+        });
+      }
+    } catch (err) {
+      console.error('Error obteniendo sesiones para PDF:', err);
+    }
+  }
+  
+  if (invoice.bonoIds && invoice.bonoIds.length > 0) {
+    // Obtener bonos desde Supabase
+    try {
+      const { data: bonos, error: bonosError } = await supabaseAdmin
+        .from('bonos')
+        .select('*')
+        .in('id', invoice.bonoIds);
+      
+      if (!bonosError && bonos) {
+        bonos.forEach(bono => {
+          const bonoData = bono.data || {};
+          const bonoPrice = bonoData.total_price_bono_amount || 0;
+          const totalSessions = bonoData.total_sessions_amount || 0;
+          detailedItems.push({
+            description: `Bono de ${totalSessions} sesiones`,
+            quantity: 1,
+            unitPrice: bonoPrice
+          });
+        });
+      }
+    } catch (err) {
+      console.error('Error obteniendo bonos para PDF:', err);
+    }
+  }
+  
+  // Si no hay items detallados, usar un item genérico
+  if (detailedItems.length === 0) {
+    detailedItems = [{
+      description: invoice.description || 'Servicio de psicología',
+      quantity: 1,
+      unitPrice: subtotal
+    }];
+  }
+  
+  console.log('📋 [PDF] Items detallados:', detailedItems);
   
   // Generate professional PDF HTML
   const html = `
@@ -5053,10 +5808,12 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
           <span class="info-label">Fecha:</span>
           <span class="info-value">${new Date(invoice.date).toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
         </div>
+        ${invoice.dueDate && !isNaN(new Date(invoice.dueDate).getTime()) ? `
         <div class="info-row">
           <span class="info-label">Vencimiento:</span>
           <span class="info-value">${new Date(invoice.dueDate).toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
         </div>
+        ` : ''}
         <div class="info-row">
           <span class="info-label">Estado:</span>
           <span class="status-badge status-${invoice.status}">${
@@ -5124,7 +5881,7 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
         </tr>
       </thead>
       <tbody>
-        ${(invoice.items || [{description: 'Servicio de psicología', quantity: 1, unitPrice: subtotal}]).map(item => `
+        ${detailedItems.map(item => `
           <tr ${invoice.status === 'cancelled' ? 'class="line-through"' : ''}>
             <td>${item.description}</td>
             <td style="text-align: center;">${item.quantity}</td>
@@ -5146,6 +5903,12 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
           <span class="total-label">IVA (${invoice.taxRate || 21}%):</span>
           <span class="total-value">${iva.toFixed(2)} €</span>
         </div>
+        ${invoice.invoice_type === 'center' && irpfAmount > 0 ? `
+        <div class="total-row">
+          <span class="total-label">IRPF (${invoice.irpf || 0}%):</span>
+          <span class="total-value" style="color: #dc2626;">-${irpfAmount.toFixed(2)} €</span>
+        </div>
+        ` : ''}
         <div class="total-row">
           <span class="total-label">TOTAL:</span>
           <span class="total-value">${totalAmount.toFixed(2)} €</span>
@@ -5218,31 +5981,25 @@ app.get('/api/psychologist/:userId/profile', async (req, res) => {
 
     // Si usamos Supabase, leer de Supabase
     if (supabaseAdmin) {
-      // Obtener el psychologist_profile_id del usuario
-      const { data: userData, error: userError } = await supabaseAdmin
-        .from('users')
-        .select('psychologist_profile_id')
-        .eq('id', userId)
-        .single();
-
-      if (userError || !userData?.psychologist_profile_id) {
-        console.log('[API] Usuario sin perfil de psicólogo, devolviendo perfil vacío');
-        return res.json(defaultProfile);
-      }
-
-      // Obtener el perfil de psicólogo
+      // Obtener el perfil de psicólogo directamente por user_id
       const { data: profileData, error: profileError } = await supabaseAdmin
         .from('psychologist_profiles')
         .select('data')
-        .eq('id', userData.psychologist_profile_id)
+        .eq('user_id', userId)
         .single();
 
       if (profileError) {
-        console.error('❌ Error obteniendo perfil de psicólogo:', profileError);
+        console.log('[API] Usuario sin perfil de psicólogo, devolviendo perfil vacío. Error:', profileError.message);
         return res.json(defaultProfile);
       }
 
-      return res.json(profileData.data || defaultProfile);
+      if (!profileData?.data) {
+        console.log('[API] Perfil de psicólogo sin datos, devolviendo perfil vacío');
+        return res.json(defaultProfile);
+      }
+
+      console.log('[API] Perfil de psicólogo cargado correctamente:', profileData.data);
+      return res.json(profileData.data);
     }
 
     // Fallback a DB local
@@ -5280,23 +6037,35 @@ app.put('/api/psychologist/:userId/profile', async (req, res) => {
 
     // Si usamos Supabase, guardar en Supabase
     if (supabaseAdmin) {
-      // Primero obtener el usuario para verificar que existe y obtener su psychologist_profile_id
-      const { data: userData, error: userError } = await supabaseAdmin
-        .from('users')
-        .select('id, psychologist_profile_id')
-        .eq('id', userId)
+      // Buscar si ya existe un perfil para este usuario
+      const { data: existingProfile, error: searchError } = await supabaseAdmin
+        .from('psychologist_profiles')
+        .select('id')
+        .eq('user_id', userId)
         .single();
 
-      if (userError) {
-        console.error('❌ Error obteniendo usuario:', userError);
-        return res.status(404).json({ error: 'Usuario no encontrado' });
+      if (searchError && searchError.code !== 'PGRST116') {
+        // PGRST116 es "no rows returned", que es válido
+        console.error('❌ Error buscando perfil de psicólogo:', searchError);
+        return res.status(500).json({ error: `Error buscando perfil: ${searchError.message}` });
       }
 
-      let profileId = userData.psychologist_profile_id;
+      if (existingProfile) {
+        // Si ya existe, actualizar
+        const { error: updateError } = await supabaseAdmin
+          .from('psychologist_profiles')
+          .update({ data: req.body, updated_at: new Date().toISOString() })
+          .eq('id', existingProfile.id);
 
-      // Si el usuario no tiene un perfil de psicólogo, crear uno
-      if (!profileId) {
-        profileId = crypto.randomUUID();
+        if (updateError) {
+          console.error('❌ Error actualizando perfil de psicólogo:', updateError);
+          return res.status(500).json({ error: `Error actualizando perfil: ${updateError.message}` });
+        }
+
+        console.log('✓ Perfil de psicólogo actualizado en Supabase:', existingProfile.id);
+      } else {
+        // Si no existe, crear uno nuevo
+        const profileId = crypto.randomUUID();
         
         const { error: createError } = await supabaseAdmin
           .from('psychologist_profiles')
@@ -5311,30 +6080,7 @@ app.put('/api/psychologist/:userId/profile', async (req, res) => {
           return res.status(500).json({ error: `Error creando perfil: ${createError.message}` });
         }
 
-        // Actualizar el usuario con el psychologist_profile_id
-        const { error: updateUserError } = await supabaseAdmin
-          .from('users')
-          .update({ psychologist_profile_id: profileId })
-          .eq('id', userId);
-
-        if (updateUserError) {
-          console.error('❌ Error actualizando usuario con psychologist_profile_id:', updateUserError);
-        }
-
         console.log('✓ Perfil de psicólogo creado en Supabase:', profileId);
-      } else {
-        // Si ya existe, actualizar
-        const { error: updateError } = await supabaseAdmin
-          .from('psychologist_profiles')
-          .update({ data: req.body, updated_at: new Date().toISOString() })
-          .eq('id', profileId);
-
-        if (updateError) {
-          console.error('❌ Error actualizando perfil de psicólogo:', updateError);
-          return res.status(500).json({ error: `Error actualizando perfil: ${updateError.message}` });
-        }
-
-        console.log('✓ Perfil de psicólogo actualizado en Supabase:', profileId);
       }
 
       return res.json(req.body);
@@ -5806,6 +6552,9 @@ app.put('/api/relationships/:id', async (req, res) => {
         if (updatedData.default_psych_percent !== undefined) {
           updatePayload.default_psych_percent = Math.min(updatedData.default_psych_percent, 100);
         }
+        if (updatedData.center_id !== undefined) {
+          updatePayload.center_id = updatedData.center_id;
+        }
         
         // Actualizar data JSONB con tags y otros campos
         const existingData = existing.data || {};
@@ -5923,26 +6672,48 @@ app.get('/api/bonos', async (req, res) => {
     }
 
     if (supabaseAdmin) {
-      let query = supabaseAdmin
+      // Primero obtener los bonos
+      let bonoQuery = supabaseAdmin
         .from('bono')
         .select('*');
       
       if (pacient_user_id) {
-        query = query.eq('pacient_user_id', pacient_user_id);
+        bonoQuery = bonoQuery.eq('pacient_user_id', pacient_user_id);
       }
       if (psychologist_user_id) {
-        query = query.eq('psychologist_user_id', psychologist_user_id);
+        bonoQuery = bonoQuery.eq('psychologist_user_id', psychologist_user_id);
       }
       
-      const { data, error } = await query.order('created_at', { ascending: false });
+      const { data: bonos, error: bonosError } = await bonoQuery.order('created_at', { ascending: false });
       
-      if (error) {
-        console.error('[GET /api/bonos] Error en Supabase:', error);
-        throw error;
+      if (bonosError) {
+        console.error('[GET /api/bonos] Error en Supabase al obtener bonos:', bonosError);
+        throw bonosError;
       }
       
-      console.log(`[GET /api/bonos] ✓ Encontrados ${data?.length || 0} bonos en Supabase`);
-      return res.json(data || []);
+      // Para cada bono, contar las sesiones asociadas
+      const bonosWithCounts = await Promise.all((bonos || []).map(async (bono) => {
+        const { data: sessions, error: sessionsError } = await supabaseAdmin
+          .from('sessions')
+          .select('id')
+          .eq('bonus_id', bono.id);
+        
+        if (sessionsError) {
+          console.error(`[GET /api/bonos] Error al contar sesiones del bono ${bono.id}:`, sessionsError);
+        }
+        
+        const sessionsUsed = sessions?.length || 0;
+        const sessionsRemaining = bono.total_sessions_amount - sessionsUsed;
+        
+        return {
+          ...bono,
+          used_sessions: sessionsUsed,
+          remaining_sessions: sessionsRemaining
+        };
+      }));
+      
+      console.log(`[GET /api/bonos] ✓ Encontrados ${bonosWithCounts.length} bonos en Supabase con cálculo de sesiones`);
+      return res.json(bonosWithCounts);
     }
     
     // Fallback a DB local (si se implementa)
@@ -6112,6 +6883,188 @@ app.delete('/api/bonos/:id', async (req, res) => {
   } catch (error) {
     console.error('[DELETE /api/bonos/:id] Error:', error);
     res.status(500).json({ error: 'Error al eliminar el bono' });
+  }
+});
+
+// GET: Obtener bonos disponibles (con sesiones restantes) para un paciente
+app.get('/api/bonos/available/:pacient_user_id', async (req, res) => {
+  try {
+    const { pacient_user_id } = req.params;
+    const { psychologist_user_id } = req.query;
+    
+    console.log('[GET /api/bonos/available/:pacient_user_id] Consultando bonos disponibles:', { pacient_user_id, psychologist_user_id });
+    
+    if (!pacient_user_id) {
+      return res.status(400).json({ error: 'Se requiere pacient_user_id' });
+    }
+
+    if (supabaseAdmin) {
+      // Obtener bonos del paciente con el psicólogo especificado
+      let bonoQuery = supabaseAdmin
+        .from('bono')
+        .select('*')
+        .eq('pacient_user_id', pacient_user_id);
+      
+      if (psychologist_user_id) {
+        bonoQuery = bonoQuery.eq('psychologist_user_id', psychologist_user_id);
+      }
+      
+      const { data: bonos, error: bonosError } = await bonoQuery.order('created_at', { ascending: false });
+      
+      if (bonosError) {
+        console.error('[GET /api/bonos/available] Error en Supabase:', bonosError);
+        throw bonosError;
+      }
+      
+      // Para cada bono, contar las sesiones asociadas y filtrar disponibles
+      const availableBonos = [];
+      for (const bono of (bonos || [])) {
+        const { data: sessions, error: sessionsError } = await supabaseAdmin
+          .from('sessions')
+          .select('id')
+          .eq('bonus_id', bono.id);
+        
+        if (sessionsError) {
+          console.error(`[GET /api/bonos/available] Error al contar sesiones del bono ${bono.id}:`, sessionsError);
+        }
+        
+        const sessionsUsed = sessions?.length || 0;
+        const sessionsRemaining = bono.total_sessions_amount - sessionsUsed;
+        
+        if (sessionsRemaining > 0) {
+          availableBonos.push({
+            ...bono,
+            sessions_used: sessionsUsed,
+            sessions_remaining: sessionsRemaining
+          });
+        }
+      }
+      
+      console.log(`[GET /api/bonos/available] ✓ Encontrados ${availableBonos.length} bonos disponibles`);
+      return res.json(availableBonos);
+    }
+    
+    return res.json([]);
+  } catch (error) {
+    console.error('[GET /api/bonos/available] Error:', error);
+    res.status(500).json({ error: 'Error al obtener bonos disponibles' });
+  }
+});
+
+// POST: Asignar sesión a un bono
+app.post('/api/sessions/:sessionId/assign-bonus', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { bonus_id } = req.body;
+    
+    console.log('[POST /api/sessions/:sessionId/assign-bonus] Asignando sesión a bono:', { sessionId, bonus_id });
+    
+    if (!bonus_id) {
+      return res.status(400).json({ error: 'Se requiere bonus_id' });
+    }
+
+    if (supabaseAdmin) {
+      // Obtener la sesión actual
+      const { data: session, error: sessionError } = await supabaseAdmin
+        .from('sessions')
+        .select('*, patient_user_id, invoice_id')
+        .eq('id', sessionId)
+        .single();
+      
+      if (sessionError || !session) {
+        console.error('[POST assign-bonus] Sesión no encontrada:', sessionError);
+        return res.status(404).json({ error: 'Sesión no encontrada' });
+      }
+      
+      // Validar que la sesión no tenga invoice_id
+      if (session.invoice_id) {
+        console.error('[POST assign-bonus] Sesión ya tiene invoice_id:', session.invoice_id);
+        return res.status(400).json({ error: 'No se puede asignar un bono a una sesión que ya tiene una factura asociada' });
+      }
+      
+      // Verificar que el bono existe y tiene sesiones disponibles
+      const { data: bono, error: bonoError } = await supabaseAdmin
+        .from('bono')
+        .select('*, sessions!sessions_bonus_id_fkey(id)')
+        .eq('id', bonus_id)
+        .eq('pacient_user_id', session.patient_user_id)
+        .single();
+      
+      if (bonoError || !bono) {
+        console.error('[POST assign-bonus] Bono no encontrado:', bonoError);
+        return res.status(404).json({ error: 'Bono no encontrado o no pertenece al paciente' });
+      }
+      
+      const sessionsUsed = bono.sessions?.length || 0;
+      const sessionsRemaining = bono.total_sessions_amount - sessionsUsed;
+      
+      if (sessionsRemaining <= 0) {
+        return res.status(400).json({ error: 'El bono no tiene sesiones disponibles' });
+      }
+      
+      // Asignar el bono a la sesión
+      const { data: updatedSession, error: updateError } = await supabaseAdmin
+        .from('sessions')
+        .update({ bonus_id })
+        .eq('id', sessionId)
+        .select()
+        .single();
+      
+      if (updateError) {
+        console.error('[POST assign-bonus] Error al actualizar sesión:', updateError);
+        throw updateError;
+      }
+      
+      console.log('[POST assign-bonus] ✓ Sesión asignada a bono correctamente');
+      return res.json({ 
+        success: true, 
+        session: updatedSession,
+        sessions_remaining: sessionsRemaining - 1
+      });
+    }
+    
+    return res.status(501).json({ error: 'Asignación de bonos solo disponible con Supabase' });
+  } catch (error) {
+    console.error('[POST assign-bonus] Error:', error);
+    res.status(500).json({ error: 'Error al asignar sesión a bono' });
+  }
+});
+
+// DELETE: Desasignar sesión de un bono
+app.delete('/api/sessions/:sessionId/assign-bonus', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    
+    console.log('[DELETE /api/sessions/:sessionId/assign-bonus] Desasignando sesión de bono:', { sessionId });
+
+    if (supabaseAdmin) {
+      // Desasignar el bono de la sesión (poner bonus_id a null)
+      const { data: updatedSession, error: updateError } = await supabaseAdmin
+        .from('sessions')
+        .update({ bonus_id: null })
+        .eq('id', sessionId)
+        .select()
+        .single();
+      
+      if (updateError) {
+        console.error('[DELETE assign-bonus] Error al actualizar sesión:', updateError);
+        if (updateError.code === 'PGRST116') {
+          return res.status(404).json({ error: 'Sesión no encontrada' });
+        }
+        throw updateError;
+      }
+      
+      console.log('[DELETE assign-bonus] ✓ Sesión desasignada de bono correctamente');
+      return res.json({ 
+        success: true, 
+        session: updatedSession
+      });
+    }
+    
+    return res.status(501).json({ error: 'Desasignación de bonos solo disponible con Supabase' });
+  } catch (error) {
+    console.error('[DELETE assign-bonus] Error:', error);
+    res.status(500).json({ error: 'Error al desasignar sesión de bono' });
   }
 });
 
@@ -7209,12 +8162,299 @@ app.get('/api/psychologist/:psychologistId/patients', (req, res) => {
         id: u.id,
         name: u.name,
         email: u.user_email,
-        phone: u.phone || ''
+        phone: u.phone || '',
+        billing_name: u.billing_name || u.name,
+        billing_address: u.billing_address || u.address || '',
+        billing_tax_id: u.billing_tax_id || u.tax_id || ''
       }))
     : [];
   
   console.log(`[GET /api/psychologist/${psychologistId}/patients] Found ${patients.length} active patients:`, patients);
   res.json(patients);
+});
+
+// ===== CENTROS ENDPOINTS =====
+
+// GET /api/centers - Obtener todos los centros de un psicólogo
+app.get('/api/centers', async (req, res) => {
+  try {
+    const { psychologistId } = req.query;
+    
+    if (!psychologistId) {
+      return res.status(400).json({ error: 'psychologistId es requerido' });
+    }
+
+    console.log(`[GET /api/centers] Obteniendo centros para psychologistId: ${psychologistId}`);
+
+    // Intentar desde Supabase
+    if (supabaseAdmin) {
+      try {
+        const { data: centers, error } = await supabaseAdmin
+          .from('center')
+          .select('*')
+          .eq('psychologist_user_id', psychologistId)
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          console.error('❌ Error consultando centros en Supabase:', error);
+          return res.status(500).json({ error: 'Error obteniendo centros' });
+        }
+
+        console.log(`✅ [GET /api/centers] ${centers?.length || 0} centros encontrados`);
+        return res.json(centers || []);
+      } catch (err) {
+        console.error('❌ Error obteniendo centros:', err);
+        return res.status(500).json({ error: 'Error obteniendo centros' });
+      }
+    }
+
+    // Fallback a DB local (aunque no es ideal para esta tabla)
+    res.json([]);
+  } catch (error) {
+    console.error('Error in GET /api/centers:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// POST /api/centers - Crear un nuevo centro
+app.post('/api/centers', async (req, res) => {
+  try {
+    const { psychologistId, center_name, cif, address } = req.body;
+
+    if (!psychologistId || !center_name || !cif || !address) {
+      return res.status(400).json({ 
+        error: 'Faltan campos requeridos: psychologistId, center_name, cif, address' 
+      });
+    }
+
+    console.log(`[POST /api/centers] Creando centro para psychologistId: ${psychologistId}`);
+
+    const centerId = crypto.randomUUID();
+    const newCenter = {
+      id: centerId,
+      psychologist_user_id: psychologistId,
+      center_name,
+      cif,
+      address,
+      created_at: new Date().toISOString()
+    };
+
+    // Guardar en Supabase
+    if (supabaseAdmin) {
+      try {
+        const { data, error } = await supabaseAdmin
+          .from('center')
+          .insert([newCenter])
+          .select()
+          .single();
+
+        if (error) {
+          console.error('❌ Error creando centro en Supabase:', error);
+          return res.status(500).json({ error: 'Error creando centro', details: error.message });
+        }
+
+        console.log('✅ [POST /api/centers] Centro creado exitosamente:', data.id);
+        return res.status(201).json(data);
+      } catch (err) {
+        console.error('❌ Error creando centro:', err);
+        return res.status(500).json({ error: 'Error creando centro' });
+      }
+    }
+
+    res.status(500).json({ error: 'Base de datos no disponible' });
+  } catch (error) {
+    console.error('Error in POST /api/centers:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// PATCH /api/centers/:id - Actualizar un centro
+app.patch('/api/centers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { center_name, cif, address, psychologistId } = req.body;
+
+    if (!psychologistId) {
+      return res.status(400).json({ error: 'psychologistId es requerido' });
+    }
+
+    console.log(`[PATCH /api/centers/${id}] Actualizando centro`);
+
+    // Actualizar en Supabase
+    if (supabaseAdmin) {
+      try {
+        // Verificar que el centro pertenece al psicólogo
+        const { data: existing, error: fetchError } = await supabaseAdmin
+          .from('center')
+          .select('*')
+          .eq('id', id)
+          .eq('psychologist_user_id', psychologistId)
+          .single();
+
+        if (fetchError || !existing) {
+          return res.status(404).json({ error: 'Centro no encontrado' });
+        }
+
+        // Actualizar solo los campos proporcionados
+        const updates = {};
+        if (center_name !== undefined) updates.center_name = center_name;
+        if (cif !== undefined) updates.cif = cif;
+        if (address !== undefined) updates.address = address;
+
+        const { data, error } = await supabaseAdmin
+          .from('center')
+          .update(updates)
+          .eq('id', id)
+          .eq('psychologist_user_id', psychologistId)
+          .select()
+          .single();
+
+        if (error) {
+          console.error('❌ Error actualizando centro en Supabase:', error);
+          return res.status(500).json({ error: 'Error actualizando centro' });
+        }
+
+        console.log('✅ [PATCH /api/centers] Centro actualizado exitosamente');
+        return res.json(data);
+      } catch (err) {
+        console.error('❌ Error actualizando centro:', err);
+        return res.status(500).json({ error: 'Error actualizando centro' });
+      }
+    }
+
+    res.status(500).json({ error: 'Base de datos no disponible' });
+  } catch (error) {
+    console.error('Error in PATCH /api/centers/:id:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// DELETE /api/centers/:id - Eliminar un centro
+app.delete('/api/centers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { psychologistId } = req.query;
+
+    if (!psychologistId) {
+      return res.status(400).json({ error: 'psychologistId es requerido' });
+    }
+
+    console.log(`[DELETE /api/centers/${id}] Eliminando centro`);
+
+    // Eliminar de Supabase
+    if (supabaseAdmin) {
+      try {
+        const { error } = await supabaseAdmin
+          .from('center')
+          .delete()
+          .eq('id', id)
+          .eq('psychologist_user_id', psychologistId);
+
+        if (error) {
+          console.error('❌ Error eliminando centro en Supabase:', error);
+          return res.status(500).json({ error: 'Error eliminando centro' });
+        }
+
+        console.log('✅ [DELETE /api/centers] Centro eliminado exitosamente');
+        return res.json({ success: true });
+      } catch (err) {
+        console.error('❌ Error eliminando centro:', err);
+        return res.status(500).json({ error: 'Error eliminando centro' });
+      }
+    }
+
+    res.status(500).json({ error: 'Base de datos no disponible' });
+  } catch (error) {
+    console.error('Error in DELETE /api/centers/:id:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// GET /api/center/:centerId/unbilled - Obtener sesiones sin facturar de un centro
+app.get('/api/center/:centerId/unbilled', async (req, res) => {
+  try {
+    const { centerId } = req.params;
+    const { psychologistId } = req.query;
+    
+    console.log(`📋 [GET /api/center/${centerId}/unbilled] Obteniendo sesiones sin facturar del centro`);
+    
+    if (!psychologistId) {
+      return res.status(400).json({ error: 'psychologistId es requerido' });
+    }
+    
+    if (supabaseAdmin) {
+      try {
+        // Primero, obtener todos los pacientes que pertenecen a este centro
+        const { data: relationships, error: relError } = await supabaseAdmin
+          .from('care_relationships')
+          .select('patient_user_id')
+          .eq('center_id', centerId)
+          .eq('psychologist_user_id', psychologistId);
+        
+        if (relError) {
+          console.error('❌ Error obteniendo relaciones del centro:', relError);
+          throw relError;
+        }
+        
+        if (!relationships || relationships.length === 0) {
+          console.log('ℹ️ No hay pacientes asociados a este centro');
+          return res.json({ sessions: [] });
+        }
+        
+        const patientIds = relationships.map(r => r.patient_user_id);
+        console.log(`📋 Pacientes del centro: ${patientIds.length}`);
+        
+        // Obtener sesiones completadas sin facturar de estos pacientes
+        const { data: sessions, error: sessionsError } = await supabaseAdmin
+          .from('sessions')
+          .select('*')
+          .in('patient_user_id', patientIds)
+          .eq('psychologist_user_id', psychologistId)
+          .is('invoice_id', null)
+          .is('bonus_id', null)
+          .eq('status', 'completed')
+          .order('starts_on', { ascending: false });
+        
+        if (sessionsError) {
+          console.error('❌ Error obteniendo sesiones sin facturar:', sessionsError);
+          throw sessionsError;
+        }
+        
+        console.log(`✅ Encontradas ${sessions?.length || 0} sesiones sin facturar para el centro`);
+        
+        // Obtener bonos sin facturar de estos pacientes
+        const { data: bonos, error: bonosError } = await supabaseAdmin
+          .from('bono')
+          .select('*')
+          .in('pacient_user_id', patientIds)
+          .eq('psychologist_user_id', psychologistId)
+          .is('invoice_id', null)
+          .order('created_at', { ascending: false });
+        
+        if (bonosError) {
+          console.error('❌ Error obteniendo bonos sin facturar:', bonosError);
+          throw bonosError;
+        }
+        
+        console.log(`✅ Encontrados ${bonos?.length || 0} bonos sin facturar para el centro`);
+        
+        return res.json({
+          sessions: sessions || [],
+          bonos: bonos || []
+        });
+        
+      } catch (err) {
+        console.error('❌ Error obteniendo sesiones del centro:', err);
+        return res.status(500).json({ error: 'Error obteniendo sesiones del centro' });
+      }
+    }
+    
+    // Fallback a DB local
+    return res.json({ sessions: [] });
+  } catch (error) {
+    console.error('Error in GET /api/center/:centerId/unbilled:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
 });
 
 app.get('/', (_req, res) => {

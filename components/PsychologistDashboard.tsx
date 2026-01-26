@@ -23,7 +23,9 @@ interface Invoice {
   amount: number;
   status: string;
   date: string;
+  invoice_date?: string;
   created_at: string;
+  total?: number;
 }
 
 interface PsychologistDashboardProps {
@@ -166,10 +168,11 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
   );
   const activePatients = activePatientsSet.size;
 
-  // Financial metrics
+  // Financial metrics (excluir drafts)
   console.log('[PsychologistDashboard] All invoices:', invoices.map(inv => ({ id: inv.id, status: inv.status, total: inv.total, date: inv.date })));
-  const paidInvoices = invoices.filter(inv => inv.status === 'paid');
-  const pendingInvoices = invoices.filter(inv => inv.status === 'pending');
+  const invoicesWithoutDrafts = invoices.filter(inv => inv.status !== 'draft');
+  const paidInvoices = invoicesWithoutDrafts.filter(inv => inv.status === 'paid');
+  const pendingInvoices = invoicesWithoutDrafts.filter(inv => inv.status === 'pending');
   console.log('[PsychologistDashboard] Filtered paid:', paidInvoices.length, 'pending:', pendingInvoices.length);
   const totalRevenue = paidInvoices.reduce((sum, inv) => sum + (inv.total || inv.amount || 0), 0);
   const totalPending = pendingInvoices.reduce((sum, inv) => sum + (inv.total || inv.amount || 0), 0);
@@ -191,7 +194,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
   }
   
   paidInvoices.forEach(invoice => {
-    const invoiceDate = new Date(invoice.date || invoice.created_at);
+    const invoiceDate = new Date(invoice.invoice_date || invoice.date || invoice.created_at);
     const key = `${invoiceDate.getFullYear()}-${String(invoiceDate.getMonth() + 1).padStart(2, '0')}`;
     if (monthlyRevenue.hasOwnProperty(key)) {
       monthlyRevenue[key] += (invoice.total || invoice.amount || 0);
@@ -199,7 +202,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
   });
   
   pendingInvoices.forEach(invoice => {
-    const invoiceDate = new Date(invoice.date || invoice.created_at);
+    const invoiceDate = new Date(invoice.invoice_date || invoice.date || invoice.created_at);
     const key = `${invoiceDate.getFullYear()}-${String(invoiceDate.getMonth() + 1).padStart(2, '0')}`;
     if (monthlyPending.hasOwnProperty(key)) {
       monthlyPending[key] += (invoice.total || invoice.amount || 0);

@@ -36,12 +36,16 @@ async function populateInvoiceColumns() {
       const status = data.status || 'pending';
       const tax = amount * 0.21;
       const total = amount + tax;
+      const invoice_date = data.invoice_date || (data.date ? data.date.split('T')[0] : null);
+      const invoiceNumber = data.invoiceNumber || invoice.invoiceNumber || '';
 
-      console.log(`📝 Factura ${invoice.id} (${data.invoiceNumber || 'N/A'}):`);
+      console.log(`📝 Factura ${invoice.id} (${invoiceNumber || 'N/A'}):`);
       console.log(`   Amount: ${amount}€`);
       console.log(`   Tax (21%): ${tax.toFixed(2)}€`);
       console.log(`   Total: ${total.toFixed(2)}€`);
       console.log(`   Status: ${status}`);
+      console.log(`   Invoice Date: ${invoice_date || 'N/A'}`);
+      console.log(`   Invoice Number: ${invoiceNumber}`);
 
       // 3. Actualizar la fila
       const updateResponse = await fetch(`${SUPABASE_URL}/rest/v1/invoices?id=eq.${invoice.id}`, {
@@ -56,7 +60,9 @@ async function populateInvoiceColumns() {
           amount: amount,
           tax: tax,
           total: total,
-          status: status
+          status: status,
+          invoice_date: invoice_date,
+          invoiceNumber: invoiceNumber
         })
       });
 

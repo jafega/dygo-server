@@ -198,7 +198,8 @@ const BonosPanel: React.FC<BonosPanelProps> = ({ patientId, psychologistId, pati
     if (!bono.paid) {
       return 'bg-yellow-50 text-yellow-700 border-yellow-200';
     }
-    const remaining = bono.remaining_sessions || bono.total_sessions_amount;
+    const used = bono.used_sessions !== undefined ? bono.used_sessions : 0;
+    const remaining = bono.remaining_sessions !== undefined ? bono.remaining_sessions : (bono.total_sessions_amount - used);
     if (remaining === 0) {
       return 'bg-slate-50 text-slate-700 border-slate-200';
     }
@@ -207,14 +208,16 @@ const BonosPanel: React.FC<BonosPanelProps> = ({ patientId, psychologistId, pati
 
   const getStatusLabel = (bono: Bono) => {
     if (!bono.paid) return 'Pendiente de pago';
-    const remaining = bono.remaining_sessions || bono.total_sessions_amount;
+    const used = bono.used_sessions !== undefined ? bono.used_sessions : 0;
+    const remaining = bono.remaining_sessions !== undefined ? bono.remaining_sessions : (bono.total_sessions_amount - used);
     if (remaining === 0) return 'Agotado';
     return 'Activo';
   };
 
   const getStatusIcon = (bono: Bono) => {
     if (!bono.paid) return <Clock size={14} />;
-    const remaining = bono.remaining_sessions || bono.total_sessions_amount;
+    const used = bono.used_sessions !== undefined ? bono.used_sessions : 0;
+    const remaining = bono.remaining_sessions !== undefined ? bono.remaining_sessions : (bono.total_sessions_amount - used);
     if (remaining === 0) return <AlertCircle size={14} />;
     return <Check size={14} />;
   };
@@ -262,8 +265,9 @@ const BonosPanel: React.FC<BonosPanelProps> = ({ patientId, psychologistId, pati
         ) : (
           <div className="divide-y divide-slate-100">
             {bonos.map((bono) => {
-              const remaining = bono.remaining_sessions ?? bono.total_sessions_amount;
-              const used = bono.used_sessions ?? 0;
+              // Calcular sesiones usadas y restantes
+              const used = bono.used_sessions !== undefined ? bono.used_sessions : 0;
+              const remaining = bono.remaining_sessions !== undefined ? bono.remaining_sessions : (bono.total_sessions_amount - used);
               const progress = ((used / bono.total_sessions_amount) * 100);
 
               return (

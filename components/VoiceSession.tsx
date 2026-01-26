@@ -28,6 +28,10 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
   const streamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  
+  // Buffer para agrupar transcripciones del usuario y evitar duplicados
+  const userTranscriptBufferRef = useRef<string>('');
+  const userBufferTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const sessionRef = useRef<any>(null);
   const contextCacheRef = useRef<{ entries: any[], context: string } | null>(null);
   
@@ -38,6 +42,7 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
   // Refs for accumulation
   const fullTranscriptRef = useRef<string>('');
   const timerRef = useRef<number | null>(null);
+  const sessionLimitRef = useRef<NodeJS.Timeout | null>(null);
   const isMounted = useRef(true);
   const isInitialized = useRef(false);
 
@@ -105,12 +110,12 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
         console.log('[VoiceSession] Loading recent entries...');
         // Sort explicitly by date descending to ensure index 0 is the most recent
         // Usamos versión optimizada que excluye transcripts y archivos para ahorrar tokens
-        // Reducido de 5 a 3 días para minimizar consumo de tokens
-        const recentEntries = user ? await getLastDaysEntriesSummary(user.id, 3) : [];
+        // Reducido de 5 a 2 días para minimizar consumo de tokens (solo lo más reciente)
+        const recentEntries = user ? await getLastDaysEntriesSummary(user.id, 2) : [];
         console.log('[VoiceSession] Loaded', recentEntries.length, 'entries');
         
-        // Función para truncar texto y reducir tokens
-        const truncate = (text: string | undefined, maxChars: number = 200) => {
+        // Función para truncar texto y reducir tokens (límites muy agresivos)
+        const truncate = (text: string | undefined, maxChars: number = 120) => {
           if (!text) return '';
           return text.length > maxChars ? text.slice(0, maxChars) + '...' : text;
         };
@@ -133,16 +138,14 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
           // Generar nuevo contexto y cachearlo
           console.log('[VoiceSession] 🔄 Generating new context...');
           contextStr = recentEntries.length > 0 
-            ? `HISTORIAL RECIENTE Y FEEDBACK DEL PSICÓLOGO (ORDENADO DEL MÁS RECIENTE AL MÁS ANTIGUO):
-               ${recentEntries.map((e, index) => {
+            ? recentEntries.map((e, index) => {
                   const feedbackText = getFeedbackText(e.psychologistFeedback);
-                  const recencyLabel = index === 0 ? "!!! ÚLTIMO FEEDBACK (MÁXIMA PRIORIDAD) !!!" : "Feedback previo";
-                  return `
-                  - Día ${e.date}:
-                    Resumen: ${truncate(e.summary, 150)}
-                    ${feedbackText ? `NOTA DEL PSICÓLOGO (${recencyLabel}): "${truncate(feedbackText, 200)}".` : 'Sin nota del psicólogo.'}
-               `}).join('\n')}`
-            : "Esta es la primera vez que hablas con el usuario.";
+                  const priority = index === 0 ? "[PRIORIDAD]" : "";
+                  const summary = truncate(e.summary, 100);
+                  const feedback = feedbackText ? truncate(feedbackText, 120) : null;
+                  return `${e.date}${priority}: ${summary}${feedback ? ` | Psicólogo: ${feedback}` : ''}`;
+               }).join('\n')
+            : "Primera sesión.";
           
           contextCacheRef.current = { entries: recentEntries, context: contextStr };
         }
@@ -198,6 +201,14 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
               timerRef.current = window.setInterval(() => {
                 setDuration(prev => prev + 1);
               }, 1000);
+              
+              // Límite de duración: 10 minutos (600 segundos)
+              sessionLimitRef.current = setTimeout(() => {
+                console.log('[VoiceSession] ⏰ Límite de 10 minutos alcanzado');
+                cleanup();
+                onSessionEnd(fullTranscriptRef.current);
+                alert('La sesión ha alcanzado el límite de 10 minutos.');
+              }, 600000); // 10 minutos = 600,000 ms
 
               // Setup Input Stream
               const source = inputAudioContext.createMediaStreamSource(stream);
@@ -229,8 +240,23 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
               }
               
               if (msg.serverContent?.inputTranscription?.text) {
-                 const text = msg.serverContent.inputTranscription.text;
-                 fullTranscriptRef.current += `Usuario: ${text}\n`;
+                const text = msg.serverContent.inputTranscription.text;
+                
+                // Limpiar timeout previo
+                if (userBufferTimeoutRef.current) {
+                  clearTimeout(userBufferTimeoutRef.current);
+                }
+                
+                // Acumular en buffer
+                userTranscriptBufferRef.current = text;
+                
+                // Guardar después de 1.5 segundos de silencio
+                userBufferTimeoutRef.current = setTimeout(() => {
+                  if (userTranscriptBufferRef.current.trim()) {
+                    fullTranscriptRef.current += `Usuario: ${userTranscriptBufferRef.current}\n`;
+                    userTranscriptBufferRef.current = '';
+                  }
+                }, 1500);
               }
 
               // Handle Audio Output
@@ -274,29 +300,11 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
           },
           config: {
             responseModalities: [Modality.AUDIO],
-            systemInstruction: `
-              Eres "dygo", un compañero de diario inteligente, empático y curioso.
-              
-              SALUDO INICIAL: Cuando comience la sesión, saluda brevemente al usuario de forma cálida y pregunta cómo le fue el día. Usa máximo 1-2 frases.
-              
-              DIRECTRIZ SUPREMA: FEEDBACK CLÍNICO
-              Revisa el contexto proporcionado abajo. Si el psicólogo ha dejado notas (especialmente las del ÚLTIMO día), TUS PREGUNTAS DEBEN DARLE PRIORIDAD A ESOS TEMAS.
-              Ejemplo: Si el psicólogo dijo "Indagar sobre su sueño", tú debes preguntar: "¿Y qué tal has dormido hoy?". Esto es más importante que cualquier otra cosa.
-              
-              TU PERSONALIDAD Y ESTILO:
-              1. **CALIDEZ BREVE**: Sé amable, cercano y usa un tono suave ("Cuéntame", "Te escucho"), pero MANTÉN TUS RESPUESTAS CORTAS. No hagas discursos. Máximo 1-2 oraciones por intervención.
-              2. **CAZADOR DE EMOCIONES**: Si el usuario te cuenta un hecho (ej: "Fui a la oficina"), pero no dice cómo se sintió, TU TRABAJO es preguntar: "¿Y cómo te hizo sentir eso?" o "¿Qué emoción te despertó?".
-              3. **AMPLITUD**: No te quedes con lo primero que digan. Cuando terminen un tema, pregunta: "¿Pasó algo más interesante hoy?" o "¿Algún otro momento que quieras guardar?".
-              4. **ESCUCHA ACTIVA**: Usa validaciones cortas ("Entiendo...", "Vaya...", "Claro") antes de lanzar tu pregunta.
+            systemInstruction: `Eres dygo, compañero de diario empático. Inicia: saluda y pregunta cómo le fue (1-2 frases). Si hay nota del psicólogo (marcada [PRIORIDAD]), pregunta sobre ESO primero. Estilo: breve (máx 2 oraciones), pregunta por emociones siempre, explora más temas. No aconsejes ni juzgues. Idioma: ${languageInstruction}.
 
-              RESTRICCIONES:
-              - NO des consejos de vida ni soluciones. Solo ayudas a documentar.
-              - NO juzgues (ni "qué bien" ni "qué mal").
-              - Habla en ${languageInstruction}.
-              
-              CONTEXTO DEL USUARIO:
-              ${contextStr}
-            `,
+Contexto:
+${contextStr}`,
+
             speechConfig: {
               voiceConfig: { prebuiltVoiceConfig: { voiceName: selectedVoice } }
             },
@@ -329,6 +337,17 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
 
   const cleanup = () => {
     if (timerRef.current) clearInterval(timerRef.current);
+    if (sessionLimitRef.current) clearTimeout(sessionLimitRef.current);
+    
+    // Limpiar buffer de transcripción del usuario
+    if (userBufferTimeoutRef.current) {
+      clearTimeout(userBufferTimeoutRef.current);
+    }
+    // Flush any pending user transcript
+    if (userTranscriptBufferRef.current.trim()) {
+      fullTranscriptRef.current += `Usuario: ${userTranscriptBufferRef.current}\n`;
+      userTranscriptBufferRef.current = '';
+    }
     
     // Stop mic
     if (streamRef.current) {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, User, Calendar, Phone, Mail, FileText, DollarSign, Settings, Tag, Trash2, Save, Edit2, CreditCard, MapPin, Cake, Clock as ClockIcon, BookOpen, Sparkles, CheckCircle, AlertCircle, Download, Loader2, Ticket } from 'lucide-react';
+import { X, User, Calendar, Phone, Mail, FileText, DollarSign, Settings, Tag, Trash2, Save, Edit2, CreditCard, MapPin, Cake, Clock as ClockIcon, BookOpen, Sparkles, CheckCircle, AlertCircle, Download, Loader2, Ticket, Building2, TrendingUp, BarChart3 } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser } from '../services/authService';
 import InsightsPanel from './InsightsPanel';
@@ -25,7 +25,7 @@ interface PatientDetailModalProps {
 }
 
 const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClose, psychologistId }) => {
-  const [activeTab, setActiveTab] = useState<'INFO' | 'SESSIONS' | 'TIMELINE' | 'BILLING' | 'BONOS' | 'RELATIONSHIP' | 'HISTORY'>('INFO');
+  const [activeTab, setActiveTab] = useState<'PATIENT' | 'INFO' | 'SESSIONS' | 'TIMELINE' | 'BILLING' | 'BONOS' | 'RELATIONSHIP' | 'HISTORY'>('PATIENT');
   const [patientData, setPatientData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [relationship, setRelationship] = useState<any>(null);
@@ -33,8 +33,10 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
     defaultPrice: 0,
     defaultPercent: 70,
     tags: [] as string[],
-    usesBonos: false
+    usesBonos: false,
+    centerId: '' as string | null
   });
+  const [centers, setCenters] = useState<any[]>([]);
   const [tagInput, setTagInput] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isEditingInfo, setIsEditingInfo] = useState(false);
@@ -47,6 +49,8 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   const [clinicalNotes, setClinicalNotes] = useState('');
   const [isEditingNotes, setIsEditingNotes] = useState(false);
   const [isSavingNotes, setIsSavingNotes] = useState(false);
+  const [patientStats, setPatientStats] = useState<any>(null);
+  const [isLoadingStats, setIsLoadingStats] = useState(false);
 
   const patientUserId = patient.userId || patient.user_id || patient.id;
   const currentPsychologistId = psychologistId || patient.psychologistId || '';
@@ -55,6 +59,8 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
     loadPatientData();
     loadRelationship();
     loadAllPsychologistTags();
+    loadCenters();
+    loadPatientStats();
   }, [patientUserId]);
 
   useEffect(() => {
@@ -106,7 +112,8 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
             defaultPrice: rel.defaultPrice || rel.default_session_price || 0,
             defaultPercent: rel.defaultPercent || rel.default_psych_percent || 70,
             tags: rel.tags || [],
-            usesBonos: rel.usesBonos || rel.uses_bonos || false
+            usesBonos: rel.usesBonos || rel.uses_bonos || false,
+            centerId: rel.centerId || rel.center_id || null
           });
           console.log('[PatientDetailModal] relationshipSettings.usesBonos:', rel.usesBonos || rel.uses_bonos || false);
           setClinicalNotes(rel.data?.clinicalNotes || '');
@@ -114,6 +121,20 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
       }
     } catch (error) {
       console.error('Error loading relationship:', error);
+    }
+  };
+
+  const loadCenters = async () => {
+    if (!currentPsychologistId) return;
+    
+    try {
+      const response = await fetch(`${API_URL}/centers?psychologistId=${currentPsychologistId}`);
+      if (response.ok) {
+        const data = await response.json();
+        setCenters(data || []);
+      }
+    } catch (error) {
+      console.error('Error loading centers:', error);
     }
   };
 
@@ -153,6 +174,22 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
       console.error('Error loading clinical history:', error);
     }
     setIsLoadingHistory(false);
+  };
+
+  const loadPatientStats = async () => {
+    if (!patientUserId || !currentPsychologistId) return;
+    
+    setIsLoadingStats(true);
+    try {
+      const response = await fetch(`${API_URL}/patient-stats/${patientUserId}?psychologistId=${currentPsychologistId}`);
+      if (response.ok) {
+        const stats = await response.json();
+        setPatientStats(stats);
+      }
+    } catch (error) {
+      console.error('Error loading patient stats:', error);
+    }
+    setIsLoadingStats(false);
   };
 
   const downloadEntryAsPDF = (entry: any) => {
@@ -518,7 +555,8 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
         default_session_price: relationshipSettings.defaultPrice,
         default_psych_percent: relationshipSettings.defaultPercent,
         tags: relationshipSettings.tags,
-        uses_bonos: relationshipSettings.usesBonos
+        uses_bonos: relationshipSettings.usesBonos,
+        center_id: relationshipSettings.centerId || null
       };
       
       console.log('[PatientDetailModal] Guardando configuración:', payload);
@@ -694,6 +732,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   };
 
   const tabs = [
+    { id: 'PATIENT', label: 'Paciente', icon: FileText },
     { id: 'INFO', label: 'Información', icon: User },
     { id: 'SESSIONS', label: 'Sesiones', icon: Calendar },
     { id: 'TIMELINE', label: 'Timeline', icon: ClockIcon },
@@ -751,6 +790,393 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
 
         {/* Content */}
         <div className="flex-1 overflow-auto">
+          {activeTab === 'PATIENT' && (
+            <div className="p-3 sm:p-6 md:p-8 space-y-6 sm:space-y-8 bg-gradient-to-br from-slate-50 to-slate-100">
+              {isLoadingStats ? (
+                <div className="flex justify-center items-center py-12">
+                  <Loader2 className="animate-spin text-purple-600" size={48} />
+                </div>
+              ) : patientStats ? (
+                <>
+                  {/* Header con título */}
+                  <div className="bg-white rounded-2xl p-6 shadow-lg border border-slate-200">
+                    <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center">
+                        <DollarSign className="text-white" size={24} />
+                      </div>
+                      Resumen Financiero del Paciente
+                    </h2>
+                    <p className="text-slate-600 mt-2 text-sm">Vista completa de sesiones, facturación y ganancias</p>
+                  </div>
+
+                  {/* SECCIÓN: SESIONES */}
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3">
+                      <div className="h-1 flex-1 bg-gradient-to-r from-blue-400 to-blue-600 rounded-full"></div>
+                      <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                        <Calendar className="text-blue-600" size={20} />
+                        Métricas de Sesiones
+                      </h3>
+                      <div className="h-1 flex-1 bg-gradient-to-r from-blue-600 to-blue-400 rounded-full"></div>
+                    </div>
+                    
+                    {/* Cards de sesiones mejoradas */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {/* Total de sesiones */}
+                      <div className="bg-white rounded-2xl p-6 shadow-lg border-2 border-blue-200 hover:shadow-xl transition-all hover:-translate-y-1">
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
+                            <CheckCircle className="text-white" size={24} />
+                          </div>
+                          <div className="text-right">
+                            <div className="text-xs font-semibold text-blue-600 uppercase tracking-wider">Total Sesiones</div>
+                          </div>
+                        </div>
+                        <div className="text-4xl font-bold text-blue-900 mb-1">{patientStats.completedSessions || 0}</div>
+                        <div className="text-sm text-slate-600">Sesiones completadas</div>
+                        <div className="mt-3 pt-3 border-t border-blue-100">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-slate-600">Programadas</span>
+                            <span className="font-semibold text-blue-700">{patientStats.scheduledSessions || 0}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Valor total sesiones */}
+                      <div className="bg-white rounded-2xl p-6 shadow-lg border-2 border-indigo-200 hover:shadow-xl transition-all hover:-translate-y-1">
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center shadow-lg">
+                            <DollarSign className="text-white" size={24} />
+                          </div>
+                          <div className="text-right">
+                            <div className="text-xs font-semibold text-indigo-600 uppercase tracking-wider">Valor Total</div>
+                          </div>
+                        </div>
+                        <div className="text-4xl font-bold text-indigo-900 mb-1">€{patientStats.totalSessionValue?.toFixed(2) || '0.00'}</div>
+                        <div className="text-sm text-slate-600">De todas las sesiones</div>
+                        <div className="mt-3 pt-3 border-t border-indigo-100">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-slate-600">Promedio/sesión</span>
+                            <span className="font-semibold text-indigo-700">
+                              €{patientStats.completedSessions > 0 
+                                ? (patientStats.totalSessionValue / patientStats.completedSessions).toFixed(2) 
+                                : '0.00'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Ganancia psicólogo */}
+                      <div className="bg-white rounded-2xl p-6 shadow-lg border-2 border-green-200 hover:shadow-xl transition-all hover:-translate-y-1 md:col-span-2 lg:col-span-1">
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-green-500 to-green-600 flex items-center justify-center shadow-lg">
+                            <TrendingUp className="text-white" size={24} />
+                          </div>
+                          <div className="text-right">
+                            <div className="text-xs font-semibold text-green-600 uppercase tracking-wider">Mi Ganancia</div>
+                          </div>
+                        </div>
+                        <div className="text-4xl font-bold text-green-900 mb-1">€{patientStats.psychologistEarnings?.toFixed(2) || '0.00'}</div>
+                        <div className="text-sm text-slate-600">Total ganado</div>
+                        <div className="mt-3 pt-3 border-t border-green-100">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-slate-600">Porcentaje promedio</span>
+                            <span className="font-semibold text-green-700">{patientStats.avgPercent?.toFixed(1) || 0}%</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Estado de pagos */}
+                    <div className="bg-white rounded-2xl p-6 shadow-lg border border-slate-200">
+                      <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-4">Estado de Pagos</h4>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="text-center p-4 bg-gradient-to-br from-emerald-50 to-emerald-100 rounded-xl border-2 border-emerald-200">
+                          <div className="text-3xl font-bold text-emerald-700 mb-1">{patientStats.paidSessions || 0}</div>
+                          <div className="text-xs text-emerald-600 font-medium">Pagadas</div>
+                        </div>
+                        <div className="text-center p-4 bg-gradient-to-br from-orange-50 to-orange-100 rounded-xl border-2 border-orange-200">
+                          <div className="text-3xl font-bold text-orange-700 mb-1">{patientStats.unpaidSessions || 0}</div>
+                          <div className="text-xs text-orange-600 font-medium">Sin Pagar</div>
+                        </div>
+                        <div className="text-center p-4 bg-gradient-to-br from-amber-50 to-amber-100 rounded-xl border-2 border-amber-200">
+                          <div className="text-3xl font-bold text-amber-700 mb-1">
+                            €{patientStats.pendingToInvoice?.toFixed(0) || '0'}
+                          </div>
+                          <div className="text-xs text-amber-600 font-medium">Por Facturar</div>
+                        </div>
+                        <div className="text-center p-4 bg-gradient-to-br from-sky-50 to-sky-100 rounded-xl border-2 border-sky-200">
+                          <div className="text-3xl font-bold text-sky-700 mb-1">
+                            {patientStats.completedSessions > 0 
+                              ? ((patientStats.paidSessions / patientStats.completedSessions) * 100).toFixed(0)
+                              : 0}%
+                          </div>
+                          <div className="text-xs text-sky-600 font-medium">Tasa Pago</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* SECCIÓN: FACTURAS */}
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3">
+                      <div className="h-1 flex-1 bg-gradient-to-r from-purple-400 to-purple-600 rounded-full"></div>
+                      <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                        <FileText className="text-purple-600" size={20} />
+                        Facturación
+                      </h3>
+                      <div className="h-1 flex-1 bg-gradient-to-r from-purple-600 to-purple-400 rounded-full"></div>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {/* Total facturado */}
+                      <div className="bg-white rounded-2xl p-6 shadow-lg border-2 border-purple-200 hover:shadow-xl transition-all hover:-translate-y-1">
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center shadow-lg">
+                            <FileText className="text-white" size={24} />
+                          </div>
+                          <div className="text-right">
+                            <div className="text-xs font-semibold text-purple-600 uppercase tracking-wider">Total Facturado</div>
+                          </div>
+                        </div>
+                        <div className="text-4xl font-bold text-purple-900 mb-1">€{patientStats.totalInvoiced?.toFixed(2) || '0.00'}</div>
+                        <div className="text-sm text-slate-600">En todas las facturas</div>
+                        <div className="mt-3 pt-3 border-t border-purple-100">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-slate-600">Nº Facturas</span>
+                            <span className="font-semibold text-purple-700">{patientStats.totalInvoices || 0}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Total cobrado */}
+                      <div className="bg-white rounded-2xl p-6 shadow-lg border-2 border-teal-200 hover:shadow-xl transition-all hover:-translate-y-1">
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-teal-500 to-teal-600 flex items-center justify-center shadow-lg">
+                            <CheckCircle className="text-white" size={24} />
+                          </div>
+                          <div className="text-right">
+                            <div className="text-xs font-semibold text-teal-600 uppercase tracking-wider">Total Cobrado</div>
+                          </div>
+                        </div>
+                        <div className="text-4xl font-bold text-teal-900 mb-1">€{patientStats.totalCollected?.toFixed(2) || '0.00'}</div>
+                        <div className="text-sm text-slate-600">Facturas pagadas</div>
+                        <div className="mt-3 pt-3 border-t border-teal-100">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-slate-600">Nº Pagadas</span>
+                            <span className="font-semibold text-teal-700">{patientStats.paidInvoices || 0}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Total por cobrar */}
+                      <div className="bg-white rounded-2xl p-6 shadow-lg border-2 border-rose-200 hover:shadow-xl transition-all hover:-translate-y-1">
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-rose-500 to-rose-600 flex items-center justify-center shadow-lg">
+                            <AlertCircle className="text-white" size={24} />
+                          </div>
+                          <div className="text-right">
+                            <div className="text-xs font-semibold text-rose-600 uppercase tracking-wider">Por Cobrar</div>
+                          </div>
+                        </div>
+                        <div className="text-4xl font-bold text-rose-900 mb-1">€{patientStats.totalPending?.toFixed(2) || '0.00'}</div>
+                        <div className="text-sm text-slate-600">Pendientes de pago</div>
+                        <div className="mt-3 pt-3 border-t border-rose-100">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-slate-600">Nº Pendientes</span>
+                            <span className="font-semibold text-rose-700">{patientStats.pendingInvoicesCount || 0}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* SECCIÓN: GRÁFICOS */}
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3">
+                      <div className="h-1 flex-1 bg-gradient-to-r from-indigo-400 to-indigo-600 rounded-full"></div>
+                      <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                        <BarChart3 className="text-indigo-600" size={20} />
+                        Evolución Mensual
+                      </h3>
+                      <div className="h-1 flex-1 bg-gradient-to-r from-indigo-600 to-indigo-400 rounded-full"></div>
+                    </div>
+
+                    {patientStats.monthlyData && patientStats.monthlyData.length > 0 ? (
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Gráfico de Sesiones por Mes */}
+                        <div className="bg-white rounded-2xl p-6 shadow-lg border border-slate-200">
+                          <div className="flex items-center justify-between mb-6">
+                            <div>
+                              <h4 className="text-base font-bold text-slate-900">Sesiones por Mes</h4>
+                              <p className="text-xs text-slate-500 mt-1">Últimos 12 meses</p>
+                            </div>
+                            <div className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center">
+                              <Calendar className="text-indigo-600" size={20} />
+                            </div>
+                          </div>
+                          <div className="relative">
+                            <div className="flex items-end justify-between gap-1.5 h-56 px-2">
+                              {patientStats.monthlyData.map((month: any, index: number) => {
+                                const maxSessions = Math.max(...patientStats.monthlyData.map((m: any) => m.sessions), 1);
+                                const heightPercent = (month.sessions / maxSessions) * 100;
+                                return (
+                                  <div key={index} className="flex-1 flex flex-col items-center gap-2 group">
+                                    <div className="w-full flex flex-col items-center">
+                                      {/* Tooltip en hover */}
+                                      <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute -top-16 bg-slate-800 text-white px-3 py-2 rounded-lg text-xs whitespace-nowrap shadow-xl z-10">
+                                        <div className="font-bold">{month.month}</div>
+                                        <div>{month.sessions} sesiones</div>
+                                        <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-full">
+                                          <div className="border-4 border-transparent border-t-slate-800"></div>
+                                        </div>
+                                      </div>
+                                      {/* Label encima de la barra */}
+                                      <div className="text-xs font-bold text-indigo-700 mb-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        {month.sessions}
+                                      </div>
+                                      {/* Barra */}
+                                      <div
+                                        className="w-full bg-gradient-to-t from-indigo-600 via-indigo-500 to-indigo-400 rounded-t-xl transition-all duration-300 group-hover:from-indigo-700 group-hover:via-indigo-600 group-hover:to-indigo-500 shadow-lg group-hover:shadow-xl cursor-pointer"
+                                        style={{ 
+                                          height: `${heightPercent}%`, 
+                                          minHeight: month.sessions > 0 ? '24px' : '2px' 
+                                        }}
+                                      />
+                                    </div>
+                                    {/* Label del mes */}
+                                    <div className="text-[10px] text-slate-600 font-medium text-center leading-tight mt-1">
+                                      {month.month.split(' ')[0]}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Gráfico de Valor Facturado por Mes */}
+                        <div className="bg-white rounded-2xl p-6 shadow-lg border border-slate-200">
+                          <div className="flex items-center justify-between mb-6">
+                            <div>
+                              <h4 className="text-base font-bold text-slate-900">Valor Facturado</h4>
+                              <p className="text-xs text-slate-500 mt-1">Últimos 12 meses</p>
+                            </div>
+                            <div className="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center">
+                              <DollarSign className="text-purple-600" size={20} />
+                            </div>
+                          </div>
+                          <div className="relative">
+                            <div className="flex items-end justify-between gap-1.5 h-56 px-2">
+                              {patientStats.monthlyData.map((month: any, index: number) => {
+                                const maxRevenue = Math.max(...patientStats.monthlyData.map((m: any) => m.revenue || 0), 1);
+                                const heightPercent = ((month.revenue || 0) / maxRevenue) * 100;
+                                return (
+                                  <div key={index} className="flex-1 flex flex-col items-center gap-2 group">
+                                    <div className="w-full flex flex-col items-center">
+                                      {/* Tooltip en hover */}
+                                      <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute -top-16 bg-slate-800 text-white px-3 py-2 rounded-lg text-xs whitespace-nowrap shadow-xl z-10">
+                                        <div className="font-bold">{month.month}</div>
+                                        <div>€{(month.revenue || 0).toFixed(2)}</div>
+                                        <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-full">
+                                          <div className="border-4 border-transparent border-t-slate-800"></div>
+                                        </div>
+                                      </div>
+                                      {/* Label encima de la barra */}
+                                      <div className="text-xs font-bold text-purple-700 mb-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        €{(month.revenue || 0).toFixed(0)}
+                                      </div>
+                                      {/* Barra */}
+                                      <div
+                                        className="w-full bg-gradient-to-t from-purple-600 via-purple-500 to-purple-400 rounded-t-xl transition-all duration-300 group-hover:from-purple-700 group-hover:via-purple-600 group-hover:to-purple-500 shadow-lg group-hover:shadow-xl cursor-pointer"
+                                        style={{ 
+                                          height: `${heightPercent}%`, 
+                                          minHeight: (month.revenue || 0) > 0 ? '24px' : '2px' 
+                                        }}
+                                      />
+                                    </div>
+                                    {/* Label del mes */}
+                                    <div className="text-[10px] text-slate-600 font-medium text-center leading-tight mt-1">
+                                      {month.month.split(' ')[0]}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Gráfico de Ganancia del Psicólogo por Mes */}
+                        <div className="bg-white rounded-2xl p-6 shadow-lg border border-slate-200 lg:col-span-2">
+                          <div className="flex items-center justify-between mb-6">
+                            <div>
+                              <h4 className="text-base font-bold text-slate-900">Mi Ganancia por Mes</h4>
+                              <p className="text-xs text-slate-500 mt-1">Últimos 12 meses</p>
+                            </div>
+                            <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
+                              <TrendingUp className="text-green-600" size={20} />
+                            </div>
+                          </div>
+                          <div className="relative">
+                            <div className="flex items-end justify-between gap-2 h-64 px-2">
+                              {patientStats.monthlyData.map((month: any, index: number) => {
+                                const maxEarnings = Math.max(...patientStats.monthlyData.map((m: any) => m.psychEarnings || 0), 1);
+                                const heightPercent = ((month.psychEarnings || 0) / maxEarnings) * 100;
+                                return (
+                                  <div key={index} className="flex-1 flex flex-col items-center gap-2 group">
+                                    <div className="w-full flex flex-col items-center">
+                                      {/* Tooltip en hover */}
+                                      <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute -top-20 bg-slate-800 text-white px-3 py-2 rounded-lg text-xs whitespace-nowrap shadow-xl z-10">
+                                        <div className="font-bold">{month.month}</div>
+                                        <div className="text-green-300">€{(month.psychEarnings || 0).toFixed(2)}</div>
+                                        <div className="text-slate-300 text-[10px]">{month.sessions} sesiones</div>
+                                        <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-full">
+                                          <div className="border-4 border-transparent border-t-slate-800"></div>
+                                        </div>
+                                      </div>
+                                      {/* Label encima de la barra */}
+                                      <div className="text-xs font-bold text-green-700 mb-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        €{(month.psychEarnings || 0).toFixed(0)}
+                                      </div>
+                                      {/* Barra con efecto de brillo */}
+                                      <div
+                                        className="w-full bg-gradient-to-t from-green-600 via-green-500 to-green-400 rounded-t-xl transition-all duration-300 group-hover:from-green-700 group-hover:via-green-600 group-hover:to-green-500 shadow-lg group-hover:shadow-xl cursor-pointer relative overflow-hidden"
+                                        style={{ 
+                                          height: `${heightPercent}%`, 
+                                          minHeight: (month.psychEarnings || 0) > 0 ? '24px' : '2px' 
+                                        }}
+                                      >
+                                        {/* Efecto de brillo */}
+                                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white to-transparent opacity-0 group-hover:opacity-20 group-hover:animate-shimmer"></div>
+                                      </div>
+                                    </div>
+                                    {/* Label del mes */}
+                                    <div className="text-[10px] text-slate-600 font-medium text-center leading-tight mt-1">
+                                      {month.month.split(' ')[0]}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-white rounded-2xl p-12 shadow-lg border border-slate-200 text-center">
+                        <BarChart3 className="mx-auto text-slate-300 mb-4" size={48} />
+                        <p className="text-slate-500">No hay datos suficientes para mostrar gráficos</p>
+                      </div>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className="text-center py-12 text-slate-500">
+                  No hay datos disponibles
+                </div>
+              )}
+            </div>
+          )}
+
           {activeTab === 'INFO' && (
             <div className="p-3 sm:p-6 md:p-8 space-y-4 sm:space-y-6">
               {/* Información Personal */}
@@ -1251,6 +1677,34 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                           className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                         />
                       </div>
+                    </div>
+
+                    {/* Selector de Centro */}
+                    <div className="space-y-2">
+                      <label className="text-sm font-semibold text-slate-600 flex items-center gap-2">
+                        <Building2 size={16} />
+                        Centro Asignado
+                      </label>
+                      <select
+                        value={relationshipSettings.centerId || ''}
+                        onChange={(e) => setRelationshipSettings({
+                          ...relationshipSettings,
+                          centerId: e.target.value || null
+                        })}
+                        className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white"
+                      >
+                        <option value="">Sin centro asignado</option>
+                        {centers.map((center) => (
+                          <option key={center.id} value={center.id}>
+                            {center.center_name} - {center.cif}
+                          </option>
+                        ))}
+                      </select>
+                      {centers.length === 0 && (
+                        <p className="text-xs text-slate-500 mt-1">
+                          No tienes centros registrados. Ve a la sección "Centros" para crear uno.
+                        </p>
+                      )}
                     </div>
 
                     <div className="bg-white border border-slate-200 rounded-lg p-4">
