@@ -901,17 +901,15 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                         </div>
                         <div className="text-center p-4 bg-gradient-to-br from-amber-50 to-amber-100 rounded-xl border-2 border-amber-200">
                           <div className="text-3xl font-bold text-amber-700 mb-1">
-                            €{patientStats.pendingToInvoice?.toFixed(0) || '0'}
+                            {sessionsWithoutInvoice || 0}
                           </div>
-                          <div className="text-xs text-amber-600 font-medium">Por Facturar</div>
+                          <div className="text-xs text-amber-600 font-medium">Sesiones Por Facturar</div>
                         </div>
                         <div className="text-center p-4 bg-gradient-to-br from-sky-50 to-sky-100 rounded-xl border-2 border-sky-200">
                           <div className="text-3xl font-bold text-sky-700 mb-1">
-                            {patientStats.completedSessions > 0 
-                              ? ((patientStats.paidSessions / patientStats.completedSessions) * 100).toFixed(0)
-                              : 0}%
+                            {patientStats.bonosNotInvoiced || 0}
                           </div>
-                          <div className="text-xs text-sky-600 font-medium">Tasa Pago</div>
+                          <div className="text-xs text-sky-600 font-medium">Bonos Sin Facturar</div>
                         </div>
                       </div>
                     </div>

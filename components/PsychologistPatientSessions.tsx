@@ -13,6 +13,8 @@ interface Session {
   date: string;
   startTime: string;
   endTime: string;
+  starts_on?: string;
+  ends_on?: string;
   type: 'in-person' | 'online' | 'home-visit';
   status: 'scheduled' | 'completed' | 'cancelled' | 'available' | 'paid';
   notes?: string;
@@ -351,20 +353,56 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
   };
 
   const getSessionDurationHours = (session: Session): number => {
-    if (!session.startTime || !session.endTime) return 1;
-    
-    const [startHour, startMin] = session.startTime.split(':').map(Number);
-    const [endHour, endMin] = session.endTime.split(':').map(Number);
-    
-    let startMinutes = startHour * 60 + startMin;
-    let endMinutes = endHour * 60 + endMin;
-    
-    if (endMinutes < startMinutes) {
-      endMinutes += 24 * 60;
+    // Priorizar usar starts_on y ends_on de Supabase si existen
+    if (session.starts_on && session.ends_on) {
+      const startDate = new Date(session.starts_on);
+      const endDate = new Date(session.ends_on);
+      
+      const durationMs = endDate.getTime() - startDate.getTime();
+      const durationHours = durationMs / (1000 * 60 * 60);
+      
+      // Solo retornar si la duración es positiva y razonable (máx 24 horas)
+      if (durationHours > 0 && durationHours <= 24) {
+        return durationHours;
+      }
     }
     
-    const durationMinutes = endMinutes - startMinutes;
-    return durationMinutes / 60;
+    // Fallback: intentar construir desde date + startTime/endTime
+    if (session.date && session.startTime && session.endTime) {
+      const startDate = new Date(session.date + 'T' + session.startTime);
+      const endDate = new Date(session.date + 'T' + session.endTime);
+      
+      // Si endTime es menor que startTime, asumir que termina al día siguiente
+      if (session.endTime < session.startTime) {
+        endDate.setDate(endDate.getDate() + 1);
+      }
+      
+      const durationMs = endDate.getTime() - startDate.getTime();
+      const durationHours = durationMs / (1000 * 60 * 60);
+      
+      if (durationHours > 0 && durationHours <= 24) {
+        return durationHours;
+      }
+    }
+    
+    // Último fallback: usar startTime y endTime para calcular minutos
+    if (session.startTime && session.endTime) {
+      const [startHour, startMin] = session.startTime.split(':').map(Number);
+      const [endHour, endMin] = session.endTime.split(':').map(Number);
+      
+      let startMinutes = startHour * 60 + startMin;
+      let endMinutes = endHour * 60 + endMin;
+      
+      if (endMinutes < startMinutes) {
+        endMinutes += 24 * 60;
+      }
+      
+      const durationMinutes = endMinutes - startMinutes;
+      return durationMinutes / 60;
+    }
+    
+    // Si no hay información de tiempo, asumir 1 hora por defecto
+    return 1;
   };
 
   const getSessionTotalPrice = (session: Session): number => {
@@ -455,6 +493,7 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
   });
 
   const completedSessions = displayedSessions.filter(s => s.status === 'completed');
+  const totalSessionValue = completedSessions.reduce((sum, s) => sum + getSessionTotalPrice(s), 0);
   const totalEarnings = completedSessions.reduce((sum, s) => sum + getPsychologistEarnings(s), 0);
   const paidSessions = displayedSessions.filter(s => s.paid && s.status !== 'cancelled');
   const paidEarnings = paidSessions.reduce((sum, s) => sum + getPsychologistEarnings(s), 0);
@@ -525,7 +564,6 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
             {[
               { value: 'scheduled', label: 'Programadas' },
               { value: 'completed', label: 'Completadas' },
-              { value: 'paid', label: 'Pagadas' },
               { value: 'cancelled', label: 'Canceladas' }
             ].map(option => (
               <button
@@ -600,19 +638,19 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
             <div className="text-[9px] sm:text-xs text-green-600 mt-0.5 sm:mt-1">sesiones</div>
           </div>
           <div className="bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-lg sm:rounded-xl border border-indigo-200 p-2.5 sm:p-4 shadow-sm">
-            <div className="text-[10px] sm:text-xs font-semibold text-indigo-700 mb-1 sm:mb-2">Generado Total</div>
-            <div className="text-xl sm:text-2xl font-bold text-indigo-900">{totalEarnings.toFixed(2)} €</div>
+            <div className="text-[10px] sm:text-xs font-semibold text-indigo-700 mb-1 sm:mb-2">Valor Total</div>
+            <div className="text-xl sm:text-2xl font-bold text-indigo-900">{totalSessionValue.toFixed(2)} €</div>
             <div className="text-[9px] sm:text-xs text-indigo-600 mt-0.5 sm:mt-1">{completedSessions.length} sesiones</div>
+          </div>
+          <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 rounded-lg sm:rounded-xl border border-emerald-200 p-2.5 sm:p-4 shadow-sm">
+            <div className="text-[10px] sm:text-xs font-semibold text-emerald-700 mb-1 sm:mb-2">Mi Ganancia</div>
+            <div className="text-xl sm:text-2xl font-bold text-emerald-900">{totalEarnings.toFixed(2)} €</div>
+            <div className="text-[9px] sm:text-xs text-emerald-600 mt-0.5 sm:mt-1">{completedSessions.length} sesiones</div>
           </div>
           <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg sm:rounded-xl border border-blue-200 p-2.5 sm:p-4 shadow-sm">
             <div className="text-[10px] sm:text-xs font-semibold text-blue-700 mb-1 sm:mb-2">Cobrado</div>
             <div className="text-xl sm:text-2xl font-bold text-blue-900">{paidEarnings.toFixed(2)} €</div>
             <div className="text-[9px] sm:text-xs text-blue-600 mt-0.5 sm:mt-1">{paidSessions.length} sesiones</div>
-          </div>
-          <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg sm:rounded-xl border border-purple-200 p-2.5 sm:p-4 shadow-sm">
-            <div className="text-[10px] sm:text-xs font-semibold text-purple-700 mb-1 sm:mb-2">Total Sesiones</div>
-            <div className="text-xl sm:text-2xl font-bold text-purple-900">{sessions.length}</div>
-            <div className="text-[9px] sm:text-xs text-purple-600 mt-0.5 sm:mt-1">en el periodo</div>
           </div>
         </div>
       )}
@@ -663,7 +701,7 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
                             <span className="hidden sm:inline">Online</span>
                           </span>
                         )}
-                        {session.paid && (
+                        {session.paid && session.status === 'completed' && (
                           <span className="inline-flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 sm:py-1 bg-green-50 text-green-700 rounded-full text-[9px] sm:text-xs">
                             <DollarSign size={10} className="sm:w-3 sm:h-3" />
                             <span className="hidden sm:inline">Pagada</span>

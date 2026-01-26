@@ -5149,6 +5149,40 @@ app.get('/api/patient/:patientId/unbilled', async (req, res) => {
   }
 });
 
+// Función auxiliar para calcular duración de sesión en horas
+function getSessionDurationHours(session) {
+  // Priorizar usar starts_on y ends_on de Supabase si existen
+  if (session.starts_on && session.ends_on) {
+    const startDate = new Date(session.starts_on);
+    const endDate = new Date(session.ends_on);
+    
+    const durationMs = endDate.getTime() - startDate.getTime();
+    const durationHours = durationMs / (1000 * 60 * 60);
+    
+    // Solo retornar si la duración es positiva y razonable (máx 24 horas)
+    if (durationHours > 0 && durationHours <= 24) {
+      return durationHours;
+    }
+  }
+  
+  // Si no hay información de tiempo, asumir 1 hora por defecto
+  return 1;
+}
+
+// Función auxiliar para calcular valor total de sesión (precio × duración)
+function getSessionTotalPrice(session) {
+  const pricePerHour = session.price || 0;
+  const hours = getSessionDurationHours(session);
+  return pricePerHour * hours;
+}
+
+// Función auxiliar para calcular ganancia del psicólogo
+function getPsychologistEarnings(session) {
+  const totalPrice = getSessionTotalPrice(session);
+  const percent = session.percent_psych || 0;
+  return (totalPrice * percent) / 100;
+}
+
 // GET /api/patient-stats/:patientId - Obtener estadísticas del paciente
 app.get('/api/patient-stats/:patientId', async (req, res) => {
   try {
@@ -5176,6 +5210,10 @@ app.get('/api/patient-stats/:patientId', async (req, res) => {
           throw sessionsError;
         }
         
+        console.log(`📊 Total sesiones obtenidas: ${allSessions?.length || 0}`);
+        console.log(`📊 Sesiones completadas: ${allSessions?.filter(s => s.status === 'completed').length || 0}`);
+        console.log(`📊 Sesiones programadas: ${allSessions?.filter(s => s.status === 'scheduled').length || 0}`);
+        
         // Obtener facturas del paciente
         const { data: invoices, error: invoicesError } = await supabaseAdmin
           .from('invoices')
@@ -5188,72 +5226,69 @@ app.get('/api/patient-stats/:patientId', async (req, res) => {
           throw invoicesError;
         }
         
+        console.log(`📊 Total facturas obtenidas: ${invoices?.length || 0}`);
+        console.log(`📊 Facturas por estado:`, invoices?.reduce((acc, inv) => {
+          acc[inv.status] = (acc[inv.status] || 0) + 1;
+          return acc;
+        }, {}));
+        
         // Calcular estadísticas
         const completedSessions = allSessions.filter(s => s.status === 'completed');
         const scheduledSessions = allSessions.filter(s => s.status === 'scheduled' || s.status === 'confirmed');
         
-        // Valor total de sesiones completadas
-        const totalSessionValue = completedSessions.reduce((sum, s) => sum + (s.price || 0), 0);
+        // Valor total de sesiones completadas (precio × duración)
+        const totalSessionValue = completedSessions.reduce((sum, s) => sum + getSessionTotalPrice(s), 0);
         
-        // Calcular ganancia del psicólogo
-        const psychologistEarnings = completedSessions.reduce((sum, s) => {
-          const price = s.price || 0;
-          const percent = s.psychologist_percent || 70;
-          return sum + (price * percent / 100);
-        }, 0);
+        // Calcular ganancia del psicólogo (usando percent_psych de la tabla sessions)
+        const psychologistEarnings = completedSessions.reduce((sum, s) => sum + getPsychologistEarnings(s), 0);
         
         const avgPercent = completedSessions.length > 0
-          ? completedSessions.reduce((sum, s) => sum + (s.psychologist_percent || 70), 0) / completedSessions.length
+          ? completedSessions.reduce((sum, s) => sum + (s.percent_psych || 70), 0) / completedSessions.length
           : 70;
+        
+        // Sesiones pagadas - directamente desde el campo 'paid' de la tabla sessions
+        const paidSessions = completedSessions.filter(s => s.paid === true).length;
+        const unpaidSessions = completedSessions.length - paidSessions;
+        
+        console.log(`💰 Sesiones pagadas (paid=true): ${paidSessions}`);
+        console.log(`💰 Sesiones sin pagar (paid=false): ${unpaidSessions}`);
         
         // Sesiones facturadas (con invoice_id)
         const sessionsWithInvoice = completedSessions.filter(s => s.invoice_id);
         
-        // Calcular total facturado (del campo data de facturas)
+        // Sesiones pendientes de facturar (sin invoice_id y sin bonus_id)
+        const sessionsWithoutInvoice = completedSessions.filter(s => !s.invoice_id && !s.bonus_id);
+        const pendingToInvoice = sessionsWithoutInvoice.reduce((sum, s) => sum + getSessionTotalPrice(s), 0);
+        
+        // Sesiones con bono pero sin facturar
+        const sessionsWithBonusNotInvoiced = completedSessions.filter(s => s.bonus_id && !s.invoice_id);
+        const bonosNotInvoiced = sessionsWithBonusNotInvoiced.length;
+        
+        // FACTURAS: usar los campos directos de la tabla invoices (no data)
+        // Total facturado (excluir cancelled y draft)
         const totalInvoiced = invoices.reduce((sum, inv) => {
-          const invoiceData = inv.data || inv;
-          const amount = invoiceData.total || invoiceData.amount || 0;
-          if (invoiceData.status !== 'cancelled' && invoiceData.status !== 'draft') {
-            return sum + amount;
+          if (inv.status !== 'cancelled' && inv.status !== 'draft') {
+            return sum + (inv.total || 0);
           }
           return sum;
         }, 0);
         
-        // Sesiones pendientes de facturar
-        const sessionsWithoutInvoice = completedSessions.filter(s => !s.invoice_id && !s.bonus_id);
-        const pendingToInvoice = sessionsWithoutInvoice.reduce((sum, s) => sum + (s.price || 0), 0);
-        
         // Facturas pagadas
-        const paidInvoices = invoices.filter(inv => {
-          const invoiceData = inv.data || inv;
-          return invoiceData.status === 'paid';
-        });
+        const paidInvoices = invoices.filter(inv => inv.status === 'paid');
         
-        // Sesiones pagadas (de facturas pagadas)
-        const paidSessionIds = new Set();
-        paidInvoices.forEach(inv => {
-          const invoiceData = inv.data || inv;
-          const sessionIds = invoiceData.sessionIds || [];
-          sessionIds.forEach((id) => paidSessionIds.add(id));
-        });
-        
-        const paidSessions = completedSessions.filter(s => paidSessionIds.has(s.id)).length;
-        const unpaidSessions = completedSessions.length - paidSessions;
-        
-        // Total cobrado y por cobrar de facturas
+        // Total cobrado (suma de facturas pagadas)
         const totalCollected = paidInvoices.reduce((sum, inv) => {
-          const invoiceData = inv.data || inv;
-          return sum + (invoiceData.total || invoiceData.amount || 0);
+          return sum + (inv.total || 0);
         }, 0);
         
-        const pendingInvoices = invoices.filter(inv => {
-          const invoiceData = inv.data || inv;
-          return invoiceData.status === 'sent' || invoiceData.status === 'pending';
-        });
+        // Facturas pendientes de cobro
+        const pendingInvoices = invoices.filter(inv => 
+          inv.status === 'sent' || inv.status === 'pending'
+        );
         
+        // Total por cobrar (suma de facturas pendientes)
         const totalPending = pendingInvoices.reduce((sum, inv) => {
-          const invoiceData = inv.data || inv;
-          return sum + (invoiceData.total || invoiceData.amount || 0);
+          return sum + (inv.total || 0);
         }, 0);
         
         // Datos mensuales (últimos 12 meses)
@@ -5267,19 +5302,20 @@ app.get('/api/patient-stats/:patientId', async (req, res) => {
           
           const monthName = date.toLocaleDateString('es-ES', { month: 'short', year: '2-digit' });
           
-          const monthSessions = completedSessions.filter(s => {
+          // Incluir todas las sesiones excepto canceladas
+          const monthSessions = allSessions.filter(s => {
+            if (s.status === 'cancelled') return false;
             const sessionDate = new Date(s.starts_on);
             return sessionDate >= monthStart && sessionDate <= monthEnd;
           });
           
-          const monthRevenue = monthSessions.reduce((sum, s) => sum + (s.price || 0), 0);
+          // Solo sesiones completadas para cálculos de dinero
+          const monthCompletedSessions = monthSessions.filter(s => s.status === 'completed');
+          
+          const monthRevenue = monthCompletedSessions.reduce((sum, s) => sum + getSessionTotalPrice(s), 0);
           
           // Calcular ganancia del psicólogo para este mes
-          const monthPsychEarnings = monthSessions.reduce((sum, s) => {
-            const price = s.price || 0;
-            const percent = s.psychologist_percent || 70;
-            return sum + (price * percent / 100);
-          }, 0);
+          const monthPsychEarnings = monthCompletedSessions.reduce((sum, s) => sum + getPsychologistEarnings(s), 0);
           
           monthlyData.push({
             month: monthName,
@@ -5297,6 +5333,7 @@ app.get('/api/patient-stats/:patientId', async (req, res) => {
           totalCollected,
           totalPending,
           pendingToInvoice,
+          bonosNotInvoiced,
           completedSessions: completedSessions.length,
           scheduledSessions: scheduledSessions.length,
           paidSessions,
@@ -5310,7 +5347,13 @@ app.get('/api/patient-stats/:patientId', async (req, res) => {
         console.log(`✅ Estadísticas calculadas:`, {
           completedSessions: stats.completedSessions,
           totalSessionValue: stats.totalSessionValue,
-          totalInvoiced: stats.totalInvoiced
+          psychologistEarnings: stats.psychologistEarnings,
+          paidSessions: stats.paidSessions,
+          unpaidSessions: stats.unpaidSessions,
+          totalInvoiced: stats.totalInvoiced,
+          totalCollected: stats.totalCollected,
+          totalPending: stats.totalPending,
+          pendingToInvoice: stats.pendingToInvoice
         });
         
         return res.json(stats);
