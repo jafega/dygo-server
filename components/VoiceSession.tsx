@@ -29,6 +29,7 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const sessionRef = useRef<any>(null);
+  const contextCacheRef = useRef<{ entries: any[], context: string } | null>(null);
   
   // Refs for playback queue
   const nextStartTimeRef = useRef<number>(0);
@@ -37,6 +38,8 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
   // Refs for accumulation
   const fullTranscriptRef = useRef<string>('');
   const timerRef = useRef<number | null>(null);
+  const isMounted = useRef(true);
+  const isInitialized = useRef(false);
 
   // Format seconds into MM:SS
   const formatTime = (secs: number) => {
@@ -53,37 +56,58 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
   };
 
   useEffect(() => {
-    let isMounted = true;
-
+    console.log('[VoiceSession] useEffect triggered');
+    isMounted.current = true; // Marcar como montado
+    
     const startSession = async () => {
+      console.log('[VoiceSession] startSession called');
+      console.log('[VoiceSession] isInitialized:', isInitialized.current);
+      
+      if (isInitialized.current) {
+        console.log('[VoiceSession] Already initialized, skipping...');
+        return;
+      }
+      
+      isInitialized.current = true;
+      console.log('[VoiceSession] ai available:', !!ai);
+      
       if (!ai) {
-  setError("Falta la API key de Gemini (VITE_GEMINI_API_KEY)");
-  setStatus("error");
-  return;
-}
+        console.error('[VoiceSession] No AI instance - missing API key');
+        setError("Falta la API key de Gemini (VITE_GEMINI_API_KEY)");
+        setStatus("error");
+        return;
+      }
 
       try {
+        console.log('[VoiceSession] Starting session...');
         const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+        console.log('[VoiceSession] API key present:', !!apiKey);
 
 
 
         const user = await getCurrentUser();
+        console.log('[VoiceSession] User loaded:', user?.id);
         
         // 1. Audio Setup
+        console.log('[VoiceSession] Setting up audio contexts...');
         const inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
         const outputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
         
         inputContextRef.current = inputAudioContext;
         audioContextRef.current = outputAudioContext;
 
+        console.log('[VoiceSession] Requesting microphone access...');
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         streamRef.current = stream;
+        console.log('[VoiceSession] Microphone access granted');
 
         // 2. Prepare Context (Updated to include Psychologist Feedback)
+        console.log('[VoiceSession] Loading recent entries...');
         // Sort explicitly by date descending to ensure index 0 is the most recent
         // Usamos versión optimizada que excluye transcripts y archivos para ahorrar tokens
         // Reducido de 5 a 3 días para minimizar consumo de tokens
         const recentEntries = user ? await getLastDaysEntriesSummary(user.id, 3) : [];
+        console.log('[VoiceSession] Loaded', recentEntries.length, 'entries');
         
         // Función para truncar texto y reducir tokens
         const truncate = (text: string | undefined, maxChars: number = 200) => {
@@ -91,21 +115,43 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
           return text.length > maxChars ? text.slice(0, maxChars) + '...' : text;
         };
         
-        const contextStr = recentEntries.length > 0 
-          ? `HISTORIAL RECIENTE Y FEEDBACK DEL PSICÓLOGO (ORDENADO DEL MÁS RECIENTE AL MÁS ANTIGUO):
-             ${recentEntries.map((e, index) => {
-                const feedbackText = getFeedbackText(e.psychologistFeedback);
-                const recencyLabel = index === 0 ? "!!! ÚLTIMO FEEDBACK (MÁXIMA PRIORIDAD) !!!" : "Feedback previo";
-                return `
-                - Día ${e.date}:
-                  Resumen: ${truncate(e.summary, 150)}
-                  ${feedbackText ? `NOTA DEL PSICÓLOGO (${recencyLabel}): "${truncate(feedbackText, 200)}".` : 'Sin nota del psicólogo.'}
-             `}).join('\n')}`
-          : "Esta es la primera vez que hablas con el usuario.";
+        // Cachear contexto para evitar regenerar si las entradas no cambian
+        let contextStr: string;
+        const entriesKey = JSON.stringify(recentEntries.map(e => ({ id: e.id, date: e.date })));
+        const cachedKey = contextCacheRef.current ? JSON.stringify(contextCacheRef.current.entries.map(e => ({ id: e.id, date: e.date }))) : null;
+        
+        console.log('[VoiceSession] Checking context cache...', { 
+          hasCache: !!contextCacheRef.current, 
+          cacheMatch: cachedKey === entriesKey 
+        });
+        
+        if (cachedKey === entriesKey && contextCacheRef.current) {
+          // Usar contexto cacheado
+          console.log('[VoiceSession] ✅ Using cached context');
+          contextStr = contextCacheRef.current.context;
+        } else {
+          // Generar nuevo contexto y cachearlo
+          console.log('[VoiceSession] 🔄 Generating new context...');
+          contextStr = recentEntries.length > 0 
+            ? `HISTORIAL RECIENTE Y FEEDBACK DEL PSICÓLOGO (ORDENADO DEL MÁS RECIENTE AL MÁS ANTIGUO):
+               ${recentEntries.map((e, index) => {
+                  const feedbackText = getFeedbackText(e.psychologistFeedback);
+                  const recencyLabel = index === 0 ? "!!! ÚLTIMO FEEDBACK (MÁXIMA PRIORIDAD) !!!" : "Feedback previo";
+                  return `
+                  - Día ${e.date}:
+                    Resumen: ${truncate(e.summary, 150)}
+                    ${feedbackText ? `NOTA DEL PSICÓLOGO (${recencyLabel}): "${truncate(feedbackText, 200)}".` : 'Sin nota del psicólogo.'}
+               `}).join('\n')}`
+            : "Esta es la primera vez que hablas con el usuario.";
+          
+          contextCacheRef.current = { entries: recentEntries, context: contextStr };
+        }
 
         // Selected Language and Voice
         const selectedLanguage = settings?.language || 'es-ES';
         const selectedVoice = settings?.voice || 'Kore';
+
+        console.log('[VoiceSession] Preparing to connect...', { selectedLanguage, selectedVoice });
 
         // Map generic codes to specific instructions
         const languageInstruction = selectedLanguage === 'en-US' 
@@ -115,12 +161,35 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
                 : 'Español de España (Castellano), natural y cercano.';
 
         // 3. Connect Live API
+        console.log('[VoiceSession] 🔌 Connecting to Gemini Live API...');
+        console.log('[VoiceSession] Context string length:', contextStr.length, 'chars');
+        console.log('[VoiceSession] Voice settings:', { selectedLanguage, selectedVoice, languageInstruction });
+        
+        const connectionStartTime = Date.now();
+        
+        // Agregar timeout para detectar conexiones colgadas
+        const connectionTimeout = setTimeout(() => {
+          const elapsed = Date.now() - connectionStartTime;
+          console.error('[VoiceSession] ⏰ Connection timeout - taking too long to connect', { elapsedMs: elapsed });
+          setError('La conexión está tardando mucho. Intenta de nuevo.');
+          setStatus('error');
+        }, 15000); // 15 segundos timeout
+        
         const sessionPromise = ai.live.connect({
           model: 'gemini-2.5-flash-native-audio-preview-09-2025',
           callbacks: {
             onopen: () => {
-              if (!isMounted) return;
+              console.log('[VoiceSession] Live API connected! onopen triggered');
+              console.log('[VoiceSession] isMounted.current:', isMounted.current);
+              clearTimeout(connectionTimeout); // Limpiar timeout si conecta exitosamente
+              
+              if (!isMounted.current) {
+                console.warn('[VoiceSession] Component unmounted, skipping status update');
+                return;
+              }
+              console.log('[VoiceSession] Setting status to connected...');
               setStatus('connected');
+              console.log('[VoiceSession] Status set to connected');
               
               // La IA comenzará a hablar automáticamente basándose en las instrucciones del sistema
               // No necesitamos enviar un mensaje inicial porque el systemInstruction ya lo cubre
@@ -134,7 +203,8 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
               const source = inputAudioContext.createMediaStreamSource(stream);
               sourceRef.current = source;
               
-              const processor = inputAudioContext.createScriptProcessor(4096, 1, 1);
+              // Aumentado de 4096 a 8192 para procesar chunks más grandes y reducir overhead
+              const processor = inputAudioContext.createScriptProcessor(8192, 1, 1);
               processorRef.current = processor;
               
               processor.onaudioprocess = (e) => {
@@ -150,7 +220,7 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
               processor.connect(inputAudioContext.destination);
             },
             onmessage: async (msg: LiveServerMessage) => {
-              if (!isMounted) return;
+              if (!isMounted.current) return;
               
               if (msg.serverContent?.outputTranscription?.text) {
                 const text = msg.serverContent.outputTranscription.text;
@@ -194,10 +264,10 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
               }
             },
             onclose: () => {
-              console.log("Session closed");
+              console.log("[VoiceSession] Session closed");
             },
             onerror: (err) => {
-              console.error("Session error", err);
+              console.error("[VoiceSession] Session error", err);
               setError("Se cortó la llamada. Intenta de nuevo.");
               setStatus('error');
             }
@@ -235,20 +305,23 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
           }
         });
         
+        console.log('[VoiceSession] Waiting for session promise to resolve...');
         sessionRef.current = await sessionPromise;
+        console.log('[VoiceSession] Session promise resolved!', sessionRef.current);
 
       } catch (err) {
-  console.error("Init error", err);
-  setError(err instanceof Error ? err.message : "No se pudo establecer la llamada.");
-  setStatus('error');
-}
+        console.error("[VoiceSession] Init error", err);
+        setError(err instanceof Error ? err.message : "No se pudo establecer la llamada.");
+        setStatus('error');
+      }
 
     };
 
     startSession();
 
     return () => {
-      isMounted = false;
+      console.log('[VoiceSession] Cleanup');
+      isMounted.current = false;
       cleanup();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

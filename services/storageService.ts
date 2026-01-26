@@ -1,6 +1,7 @@
 import { JournalEntry, Goal, UserSettings, Invitation, User, PatientSummary, CareRelationship } from '../types';
 import * as AuthService from './authService';
 import { API_URL, USE_BACKEND, ALLOW_LOCAL_FALLBACK } from './config';
+import { decompressTranscript } from './genaiService';
 
 const ENTRIES_KEY = 'ai_diary_entries_v2';
 const GOALS_KEY = 'ai_diary_goals_v2';
@@ -295,7 +296,14 @@ export const getEntriesForUser = async (
           
           const url = `${API_URL}/entries?${params.toString()}`;
           const res = await fetch(url);
-          if (res.ok) return (await res.json()).sort((a: any, b: any) => b.timestamp - a.timestamp);
+          if (res.ok) {
+            const entries = await res.json();
+            // Descomprimir transcripts automáticamente
+            return entries.map((e: JournalEntry) => ({
+              ...e,
+              transcript: e.transcript ? decompressTranscript(e.transcript) : e.transcript
+            })).sort((a: any, b: any) => b.timestamp - a.timestamp);
+          }
           throw new Error(`Server error: ${res.status}`);
       } catch (e) {
                     if (ALLOW_LOCAL_FALLBACK) { console.warn("Backend fail, using local fallback", e); }
@@ -308,6 +316,12 @@ export const getEntriesForUser = async (
     // Local Fallback (solo si USE_BACKEND es false)
   const stored = localStorage.getItem(ENTRIES_KEY);
   let all: JournalEntry[] = stored ? JSON.parse(stored) : [];
+  
+  // Descomprimir transcripts automáticamente
+  all = all.map(e => ({
+    ...e,
+    transcript: e.transcript ? decompressTranscript(e.transcript) : e.transcript
+  }));
   
   // Aplicar filtros locales
   all = all.filter(e => e.userId === userId);

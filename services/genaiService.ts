@@ -1,9 +1,42 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { JournalEntry, Goal, WeeklyReport, EmotionStructure } from "../types";
+import pako from 'pako';
 
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
 
 export const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
+
+// Función para comprimir transcripts largos antes de guardar
+function compressTranscript(transcript: string): string {
+  if (!transcript || transcript.length < 500) return transcript; // No comprimir si es corto
+  try {
+    const uint8Array = new TextEncoder().encode(transcript);
+    const compressed = pako.deflate(uint8Array);
+    const base64 = btoa(String.fromCharCode(...compressed));
+    return `COMPRESSED:${base64}`;
+  } catch (error) {
+    console.error('Error comprimiendo transcript:', error);
+    return transcript; // Devolver sin comprimir si falla
+  }
+}
+
+// Función para descomprimir transcripts
+export function decompressTranscript(transcript: string): string {
+  if (!transcript || !transcript.startsWith('COMPRESSED:')) return transcript;
+  try {
+    const base64 = transcript.replace('COMPRESSED:', '');
+    const binaryString = atob(base64);
+    const uint8Array = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      uint8Array[i] = binaryString.charCodeAt(i);
+    }
+    const decompressed = pako.inflate(uint8Array);
+    return new TextDecoder().decode(decompressed);
+  } catch (error) {
+    console.error('Error descomprimiendo transcript:', error);
+    return transcript;
+  }
+}
 
 interface AnalysisResult {
   summary: string;
@@ -113,7 +146,7 @@ export async function analyzeJournalEntry(transcript: string, date: string, user
     entry_type: 'voice_session',  // Tipo de entrada para sesiones de voz
     date: date,
     timestamp: Date.now(),
-    transcript: transcript,
+    transcript: compressTranscript(transcript), // Comprimir para ahorrar espacio
     summary: result.summary || "No summary available.",
     sentimentScore: result.sentimentScore || 5,
     emotions: flatEmotions,

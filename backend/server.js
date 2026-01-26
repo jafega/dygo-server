@@ -838,9 +838,18 @@ function buildSupabaseEntryRow(entry) {
   }
   
   // Extraer entry_type como columna directa (no en data)
-  // Excluir entryType de restData
-  const { entryType: dataEntryType, ...cleanData } = restData;
-  const finalEntryType = entryType || dataEntryType || psychologistEntryType || type || null;
+  // Excluir entryType de restData y también entry_type
+  const { entryType: dataEntryType, entry_type: dataEntryType2, ...cleanData } = restData;
+  const finalEntryType = entryType || dataEntryType || dataEntryType2 || psychologistEntryType || type || null;
+  
+  console.log('[buildSupabaseEntryRow] 🔍 Entry type resolution:', {
+    entryType,
+    dataEntryType,
+    dataEntryType2,
+    psychologistEntryType,
+    type,
+    finalEntryType
+  });
   
   return {
     id,
