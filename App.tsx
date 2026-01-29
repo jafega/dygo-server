@@ -475,8 +475,12 @@ const App: React.FC = () => {
   };
 
   const handleSessionEnd = async (transcript: string) => {
+    console.log('[App] 📥 handleSessionEnd called with transcript length:', transcript?.length);
+    console.log('[App] 📄 Transcript preview:', transcript?.substring(0, 200));
+    
     if (!currentUser) return;
     if (!transcript || !transcript.trim()) {
+        console.warn('[App] ⚠️ Empty transcript, cancelling save');
         setViewState(ViewState.CALENDAR);
         setTimeout(() => {
             alert("No se detectó audio en la grabación.");
@@ -491,12 +495,16 @@ const App: React.FC = () => {
       const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
       const targetDate = sessionDate || today;
       
+      console.log('[App] 🧠 Analyzing transcript with date:', targetDate);
       const newEntry = await analyzeJournalEntry(transcript, targetDate, currentUser.id);
+      console.log('[App] ✅ Analysis complete, entry created:', newEntry.id);
       
       try {
+        console.log('[App] 💾 Saving entry to storage...');
         await StorageService.saveEntry(newEntry);
+        console.log('[App] ✅ Entry saved successfully');
       } catch (err:any) {
-        console.error('Error saving entry', err);
+        console.error('[App] ❌ Error saving entry', err);
         alert(err?.message || 'Error guardando la entrada. Comprueba la conexión con el servidor.');
         setIsProcessing(false);
         return;
@@ -508,7 +516,7 @@ const App: React.FC = () => {
       setSelectedDate(targetDate);
       setSessionDate(null);
     } catch (error) {
-      console.error(error);
+      console.error('[App] ❌ Error in handleSessionEnd:', error);
       alert("Hubo un error guardando tu diario.");
     } finally {
       setIsProcessing(false);

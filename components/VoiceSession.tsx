@@ -21,6 +21,7 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
   const [error, setError] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<string>('');
   const [duration, setDuration] = useState(0);
+  const [transcriptWarning, setTranscriptWarning] = useState(false);
   
   // Refs for audio handling
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -200,6 +201,12 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
               // Start Timer
               timerRef.current = window.setInterval(() => {
                 setDuration(prev => prev + 1);
+                
+                // Verificar si hay transcripción después de 30 segundos
+                if (prev === 30 && fullTranscriptRef.current.length < 10) {
+                  console.warn('[VoiceSession] ⚠️ No transcript detected after 30 seconds');
+                  setTranscriptWarning(true);
+                }
               }, 1000);
               
               // Límite de duración: 10 minutos (600 segundos)
@@ -233,14 +240,26 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
             onmessage: async (msg: LiveServerMessage) => {
               if (!isMounted.current) return;
               
+              // Log completo del mensaje para debugging
+              console.log('[VoiceSession] 📨 Received message:', {
+                hasOutputTranscription: !!msg.serverContent?.outputTranscription,
+                hasInputTranscription: !!msg.serverContent?.inputTranscription,
+                hasModelTurn: !!msg.serverContent?.modelTurn,
+                hasInterrupted: !!msg.serverContent?.interrupted,
+                fullMessage: msg
+              });
+              
               if (msg.serverContent?.outputTranscription?.text) {
                 const text = msg.serverContent.outputTranscription.text;
+                console.log('[VoiceSession] 🎤 IA transcript:', text);
                 fullTranscriptRef.current += `IA: ${text}\n`;
                 setTranscript(prev => prev + text);
+                setTranscriptWarning(false); // Reset warning if we get transcription
               }
               
               if (msg.serverContent?.inputTranscription?.text) {
                 const text = msg.serverContent.inputTranscription.text;
+                console.log('[VoiceSession] 👤 User transcript:', text);
                 
                 // Limpiar timeout previo
                 if (userBufferTimeoutRef.current) {
@@ -253,10 +272,12 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
                 // Guardar después de 1.5 segundos de silencio
                 userBufferTimeoutRef.current = setTimeout(() => {
                   if (userTranscriptBufferRef.current.trim()) {
+                    console.log('[VoiceSession] 💾 Saving user transcript to fullTranscriptRef:', userTranscriptBufferRef.current);
                     fullTranscriptRef.current += `Usuario: ${userTranscriptBufferRef.current}\n`;
                     userTranscriptBufferRef.current = '';
                   }
                 }, 1500);
+                setTranscriptWarning(false); // Reset warning if we get transcription
               }
 
               // Handle Audio Output
@@ -308,8 +329,9 @@ ${contextStr}`,
             speechConfig: {
               voiceConfig: { prebuiltVoiceConfig: { voiceName: selectedVoice } }
             },
-            inputAudioTranscription: {},
-            outputAudioTranscription: {},
+            // Habilitar transcripción tanto de entrada como de salida
+            inputAudioTranscription: { language: selectedLanguage },
+            outputAudioTranscription: { language: selectedLanguage },
           }
         });
         
@@ -336,6 +358,7 @@ ${contextStr}`,
   }, []);
 
   const cleanup = () => {
+    console.log('[VoiceSession] 🧹 Cleanup called');
     if (timerRef.current) clearInterval(timerRef.current);
     if (sessionLimitRef.current) clearTimeout(sessionLimitRef.current);
     
@@ -345,9 +368,13 @@ ${contextStr}`,
     }
     // Flush any pending user transcript
     if (userTranscriptBufferRef.current.trim()) {
+      console.log('[VoiceSession] 💾 Flushing pending user transcript:', userTranscriptBufferRef.current);
       fullTranscriptRef.current += `Usuario: ${userTranscriptBufferRef.current}\n`;
       userTranscriptBufferRef.current = '';
     }
+    
+    console.log('[VoiceSession] 📝 Final transcript length:', fullTranscriptRef.current.length, 'chars');
+    console.log('[VoiceSession] 📝 Final transcript preview:', fullTranscriptRef.current.substring(0, 200));
     
     // Stop mic
     if (streamRef.current) {
@@ -371,8 +398,11 @@ ${contextStr}`,
   };
 
   const handleHangUp = () => {
+    console.log('[VoiceSession] 📞 Hanging up...');
     cleanup();
-    onSessionEnd(fullTranscriptRef.current);
+    const finalTranscript = fullTranscriptRef.current;
+    console.log('[VoiceSession] 📤 Sending transcript to onSessionEnd. Length:', finalTranscript.length);
+    onSessionEnd(finalTranscript);
   };
 
   const toggleMute = () => {
@@ -427,13 +457,25 @@ ${contextStr}`,
       </div>
 
       {/* Transcript hint / Error */}
-      <div className="h-20 flex items-center justify-center text-center px-4">
+      <div className="h-20 flex flex-col items-center justify-center text-center px-4 gap-2">
         {error ? (
             <p className="text-red-300 bg-red-900/30 px-4 py-2 rounded-lg">{error}</p>
+        ) : transcriptWarning ? (
+            <div className="text-amber-300 bg-amber-900/30 px-4 py-2 rounded-lg">
+              <p className="text-sm">⚠️ No se detecta transcripción automática</p>
+              <p className="text-xs mt-1">La conversación se está grabando, pero puede que necesites revisar el resultado.</p>
+            </div>
         ) : (
-            <p className="text-slate-400 text-sm max-w-xs animate-pulse">
-                {isAiSpeaking ? "dygo te está hablando..." : "dygo está esperando..."}
-            </p>
+            <>
+              <p className="text-slate-400 text-sm max-w-xs animate-pulse">
+                  {isAiSpeaking ? "dygo te está hablando..." : "dygo está esperando..."}
+              </p>
+              {fullTranscriptRef.current.length > 0 && (
+                <p className="text-slate-500 text-xs">
+                  📝 {fullTranscriptRef.current.length} caracteres transcritos
+                </p>
+              )}
+            </>
         )}
       </div>
 

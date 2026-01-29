@@ -59,6 +59,10 @@ const getFeedbackText = (feedback?: string | { text: string }): string => {
 
 
 export async function analyzeJournalEntry(transcript: string, date: string, userId: string, pastEntries?: JournalEntry[]): Promise<JournalEntry> {
+  console.log('[genaiService] 🧠 analyzeJournalEntry called');
+  console.log('[genaiService] 📄 Transcript length:', transcript.length);
+  console.log('[genaiService] 📄 Transcript preview:', transcript.substring(0, 200));
+  
   // Construct context from past psychologist feedback if available
   let psychContext = "";
   if (pastEntries && pastEntries.length > 0) {
@@ -102,6 +106,7 @@ export async function analyzeJournalEntry(transcript: string, date: string, user
   throw new Error("Falta la API key de Gemini");
 }
 
+  console.log('[genaiService] 🤖 Calling Gemini API...');
   const response = await ai.models.generateContent({
     model: "gemini-2.5-flash",
     contents: prompt,
@@ -131,12 +136,25 @@ export async function analyzeJournalEntry(transcript: string, date: string, user
     }
   });
 
+  console.log('[genaiService] ✅ Gemini API response received');
   const result: AnalysisResult = JSON.parse(response.text || "{}");
+  console.log('[genaiService] 📊 Analysis result:', { 
+    summaryLength: result.summary?.length, 
+    sentimentScore: result.sentimentScore,
+    emotionsCount: result.structuredEmotions?.length
+  });
   
   const safeStructuredEmotions = result.structuredEmotions || [];
   const flatEmotions = safeStructuredEmotions.length > 0 
     ? safeStructuredEmotions.map(e => e.level2 || e.level1) 
     : [];
+
+  const compressedTranscript = compressTranscript(transcript);
+  console.log('[genaiService] 📦 Transcript compressed:', {
+    originalLength: transcript.length,
+    compressedLength: compressedTranscript.length,
+    compressionRatio: (compressedTranscript.length / transcript.length * 100).toFixed(1) + '%'
+  });
 
   return {
     id: crypto.randomUUID(),
@@ -146,7 +164,7 @@ export async function analyzeJournalEntry(transcript: string, date: string, user
     entry_type: 'voice_session',  // Tipo de entrada para sesiones de voz
     date: date,
     timestamp: Date.now(),
-    transcript: compressTranscript(transcript), // Comprimir para ahorrar espacio
+    transcript: compressedTranscript, // Comprimir para ahorrar espacio
     summary: result.summary || "No summary available.",
     sentimentScore: result.sentimentScore || 5,
     emotions: flatEmotions,
