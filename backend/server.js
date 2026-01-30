@@ -2204,27 +2204,113 @@ const handleAdminCreatePatient = async (req, res) => {
       return res.status(403).json({ error: 'Only psychologists can create patients' });
     }
 
-    // Verificar si el email ya existe en Supabase
+    // Verificar si el email ya existe
     const normalizedEmail = normalizeEmail(email);
+    let existingPatientId = null;
+    let existingPatient = null;
     
     if (supabaseAdmin) {
       const { data: existingInSupabase } = await supabaseAdmin
         .from('users')
-        .select('id')
+        .select('id, data')
         .eq('user_email', normalizedEmail)
         .maybeSingle();
       
       if (existingInSupabase) {
-        return res.status(400).json({ error: 'Ya existe un usuario con ese email' });
+        existingPatientId = existingInSupabase.id;
+        existingPatient = existingInSupabase.data;
       }
     } else {
-      const existingUser = db.users.find(u => normalizeEmail(u.email) === normalizedEmail);
-      if (existingUser) {
-        return res.status(400).json({ error: 'Ya existe un usuario con ese email' });
+      existingPatient = db.users.find(u => normalizeEmail(u.email) === normalizedEmail);
+      if (existingPatient) {
+        existingPatientId = existingPatient.id;
       }
     }
 
-    // Crear el nuevo paciente
+    // Si el usuario ya existe, verificar que no haya una relación existente
+    if (existingPatientId) {
+      console.log(`[handleAdminCreatePatient] Usuario ya existe: ${existingPatientId}, verificando relación...`);
+      
+      // Verificar si ya existe una relación entre este psicólogo y este paciente
+      let relationshipExists = false;
+      
+      if (supabaseAdmin) {
+        const { data: existingRel } = await supabaseAdmin
+          .from('care_relationships')
+          .select('id')
+          .eq('psychologist_user_id', psychologistId)
+          .eq('patient_user_id', existingPatientId)
+          .maybeSingle();
+        
+        relationshipExists = !!existingRel;
+      } else {
+        relationshipExists = db.careRelationships?.some(r => 
+          r.psychologist_user_id === psychologistId && 
+          r.patient_user_id === existingPatientId
+        );
+      }
+      
+      if (relationshipExists) {
+        return res.status(400).json({ error: 'Ya existe una relación con este paciente' });
+      }
+      
+      // Crear solo la relación de cuidado
+      const relationship = {
+        id: crypto.randomUUID(),
+        psychologist_user_id: psychologistId,
+        patient_user_id: existingPatientId,
+        status: 'active',
+        default_session_price: 0,
+        default_psych_percent: 80,
+        data: {
+          psychologistId: psychologistId,
+          patientId: existingPatientId,
+          status: 'active',
+          tags: []
+        },
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      
+      // Insertar la relación en Supabase si está disponible
+      if (supabaseAdmin) {
+        console.log('[handleAdminCreatePatient] 🔄 Insertando relación en Supabase...');
+        const { error: relError } = await supabaseAdmin
+          .from('care_relationships')
+          .insert({
+            id: relationship.id,
+            data: relationship.data,
+            psychologist_user_id: psychologistId,
+            patient_user_id: existingPatientId,
+            default_session_price: 0,
+            default_psych_percent: 80
+          });
+
+        if (relError) {
+          console.error('[handleAdminCreatePatient] ❌ Error insertando relación:', relError);
+          return res.status(500).json({ error: `Error al crear relación: ${relError.message}` });
+        }
+        console.log('[handleAdminCreatePatient] ✅ Relación insertada en Supabase');
+      }
+      
+      // Guardar también en DB local
+      if (!Array.isArray(db.careRelationships)) {
+        db.careRelationships = [];
+      }
+      db.careRelationships.push(relationship);
+      await saveDb(db, { awaitPersistence: false });
+      
+      console.log(`✅ Relación creada con paciente existente: ${existingPatient.name || existingPatient.email} (${existingPatientId}) por psicólogo ${psychologist.name}`);
+      
+      return res.json({
+        success: true,
+        patient: existingPatient,
+        relationship: relationship,
+        message: 'Relación creada con paciente existente'
+      });
+    }
+
+    // Si el usuario no existe, crear el nuevo paciente
     const newPatient = {
       id: crypto.randomUUID(),
       email: normalizedEmail,
@@ -5333,6 +5419,7 @@ app.get('/api/patient-stats/:patientId', async (req, res) => {
           totalCollected,
           totalPending,
           pendingToInvoice,
+          sessionsWithoutInvoice: sessionsWithoutInvoice.length,
           bonosNotInvoiced,
           completedSessions: completedSessions.length,
           scheduledSessions: scheduledSessions.length,
@@ -5373,6 +5460,8 @@ app.get('/api/patient-stats/:patientId', async (req, res) => {
       totalCollected: 0,
       totalPending: 0,
       pendingToInvoice: 0,
+      sessionsWithoutInvoice: 0,
+      bonosNotInvoiced: 0,
       completedSessions: 0,
       scheduledSessions: 0,
       paidSessions: 0,

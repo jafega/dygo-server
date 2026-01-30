@@ -901,7 +901,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                         </div>
                         <div className="text-center p-4 bg-gradient-to-br from-amber-50 to-amber-100 rounded-xl border-2 border-amber-200">
                           <div className="text-3xl font-bold text-amber-700 mb-1">
-                            {sessionsWithoutInvoice || 0}
+                            {patientStats.sessionsWithoutInvoice || 0}
                           </div>
                           <div className="text-xs text-amber-600 font-medium">Sesiones Por Facturar</div>
                         </div>

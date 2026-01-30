@@ -46,6 +46,10 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
   const sessionLimitRef = useRef<NodeJS.Timeout | null>(null);
   const isMounted = useRef(true);
   const isInitialized = useRef(false);
+  
+  // Web Speech Recognition como respaldo
+  const recognitionRef = useRef<any>(null);
+  const userSpeechTranscriptRef = useRef<string>('');
 
   // Format seconds into MM:SS
   const formatTime = (secs: number) => {
@@ -156,6 +160,53 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
         const selectedVoice = settings?.voice || 'Kore';
 
         console.log('[VoiceSession] Preparing to connect...', { selectedLanguage, selectedVoice });
+
+        // Inicializar Web Speech Recognition como respaldo
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        if (SpeechRecognition) {
+          console.log('[VoiceSession] 🎙️ Initializing Web Speech Recognition as backup...');
+          const recognition = new SpeechRecognition();
+          recognitionRef.current = recognition;
+          recognition.lang = selectedLanguage;
+          recognition.continuous = true;
+          recognition.interimResults = false; // Solo resultados finales
+          
+          recognition.onresult = (event: any) => {
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+              const result = event.results[i];
+              if (result.isFinal) {
+                const transcript = result[0].transcript;
+                console.log('[VoiceSession] 🗣️ Web Speech captured:', transcript);
+                userSpeechTranscriptRef.current += transcript + ' ';
+                fullTranscriptRef.current += `Usuario: ${transcript}\n`;
+              }
+            }
+          };
+          
+          recognition.onerror = (evt: any) => {
+            console.warn('[VoiceSession] ⚠️ Speech Recognition error:', evt.error);
+          };
+          
+          recognition.onend = () => {
+            // Reiniciar si aún está montado y conectado
+            if (isMounted.current && status === 'connected') {
+              try {
+                recognition.start();
+              } catch (e) {
+                console.warn('[VoiceSession] Could not restart recognition:', e);
+              }
+            }
+          };
+          
+          try {
+            recognition.start();
+            console.log('[VoiceSession] ✅ Web Speech Recognition started');
+          } catch (e) {
+            console.warn('[VoiceSession] ⚠️ Could not start Speech Recognition:', e);
+          }
+        } else {
+          console.warn('[VoiceSession] ⚠️ Web Speech Recognition not available in this browser');
+        }
 
         // Map generic codes to specific instructions
         const languageInstruction = selectedLanguage === 'en-US' 
@@ -362,6 +413,21 @@ ${contextStr}`,
     if (timerRef.current) clearInterval(timerRef.current);
     if (sessionLimitRef.current) clearTimeout(sessionLimitRef.current);
     
+    // Detener Web Speech Recognition
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+        console.log('[VoiceSession] 🛑 Web Speech Recognition stopped');
+      } catch (e) {
+        console.warn('[VoiceSession] Could not stop recognition:', e);
+      }
+    }
+    
+    // Agregar transcripción capturada por Web Speech si existe
+    if (userSpeechTranscriptRef.current.trim()) {
+      console.log('[VoiceSession] 📝 Adding Web Speech transcript:', userSpeechTranscriptRef.current.substring(0, 100));
+    }
+    
     // Limpiar buffer de transcripción del usuario
     if (userBufferTimeoutRef.current) {
       clearTimeout(userBufferTimeoutRef.current);
@@ -462,8 +528,8 @@ ${contextStr}`,
             <p className="text-red-300 bg-red-900/30 px-4 py-2 rounded-lg">{error}</p>
         ) : transcriptWarning ? (
             <div className="text-amber-300 bg-amber-900/30 px-4 py-2 rounded-lg">
-              <p className="text-sm">⚠️ No se detecta transcripción automática</p>
-              <p className="text-xs mt-1">La conversación se está grabando, pero puede que necesites revisar el resultado.</p>
+              <p className="text-sm">⚠️ Transcripción de respaldo activa</p>
+              <p className="text-xs mt-1">Usando reconocimiento de voz del navegador para capturar tu audio.</p>
             </div>
         ) : (
             <>

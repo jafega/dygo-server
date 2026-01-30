@@ -180,7 +180,10 @@ const PatientDashboard = forwardRef<PatientDashboardHandle>((props, ref) => {
 
       if (response.ok) {
         const result = await response.json();
-        alert(`Paciente creado exitosamente: ${result.patient.name}`);
+        const message = result.message 
+          ? `${result.message}: ${result.patient.name || result.patient.email}` 
+          : `Paciente creado exitosamente: ${result.patient.name}`;
+        alert(message);
         setShowCreateModal(false);
         setNewPatient({ firstName: '', lastName: '', email: '', phone: '' });
         // Recargar la lista de pacientes
