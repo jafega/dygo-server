@@ -482,16 +482,21 @@ const App: React.FC = () => {
     
     console.log('[App] 📝 Received transcript length:', transcript?.length || 0);
     console.log('[App] 📝 Transcript preview:', transcript?.substring(0, 200) || '(empty)');
+    console.log('[App] 📝 Full transcript:', transcript);
     
-    if (!transcript || !transcript.trim()) {
-        console.error('[App] ❌ Empty transcript, cancelling save');
+    // Verificar con umbral más bajo (5 caracteres en lugar de vacío)
+    if (!transcript || transcript.trim().length < 5) {
+        console.error('[App] ❌ Transcript too short or empty, cancelling save');
+        console.error('[App] Transcript received:', transcript);
         console.error('[App] Possible causes: microphone not working, permissions denied, or transcription failed');
         setViewState(ViewState.CALENDAR);
         setTimeout(() => {
-            alert("No se detectó audio en la grabación.\n\nPosibles causas:\n• Permisos de micrófono no otorgados\n• Micrófono no funcionando\n• Problema con el reconocimiento de voz\n\nPor favor, revisa los permisos del navegador e intenta de nuevo.");
+            alert("No se detectó suficiente audio en la grabación.\n\nPosibles causas:\n• Permisos de micrófono no otorgados\n• Micrófono no funcionando\n• Problema con el reconocimiento de voz\n• La sesión fue muy corta\n\nPor favor, revisa los permisos del navegador e intenta de nuevo.");
         }, 100);
         return;
     }
+    
+    console.log('[App] ✅ Transcript valid, proceeding to save...');
 
     setViewState(ViewState.CALENDAR); 
     setIsProcessing(true);

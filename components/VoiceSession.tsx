@@ -178,54 +178,86 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
 
         console.log('[VoiceSession] Preparing to connect...', { selectedLanguage, selectedVoice });
 
-        // Inicializar Web Speech Recognition como respaldo
+        // Inicializar Web Speech Recognition como respaldo PRIMERO
         const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
         if (SpeechRecognition) {
-          console.log('[VoiceSession] 🎙️ Initializing Web Speech Recognition as backup...');
+          console.log('[VoiceSession] 🎙️ Initializing Web Speech Recognition as PRIMARY transcription method...');
           const recognition = new SpeechRecognition();
           recognitionRef.current = recognition;
           recognition.lang = selectedLanguage;
           recognition.continuous = true;
-          recognition.interimResults = false; // Solo resultados finales
+          recognition.interimResults = true; // Cambiar a true para capturar más
+          recognition.maxAlternatives = 1;
+          
+          recognition.onstart = () => {
+            console.log('[VoiceSession] ✅✅✅ Web Speech Recognition STARTED and listening!');
+          };
           
           recognition.onresult = (event: any) => {
+            console.log('[VoiceSession] 🎤 Web Speech onresult triggered, results:', event.results.length);
             for (let i = event.resultIndex; i < event.results.length; i++) {
               const result = event.results[i];
+              const transcript = result[0].transcript;
+              
               if (result.isFinal) {
-                const transcript = result[0].transcript;
-                console.log('[VoiceSession] 🗣️ Web Speech captured:', transcript);
+                console.log('[VoiceSession] 🗣️ FINAL Web Speech captured:', transcript);
                 userSpeechTranscriptRef.current += transcript + ' ';
-                // Guardar INMEDIATAMENTE en fullTranscriptRef
-                fullTranscriptRef.current += `Usuario (Web Speech): ${transcript}\n`;
+                fullTranscriptRef.current += `Usuario: ${transcript}\n`;
                 console.log('[VoiceSession] 💾 Saved to fullTranscriptRef. Current length:', fullTranscriptRef.current.length);
                 setTranscriptWarning(false);
+              } else {
+                console.log('[VoiceSession] 🎤 INTERIM Web Speech:', transcript.substring(0, 50));
               }
             }
           };
           
           recognition.onerror = (evt: any) => {
-            console.warn('[VoiceSession] ⚠️ Speech Recognition error:', evt.error);
+            console.error('[VoiceSession] ❌ Speech Recognition error:', evt.error, evt);
+            if (evt.error === 'no-speech') {
+              console.log('[VoiceSession] No speech detected, but continuing...');
+            }
+          };
+          
+          recognition.onspeechstart = () => {
+            console.log('[VoiceSession] 🎤 Speech detected by Web Speech Recognition!');
+          };
+          
+          recognition.onspeechend = () => {
+            console.log('[VoiceSession] 🎤 Speech ended');
           };
           
           recognition.onend = () => {
-            // Reiniciar si aún está montado y conectado
-            if (isMounted.current && status === 'connected') {
+            console.log('[VoiceSession] 🔄 Speech Recognition ended, restarting...');
+            // Reiniciar si aún está montado
+            if (isMounted.current) {
               try {
-                recognition.start();
+                setTimeout(() => {
+                  if (isMounted.current && recognitionRef.current) {
+                    recognition.start();
+                    console.log('[VoiceSession] ✅ Speech Recognition restarted');
+                  }
+                }, 100);
               } catch (e) {
                 console.warn('[VoiceSession] Could not restart recognition:', e);
               }
             }
           };
           
+          // Iniciar Web Speech Recognition AHORA, antes de Gemini
           try {
             recognition.start();
-            console.log('[VoiceSession] ✅ Web Speech Recognition started');
+            console.log('[VoiceSession] ✅ Web Speech Recognition started successfully');
+            // Esperar un poco para asegurar que está listo
+            await new Promise(resolve => setTimeout(resolve, 500));
           } catch (e) {
-            console.warn('[VoiceSession] ⚠️ Could not start Speech Recognition:', e);
+            console.error('[VoiceSession] ❌ FAILED to start Speech Recognition:', e);
+            alert('Error al iniciar el reconocimiento de voz. Por favor, recarga la página.');
+            return;
           }
         } else {
-          console.warn('[VoiceSession] ⚠️ Web Speech Recognition not available in this browser');
+          console.error('[VoiceSession] ❌ Web Speech Recognition NOT available in this browser!');
+          alert('Tu navegador no soporta reconocimiento de voz. Por favor, usa Chrome.');
+          return;
         }
 
         // Map generic codes to specific instructions
@@ -331,25 +363,13 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
               if (msg.serverContent?.inputTranscription?.text) {
                 const text = msg.serverContent.inputTranscription.text;
                 console.log('[VoiceSession] 👤 User transcript from Gemini:', text);
+                console.log('[VoiceSession] 📊 Current fullTranscriptRef length BEFORE:', fullTranscriptRef.current.length);
                 
-                // Limpiar timeout previo
-                if (userBufferTimeoutRef.current) {
-                  clearTimeout(userBufferTimeoutRef.current);
-                }
-                
-                // Acumular en buffer
-                userTranscriptBufferRef.current = text;
-                
-                // Guardar después de 1 segundo de silencio (reducido de 1.5s)
-                userBufferTimeoutRef.current = setTimeout(() => {
-                  if (userTranscriptBufferRef.current.trim()) {
-                    console.log('[VoiceSession] 💾 Saving Gemini user transcript to fullTranscriptRef:', userTranscriptBufferRef.current);
-                    fullTranscriptRef.current += `Usuario (Gemini): ${userTranscriptBufferRef.current}\n`;
-                    console.log('[VoiceSession] 📊 fullTranscriptRef length:', fullTranscriptRef.current.length, 'chars');
-                    userTranscriptBufferRef.current = '';
-                  }
-                }, 1000);
-                setTranscriptWarning(false); // Reset warning if we get transcription
+                // Guardar INMEDIATAMENTE sin buffer para asegurar que se capture
+                fullTranscriptRef.current += `Usuario: ${text}\n`;
+                console.log('[VoiceSession] 💾 Saved Gemini transcript IMMEDIATELY');
+                console.log('[VoiceSession] 📊 fullTranscriptRef length AFTER:', fullTranscriptRef.current.length, 'chars');
+                setTranscriptWarning(false);
               }
 
               // Handle Audio Output
@@ -432,6 +452,7 @@ ${contextStr}`,
   const cleanup = () => {
     console.log('[VoiceSession] 🧹 Cleanup called');
     console.log('[VoiceSession] 📊 Current transcript length BEFORE cleanup:', fullTranscriptRef.current.length);
+    console.log('[VoiceSession] 📝 Full transcript:', fullTranscriptRef.current);
     
     if (timerRef.current) clearInterval(timerRef.current);
     if (sessionLimitRef.current) clearTimeout(sessionLimitRef.current);
@@ -446,25 +467,17 @@ ${contextStr}`,
       }
     }
     
-    // Limpiar buffer de transcripción del usuario de Gemini
-    if (userBufferTimeoutRef.current) {
-      clearTimeout(userBufferTimeoutRef.current);
-    }
-    // Flush any pending user transcript from Gemini
-    if (userTranscriptBufferRef.current.trim()) {
-      console.log('[VoiceSession] 💾 Flushing pending Gemini user transcript:', userTranscriptBufferRef.current);
-      fullTranscriptRef.current += `Usuario (Gemini): ${userTranscriptBufferRef.current}\n`;
-      userTranscriptBufferRef.current = '';
-    }
-    
     console.log('[VoiceSession] 📝 Final transcript length:', fullTranscriptRef.current.length, 'chars');
-    console.log('[VoiceSession] 📝 Final transcript preview (first 300 chars):', fullTranscriptRef.current.substring(0, 300));
+    console.log('[VoiceSession] 📝 Final transcript preview (first 500 chars):', fullTranscriptRef.current.substring(0, 500));
     console.log('[VoiceSession] 📝 Web Speech captured:', userSpeechTranscriptRef.current.length, 'chars');
     
     // Verificar si tenemos transcripción
     if (fullTranscriptRef.current.length < 20) {
       console.error('[VoiceSession] ⚠️⚠️⚠️ WARNING: Very short or empty transcript!');
-      console.error('[VoiceSession] This might cause "No se detectó audio" error');
+      console.error('[VoiceSession] This will cause "No se detectó audio" error');
+      console.error('[VoiceSession] fullTranscriptRef:', fullTranscriptRef.current);
+    } else {
+      console.log('[VoiceSession] ✅ Transcript looks good, length:', fullTranscriptRef.current.length);
     }
     
     // Stop mic
