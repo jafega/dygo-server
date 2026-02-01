@@ -303,13 +303,17 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
 
               // Start Timer
               timerRef.current = window.setInterval(() => {
-                setDuration(prev => prev + 1);
-                
-                // Verificar si hay transcripción después de 30 segundos
-                if (prev === 30 && fullTranscriptRef.current.length < 10) {
-                  console.warn('[VoiceSession] ⚠️ No transcript detected after 30 seconds');
-                  setTranscriptWarning(true);
-                }
+                setDuration(prev => {
+                  const newDuration = prev + 1;
+                  
+                  // Verificar si hay transcripción después de 30 segundos
+                  if (newDuration === 30 && fullTranscriptRef.current.length < 10) {
+                    console.warn('[VoiceSession] ⚠️ No transcript detected after 30 seconds');
+                    setTranscriptWarning(true);
+                  }
+                  
+                  return newDuration;
+                });
               }, 1000);
               
               // Límite de duración: 10 minutos (600 segundos)
@@ -471,15 +475,6 @@ ${contextStr}`,
     console.log('[VoiceSession] 📝 Final transcript preview (first 500 chars):', fullTranscriptRef.current.substring(0, 500));
     console.log('[VoiceSession] 📝 Web Speech captured:', userSpeechTranscriptRef.current.length, 'chars');
     
-    // Verificar si tenemos transcripción
-    if (fullTranscriptRef.current.length < 20) {
-      console.error('[VoiceSession] ⚠️⚠️⚠️ WARNING: Very short or empty transcript!');
-      console.error('[VoiceSession] This will cause "No se detectó audio" error');
-      console.error('[VoiceSession] fullTranscriptRef:', fullTranscriptRef.current);
-    } else {
-      console.log('[VoiceSession] ✅ Transcript looks good, length:', fullTranscriptRef.current.length);
-    }
-    
     // Stop mic
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
@@ -503,10 +498,36 @@ ${contextStr}`,
 
   const handleHangUp = () => {
     console.log('[VoiceSession] 📞 Hanging up...');
-    cleanup();
-    const finalTranscript = fullTranscriptRef.current;
-    console.log('[VoiceSession] 📤 Sending transcript to onSessionEnd. Length:', finalTranscript.length);
-    onSessionEnd(finalTranscript);
+    
+    // Primero detener Web Speech para forzar el procesamiento de resultados finales
+    if (recognitionRef.current) {
+      try {
+        console.log('[VoiceSession] 🛑 Stopping Web Speech to force final results...');
+        recognitionRef.current.stop();
+      } catch (e) {
+        console.warn('[VoiceSession] Could not stop recognition:', e);
+      }
+    }
+    
+    // Esperar 500ms para que Web Speech procese los últimos resultados
+    setTimeout(() => {
+      console.log('[VoiceSession] ⏱️ Timeout completed, proceeding with cleanup');
+      console.log('[VoiceSession] 📊 Transcript length after waiting:', fullTranscriptRef.current.length);
+      
+      // Verificar si tenemos transcripción DESPUÉS de esperar
+      if (fullTranscriptRef.current.length < 20) {
+        console.error('[VoiceSession] ⚠️⚠️⚠️ WARNING: Very short or empty transcript!');
+        console.error('[VoiceSession] This will cause "No se detectó audio" error');
+        console.error('[VoiceSession] fullTranscriptRef:', fullTranscriptRef.current);
+      } else {
+        console.log('[VoiceSession] ✅ Transcript looks good, length:', fullTranscriptRef.current.length);
+      }
+      
+      cleanup();
+      const finalTranscript = fullTranscriptRef.current;
+      console.log('[VoiceSession] 📤 Sending transcript to onSessionEnd. Length:', finalTranscript.length);
+      onSessionEnd(finalTranscript);
+    }, 500);
   };
 
   const toggleMute = () => {
