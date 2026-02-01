@@ -479,11 +479,16 @@ const App: React.FC = () => {
     console.log('[App] 📄 Transcript preview:', transcript?.substring(0, 200));
     
     if (!currentUser) return;
+    
+    console.log('[App] 📝 Received transcript length:', transcript?.length || 0);
+    console.log('[App] 📝 Transcript preview:', transcript?.substring(0, 200) || '(empty)');
+    
     if (!transcript || !transcript.trim()) {
-        console.warn('[App] ⚠️ Empty transcript, cancelling save');
+        console.error('[App] ❌ Empty transcript, cancelling save');
+        console.error('[App] Possible causes: microphone not working, permissions denied, or transcription failed');
         setViewState(ViewState.CALENDAR);
         setTimeout(() => {
-            alert("No se detectó audio en la grabación.");
+            alert("No se detectó audio en la grabación.\n\nPosibles causas:\n• Permisos de micrófono no otorgados\n• Micrófono no funcionando\n• Problema con el reconocimiento de voz\n\nPor favor, revisa los permisos del navegador e intenta de nuevo.");
         }, 100);
         return;
     }

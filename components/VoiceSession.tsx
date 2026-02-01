@@ -107,9 +107,26 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
         audioContextRef.current = outputAudioContext;
 
         console.log('[VoiceSession] Requesting microphone access...');
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        streamRef.current = stream;
-        console.log('[VoiceSession] Microphone access granted');
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ 
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true
+            } 
+          });
+          streamRef.current = stream;
+          console.log('[VoiceSession] ✅ Microphone access granted');
+          console.log('[VoiceSession] Audio tracks:', stream.getAudioTracks().map(t => ({
+            label: t.label,
+            enabled: t.enabled,
+            muted: t.muted,
+            readyState: t.readyState
+          })));
+        } catch (micError) {
+          console.error('[VoiceSession] ❌ Microphone access denied or failed:', micError);
+          throw new Error('No se pudo acceder al micrófono. Por favor, permite el acceso al micrófono.');
+        }
 
         // 2. Prepare Context (Updated to include Psychologist Feedback)
         console.log('[VoiceSession] Loading recent entries...');
@@ -178,7 +195,10 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
                 const transcript = result[0].transcript;
                 console.log('[VoiceSession] 🗣️ Web Speech captured:', transcript);
                 userSpeechTranscriptRef.current += transcript + ' ';
-                fullTranscriptRef.current += `Usuario: ${transcript}\n`;
+                // Guardar INMEDIATAMENTE en fullTranscriptRef
+                fullTranscriptRef.current += `Usuario (Web Speech): ${transcript}\n`;
+                console.log('[VoiceSession] 💾 Saved to fullTranscriptRef. Current length:', fullTranscriptRef.current.length);
+                setTranscriptWarning(false);
               }
             }
           };
@@ -310,7 +330,7 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
               
               if (msg.serverContent?.inputTranscription?.text) {
                 const text = msg.serverContent.inputTranscription.text;
-                console.log('[VoiceSession] 👤 User transcript:', text);
+                console.log('[VoiceSession] 👤 User transcript from Gemini:', text);
                 
                 // Limpiar timeout previo
                 if (userBufferTimeoutRef.current) {
@@ -320,14 +340,15 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
                 // Acumular en buffer
                 userTranscriptBufferRef.current = text;
                 
-                // Guardar después de 1.5 segundos de silencio
+                // Guardar después de 1 segundo de silencio (reducido de 1.5s)
                 userBufferTimeoutRef.current = setTimeout(() => {
                   if (userTranscriptBufferRef.current.trim()) {
-                    console.log('[VoiceSession] 💾 Saving user transcript to fullTranscriptRef:', userTranscriptBufferRef.current);
-                    fullTranscriptRef.current += `Usuario: ${userTranscriptBufferRef.current}\n`;
+                    console.log('[VoiceSession] 💾 Saving Gemini user transcript to fullTranscriptRef:', userTranscriptBufferRef.current);
+                    fullTranscriptRef.current += `Usuario (Gemini): ${userTranscriptBufferRef.current}\n`;
+                    console.log('[VoiceSession] 📊 fullTranscriptRef length:', fullTranscriptRef.current.length, 'chars');
                     userTranscriptBufferRef.current = '';
                   }
-                }, 1500);
+                }, 1000);
                 setTranscriptWarning(false); // Reset warning if we get transcription
               }
 
@@ -410,6 +431,8 @@ ${contextStr}`,
 
   const cleanup = () => {
     console.log('[VoiceSession] 🧹 Cleanup called');
+    console.log('[VoiceSession] 📊 Current transcript length BEFORE cleanup:', fullTranscriptRef.current.length);
+    
     if (timerRef.current) clearInterval(timerRef.current);
     if (sessionLimitRef.current) clearTimeout(sessionLimitRef.current);
     
@@ -423,24 +446,26 @@ ${contextStr}`,
       }
     }
     
-    // Agregar transcripción capturada por Web Speech si existe
-    if (userSpeechTranscriptRef.current.trim()) {
-      console.log('[VoiceSession] 📝 Adding Web Speech transcript:', userSpeechTranscriptRef.current.substring(0, 100));
-    }
-    
-    // Limpiar buffer de transcripción del usuario
+    // Limpiar buffer de transcripción del usuario de Gemini
     if (userBufferTimeoutRef.current) {
       clearTimeout(userBufferTimeoutRef.current);
     }
-    // Flush any pending user transcript
+    // Flush any pending user transcript from Gemini
     if (userTranscriptBufferRef.current.trim()) {
-      console.log('[VoiceSession] 💾 Flushing pending user transcript:', userTranscriptBufferRef.current);
-      fullTranscriptRef.current += `Usuario: ${userTranscriptBufferRef.current}\n`;
+      console.log('[VoiceSession] 💾 Flushing pending Gemini user transcript:', userTranscriptBufferRef.current);
+      fullTranscriptRef.current += `Usuario (Gemini): ${userTranscriptBufferRef.current}\n`;
       userTranscriptBufferRef.current = '';
     }
     
     console.log('[VoiceSession] 📝 Final transcript length:', fullTranscriptRef.current.length, 'chars');
-    console.log('[VoiceSession] 📝 Final transcript preview:', fullTranscriptRef.current.substring(0, 200));
+    console.log('[VoiceSession] 📝 Final transcript preview (first 300 chars):', fullTranscriptRef.current.substring(0, 300));
+    console.log('[VoiceSession] 📝 Web Speech captured:', userSpeechTranscriptRef.current.length, 'chars');
+    
+    // Verificar si tenemos transcripción
+    if (fullTranscriptRef.current.length < 20) {
+      console.error('[VoiceSession] ⚠️⚠️⚠️ WARNING: Very short or empty transcript!');
+      console.error('[VoiceSession] This might cause "No se detectó audio" error');
+    }
     
     // Stop mic
     if (streamRef.current) {

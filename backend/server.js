@@ -8134,17 +8134,33 @@ app.get('/api/session-entries', async (req, res) => {
     const db = getDb();
 
     let entries = db.sessionEntries || [];
+    console.log(`📖 [GET /api/session-entries] Total entries in cache: ${entries.length}`);
 
     if (session_id) {
-      entries = entries.filter(e => e.session_id === session_id);
+      entries = entries.filter(e => e.session_id === session_id || e.data?.session_id === session_id);
+      console.log(`📖 [GET /api/session-entries] Filtered by session_id=${session_id}: ${entries.length} entries`);
     }
 
     if (target_user_id) {
       entries = entries.filter(e => e.target_user_id === target_user_id);
+      console.log(`📖 [GET /api/session-entries] Filtered by target_user_id=${target_user_id}: ${entries.length} entries`);
     }
 
     if (creator_user_id) {
       entries = entries.filter(e => e.creator_user_id === creator_user_id);
+      console.log(`📖 [GET /api/session-entries] Filtered by creator_user_id=${creator_user_id}: ${entries.length} entries`);
+    }
+    
+    if (entries.length > 0) {
+      console.log(`📖 [GET /api/session-entries] Returning ${entries.length} entries, first entry:`, {
+        id: entries[0].id,
+        status: entries[0].status,
+        dataStatus: entries[0].data?.status,
+        hasTranscript: !!entries[0].data?.transcript,
+        hasSummary: !!entries[0].data?.summary,
+        transcriptLength: entries[0].data?.transcript?.length || 0,
+        summaryLength: entries[0].data?.summary?.length || 0
+      });
     }
 
     return res.json(entries);
@@ -8163,8 +8179,19 @@ app.get('/api/session-entries/:id', async (req, res) => {
 
     const entry = db.sessionEntries.find(e => e.id === id);
     if (!entry) {
+      console.log(`❌ [GET /api/session-entries/${id}] Entry not found in cache`);
       return res.status(404).json({ error: 'Session entry not found' });
     }
+
+    console.log(`✅ [GET /api/session-entries/${id}] Entry found:`, {
+      id: entry.id,
+      status: entry.status,
+      dataStatus: entry.data?.status,
+      hasTranscript: !!entry.data?.transcript,
+      hasSummary: !!entry.data?.summary,
+      transcriptLength: entry.data?.transcript?.length || 0,
+      summaryLength: entry.data?.summary?.length || 0
+    });
 
     return res.json(entry);
   } catch (err) {
@@ -8190,8 +8217,12 @@ app.patch('/api/session-entries/:id', async (req, res) => {
     const updates = {};
     const dataUpdates = { ...entry.data };
 
+    console.log('📝 [PATCH session-entry] Valores recibidos:', { summary: !!summary, status, transcript: !!transcript, file: !!file });
+    console.log('📝 [PATCH session-entry] Entry actual data:', entry.data);
+
     if (summary !== undefined) {
       dataUpdates.summary = summary;
+      console.log('✅ Actualizando summary, longitud:', summary?.length || 0);
     }
 
     if (status !== undefined) {
@@ -8202,6 +8233,7 @@ app.patch('/api/session-entries/:id', async (req, res) => {
 
     if (transcript !== undefined) {
       dataUpdates.transcript = transcript;
+      console.log('✅ Actualizando transcript, longitud:', transcript?.length || 0);
     }
 
     if (file !== undefined) {
@@ -8218,11 +8250,19 @@ app.patch('/api/session-entries/:id', async (req, res) => {
 
     dataUpdates.updated_at = new Date().toISOString();
     updates.data = dataUpdates;
+    
+    console.log('📝 [PATCH session-entry] Data a actualizar en Supabase:', { 
+      id, 
+      hasStatus: !!updates.status,
+      dataKeys: Object.keys(dataUpdates),
+      summaryLength: dataUpdates.summary?.length || 0,
+      transcriptLength: dataUpdates.transcript?.length || 0
+    });
 
     // Actualizar directamente en Supabase
     if (supabaseAdmin) {
       try {
-        console.log('📝 Actualizando session_entry en Supabase:', { id, updates });
+        console.log('📝 [PATCH session-entry] Actualizando en Supabase:', { id, updates });
         const { data: updatedData, error: updateError } = await supabaseAdmin
           .from('session_entry')
           .update(updates)
@@ -8230,13 +8270,19 @@ app.patch('/api/session-entries/:id', async (req, res) => {
           .select();
 
         if (updateError) {
-          console.error('❌ Error actualizando session_entry en Supabase:', updateError);
+          console.error('❌ [PATCH session-entry] Error actualizando en Supabase:', updateError);
           throw updateError;
         }
 
-        console.log('✅ Session_entry actualizada en Supabase:', updatedData);
+        console.log('✅ [PATCH session-entry] Session_entry actualizada en Supabase:', {
+          id: updatedData?.[0]?.id,
+          status: updatedData?.[0]?.status,
+          dataKeys: updatedData?.[0]?.data ? Object.keys(updatedData[0].data) : [],
+          summaryLength: updatedData?.[0]?.data?.summary?.length || 0,
+          transcriptLength: updatedData?.[0]?.data?.transcript?.length || 0
+        });
       } catch (supabaseErr) {
-        console.error('❌ Error en operación de Supabase:', supabaseErr);
+        console.error('❌ [PATCH session-entry] Error en operación de Supabase:', supabaseErr);
         throw supabaseErr;
       }
     }
@@ -8244,6 +8290,14 @@ app.patch('/api/session-entries/:id', async (req, res) => {
     // Actualizar caché en memoria
     db.sessionEntries[idx] = { ...entry, ...updates };
     db.sessionEntries[idx].data = dataUpdates;
+    
+    console.log('✅ [PATCH session-entry] Session entry updated in cache:', {
+      id,
+      status: db.sessionEntries[idx].status,
+      dataStatus: db.sessionEntries[idx].data?.status,
+      summaryLength: db.sessionEntries[idx].data?.summary?.length || 0,
+      transcriptLength: db.sessionEntries[idx].data?.transcript?.length || 0
+    });
 
     console.log('✅ Session entry updated:', id);
     return res.json(db.sessionEntries[idx]);

@@ -1044,38 +1044,49 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                         Sesiones sin facturar ({availableSessions.length})
                       </label>
                       <div className="max-h-60 overflow-y-auto space-y-2 border border-slate-200 rounded-lg p-3">
-                        {availableSessions.map(session => (
-                          <div
-                            key={session.id}
-                            onClick={() => toggleSession(session.id)}
-                            className={`p-3 rounded-lg border cursor-pointer transition-colors ${
-                              selectedSessionIds.has(session.id)
-                                ? 'border-indigo-600 bg-indigo-50'
-                                : 'border-slate-200 hover:border-slate-300'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <div className="font-medium text-slate-900">
-                                  {new Date(session.starts_on).toLocaleString()}
+                        {availableSessions.map(session => {
+                          const sessionPrice = session.price || 0;
+                          const psychPercent = session.percent_psych || 100;
+                          const amountToInvoice = invoiceType === 'center' 
+                            ? (sessionPrice * psychPercent / 100)
+                            : sessionPrice;
+                          
+                          return (
+                            <div
+                              key={session.id}
+                              onClick={() => toggleSession(session.id)}
+                              className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                                selectedSessionIds.has(session.id)
+                                  ? 'border-indigo-600 bg-indigo-50'
+                                  : 'border-slate-200 hover:border-slate-300'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex-1">
+                                  <div className="font-medium text-slate-900">
+                                    {new Date(session.starts_on).toLocaleString()}
+                                  </div>
+                                  {session.notes && (
+                                    <div className="text-sm text-slate-600 mt-1">{session.notes}</div>
+                                  )}
+                                  {invoiceType === 'center' && psychPercent < 100 && (
+                                    <div className="text-xs text-slate-500 mt-1">
+                                      Tu porcentaje: {psychPercent}% de €{sessionPrice.toFixed(2)}
+                                    </div>
+                                  )}
                                 </div>
-                                {session.notes && (
-                                  <div className="text-sm text-slate-600 mt-1">{session.notes}</div>
-                                )}
-                              </div>
-                              <div className="text-right">
-                                <div className="font-semibold text-indigo-600">
-                                  €{invoiceType === 'center' && session.percent_psych
-                                    ? ((session.price || 0) * session.percent_psych / 100).toFixed(2)
-                                    : (session.price || 0).toFixed(2)}
+                                <div className="text-right ml-4">
+                                  <div className="font-semibold text-indigo-600">
+                                    €{amountToInvoice.toFixed(2)}
+                                  </div>
+                                  {selectedSessionIds.has(session.id) && (
+                                    <CheckSquare size={20} className="text-indigo-600 mt-1" />
+                                  )}
                                 </div>
-                                {selectedSessionIds.has(session.id) && (
-                                  <CheckSquare size={20} className="text-indigo-600 mt-1" />
-                                )}
                               </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -1087,38 +1098,49 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                         Bonos sin facturar ({availableBonos.length})
                       </label>
                       <div className="max-h-60 overflow-y-auto space-y-2 border border-slate-200 rounded-lg p-3">
-                        {availableBonos.map(bono => (
-                          <div
-                            key={bono.id}
-                            onClick={() => toggleBono(bono.id)}
-                            className={`p-3 rounded-lg border cursor-pointer transition-colors ${
-                              selectedBonoIds.has(bono.id)
-                                ? 'border-indigo-600 bg-indigo-50'
-                                : 'border-slate-200 hover:border-slate-300'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <div className="font-medium text-slate-900">
-                                  Bono de {bono.total_sessions_amount} sesiones
+                        {availableBonos.map(bono => {
+                          const bonoPrice = bono.total_price_bono_amount || 0;
+                          const psychPercent = bono.percent_psych || 100;
+                          const amountToInvoice = invoiceType === 'center' 
+                            ? (bonoPrice * psychPercent / 100)
+                            : bonoPrice;
+                          
+                          return (
+                            <div
+                              key={bono.id}
+                              onClick={() => toggleBono(bono.id)}
+                              className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                                selectedBonoIds.has(bono.id)
+                                  ? 'border-indigo-600 bg-indigo-50'
+                                  : 'border-slate-200 hover:border-slate-300'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex-1">
+                                  <div className="font-medium text-slate-900">
+                                    Bono de {bono.total_sessions_amount} sesiones
+                                  </div>
+                                  <div className="text-sm text-slate-600">
+                                    {bono.used_sessions} usadas, {bono.remaining_sessions} restantes
+                                  </div>
+                                  {invoiceType === 'center' && psychPercent < 100 && (
+                                    <div className="text-xs text-slate-500 mt-1">
+                                      Tu porcentaje: {psychPercent}% de €{bonoPrice.toFixed(2)}
+                                    </div>
+                                  )}
                                 </div>
-                                <div className="text-sm text-slate-600">
-                                  {bono.used_sessions} usadas, {bono.remaining_sessions} restantes
+                                <div className="text-right ml-4">
+                                  <div className="font-semibold text-indigo-600">
+                                    €{amountToInvoice.toFixed(2)}
+                                  </div>
+                                  {selectedBonoIds.has(bono.id) && (
+                                    <CheckSquare size={20} className="text-indigo-600 mt-1" />
+                                  )}
                                 </div>
-                              </div>
-                              <div className="text-right">
-                                <div className="font-semibold text-indigo-600">
-                                  €{invoiceType === 'center' && bono.percent_psych
-                                    ? (bono.total_price_bono_amount * bono.percent_psych / 100).toFixed(2)
-                                    : bono.total_price_bono_amount.toFixed(2)}
-                                </div>
-                                {selectedBonoIds.has(bono.id) && (
-                                  <CheckSquare size={20} className="text-indigo-600 mt-1" />
-                                )}
                               </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -1272,25 +1294,62 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
 
               {/* Totales */}
               {((invoiceType === 'patient' && (selectedSessionIds.size > 0 || selectedBonoIds.size > 0)) || 
-                (invoiceType === 'center' && selectedCenterId && formData.manualAmount > 0)) && (
-                <div className="pt-4 border-t border-slate-200 space-y-2">
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="text-slate-600">Subtotal:</span>
-                    <span className="font-semibold text-slate-900">€{calculateTotal().subtotal.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="text-slate-600">IVA ({formData.taxRate}%):</span>
-                    <span className="font-semibold text-slate-900">€{calculateTotal().tax.toFixed(2)}</span>
-                  </div>
-                  {invoiceType === 'center' && formData.irpf > 0 && (
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-slate-600">IRPF ({formData.irpf}%):</span>
-                      <span className="font-semibold text-red-600">-€{(calculateTotal().subtotal * (formData.irpf / 100)).toFixed(2)}</span>
+                (invoiceType === 'center' && selectedSessionIds.size > 0)) && (
+                <div className="pt-4 border-t border-slate-200 space-y-3">
+                  <h4 className="text-sm font-semibold text-slate-700 mb-2">Vista Previa de la Factura</h4>
+                  
+                  {invoiceType === 'center' && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-2">
+                      <p className="text-xs text-blue-800">
+                        💡 Solo se factura tu porcentaje como psicólogo de las sesiones/bonos seleccionados
+                      </p>
                     </div>
                   )}
-                  <div className="flex justify-between items-center pt-2 border-t border-slate-100">
-                    <span className="text-lg font-semibold text-slate-900">Total:</span>
-                    <span className="text-2xl font-bold text-indigo-600">€{calculateTotal().total.toFixed(2)}</span>
+                  
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-slate-600">
+                        Base imponible:
+                        {invoiceType === 'center' && (
+                          <span className="text-xs text-slate-500 ml-1">(Tu porcentaje)</span>
+                        )}
+                      </span>
+                      <span className="font-semibold text-slate-900">€{calculateTotal().subtotal.toFixed(2)}</span>
+                    </div>
+                    
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-slate-600">IVA ({formData.taxRate}%):</span>
+                      <span className="font-semibold text-green-600">+€{calculateTotal().tax.toFixed(2)}</span>
+                    </div>
+                    
+                    {invoiceType === 'center' && formData.irpf > 0 && (
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-slate-600">IRPF ({formData.irpf}%) - Retención:</span>
+                        <span className="font-semibold text-red-600">-€{(calculateTotal().subtotal * (formData.irpf / 100)).toFixed(2)}</span>
+                      </div>
+                    )}
+                    
+                    <div className="flex justify-between items-center pt-3 border-t border-slate-200">
+                      <span className="text-lg font-semibold text-slate-900">Total a Cobrar:</span>
+                      <span className="text-2xl font-bold text-indigo-600">€{calculateTotal().total.toFixed(2)}</span>
+                    </div>
+                    
+                    {invoiceType === 'center' && (
+                      <div className="bg-slate-50 rounded-lg p-3 mt-2">
+                        <div className="text-xs text-slate-600 space-y-1">
+                          <div className="flex justify-between">
+                            <span>Sesiones seleccionadas:</span>
+                            <span className="font-medium">{selectedSessionIds.size}</span>
+                          </div>
+                          {selectedBonoIds.size > 0 && (
+                            <div className="flex justify-between">
+                              <span>Bonos seleccionados:</span>
+                              <span className="font-medium">{selectedBonoIds.size}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
