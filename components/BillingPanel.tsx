@@ -952,8 +952,8 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
 
       {/* New/Edit Invoice Modal */}
       {showNewInvoice && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm overflow-y-auto" onClick={handleCloseModal}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="p-6 border-b border-slate-200 flex items-center justify-between">
               <h3 className="text-xl font-bold text-slate-900">
                 {editingInvoice ? 'Editar Borrador' : 'Nueva Factura'}
@@ -1384,8 +1384,8 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
 
       {/* Modal de confirmación de cancelación */}
       {showCancelModal && invoiceToCancel && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]" onClick={() => { setShowCancelModal(false); setInvoiceToCancel(null); }}>
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
             <div className="p-6">
               <h3 className="text-lg font-semibold text-slate-900 mb-4">¿Cancelar factura y crear rectificativa?</h3>
               <p className="text-slate-600 mb-2">
@@ -1418,8 +1418,8 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
 
       {/* View Invoice Modal */}
       {selectedInvoice && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setSelectedInvoice(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="p-6 border-b border-slate-200">
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1">

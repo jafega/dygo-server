@@ -274,34 +274,46 @@ const App: React.FC = () => {
   const handleAuthSuccess = async (providedUser?: User) => {
       console.log('📍 handleAuthSuccess llamado con:', providedUser ? 'usuario proporcionado' : 'sin usuario');
       
-      // Si ya tenemos el usuario (ej: desde signInWithSupabase), usarlo directamente
-      let user = providedUser;
+      // Mostrar indicador de carga mientras se obtiene y cargan los datos del usuario
+      setIsLoadingData(true);
       
-      if (!user) {
-          user = await AuthService.getCurrentUser();
-      }
-      
-      if (!user) {
-          console.error('❌ No se pudo obtener el usuario después de autenticación');
-          setCurrentUser(null);
+      try {
+          // Si ya tenemos el usuario (ej: desde signInWithSupabase), usarlo directamente
+          let user = providedUser;
+          
+          if (!user) {
+              user = await AuthService.getCurrentUser();
+          }
+          
+          if (!user) {
+              console.error('❌ No se pudo obtener el usuario después de autenticación');
+              setCurrentUser(null);
+              setViewState(ViewState.AUTH);
+              setError('Error al cargar usuario. Por favor, intenta de nuevo.');
+              setIsLoadingData(false);
+              return;
+          }
+          
+          console.log('✅ Usuario obtenido:', user.email || user.id);
+          setCurrentUser(user);
+          
+          // Cargar datos del usuario ANTES de cambiar la vista
+          await refreshUserData(user.id);
+          
+          // Solo permitir vista de psicólogo si is_psychologist es true
+          const canAccessPsychologistView = user.is_psychologist === true;
+          setViewState(canAccessPsychologistView ? ViewState.PATIENTS : ViewState.CALENDAR);
+          setPsychViewMode(canAccessPsychologistView ? 'DASHBOARD' : 'PERSONAL');
+          
+          // Establecer tab por defecto según el rol
+          setActiveTab(canAccessPsychologistView ? 'dashboard' : 'calendar');
+      } catch (err) {
+          console.error('❌ Error en handleAuthSuccess:', err);
+          setError('Error al cargar datos del usuario. Por favor, intenta de nuevo.');
           setViewState(ViewState.AUTH);
-          setError('Error al cargar usuario. Por favor, intenta de nuevo.');
-          return;
+      } finally {
+          setIsLoadingData(false);
       }
-      
-      console.log('✅ Usuario obtenido:', user.email || user.id);
-      setCurrentUser(user);
-      
-      // Verificar completitud del perfil al hacer login
-      await checkProfileComplete(user.id, user);
-      
-      // Solo permitir vista de psicólogo si is_psychologist es true
-      const canAccessPsychologistView = user.is_psychologist === true;
-      setViewState(canAccessPsychologistView ? ViewState.PATIENTS : ViewState.INSIGHTS);
-      setPsychViewMode(canAccessPsychologistView ? 'DASHBOARD' : 'PERSONAL');
-      
-      // Cargar datos en segundo plano (no bloquear la UI)
-      refreshUserData(user.id).catch(err => console.warn('Error cargando datos iniciales:', err));
   };
 
   const handleLogout = () => {

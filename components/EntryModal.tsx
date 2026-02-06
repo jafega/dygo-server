@@ -19,8 +19,8 @@ const EntryModal: React.FC<EntryModalProps> = ({ entries, dateStr, onClose, onSt
 
   if (entries.length === 0) {
     return (
-      <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-40 p-4 backdrop-blur-sm">
-        <div className="bg-white rounded-2xl max-w-sm w-full p-6 text-center relative animate-in fade-in zoom-in duration-200 shadow-xl">
+      <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-40 p-4 backdrop-blur-sm" onClick={onClose}>
+        <div className="bg-white rounded-2xl max-w-sm w-full p-6 text-center relative animate-in fade-in zoom-in duration-200 shadow-xl" onClick={(e) => e.stopPropagation()}>
            <button onClick={onClose} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600">
             <X size={20} />
            </button>
@@ -44,8 +44,8 @@ const EntryModal: React.FC<EntryModalProps> = ({ entries, dateStr, onClose, onSt
   }
 
   return (
-    <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-40 p-4 backdrop-blur-sm">
-       <div className="bg-white rounded-2xl max-w-2xl w-full p-0 overflow-hidden shadow-2xl relative animate-in fade-in slide-in-from-bottom-4 duration-300 max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-40 p-4 backdrop-blur-sm" onClick={onClose}>
+       <div className="bg-white rounded-2xl max-w-2xl w-full p-0 overflow-hidden shadow-2xl relative animate-in fade-in slide-in-from-bottom-4 duration-300 max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
           
           {/* Header */}
           <div className="bg-indigo-600 p-6 text-white relative shrink-0 flex justify-between items-center">

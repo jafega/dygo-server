@@ -651,6 +651,8 @@ function normalizeSupabaseRow(row) {
     delete cleanData.paid;                 // Usar columna de tabla (sessions)
     delete cleanData.default_session_price; // Usar columna de tabla (care_relationships)
     delete cleanData.default_psych_percent; // Usar columna de tabla (care_relationships)
+    delete cleanData.summary;               // Usar columna de tabla (session_entry)
+    delete cleanData.transcript;            // Usar columna de tabla (session_entry)
     // NOTA: uses_bonos NO se elimina porque está en data JSONB, no en columna de tabla
     
     // Combinar: primero data limpia, luego columnas de tabla
@@ -6647,6 +6649,16 @@ app.patch('/api/relationships/end', async (req, res) => {
   }
 });
 
+// PATCH /api/relationships/:id - Alias de PUT para compatibilidad
+app.patch('/api/relationships/:id', async (req, res) => {
+  // Simplemente delegar al handler de PUT
+  return app._router.handle(
+    { ...req, method: 'PUT' },
+    res,
+    () => {}
+  );
+});
+
 app.put('/api/relationships/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -7526,6 +7538,55 @@ app.post('/api/sessions/availability', async (req, res) => {
   }
 });
 
+// Obtener una sesión específica por ID
+app.get('/api/sessions/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`🔍 [GET /api/sessions/${id}] Buscando sesión`);
+
+    // Si usamos Supabase, buscar allí primero
+    if (supabaseAdmin) {
+      try {
+        const { data: rows, error } = await supabaseAdmin
+          .from('sessions')
+          .select('*')
+          .eq('id', id)
+          .limit(1);
+
+        if (error) throw error;
+
+        if (rows && rows.length > 0) {
+          const session = normalizeSupabaseRow(rows[0]);
+          console.log(`✅ [GET /api/sessions/${id}] Sesión encontrada en Supabase`);
+          return res.json(session);
+        } else {
+          console.log(`❌ [GET /api/sessions/${id}] Sesión no encontrada en Supabase`);
+          return res.status(404).json({ error: 'Session not found' });
+        }
+      } catch (err) {
+        console.error(`❌ [GET /api/sessions/${id}] Error consultando Supabase:`, err);
+        // Continuar con fallback local
+      }
+    }
+
+    // Fallback a DB local
+    const db = getDb();
+    if (!db.sessions) db.sessions = [];
+
+    const session = db.sessions.find(s => s.id === id);
+    if (!session) {
+      console.log(`❌ [GET /api/sessions/${id}] Sesión no encontrada en DB local`);
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    console.log(`✅ [GET /api/sessions/${id}] Sesión encontrada en DB local`);
+    return res.json(session);
+  } catch (err) {
+    console.error(`❌ [GET /api/sessions/${id}] Error:`, err);
+    return res.status(500).json({ error: err?.message || 'Error al obtener la sesión' });
+  }
+});
+
 app.patch('/api/sessions/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -7594,6 +7655,87 @@ app.patch('/api/sessions/:id', async (req, res) => {
 
     db.sessions[idx] = updatedSession;
     console.log(`💾 [PATCH /api/sessions/${id}] Sesión actualizada en memoria:`, updatedSession);
+    
+    // Si la sesión se marca como completada y no tiene session_entry_id, crear una entrada vacía automáticamente
+    if (updatedSession.status === 'completed' && !updatedSession.session_entry_id) {
+      console.log(`📝 [PATCH /api/sessions/${id}] Sesión marcada como completada sin session_entry, creando una automáticamente...`);
+      
+      try {
+        const sessionEntryId = crypto.randomUUID();
+        const sessionEntryData = {
+          session_id: id,
+          transcript: '',
+          summary: '',
+          entry_type: 'session_note',
+          created_at: new Date().toISOString()
+        };
+
+        // Obtener userId del header
+        const userId = req.headers['x-user-id'] || req.headers['x-userid'];
+        const creatorUserId = userId || updatedSession.psychologist_user_id || updatedSession.psychologistId;
+        const targetUserId = updatedSession.patient_user_id || updatedSession.patientId;
+
+        if (supabaseAdmin) {
+          await ensureSessionEntryTable();
+
+          // Insertar en Supabase (summary y transcript en columnas separadas)
+          const { error: insertError } = await supabaseAdmin
+            .from('session_entry')
+            .insert({
+              id: sessionEntryId,
+              creator_user_id: creatorUserId,
+              target_user_id: targetUserId,
+              status: 'pending',
+              summary: null,
+              transcript: null,
+              data: sessionEntryData
+            });
+
+          if (insertError) {
+            console.error('❌ Error insertando session_entry automáticamente en Supabase:', insertError);
+          } else {
+            console.log('✅ Session_entry creada automáticamente en Supabase:', sessionEntryId);
+
+            // Actualizar la sesión con el session_entry_id
+            const { error: updateError } = await supabaseAdmin
+              .from('sessions')
+              .update({ session_entry_id: sessionEntryId })
+              .eq('id', id);
+            
+            if (updateError) {
+              console.error('❌ Error actualizando session_entry_id en Supabase:', updateError);
+            } else {
+              console.log('✅ session_entry_id actualizado en Supabase para session:', id);
+              // Actualizar también en memoria
+              updatedSession.session_entry_id = sessionEntryId;
+              db.sessions[idx].session_entry_id = sessionEntryId;
+            }
+          }
+        }
+
+        // Actualizar caché en memoria
+        if (!db.sessionEntries) db.sessionEntries = [];
+        const sessionEntry = {
+          id: sessionEntryId,
+          session_id: id,
+          creator_user_id: creatorUserId,
+          target_user_id: targetUserId,
+          status: 'pending',
+          summary: null,
+          transcript: null,
+          data: {
+            ...sessionEntryData
+          },
+          created_at: new Date().toISOString()
+        };
+        db.sessionEntries.push(sessionEntry);
+        
+        console.log('✅ Session entry creada automáticamente al completar sesión:', sessionEntryId);
+      } catch (entryErr) {
+        console.error('❌ Error creando session_entry automáticamente:', entryErr);
+        // No fallar la actualización de la sesión si hay error en la creación de la entrada
+      }
+    }
     
     // Actualizar directamente en Supabase sin tocar otras tablas
     if (supabaseAdmin) {
@@ -7938,7 +8080,7 @@ app.post('/api/transcribe', async (req, res) => {
           console.log('📄 Extrayendo texto de PDF con Gemini...');
           
           try {
-            const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+            const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
             
             const result = await model.generateContent([
               {
@@ -7964,7 +8106,7 @@ app.post('/api/transcribe', async (req, res) => {
           console.log('🎤 Transcribiendo audio con Gemini...');
 
           try {
-            const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+            const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
             
             const result = await model.generateContent([
               {
@@ -8045,10 +8187,9 @@ app.post('/api/session-entries', async (req, res) => {
     }
 
     const sessionEntryId = crypto.randomUUID();
+    // Separar campos que van en columnas vs data
     const sessionEntryData = {
       session_id,
-      transcript,
-      summary,
       file,
       file_name,
       file_type,
@@ -8062,7 +8203,7 @@ app.post('/api/session-entries', async (req, res) => {
         // Asegurar que la tabla existe
         await ensureSessionEntryTable();
 
-        // Insertar en Supabase (session_id va dentro de data)
+        // Insertar en Supabase (summary y transcript en columnas, resto en data)
         const { error: insertError } = await supabaseAdmin
           .from('session_entry')
           .insert({
@@ -8070,6 +8211,8 @@ app.post('/api/session-entries', async (req, res) => {
             creator_user_id: creator_user_id || userId,
             target_user_id,
             status: status || 'pending',
+            summary: summary || null,
+            transcript: transcript || null,
             data: sessionEntryData
           });
 
@@ -8098,14 +8241,17 @@ app.post('/api/session-entries', async (req, res) => {
     }
 
     // Actualizar caché en memoria
+    // summary y transcript ahora están en columnas separadas, no en data
     const sessionEntry = {
       id: sessionEntryId,
       session_id,
       creator_user_id: creator_user_id || userId,
       target_user_id,
+      status: status || 'pending',
+      summary: summary || null,
+      transcript: transcript || null,
       data: {
-        ...sessionEntryData,
-        status: status || 'pending'
+        ...sessionEntryData
       },
       created_at: new Date().toISOString()
     };
@@ -8151,15 +8297,63 @@ app.get('/api/session-entries', async (req, res) => {
       console.log(`📖 [GET /api/session-entries] Filtered by creator_user_id=${creator_user_id}: ${entries.length} entries`);
     }
     
+    // Si no hay entradas en caché, consultar Supabase directamente
+    if (entries.length === 0 && supabaseAdmin && (session_id || target_user_id || creator_user_id)) {
+      console.log(`🔍 [GET /api/session-entries] No entries in cache, querying Supabase...`);
+      try {
+        let query = supabaseAdmin.from('session_entry').select('*');
+        
+        if (session_id) {
+          query = query.or(`session_id.eq.${session_id},data->>session_id.eq.${session_id}`);
+        }
+        if (target_user_id) {
+          query = query.eq('target_user_id', target_user_id);
+        }
+        if (creator_user_id) {
+          query = query.eq('creator_user_id', creator_user_id);
+        }
+        
+        const { data: supabaseEntries, error } = await query;
+        
+        if (!error && supabaseEntries) {
+          entries = supabaseEntries.map(row => {
+            const normalized = normalizeSupabaseRow(row);
+            if (row.status) {
+              normalized.status = row.status;
+              if (normalized.data) {
+                normalized.data.status = row.status;
+              }
+            }
+            return normalized;
+          });
+          console.log(`✅ [GET /api/session-entries] Loaded ${entries.length} entries from Supabase`);
+          
+          // Actualizar caché con las entradas encontradas
+          entries.forEach(entry => {
+            const existingIdx = db.sessionEntries.findIndex(e => e.id === entry.id);
+            if (existingIdx === -1) {
+              db.sessionEntries.push(entry);
+            } else {
+              db.sessionEntries[existingIdx] = entry;
+            }
+          });
+        } else if (error) {
+          console.error(`❌ [GET /api/session-entries] Error querying Supabase:`, error);
+        }
+      } catch (supabaseErr) {
+        console.error(`❌ [GET /api/session-entries] Exception querying Supabase:`, supabaseErr);
+      }
+    }
+    
     if (entries.length > 0) {
       console.log(`📖 [GET /api/session-entries] Returning ${entries.length} entries, first entry:`, {
         id: entries[0].id,
         status: entries[0].status,
         dataStatus: entries[0].data?.status,
-        hasTranscript: !!entries[0].data?.transcript,
-        hasSummary: !!entries[0].data?.summary,
-        transcriptLength: entries[0].data?.transcript?.length || 0,
-        summaryLength: entries[0].data?.summary?.length || 0
+        hasTranscript: !!entries[0].transcript,
+        hasSummary: !!entries[0].summary,
+        transcriptLength: entries[0].transcript?.length || 0,
+        summaryLength: entries[0].summary?.length || 0
       });
     }
 
@@ -8177,9 +8371,41 @@ app.get('/api/session-entries/:id', async (req, res) => {
 
     if (!db.sessionEntries) db.sessionEntries = [];
 
-    const entry = db.sessionEntries.find(e => e.id === id);
+    let entry = db.sessionEntries.find(e => e.id === id);
+    
+    // Si no está en caché, buscar en Supabase
+    if (!entry && supabaseAdmin) {
+      console.log(`🔍 [GET /api/session-entries/${id}] Entry not found in cache, querying Supabase...`);
+      try {
+        const { data, error } = await supabaseAdmin
+          .from('session_entry')
+          .select('*')
+          .eq('id', id)
+          .limit(1);
+        
+        if (!error && data && data.length > 0) {
+          const row = data[0];
+          entry = normalizeSupabaseRow(row);
+          if (row.status) {
+            entry.status = row.status;
+            if (entry.data) {
+              entry.data.status = row.status;
+            }
+          }
+          console.log(`✅ [GET /api/session-entries/${id}] Entry found in Supabase`);
+          
+          // Agregar al caché
+          db.sessionEntries.push(entry);
+        } else if (error) {
+          console.error(`❌ [GET /api/session-entries/${id}] Error querying Supabase:`, error);
+        }
+      } catch (supabaseErr) {
+        console.error(`❌ [GET /api/session-entries/${id}] Exception querying Supabase:`, supabaseErr);
+      }
+    }
+    
     if (!entry) {
-      console.log(`❌ [GET /api/session-entries/${id}] Entry not found in cache`);
+      console.log(`❌ [GET /api/session-entries/${id}] Entry not found in cache or Supabase`);
       return res.status(404).json({ error: 'Session entry not found' });
     }
 
@@ -8187,10 +8413,10 @@ app.get('/api/session-entries/:id', async (req, res) => {
       id: entry.id,
       status: entry.status,
       dataStatus: entry.data?.status,
-      hasTranscript: !!entry.data?.transcript,
-      hasSummary: !!entry.data?.summary,
-      transcriptLength: entry.data?.transcript?.length || 0,
-      summaryLength: entry.data?.summary?.length || 0
+      hasTranscript: !!entry.transcript,
+      hasSummary: !!entry.summary,
+      transcriptLength: entry.transcript?.length || 0,
+      summaryLength: entry.summary?.length || 0
     });
 
     return res.json(entry);
@@ -8220,9 +8446,10 @@ app.patch('/api/session-entries/:id', async (req, res) => {
     console.log('📝 [PATCH session-entry] Valores recibidos:', { summary: !!summary, status, transcript: !!transcript, file: !!file });
     console.log('📝 [PATCH session-entry] Entry actual data:', entry.data);
 
+    // summary y transcript van en columnas específicas, no en data
     if (summary !== undefined) {
-      dataUpdates.summary = summary;
-      console.log('✅ Actualizando summary, longitud:', summary?.length || 0);
+      updates.summary = summary;
+      console.log('✅ Actualizando summary en columna, longitud:', summary?.length || 0);
     }
 
     if (status !== undefined) {
@@ -8232,8 +8459,8 @@ app.patch('/api/session-entries/:id', async (req, res) => {
     }
 
     if (transcript !== undefined) {
-      dataUpdates.transcript = transcript;
-      console.log('✅ Actualizando transcript, longitud:', transcript?.length || 0);
+      updates.transcript = transcript;
+      console.log('✅ Actualizando transcript en columna, longitud:', transcript?.length || 0);
     }
 
     if (file !== undefined) {
@@ -8277,9 +8504,9 @@ app.patch('/api/session-entries/:id', async (req, res) => {
         console.log('✅ [PATCH session-entry] Session_entry actualizada en Supabase:', {
           id: updatedData?.[0]?.id,
           status: updatedData?.[0]?.status,
-          dataKeys: updatedData?.[0]?.data ? Object.keys(updatedData[0].data) : [],
-          summaryLength: updatedData?.[0]?.data?.summary?.length || 0,
-          transcriptLength: updatedData?.[0]?.data?.transcript?.length || 0
+          summaryLength: updatedData?.[0]?.summary?.length || 0,
+          transcriptLength: updatedData?.[0]?.transcript?.length || 0,
+          dataKeys: updatedData?.[0]?.data ? Object.keys(updatedData[0].data) : []
         });
       } catch (supabaseErr) {
         console.error('❌ [PATCH session-entry] Error en operación de Supabase:', supabaseErr);
@@ -8288,6 +8515,7 @@ app.patch('/api/session-entries/:id', async (req, res) => {
     }
 
     // Actualizar caché en memoria
+    // summary y transcript ahora están en el nivel superior, no en data
     db.sessionEntries[idx] = { ...entry, ...updates };
     db.sessionEntries[idx].data = dataUpdates;
     
@@ -8295,8 +8523,8 @@ app.patch('/api/session-entries/:id', async (req, res) => {
       id,
       status: db.sessionEntries[idx].status,
       dataStatus: db.sessionEntries[idx].data?.status,
-      summaryLength: db.sessionEntries[idx].data?.summary?.length || 0,
-      transcriptLength: db.sessionEntries[idx].data?.transcript?.length || 0
+      summaryLength: db.sessionEntries[idx].summary?.length || 0,
+      transcriptLength: db.sessionEntries[idx].transcript?.length || 0
     });
 
     console.log('✅ Session entry updated:', id);
@@ -8347,7 +8575,7 @@ app.get('/api/psychologist/:psychologistId/patients', (req, res) => {
       }).map(u => ({
         id: u.id,
         name: u.name,
-        email: u.user_email,
+        email: u.email || u.user_email,
         phone: u.phone || '',
         billing_name: u.billing_name || u.name,
         billing_address: u.billing_address || u.address || '',

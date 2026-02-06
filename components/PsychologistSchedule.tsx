@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar as CalendarIcon, Clock, Plus, X, Users, Video, MapPin, ChevronLeft, ChevronRight, MessageCircle, Trash2, Save } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, Plus, X, Users, Video, MapPin, ChevronLeft, ChevronRight, MessageCircle, Trash2, Save, Copy, Send, ExternalLink } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser } from '../services/authService';
 
@@ -1671,8 +1671,8 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
 
       {/* Day Sessions Detail Modal */}
       {selectedDate && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setSelectedDate('')}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="p-6 border-b border-slate-200">
               <div className="flex items-center justify-between">
                 <h3 className="text-xl font-bold text-slate-900">
@@ -1768,8 +1768,8 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
 
       {/* Edit Session Modal */}
       {selectedSession && editedSession && (
-        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={handleCloseModal}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             {/* Modal Header */}
             <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
               <h3 className="text-xl font-bold text-slate-800">Editar Sesión</h3>
@@ -1909,6 +1909,49 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                     placeholder="https://meet.google.com/..."
                     className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                   />
+                  {editedSession.meetLink && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <a
+                        href={editedSession.meetLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                      >
+                        <ExternalLink size={16} />
+                        Conectar como psicólogo
+                      </a>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(editedSession.meetLink || '');
+                          alert('Enlace copiado al portapapeles');
+                        }}
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                      >
+                        <Copy size={16} />
+                        Copiar enlace
+                      </button>
+                      <button
+                        onClick={() => {
+                          const patientName = editedSession.patientName || 'Paciente';
+                          const sessionDate = new Date(editedSession.date).toLocaleDateString('es-ES', { 
+                            weekday: 'long', 
+                            day: 'numeric', 
+                            month: 'long' 
+                          });
+                          const message = `Hola ${patientName}, aquí está el enlace para nuestra sesión del ${sessionDate} a las ${editedSession.startTime}: ${editedSession.meetLink}`;
+                          const phone = editedSession.patientPhone?.replace(/[^0-9]/g, '') || '';
+                          const whatsappUrl = phone 
+                            ? `https://wa.me/${phone}?text=${encodeURIComponent(message)}`
+                            : `https://wa.me/?text=${encodeURIComponent(message)}`;
+                          window.open(whatsappUrl, '_blank');
+                        }}
+                        className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors text-sm font-medium"
+                      >
+                        <Send size={16} />
+                        Enviar por WhatsApp
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1999,8 +2042,8 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
 
       {/* New Session Modal */}
       {showNewSession && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-2 sm:p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-xl sm:rounded-2xl shadow-2xl max-w-md w-full max-h-[95vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-2 sm:p-4 backdrop-blur-sm" onClick={() => setShowNewSession(false)}>
+          <div className="bg-white rounded-xl sm:rounded-2xl shadow-2xl max-w-md w-full max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="sticky top-0 bg-white p-3 sm:p-6 border-b border-slate-200 rounded-t-xl sm:rounded-t-2xl">
               <h3 className="text-lg sm:text-xl font-bold text-slate-900">Nueva Sesión</h3>
               <p className="text-xs sm:text-sm text-slate-500 mt-1">Programa una sesión con un paciente</p>
@@ -2216,8 +2259,8 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
 
       {/* New Availability Modal */}
       {showNewAvailability && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-2 sm:p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-xl sm:rounded-2xl shadow-2xl max-w-md w-full max-h-[95vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-2 sm:p-4 backdrop-blur-sm" onClick={() => setShowNewAvailability(false)}>
+          <div className="bg-white rounded-xl sm:rounded-2xl shadow-2xl max-w-md w-full max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="sticky top-0 bg-white p-3 sm:p-6 border-b border-slate-200 rounded-t-xl sm:rounded-t-2xl">
               <h3 className="text-lg sm:text-xl font-bold text-slate-900">Añadir Disponibilidad</h3>
               <p className="text-xs sm:text-sm text-slate-500 mt-1">Crea espacios libres para que tus pacientes reserven</p>
@@ -2390,8 +2433,8 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
 
       {/* Assign Patient to Available Slot Modal */}
       {showAssignPatient && selectedSlot && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => { setShowAssignPatient(false); setSelectedSlot(null); setSelectedPatientId(''); setMeetLink(''); }}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full" onClick={(e) => e.stopPropagation()}>
             <div className="p-6 border-b border-slate-200">
               <div className="flex items-center justify-between">
                 <h3 className="text-xl font-bold text-slate-900">Asignar Paciente</h3>

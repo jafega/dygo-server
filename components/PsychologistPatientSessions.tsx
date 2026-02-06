@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Video, MapPin, CheckCircle, XCircle, DollarSign, Filter, Save, X, Trash2, FileText, Receipt, Ticket } from 'lucide-react';
+import { Calendar, Clock, Video, MapPin, CheckCircle, XCircle, DollarSign, Filter, Save, X, Trash2, FileText, Receipt, Ticket, Copy, Send, ExternalLink } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser } from '../services/authService';
 import SessionDetailsModal from './SessionDetailsModal';
@@ -193,56 +193,10 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
   const handleOpenSessionDetails = async (session: Session, e: React.MouseEvent) => {
     e.stopPropagation();
     
-    // Si ya tiene entrada, abrir directamente para editar
-    if (session.session_entry_id) {
-      setSelectedSessionForDetails(session);
-      setSessionDetailsModalOpen(true);
-    } else {
-      // Si no tiene entrada, crear una vacía automáticamente
-      try {
-        const currentUser = await getCurrentUser();
-        if (!currentUser) {
-          alert('Error: Usuario no autenticado');
-          return;
-        }
-
-        const sessionEntryData = {
-          session_id: session.id,
-          creator_user_id: currentUser.id,
-          target_user_id: session.patient_user_id || session.patientId,
-          transcript: '',
-          summary: '',
-          status: 'pending',
-          entry_type: 'session_note'
-        };
-
-        const response = await fetch(`${API_URL}/session-entries`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-user-id': currentUser.id
-          },
-          body: JSON.stringify(sessionEntryData)
-        });
-
-        if (response.ok) {
-          const savedEntry = await response.json();
-          console.log('✅ Session entry creada automáticamente:', savedEntry.id);
-          
-          // Actualizar la sesión con el session_entry_id (el backend ya lo hace en Supabase)
-          session.session_entry_id = savedEntry.id;
-          
-          setSelectedSessionForDetails(session);
-          setSessionDetailsModalOpen(true);
-        } else {
-          console.error('Error creando session entry automáticamente');
-          alert('Error al crear la entrada de sesión');
-        }
-      } catch (error) {
-        console.error('Error creando session entry:', error);
-        alert('Error al crear la entrada de sesión');
-      }
-    }
+    // Abrir directamente el modal de detalles
+    // La session_entry se crea automáticamente en el backend cuando la sesión se marca como completada
+    setSelectedSessionForDetails(session);
+    setSessionDetailsModalOpen(true);
   };
 
   const handleCloseSessionDetails = () => {
@@ -768,8 +722,8 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
 
       {/* Edit Session Modal */}
       {selectedSession && editedSession && (
-        <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4 backdrop-blur-sm" onClick={handleCloseModal}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="sticky top-0 bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-6 py-4 rounded-t-2xl z-10">
               <div className="flex items-center justify-between">
                 <h3 className="text-xl font-bold">Editar Sesión</h3>
@@ -885,7 +839,7 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
 
               {editedSession.type === 'online' && (
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Enlace</label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Enlace de reunión</label>
                   <input
                     type="url"
                     value={editedSession.meetLink || ''}
@@ -893,6 +847,49 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
                     placeholder="https://meet.google.com/..."
                     className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500"
                   />
+                  {editedSession.meetLink && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <a
+                        href={editedSession.meetLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                      >
+                        <ExternalLink size={16} />
+                        Conectar como psicólogo
+                      </a>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(editedSession.meetLink || '');
+                          alert('Enlace copiado al portapapeles');
+                        }}
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                      >
+                        <Copy size={16} />
+                        Copiar enlace
+                      </button>
+                      <button
+                        onClick={() => {
+                          const patientName = editedSession.patientName || 'Paciente';
+                          const sessionDate = new Date(editedSession.date).toLocaleDateString('es-ES', { 
+                            weekday: 'long', 
+                            day: 'numeric', 
+                            month: 'long' 
+                          });
+                          const message = `Hola ${patientName}, aquí está el enlace para nuestra sesión del ${sessionDate} a las ${editedSession.startTime}: ${editedSession.meetLink}`;
+                          const phone = editedSession.patientPhone?.replace(/[^0-9]/g, '') || '';
+                          const whatsappUrl = phone 
+                            ? `https://wa.me/${phone}?text=${encodeURIComponent(message)}`
+                            : `https://wa.me/?text=${encodeURIComponent(message)}`;
+                          window.open(whatsappUrl, '_blank');
+                        }}
+                        className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors text-sm font-medium"
+                      >
+                        <Send size={16} />
+                        Enviar por WhatsApp
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 

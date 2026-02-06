@@ -118,8 +118,8 @@ const SessionRecorder: React.FC<SessionRecorderProps> = ({ onComplete, onCancel 
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-xl rounded-2xl shadow-xl overflow-hidden">
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4" onClick={onCancel}>
+      <div className="bg-white w-full max-w-xl rounded-2xl shadow-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <div className="p-4 border-b border-slate-100 flex items-center justify-between">
           <div className="flex items-center gap-2 text-slate-800 font-semibold">
             <AudioLines size={18} /> Grabar sesión

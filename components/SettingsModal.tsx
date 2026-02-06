@@ -103,8 +103,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
   };
 
   return (
-    <div className="fixed top-0 left-0 w-screen h-[100dvh] bg-slate-900/50 flex items-center justify-center z-[9999] p-4 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden relative animate-in fade-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+    <div className="fixed top-0 left-0 w-screen h-[100dvh] bg-slate-900/50 flex items-center justify-center z-[9999] p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden relative animate-in fade-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
         <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
              <h2 className="text-xl font-bold text-slate-800">Ajustes</h2>
              <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>

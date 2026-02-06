@@ -364,8 +364,8 @@ const BonosPanel: React.FC<BonosPanelProps> = ({ patientId, psychologistId, pati
 
       {/* Modal para crear bono */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setShowCreateModal(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full" onClick={(e) => e.stopPropagation()}>
             <div className="p-6 border-b border-slate-200">
               <div className="flex items-center justify-between">
                 <h3 className="text-xl font-bold text-slate-900">Crear Nuevo Bono</h3>
@@ -497,8 +497,8 @@ const BonosPanel: React.FC<BonosPanelProps> = ({ patientId, psychologistId, pati
 
       {/* Modal de Editar Bono */}
       {showEditModal && selectedBono && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-xl p-6 max-w-md w-full mx-4 shadow-xl">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => { setShowEditModal(false); setSelectedBono(null); }}>
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-6 max-w-md w-full mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-xl font-semibold text-gray-900 dark:text-white flex items-center gap-2">
                 <Edit2 className="w-5 h-5" />

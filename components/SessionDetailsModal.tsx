@@ -109,10 +109,11 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session, onCl
 
         if (entry) {
           setExistingEntry(entry);
-          setTranscript(entry.data.transcript || '');
-          setEditedSummary(entry.data.summary || '');
-          setAiSummary(entry.data.summary || '');
-          setStatus(entry.data.status || 'pending');
+          // summary y transcript ahora están en columnas separadas, no en data
+          setTranscript(entry.transcript || entry.data?.transcript || '');
+          setEditedSummary(entry.summary || entry.data?.summary || '');
+          setAiSummary(entry.summary || entry.data?.summary || '');
+          setStatus(entry.status || entry.data?.status || 'pending');
         }
       } catch (error) {
         console.error('Error loading existing entry:', error);
@@ -234,7 +235,7 @@ Por favor, genera un resumen que incluya:
 Mantén un tono profesional y objetivo.`;
 
       const result = await ai.models.generateContent({
-        model: 'gemini-2.0-flash-exp',
+        model: 'gemini-2.5-flash',
         contents: prompt
       });
 
@@ -468,7 +469,7 @@ Mantén un tono profesional y objetivo.`;
 
           // Usar Gemini para transcribir
           const result = await ai.models.generateContent({
-            model: 'gemini-2.0-flash-exp',
+            model: 'gemini-2.5-flash',
             contents: [
               {
                 role: 'user',

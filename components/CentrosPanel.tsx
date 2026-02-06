@@ -214,8 +214,8 @@ const CentrosPanel = forwardRef<CentrosPanelRef, CentrosPanelProps>(({ psycholog
 
       {/* Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => { setShowModal(false); setEditingCentro(null); setFormData({ center_name: '', cif: '', address: '' }); }}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             {/* Modal Header */}
             <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center rounded-t-2xl">
               <h3 className="text-xl font-bold text-slate-900">

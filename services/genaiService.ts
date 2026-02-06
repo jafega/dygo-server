@@ -405,7 +405,7 @@ export async function extractTextFromDocument(fileUrl: string, fileName: string)
     `;
 
     const genResponse = await ai.models.generateContent({
-      model: "gemini-2.0-flash-exp",
+      model: "gemini-2.5-flash",
       contents: [{
         role: "user",
         parts: [
@@ -453,7 +453,7 @@ export async function transcribeAudioFile(audioBlob: Blob): Promise<string> {
     `;
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash-exp",
+      model: "gemini-2.5-flash",
       contents: [{
         role: "user",
         parts: [

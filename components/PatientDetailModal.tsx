@@ -735,7 +735,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
     { id: 'PATIENT', label: 'Paciente', icon: FileText },
     { id: 'INFO', label: 'Información', icon: User },
     { id: 'SESSIONS', label: 'Sesiones', icon: Calendar },
-    { id: 'TIMELINE', label: 'Timeline', icon: ClockIcon },
+    { id: 'TIMELINE', label: 'Comunicación', icon: ClockIcon },
     { id: 'HISTORY', label: 'Historia Clínica', icon: BookOpen },
     { id: 'BILLING', label: 'Facturación', icon: DollarSign },
     ...(relationshipSettings.usesBonos ? [{ id: 'BONOS', label: 'Bonos', icon: Ticket }] : []),
@@ -743,8 +743,8 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   ];
 
   return (
-    <div className="fixed inset-0 sm:left-64 bg-black/60 backdrop-blur-sm z-50">
-      <div className="bg-white w-full h-full overflow-hidden flex flex-col">
+    <div className="fixed inset-0 sm:left-64 bg-black/60 backdrop-blur-sm z-50" onClick={onClose}>
+      <div className="bg-white w-full h-full overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-3 sm:px-6 py-3 sm:py-4 flex items-center justify-between">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">

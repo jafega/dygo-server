@@ -356,7 +356,7 @@ const PatientTimeline: React.FC<PatientTimelineProps> = ({ patientId, psychologi
     <div className="p-3 sm:p-6 space-y-3 sm:space-y-4">
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-        <h3 className="text-base sm:text-lg font-bold text-slate-900">Timeline del Paciente</h3>
+        <h3 className="text-base sm:text-lg font-bold text-slate-900">Comunicación</h3>
         <button
           onClick={() => setShowAddModal(true)}
           className="w-full sm:w-auto flex items-center justify-center gap-2 px-3 sm:px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-xs sm:text-sm font-medium"
@@ -533,8 +533,8 @@ const PatientTimeline: React.FC<PatientTimelineProps> = ({ patientId, psychologi
 
       {/* Add Entry Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowAddModal(false)}>
+          <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
               <h3 className="text-xl font-bold text-slate-900">Nueva Entrada</h3>
               <button

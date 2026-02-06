@@ -634,8 +634,8 @@ const PatientSessions: React.FC = () => {
 
       {/* Session Details Modal */}
       {selectedSession && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setSelectedSession(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full" onClick={(e) => e.stopPropagation()}>
             <div className="p-6 border-b border-slate-200">
               <div className="flex items-center justify-between">
                 <h3 className="text-xl font-bold text-slate-900">Detalles de la Sesión</h3>
@@ -741,8 +741,8 @@ const PatientSessions: React.FC = () => {
 
       {/* Availability Modal */}
       {showAvailability && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-end md:items-center justify-center md:p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-t-3xl md:rounded-2xl shadow-2xl w-full md:max-w-2xl max-h-[85vh] md:max-h-[80vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-end md:items-center justify-center md:p-4 backdrop-blur-sm" onClick={() => setShowAvailability(false)}>
+          <div className="bg-white rounded-t-3xl md:rounded-2xl shadow-2xl w-full md:max-w-2xl max-h-[85vh] md:max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="p-4 md:p-6 border-b border-slate-200 sticky top-0 bg-white z-10">
               <div className="flex items-center justify-between">
                 <div>

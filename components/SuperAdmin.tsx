@@ -187,8 +187,8 @@ const SuperAdmin: React.FC = () => {
 
       {/* Modal de confirmación */}
       {confirmingUser && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setConfirmingUser(null)}>
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-3 mb-4">
               <div className="p-3 bg-red-100 text-red-600 rounded-xl">
                 <AlertTriangle size={24} />

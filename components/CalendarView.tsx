@@ -84,7 +84,11 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
             const isVoiceSession = entryType === 'voice_session' || entryType === 'voiceSession';
             const isFeedback = entryType === 'feedback';
             
-            const feedback = typeof entry.psychologistFeedback === 'string' 
+            // Para entradas de tipo feedback, el contenido está en entry.content
+            // Para feedback adjunto a voice sessions, está en psychologistFeedback
+            const feedback = isFeedback && entry.content
+              ? { text: entry.content, attachments: entry.attachments || [] }
+              : typeof entry.psychologistFeedback === 'string' 
               ? { text: entry.psychologistFeedback, attachments: [] } 
               : entry.psychologistFeedback;
 

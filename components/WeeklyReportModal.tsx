@@ -9,8 +9,8 @@ interface WeeklyReportModalProps {
 
 const WeeklyReportModal: React.FC<WeeklyReportModalProps> = ({ report, onClose }) => {
   return (
-    <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-       <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden shadow-2xl relative animate-in zoom-in-95 duration-200 flex flex-col">
+    <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm" onClick={onClose}>
+       <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden shadow-2xl relative animate-in zoom-in-95 duration-200 flex flex-col" onClick={(e) => e.stopPropagation()}>
           
           <div className="bg-gradient-to-r from-purple-600 to-indigo-600 p-6 text-white shrink-0 relative">
              <button onClick={onClose} className="absolute top-4 right-4 text-white/70 hover:text-white">
