@@ -871,6 +871,7 @@ function buildSupabaseInvoiceRow(invoice) {
   console.log('[buildSupabaseInvoiceRow] 🔍 Valores recibidos:', { id, amount, tax, total, status, date, invoice_date, invoiceNumber });
   
   // Si vienen tax y total del frontend, usarlos; si no, calcular con 21% por defecto
+  // NOTA: No usar Math.abs aquí porque las facturas rectificativas tienen valores negativos legítimos
   const finalAmount = parseFloat(amount) || 0;
   const finalTax = tax !== undefined && tax !== null ? parseFloat(tax) : (finalAmount * 0.21);
   const finalTotal = total !== undefined && total !== null ? parseFloat(total) : (finalAmount + finalTax);
@@ -2019,6 +2020,13 @@ const handleSupabaseAuth = async (req, res) => {
       isPsychologist: user.is_psychologist !== undefined ? user.is_psychologist : user.data.isPsychologist
     } : user;
     
+    // BUGFIX: Asegurar que is_psychologist siempre tenga un valor booleano
+    // Si no está definido después de la normalización, usar false por defecto
+    if (userResponse.is_psychologist === undefined || userResponse.is_psychologist === null) {
+      userResponse.is_psychologist = false;
+    }
+    userResponse.isPsychologist = userResponse.is_psychologist;
+    
     console.log('✅ Autenticación Supabase exitosa para:', userResponse.email || userResponse.id, {
       is_psychologist: userResponse.is_psychologist,
       isPsychologist: userResponse.isPsychologist
@@ -2112,6 +2120,13 @@ app.post('/api/auth/login', async (req, res) => {
       isPsychologist: user.is_psychologist !== undefined ? user.is_psychologist : user.data.isPsychologist,
       auth_user_id: user.auth_user_id
     } : user;
+    
+    // BUGFIX: Asegurar que is_psychologist siempre tenga un valor booleano
+    // Si no está definido después de la normalización, usar false por defecto
+    if (userResponse.is_psychologist === undefined || userResponse.is_psychologist === null) {
+      userResponse.is_psychologist = false;
+    }
+    userResponse.isPsychologist = userResponse.is_psychologist;
     
     console.log('📊 Login response:', {
       email: userResponse.email,
@@ -2740,6 +2755,14 @@ app.get('/api/users/:id', async (req, res) => {
       user.premiumUntil = undefined;
     }
 
+    // BUGFIX: Asegurar que is_psychologist siempre tenga un valor booleano
+    // Si no está definido, usar false por defecto (es un paciente)
+    if (user.is_psychologist === undefined || user.is_psychologist === null) {
+      user.is_psychologist = false;
+    }
+    // Mantener isPsychologist sincronizado para compatibilidad
+    user.isPsychologist = user.is_psychologist;
+
     res.json(user);
   } catch (err) {
     console.error('Error in /api/users/:id', err);
@@ -2765,14 +2788,27 @@ app.get('/api/users', async (req, res) => {
           user.premiumUntil = undefined;
         }
 
+        // BUGFIX: Asegurar que is_psychologist siempre tenga un valor booleano
+        if (user.is_psychologist === undefined || user.is_psychologist === null) {
+          user.is_psychologist = false;
+        }
+        user.isPsychologist = user.is_psychologist;
+
         return res.json(user);
       }
 
       if (email) {
         const users = (await readSupabaseTable('users')) || [];
         const normalizedEmail = normalizeEmail(email);
-        const user = users.find(u => normalizeEmail(u.email) === normalizedEmail);
+        let user = users.find(u => normalizeEmail(u.email) === normalizedEmail);
         if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+        
+        // BUGFIX: Asegurar que is_psychologist siempre tenga un valor booleano
+        if (user.is_psychologist === undefined || user.is_psychologist === null) {
+          user.is_psychologist = false;
+        }
+        user.isPsychologist = user.is_psychologist;
+        
         return res.json(user);
       }
 
@@ -2782,7 +2818,10 @@ app.get('/api/users', async (req, res) => {
           return { ...u, isPremium: false, premiumUntil: undefined };
         }
         // Respetar is_psychologist de la BD, solo usar role como fallback
-        const isPsych = u.is_psychologist !== undefined ? u.is_psychologist : (String(u.role).toUpperCase() === 'PSYCHOLOGIST');
+        // BUGFIX: Si is_psychologist es null/undefined, usar false por defecto
+        const isPsych = u.is_psychologist !== undefined && u.is_psychologist !== null 
+          ? u.is_psychologist 
+          : (u.role && String(u.role).toUpperCase() === 'PSYCHOLOGIST');
         return { ...u, isPsychologist: isPsych, is_psychologist: isPsych };
       });
       const unique = [];
@@ -5353,28 +5392,32 @@ app.get('/api/patient-stats/:patientId', async (req, res) => {
         const bonosNotInvoiced = sessionsWithBonusNotInvoiced.length;
         
         // FACTURAS: usar los campos directos de la tabla invoices (no data)
-        // Total facturado (excluir cancelled y draft)
-        const totalInvoiced = invoices.reduce((sum, inv) => {
+        // Excluir facturas rectificativas (is_rectificativa) de los cálculos
+        const regularInvoices = invoices.filter(inv => !inv.is_rectificativa && !inv.data?.is_rectificativa);
+        
+        // Total facturado (excluir cancelled, draft y rectificativas)
+        const totalInvoiced = regularInvoices.reduce((sum, inv) => {
           if (inv.status !== 'cancelled' && inv.status !== 'draft') {
             return sum + (inv.total || 0);
           }
           return sum;
         }, 0);
         
-        // Facturas pagadas
-        const paidInvoices = invoices.filter(inv => inv.status === 'paid');
+        // Facturas pagadas (excluir rectificativas)
+        const paidInvoices = regularInvoices.filter(inv => inv.status === 'paid');
         
-        // Total cobrado (suma de facturas pagadas)
+        // Total cobrado (suma de facturas pagadas, sin rectificativas)
         const totalCollected = paidInvoices.reduce((sum, inv) => {
+          console.log(`💰 Factura pagada ID ${inv.id}: total=${inv.total}`);
           return sum + (inv.total || 0);
         }, 0);
         
-        // Facturas pendientes de cobro
-        const pendingInvoices = invoices.filter(inv => 
+        // Facturas pendientes de cobro (excluir rectificativas)
+        const pendingInvoices = regularInvoices.filter(inv => 
           inv.status === 'sent' || inv.status === 'pending'
         );
         
-        // Total por cobrar (suma de facturas pendientes)
+        // Total por cobrar (suma de facturas pendientes, sin rectificativas)
         const totalPending = pendingInvoices.reduce((sum, inv) => {
           return sum + (inv.total || 0);
         }, 0);
@@ -5427,7 +5470,7 @@ app.get('/api/patient-stats/:patientId', async (req, res) => {
           scheduledSessions: scheduledSessions.length,
           paidSessions,
           unpaidSessions,
-          totalInvoices: invoices.length,
+          totalInvoices: regularInvoices.length, // Usar regularInvoices (sin rectificativas)
           paidInvoices: paidInvoices.length,
           pendingInvoicesCount: pendingInvoices.length,
           monthlyData
@@ -5439,6 +5482,7 @@ app.get('/api/patient-stats/:patientId', async (req, res) => {
           psychologistEarnings: stats.psychologistEarnings,
           paidSessions: stats.paidSessions,
           unpaidSessions: stats.unpaidSessions,
+          totalInvoices: stats.totalInvoices,
           totalInvoiced: stats.totalInvoiced,
           totalCollected: stats.totalCollected,
           totalPending: stats.totalPending,

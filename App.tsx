@@ -128,6 +128,12 @@ const App: React.FC = () => {
         try {
           const user = await AuthService.getCurrentUser();
           if (user) {
+              // BUGFIX: Asegurar que is_psychologist siempre tenga un valor booleano
+              if (user.is_psychologist === undefined || user.is_psychologist === null) {
+                  user.is_psychologist = false;
+                  user.isPsychologist = false;
+              }
+              
               setCurrentUser(user);
               // If backend is available, try to migrate any local data for this user
               if (USE_BACKEND) {
@@ -200,28 +206,55 @@ const App: React.FC = () => {
   }, [psychViewMode]);
 
   const loadUserData = async (userId: string) => {
-    // Optimización: Solo cargar últimas 50 entradas por defecto
-    const [e, g, s] = await Promise.all([
-        StorageService.getEntriesForUser(userId, undefined, { limit: 50 }),
-        StorageService.getGoalsForUser(userId),
-        StorageService.getSettings(userId)
-    ]);
-    setEntries(e);
-    setGoals(g);
-    setSettings(s);
+    try {
+      // Optimización: Solo cargar últimas 50 entradas por defecto
+      const [e, g, s] = await Promise.all([
+          StorageService.getEntriesForUser(userId, undefined, { limit: 50 }),
+          StorageService.getGoalsForUser(userId),
+          StorageService.getSettings(userId)
+      ]);
+      setEntries(e);
+      setGoals(g);
+      setSettings(s);
+    } catch (error) {
+      console.error('❌ Error cargando datos del usuario:', error);
+      // Establecer valores por defecto para evitar pantalla en blanco
+      setEntries([]);
+      setGoals([]);
+      setSettings({ 
+        notificationsEnabled: false, 
+        feedbackNotificationsEnabled: true,
+        notificationTime: '20:00',
+        language: 'es-ES',
+        voice: 'Kore' 
+      });
+    }
   };
 
   const refreshUserData = async (userId: string) => {
     try {
       const refreshed = await AuthService.getUserById(userId);
-      if (refreshed) setCurrentUser(refreshed);
+      if (refreshed) {
+        // BUGFIX: Asegurar que is_psychologist siempre tenga un valor booleano
+        if (refreshed.is_psychologist === undefined || refreshed.is_psychologist === null) {
+          refreshed.is_psychologist = false;
+          refreshed.isPsychologist = false;
+        }
+        setCurrentUser(refreshed);
+      }
       await loadUserData(userId);
       if (refreshed?.email) await checkInvitations(refreshed.email, refreshed.id);
       // Check profile for both psychologists and patients
       await checkProfileComplete(userId);
     } catch (e) {
-      console.warn('No se pudo refrescar el perfil desde el servidor (probablemente error temporal de red):', e);
+      console.error('❌ Error refrescando datos del usuario:', e);
       // Don't logout on refresh errors - user can continue with cached data
+      // Intentar cargar datos localmente como fallback
+      try {
+        await loadUserData(userId);
+      } catch (loadError) {
+        console.error('❌ Error cargando datos localmente:', loadError);
+      }
     }
   };
 
@@ -294,7 +327,13 @@ const App: React.FC = () => {
               return;
           }
           
-          console.log('✅ Usuario obtenido:', user.email || user.id);
+          // BUGFIX: Asegurar que is_psychologist siempre tenga un valor booleano
+          if (user.is_psychologist === undefined || user.is_psychologist === null) {
+              user.is_psychologist = false;
+              user.isPsychologist = false;
+          }
+          
+          console.log('✅ Usuario obtenido:', user.email || user.id, '| is_psychologist:', user.is_psychologist);
           setCurrentUser(user);
           
           // Cargar datos del usuario ANTES de cambiar la vista

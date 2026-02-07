@@ -279,6 +279,13 @@ export const getUserById = async (id: string): Promise<User | undefined> => {
           
           if (res.ok) {
               const user = await res.json();
+              
+              // BUGFIX: Asegurar que is_psychologist siempre tenga un valor booleano
+              if (user && (user.is_psychologist === undefined || user.is_psychologist === null)) {
+                  user.is_psychologist = false;
+                  user.isPsychologist = false;
+              }
+              
               return user;
           }
           if (res.status === 404) {
@@ -290,13 +297,23 @@ export const getUserById = async (id: string): Promise<User | undefined> => {
           console.warn('⚠️ Error in getUserById (could be temporary network issue):', e);
           if (ALLOW_LOCAL_FALLBACK) { 
               console.warn("Fetch error, using local fallback.", e); 
-              return getLocalUsers().find(u => u.id === id); 
+              const localUser = getLocalUsers().find(u => u.id === id);
+              if (localUser && (localUser.is_psychologist === undefined || localUser.is_psychologist === null)) {
+                  localUser.is_psychologist = false;
+                  localUser.isPsychologist = false;
+              }
+              return localUser;
           }
           // Don't throw - return undefined to allow app to continue with cached data
           return undefined;
       }
   }
-  return getLocalUsers().find(u => u.id === id);
+  const localUser = getLocalUsers().find(u => u.id === id);
+  if (localUser && (localUser.is_psychologist === undefined || localUser.is_psychologist === null)) {
+      localUser.is_psychologist = false;
+      localUser.isPsychologist = false;
+  }
+  return localUser;
 };
 
 export const getUserByEmail = async (email: string): Promise<User | undefined> => {

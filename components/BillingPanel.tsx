@@ -109,6 +109,9 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
   const [showRectificativas, setShowRectificativas] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [invoiceToCancel, setInvoiceToCancel] = useState<Invoice | null>(null);
+  const [showInvoiceStartModal, setShowInvoiceStartModal] = useState(false);
+  const [invoiceStartNumber, setInvoiceStartNumber] = useState<string>('');
+  const [pendingInvoiceData, setPendingInvoiceData] = useState<any>(null);
   
   // Filtros
   const [searchTerm, setSearchTerm] = useState('');
@@ -345,7 +348,51 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
     return { subtotal, tax, total, irpf: irpfAmount };
   };
 
-  const generateInvoiceNumber = async () => {
+  const getInvoiceStartNumber = async (year: number): Promise<number | null> => {
+    try {
+      const response = await fetch(`${API_URL}/psychologist/${psychologistId}/profile`);
+      if (!response.ok) return null;
+      
+      const profile = await response.json();
+      const startNumbers = profile?.invoice_start_numbers;
+      return startNumbers?.[year] || null;
+    } catch (error) {
+      console.error('Error getting invoice start number:', error);
+      return null;
+    }
+  };
+
+  const saveInvoiceStartNumber = async (year: number, startNumber: number) => {
+    try {
+      // Obtener el perfil actual
+      const response = await fetch(`${API_URL}/psychologist/${psychologistId}/profile`);
+      if (!response.ok) throw new Error('Failed to fetch profile');
+      
+      const profile = await response.json();
+      const startNumbers = profile.invoice_start_numbers || {};
+      
+      // Actualizar con el nuevo número inicial para este año
+      startNumbers[year] = startNumber;
+      
+      // Guardar en el perfil
+      const updateResponse = await fetch(`${API_URL}/psychologist/${psychologistId}/profile`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...profile,
+          invoice_start_numbers: startNumbers
+        })
+      });
+      
+      if (!updateResponse.ok) throw new Error('Failed to update profile');
+      return true;
+    } catch (error) {
+      console.error('Error saving invoice start number:', error);
+      return false;
+    }
+  };
+
+  const generateInvoiceNumber = async (): Promise<string | null> => {
     try {
       const response = await fetch(`${API_URL}/invoices?psychologist_user_id=${psychologistId}`);
       if (!response.ok) {
@@ -362,8 +409,16 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
         inv.invoiceNumber && inv.invoiceNumber.startsWith(yearPrefix)
       );
       
+      // Si es la primera factura del año, verificar si hay un número inicial configurado
       if (invoicesThisYear.length === 0) {
-        return `${yearPrefix}000001`;
+        const startNumber = await getInvoiceStartNumber(year);
+        
+        // Si no hay número inicial configurado, pedir al usuario
+        if (startNumber === null) {
+          return null; // Señal para mostrar modal
+        }
+        
+        return `${yearPrefix}${String(startNumber).padStart(6, '0')}`;
       }
       
       // Extraer los números de secuencia (últimos 6 dígitos)
@@ -414,6 +469,15 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
     
     try {
       const invoiceNumber = await generateInvoiceNumber();
+      
+      // Si invoiceNumber es null, significa que es la primera factura del año y necesitamos preguntar
+      if (invoiceNumber === null && !editingInvoice) {
+        setIsSubmitting(false);
+        setPendingInvoiceData({ isDraft });
+        setShowInvoiceStartModal(true);
+        return;
+      }
+      
       const totals = calculateTotal();
 
       // Datos base de la factura
@@ -487,6 +551,32 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       alert('Error al guardar la factura');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleConfirmInvoiceStart = async () => {
+    const startNum = parseInt(invoiceStartNumber);
+    if (isNaN(startNum) || startNum < 1) {
+      alert('Por favor ingresa un número válido mayor a 0');
+      return;
+    }
+
+    const year = new Date().getFullYear();
+    const success = await saveInvoiceStartNumber(year, startNum);
+    
+    if (!success) {
+      alert('Error al guardar la configuración. Inténtalo de nuevo.');
+      return;
+    }
+
+    // Cerrar el modal y reintentar crear la factura
+    setShowInvoiceStartModal(false);
+    setInvoiceStartNumber('');
+    
+    // Llamar nuevamente a handleSaveInvoice con los datos pendientes
+    if (pendingInvoiceData) {
+      await handleSaveInvoice(pendingInvoiceData.isDraft);
+      setPendingInvoiceData(null);
     }
   };
 
@@ -1508,6 +1598,67 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                 className="px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 rounded-lg transition-colors font-medium"
               >
                 Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para configurar número inicial de factura */}
+      {showInvoiceStartModal && (
+        <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6 border-b border-slate-200">
+              <h3 className="text-xl font-bold text-slate-900">Primera Factura del Año</h3>
+              <p className="text-sm text-slate-600 mt-2">
+                Vas a crear tu primera factura de {new Date().getFullYear()}. ¿Qué número quieres que sea?
+              </p>
+            </div>
+            
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Número inicial de factura para {new Date().getFullYear()}
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  value={invoiceStartNumber}
+                  onChange={(e) => setInvoiceStartNumber(e.target.value)}
+                  placeholder="Ej: 1, 50, 100..."
+                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleConfirmInvoiceStart();
+                    }
+                  }}
+                />
+                <p className="text-xs text-slate-500 mt-2">
+                  Este número se usará para tu primera factura de {new Date().getFullYear()} y las siguientes se incrementarán automáticamente.
+                </p>
+                <p className="text-xs text-slate-500 mt-1">
+                  Formato: F{String(new Date().getFullYear()).slice(-2)}{String(invoiceStartNumber || '000001').padStart(6, '0')}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-6 border-t border-slate-200 flex gap-3 justify-end">
+              <button
+                onClick={() => {
+                  setShowInvoiceStartModal(false);
+                  setInvoiceStartNumber('');
+                  setPendingInvoiceData(null);
+                }}
+                className="px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 rounded-lg transition-colors font-medium"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleConfirmInvoiceStart}
+                className="px-4 py-2 text-sm bg-indigo-600 text-white hover:bg-indigo-700 rounded-lg transition-colors font-medium"
+              >
+                Confirmar
               </button>
             </div>
           </div>
