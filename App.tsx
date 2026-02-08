@@ -105,12 +105,17 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
+    console.log('🎬 [App] Componente montado - iniciando...');
     const init = async () => {
+        console.log('📋 [App] Estableciendo isLoadingData = true');
         setIsLoadingData(true);
         await AuthService.initializeDemoData();
         
         try {
+          console.log('👤 [App] Obteniendo usuario actual...');
           const user = await AuthService.getCurrentUser();
+          console.log('👤 [App] Usuario obtenido:', user ? user.email : 'null');
+          
           if (user) {
               // BUGFIX: Asegurar que is_psychologist siempre tenga un valor booleano
               if (user.is_psychologist === undefined || user.is_psychologist === null) {
@@ -118,28 +123,39 @@ const App: React.FC = () => {
                   user.isPsychologist = false;
               }
               
+              console.log('✅ [App] Estableciendo usuario:', user.email, 'is_psychologist:', user.is_psychologist);
               setCurrentUser(user);
+              
               // If backend is available, try to migrate any local data for this user
               if (USE_BACKEND) {
                   try { await StorageService.migrateLocalToBackend(user.id); } catch (e) { console.warn('Migration skipped', e); }
               }
+              
+              console.log('📊 [App] Cargando datos del usuario...');
               await refreshUserData(user.id);
+              
               // Solo permitir vista de psicólogo si is_psychologist es true
               const canAccessPsychologistView = user.is_psychologist === true;
-              setViewState(canAccessPsychologistView ? ViewState.PATIENTS : ViewState.CALENDAR);
+              const targetView = canAccessPsychologistView ? ViewState.PATIENTS : ViewState.CALENDAR;
+              console.log('🎯 [App] Estableciendo vista:', targetView);
+              setViewState(targetView);
           } else {
+              console.log('🔐 [App] No hay usuario - mostrando AUTH');
               setViewState(ViewState.AUTH);
           }
         } catch (error) {
-          console.error('Error inicializando usuario:', error);
+          console.error('❌ [App] Error inicializando usuario:', error);
           // Don't force logout on initialization errors - might be temporary network issue
           // Only redirect to auth if there's no user data at all
           if (!currentUser) {
+            console.log('🔐 [App] Error y no hay usuario - mostrando AUTH');
             setViewState(ViewState.AUTH);
           }
         }
         
+        console.log('✅ [App] Estableciendo isLoadingData = false');
         setIsLoadingData(false);
+        console.log('🏁 [App] Inicialización completa');
     };
     init();
   }, []);
