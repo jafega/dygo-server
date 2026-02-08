@@ -2330,12 +2330,12 @@ const handleAdminCreatePatient = async (req, res) => {
         status: 'active',
         default_session_price: 0,
         default_psych_percent: 80,
+        active: true, // Campo directo en la tabla
         data: {
           psychologistId: psychologistId,
           patientId: existingPatientId,
           status: 'active',
           tags: [],
-          active: true,
           patientNumber: nextPatientNumber
         },
         created_at: new Date().toISOString(),
@@ -2353,7 +2353,8 @@ const handleAdminCreatePatient = async (req, res) => {
             psychologist_user_id: psychologistId,
             patient_user_id: existingPatientId,
             default_session_price: 0,
-            default_psych_percent: 80
+            default_psych_percent: 80,
+            active: true
           });
 
         if (relError) {
@@ -2425,13 +2426,12 @@ const handleAdminCreatePatient = async (req, res) => {
       patient_user_id: newPatient.id,
       status: 'active',
       default_session_price: 0,
-      default_psych_percent: 80,
+      active: true, // Campo directo en la tabla
       data: {
         psychologistId: psychologistId,
         patientId: newPatient.id,
         status: 'active',
         tags: [],
-        active: true,
         patientNumber: nextPatientNumber
       },
       created_at: new Date().toISOString(),
@@ -2470,7 +2470,8 @@ const handleAdminCreatePatient = async (req, res) => {
             psychologist_user_id: psychologistId,
             patient_user_id: newPatient.id,
             default_session_price: 0,
-            default_psych_percent: 80
+            default_psych_percent: 80,
+            active: true
           });
 
         if (relError) {
@@ -9098,56 +9099,104 @@ app.patch('/api/session-entries/:id', async (req, res) => {
 });
 
 // --- PATIENTS LIST ---
-app.get('/api/psychologist/:psychologistId/patients', (req, res) => {
+app.get('/api/psychologist/:psychologistId/patients', async (req, res) => {
   const { psychologistId } = req.params;
   const { showInactive } = req.query; // Recibir parámetro para mostrar inactivos
-  const db = getDb();
   
-  console.log(`[GET /api/psychologist/${psychologistId}/patients] Total relationships:`, db.careRelationships?.length);
+  console.log(`[GET /api/psychologist/${psychologistId}/patients] Consultando...`);
   console.log(`[GET /api/psychologist/${psychologistId}/patients] showInactive:`, showInactive);
   
-  // Filtrar solo relaciones del psicólogo (sin endedAt significa que la relación sigue activa)
-  const relationships = (db.careRelationships || [])
-    .filter(rel => {
-      const psychId = rel.psychologist_user_id || rel.psych_user_id || rel.psychologistId;
-      const isMatch = psychId === psychologistId;
-      const isActive = !rel.endedAt; // Relación no finalizada
+  try {
+    let relationships = [];
+    let users = [];
+    
+    // PRIMERO: Intentar desde Supabase
+    if (supabaseAdmin) {
+      try {
+        console.log('[GET /api/psychologist/:psychologistId/patients] Consultando Supabase...');
+        
+        // Obtener relaciones del psicólogo
+        let query = supabaseAdmin
+          .from('care_relationships')
+          .select('*')
+          .eq('psychologist_user_id', psychologistId);
+        
+        // Filtrar por estado activo si no se pide mostrar inactivos
+        if (showInactive !== 'true') {
+          query = query.eq('active', true);
+        }
+        
+        const { data: relData, error: relError } = await query;
+        
+        if (relError) {
+          console.error('[GET /api/psychologist/:psychologistId/patients] Error consultando relaciones:', relError);
+        } else if (relData) {
+          relationships = relData;
+          console.log(`[GET /api/psychologist/${psychologistId}/patients] ${relationships.length} relaciones encontradas`);
+          
+          // Obtener IDs de pacientes
+          const patientIds = relationships.map(rel => rel.patient_user_id);
+          console.log(`[GET /api/psychologist/${psychologistId}/patients] IDs de pacientes:`, patientIds);
+          
+          if (patientIds.length > 0) {
+            // Obtener usuarios de esos pacientes
+            const { data: userData, error: userError } = await supabaseAdmin
+              .from('users')
+              .select('*')
+              .in('id', patientIds);
+            
+            if (userError) {
+              console.error('[GET /api/psychologist/:psychologistId/patients] Error consultando usuarios:', userError);
+            } else {
+              users = (userData || []).map(normalizeSupabaseRow);
+              console.log(`[GET /api/psychologist/${psychologistId}/patients] ${users.length} usuarios encontrados en Supabase`);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[GET /api/psychologist/:psychologistId/patients] Error en consulta Supabase:', err);
+      }
+    }
+    
+    // Fallback a db local solo si Supabase no está disponible
+    if (relationships.length === 0 && !supabaseAdmin) {
+      console.log('[GET /api/psychologist/:psychologistId/patients] Fallback a DB local');
+      const db = getDb();
       
-      // Filtrar por estado activo/inactivo del paciente si no se pide mostrar inactivos
-      const patientActive = rel.data?.active !== false; // Por defecto es true
-      const shouldShow = showInactive === 'true' || patientActive;
+      // Filtrar solo relaciones del psicólogo (sin endedAt significa que la relación sigue activa)
+      relationships = (db.careRelationships || [])
+        .filter(rel => {
+          const psychId = rel.psychologist_user_id || rel.psych_user_id || rel.psychologistId;
+          const isMatch = psychId === psychologistId;
+          const isActive = !rel.endedAt; // Relación no finalizada
+          
+          // Filtrar por estado activo/inactivo del paciente si no se pide mostrar inactivos
+          const patientActive = rel.data?.active !== false; // Por defecto es true
+          const shouldShow = showInactive === 'true' || patientActive;
+          
+          return isMatch && isActive && shouldShow;
+        });
       
-      console.log(`  Evaluating relationship:`, {
-        psychId,
-        patId: rel.patient_user_id || rel.patientId,
-        endedAt: rel.endedAt,
-        patientActive,
-        isMatch,
-        isActive,
-        shouldShow,
-        result: isMatch && isActive && shouldShow
-      });
-      
-      return isMatch && isActive && shouldShow;
+      users = db.users || [];
+    }
+    
+    // Crear mapa de relaciones por paciente
+    const relationshipMap = new Map();
+    relationships.forEach(rel => {
+      const patId = rel.patient_user_id || rel.patientId;
+      relationshipMap.set(patId, rel);
     });
 
-  // Crear mapa de relaciones por paciente
-  const relationshipMap = new Map();
-  relationships.forEach(rel => {
-    const patId = rel.patient_user_id || rel.patientId;
-    relationshipMap.set(patId, rel);
-  });
+    const linkedPatientIds = new Set(Array.from(relationshipMap.keys()));
 
-  const linkedPatientIds = new Set(Array.from(relationshipMap.keys()));
-
-  console.log(`[GET /api/psychologist/${psychologistId}/patients] Linked patient IDs:`, Array.from(linkedPatientIds));
-  
-  const patients = db.users
-    ? db.users.filter(user => {
+    console.log(`[GET /api/psychologist/${psychologistId}/patients] Linked patient IDs:`, Array.from(linkedPatientIds));
+    
+    const patients = users
+      .filter(user => {
         const isLinked = linkedPatientIds.has(user.id);
-        console.log(`  Evaluating user ${user.id} (${user.name}):`, { isLinked });
         return isLinked;
-      }).map(u => {
+      })
+      .map(u => {
         const rel = relationshipMap.get(u.id);
         return {
           id: u.id,
@@ -9158,14 +9207,25 @@ app.get('/api/psychologist/:psychologistId/patients', (req, res) => {
           billing_address: u.billing_address || u.address || '',
           billing_tax_id: u.billing_tax_id || u.tax_id || '',
           tags: rel?.data?.tags || [],
-          active: rel?.data?.active !== false, // Por defecto true
+          active: rel?.active !== false, // Leer de la columna directa (por defecto true)
           patientNumber: rel?.data?.patientNumber || 0
         };
-      })
-    : [];
-  
-  console.log(`[GET /api/psychologist/${psychologistId}/patients] Found ${patients.length} patients:`, patients);
-  res.json(patients);
+      });
+    
+    console.log(`[GET /api/psychologist/${psychologistId}/patients] Devolviendo ${patients.length} pacientes`);
+    
+    // Prevenir caché
+    res.set({
+      'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    });
+    
+    res.json(patients);
+  } catch (error) {
+    console.error(`[GET /api/psychologist/${psychologistId}/patients] ERROR:`, error);
+    res.status(500).json({ error: error.message || 'Error interno del servidor' });
+  }
 });
 
 // ===== CENTROS ENDPOINTS =====

@@ -124,7 +124,8 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
             defaultPercent: rel.defaultPercent || rel.default_psych_percent || 70,
             tags: rel.tags || [],
             usesBonos: rel.usesBonos || rel.uses_bonos || false,
-            centerId: rel.centerId || rel.center_id || null
+            centerId: rel.centerId || rel.center_id || null,
+            active: rel.active !== false // Leer de la columna directa (por defecto true)
           });
           console.log('[PatientDetailModal] relationshipSettings.usesBonos:', rel.usesBonos || rel.uses_bonos || false);
           setClinicalNotes(rel.data?.clinicalNotes || '');

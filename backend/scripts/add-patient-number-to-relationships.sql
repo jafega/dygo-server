@@ -27,14 +27,11 @@ SET data = jsonb_set(
 FROM numbered_patients np
 WHERE cr.id = np.id;
 
--- Paso 2: Asegurar que todos los pacientes nuevos tengan active = true por defecto
+-- Paso 2: Asegurar que todos los pacientes tienen active = true en la columna directa (no en data)
+-- Solo actualizar si la columna active es NULL
 UPDATE care_relationships
-SET data = jsonb_set(
-  COALESCE(data, '{}'::jsonb),
-  '{active}',
-  'true'::jsonb
-)
-WHERE (data->>'active') IS NULL;
+SET active = true
+WHERE active IS NULL;
 
 -- Verificación: Mostrar el resultado
 SELECT 
@@ -42,9 +39,9 @@ SELECT
   cr.psychologist_user_id,
   cr.patient_user_id,
   cr.created_at,
+  cr.active,
   cr.data->>'patientNumber' as patient_number,
-  cr.data->>'active' as active,
-  u.name as patient_name
+  u.data->>'name' as patient_name
 FROM care_relationships cr
 LEFT JOIN users u ON u.id = cr.patient_user_id
 ORDER BY cr.psychologist_user_id, (cr.data->>'patientNumber')::integer;

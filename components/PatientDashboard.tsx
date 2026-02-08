@@ -62,10 +62,12 @@ const PatientDashboard = forwardRef<PatientDashboardHandle>((props, ref) => {
   // Filtrar pacientes por búsqueda y tags
   const filteredPatients = useMemo(() => {
     let result = patients.filter(patient => {
-      // Filtro por búsqueda (nombre)
+      // Filtro por búsqueda (nombre y email)
       if (searchTerm) {
-        const matchesSearch = patient.name.toLowerCase().includes(searchTerm.toLowerCase());
-        if (!matchesSearch) return false;
+        const searchLower = searchTerm.toLowerCase();
+        const matchesName = patient.name.toLowerCase().includes(searchLower);
+        const matchesEmail = patient.email?.toLowerCase().includes(searchLower) || false;
+        if (!matchesName && !matchesEmail) return false;
       }
       
       // Filtro por tags
@@ -190,7 +192,7 @@ const PatientDashboard = forwardRef<PatientDashboardHandle>((props, ref) => {
         },
         body: JSON.stringify({
           name: fullName,
-          email: newPatient.email.trim() ? newPatient.email.trim().toLowerCase() : undefined,
+          email: newPatient.email.trim().toLowerCase(),
           phone: newPatient.phone.trim(),
           psychologistId: currentUser.id
         })
@@ -251,7 +253,7 @@ const PatientDashboard = forwardRef<PatientDashboardHandle>((props, ref) => {
              <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
              <input
                type="text"
-               placeholder="Buscar paciente por nombre..."
+               placeholder="Buscar paciente por nombre o email..."
                value={searchTerm}
                onChange={(e) => setSearchTerm(e.target.value)}
                className="w-full pl-10 pr-10 py-2.5 border-2 border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors"
@@ -355,28 +357,25 @@ const PatientDashboard = forwardRef<PatientDashboardHandle>((props, ref) => {
             ) : (
                 filteredPatients.map(patient => (
                     <div key={patient.id} onClick={() => setSelectedPatientId(patient.id)} className="border border-slate-200 rounded-lg sm:rounded-xl p-3 sm:p-4 hover:shadow-md transition-shadow bg-white cursor-pointer group">
-                        <div className="flex justify-between items-start gap-3">
-                            {/* Columna izquierda: Número y Avatar */}
-                            <div className="flex items-start gap-2 sm:gap-3">
-                                {/* Número de paciente */}
-                                {patient.patientNumber > 0 && (
-                                    <div className="flex-shrink-0 w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-indigo-100 flex items-center justify-center border-2 border-indigo-200">
-                                        <span className="text-indigo-700 font-bold text-xs sm:text-sm">
-                                            {patient.patientNumber}
-                                        </span>
-                                    </div>
-                                )}
-                                
-                                {/* Avatar del paciente */}
-                                <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0 overflow-hidden border-2 border-slate-200">
-                                    {patient.avatarUrl ? (
-                                        <img src={patient.avatarUrl} alt={patient.name} className="w-full h-full object-cover" />
-                                    ) : (
-                                        <span className="text-indigo-700 font-semibold text-sm sm:text-base">
-                                            {patient.name?.charAt(0).toUpperCase()}
-                                        </span>
-                                    )}
+                        <div className="flex items-start gap-3">
+                            {/* Número de paciente */}
+                            {patient.patientNumber > 0 && !patient.isSelf && (
+                                <div className="flex-shrink-0 w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-md">
+                                    <span className="text-white font-bold text-sm sm:text-base">
+                                        #{patient.patientNumber}
+                                    </span>
                                 </div>
+                            )}
+                            
+                            {/* Avatar del paciente */}
+                            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0 overflow-hidden border-2 border-slate-200">
+                                {patient.avatarUrl ? (
+                                    <img src={patient.avatarUrl} alt={patient.name} className="w-full h-full object-cover" />
+                                ) : (
+                                    <span className="text-indigo-700 font-semibold text-base sm:text-lg">
+                                        {patient.name?.charAt(0).toUpperCase()}
+                                    </span>
+                                )}
                             </div>
                             
                             {/* Columna central: Información del paciente */}
@@ -385,7 +384,7 @@ const PatientDashboard = forwardRef<PatientDashboardHandle>((props, ref) => {
                                 
                                 {/* Email */}
                                 {patient.email && (
-                                    <div className="flex items-center gap-1 text-[10px] sm:text-xs text-slate-500 mt-0.5">
+                                    <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-slate-500 mt-0.5">
                                         <Mail size={12} className="shrink-0" />
                                         <span className="truncate">{patient.email}</span>
                                     </div>
@@ -413,7 +412,7 @@ const PatientDashboard = forwardRef<PatientDashboardHandle>((props, ref) => {
                             </div>
                             
                             {/* Columna derecha: Indicadores */}
-                            <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1.5 sm:gap-3 shrink-0">
+                            <div className="flex flex-col items-end gap-1.5 shrink-0">
                                 <span className={`px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-full text-[9px] sm:text-xs font-bold border ${getRiskColor(patient.riskLevel)} whitespace-nowrap`}>
                                     <span className="hidden sm:inline">Riesgo </span>{patient.riskLevel}
                                 </span>
