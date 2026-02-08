@@ -6474,7 +6474,7 @@ app.put('/api/patient/:userId/profile', async (req, res) => {
 // --- RELACIONES PACIENTE / PSICÓLOGO ---
 app.get('/api/relationships', async (req, res) => {
   try {
-    const { psychologistId, patientId, psych_user_id, psychologist_user_id, patient_user_id, includeEnded } = req.query;
+    const { psychologistId, patientId, psych_user_id, psychologist_user_id, patient_user_id, includeEnded, includeInactive } = req.query;
     
     // Soportar tanto campos nuevos como legacy y ambos nombres (psych_user_id y psychologist_user_id)
     const psychId = psychologist_user_id || psych_user_id || psychologistId;
@@ -6489,7 +6489,7 @@ app.get('/api/relationships', async (req, res) => {
     // SIEMPRE consultar directamente desde Supabase (nunca usar caché)
     if (supabaseAdmin) {
       try {
-        console.log('[GET /api/relationships] Consultando Supabase directamente - psychId:', psychId, 'patId:', patId, 'includeEnded:', includeEnded);
+        console.log('[GET /api/relationships] Consultando Supabase directamente - psychId:', psychId, 'patId:', patId, 'includeEnded:', includeEnded, 'includeInactive:', includeInactive);
         
         let query = supabaseAdmin.from('care_relationships').select('*');
         
@@ -6499,6 +6499,11 @@ app.get('/api/relationships', async (req, res) => {
         }
         if (patId) {
           query = query.eq('patient_user_id', patId);
+        }
+        
+        // Filtrar por estado activo si no se pide incluir inactivos
+        if (includeInactive !== 'true') {
+          query = query.eq('active', true);
         }
         
         const { data, error } = await query;
@@ -6538,6 +6543,11 @@ app.get('/api/relationships', async (req, res) => {
         // Por defecto, solo devolver relaciones activas (sin endedAt)
         // A menos que includeEnded=true
         if (matches && !includeEnded && (rel.endedAt || rel.ended_at)) {
+          return false;
+        }
+        
+        // Filtrar por estado activo/inactivo si no se pide incluir inactivos
+        if (matches && includeInactive !== 'true' && rel.data?.active === false) {
           return false;
         }
         
@@ -6812,7 +6822,7 @@ app.put('/api/relationships/:id', async (req, res) => {
           return res.status(404).json({ error: 'Relación no encontrada' });
         }
 
-        // Preparar datos actualizados: ahora default_session_price y default_psych_percent son columnas directas
+        // Preparar datos actualizados: ahora default_session_price, default_psych_percent y active son columnas directas
         const updatePayload = {};
         
         // Si vienen los campos directos, actualizarlos
@@ -6824,6 +6834,10 @@ app.put('/api/relationships/:id', async (req, res) => {
         }
         if (updatedData.center_id !== undefined) {
           updatePayload.center_id = updatedData.center_id;
+        }
+        // Si se envía active, actualizarlo como columna directa
+        if (updatedData.active !== undefined) {
+          updatePayload.active = updatedData.active;
         }
         
         // Actualizar data JSONB con tags y otros campos
@@ -6838,11 +6852,6 @@ app.put('/api/relationships/:id', async (req, res) => {
         // Si se envía uses_bonos, guardarlo en data
         if (updatedData.uses_bonos !== undefined) {
           newData.uses_bonos = updatedData.uses_bonos;
-        }
-        
-        // Si se envía active, guardarlo en data
-        if (updatedData.active !== undefined) {
-          newData.active = updatedData.active;
         }
         
         // Si se envía patientNumber, guardarlo en data
@@ -6961,25 +6970,25 @@ app.delete('/api/relationships/:psychologistId/patients/:patientId', async (req,
       return res.status(400).json({ error: 'Se requieren psychologistId y patientId' });
     }
 
-    // Verificar si el paciente tiene auth (user_id)
+    // Verificar si el paciente tiene autenticación (auth_user_id)
     let patientHasAuth = false;
     
     if (supabaseAdmin) {
       try {
-        // Buscar si existe un usuario con ese ID
+        // Buscar el usuario para ver si tiene auth_user_id
         const { data: userData, error: userError } = await supabaseAdmin
           .from('users')
-          .select('id, email')
+          .select('id, auth_user_id')
           .eq('id', patientId)
-          .limit(1);
+          .single();
         
         if (userError && userError.code !== 'PGRST116') { // PGRST116 = no rows returned
           console.error('[DELETE patient] Error al buscar usuario:', userError);
           throw userError;
         }
         
-        patientHasAuth = userData && userData.length > 0 && userData[0].email;
-        console.log('[DELETE patient] ¿Paciente tiene auth?:', patientHasAuth);
+        patientHasAuth = userData && userData.auth_user_id;
+        console.log('[DELETE patient] ¿Paciente tiene auth?:', patientHasAuth, '(auth_user_id:', userData?.auth_user_id || 'null', ')');
         
         // Eliminar la relación
         const { error: relError } = await supabaseAdmin
@@ -7028,7 +7037,17 @@ app.delete('/api/relationships/:psychologistId/patients/:patientId', async (req,
         });
       } catch (err) {
         console.error('[DELETE patient] ❌ Error en Supabase:', err);
-        return res.status(500).json({ error: 'Error eliminando el paciente' });
+        console.error('[DELETE patient] Error details:', {
+          message: err?.message,
+          code: err?.code,
+          details: err?.details,
+          hint: err?.hint,
+          stack: err?.stack
+        });
+        return res.status(500).json({ 
+          error: 'Error eliminando el paciente',
+          details: err?.message || String(err)
+        });
       }
     }
     
@@ -7128,12 +7147,37 @@ app.post('/api/relationships/:id/historical-documents', async (req, res) => {
       return res.status(400).json({ error: 'Faltan campos requeridos' });
     }
 
-    const db = getDb();
-    if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
-    
-    const relationship = db.careRelationships.find(rel => rel.id === id);
+    let relationship = null;
+
+    // Intentar cargar desde Supabase primero
+    if (supabaseAdmin) {
+      try {
+        const { data: rows, error } = await supabaseAdmin
+          .from('care_relationships')
+          .select('*')
+          .eq('id', id)
+          .limit(1);
+        
+        if (error) throw error;
+        
+        if (rows && rows[0]) {
+          relationship = rows[0];
+          if (!relationship.data) relationship.data = {};
+        }
+      } catch (err) {
+        console.error(`[POST /api/relationships/${id}/historical-documents] ⚠️ Error loading from Supabase:`, err);
+      }
+    }
+
+    // Fallback a DB local si no se encontró en Supabase
     if (!relationship) {
-      return res.status(404).json({ error: 'Relación no encontrada' });
+      const db = getDb();
+      if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
+      
+      relationship = db.careRelationships.find(rel => rel.id === id);
+      if (!relationship) {
+        return res.status(404).json({ error: 'Relación no encontrada' });
+      }
     }
 
     // Inicializar estructura de documentos históricos si no existe
@@ -7175,9 +7219,17 @@ app.post('/api/relationships/:id/historical-documents', async (req, res) => {
         }
       } catch (err) {
         console.error(`[POST /api/relationships/${id}/historical-documents] ⚠️ Error saving to Supabase:`, err);
+        return res.status(500).json({ error: 'Error guardando en Supabase' });
       }
     }
 
+    // Guardar también en DB local como backup
+    const db = getDb();
+    if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
+    const localRelIdx = db.careRelationships.findIndex(rel => rel.id === id);
+    if (localRelIdx >= 0) {
+      db.careRelationships[localRelIdx] = relationship;
+    }
     await saveDb(db, { awaitPersistence: true });
     console.log(`[POST /api/relationships/${id}/historical-documents] Document uploaded: ${fileName}`);
     
@@ -7197,12 +7249,37 @@ app.delete('/api/relationships/:id/historical-documents/:docId', async (req, res
       return res.status(400).json({ error: 'IDs requeridos' });
     }
 
-    const db = getDb();
-    if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
-    
-    const relationship = db.careRelationships.find(rel => rel.id === id);
+    let relationship = null;
+
+    // Intentar cargar desde Supabase primero
+    if (supabaseAdmin) {
+      try {
+        const { data: rows, error } = await supabaseAdmin
+          .from('care_relationships')
+          .select('*')
+          .eq('id', id)
+          .limit(1);
+        
+        if (error) throw error;
+        
+        if (rows && rows[0]) {
+          relationship = rows[0];
+          if (!relationship.data) relationship.data = {};
+        }
+      } catch (err) {
+        console.error(`[DELETE /api/relationships/${id}/historical-documents/${docId}] ⚠️ Error loading from Supabase:`, err);
+      }
+    }
+
+    // Fallback a DB local si no se encontró en Supabase
     if (!relationship) {
-      return res.status(404).json({ error: 'Relación no encontrada' });
+      const db = getDb();
+      if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
+      
+      relationship = db.careRelationships.find(rel => rel.id === id);
+      if (!relationship) {
+        return res.status(404).json({ error: 'Relación no encontrada' });
+      }
     }
 
     if (!relationship.data?.historicalDocuments?.documents) {
@@ -7220,7 +7297,7 @@ app.delete('/api/relationships/:id/historical-documents/:docId', async (req, res
 
     relationship.data.historicalDocuments.lastUpdated = Date.now();
     
-    // Si no quedan documentos, limpiar el resumen
+    // Si no quedan documentos, limpiar el resumen y el campo historical_info
     if (relationship.data.historicalDocuments.documents.length === 0) {
       relationship.data.historicalDocuments.aiSummary = undefined;
     }
@@ -7228,9 +7305,15 @@ app.delete('/api/relationships/:id/historical-documents/:docId', async (req, res
     // Persistir en Supabase
     if (supabaseAdmin) {
       try {
+        const updateData = { data: relationship.data };
+        // Si no quedan documentos, limpiar también historical_info
+        if (relationship.data.historicalDocuments.documents.length === 0) {
+          updateData.historical_info = null;
+        }
+        
         const { error } = await supabaseAdmin
           .from('care_relationships')
-          .update({ data: relationship.data })
+          .update(updateData)
           .eq('id', id);
         
         if (error) throw error;
@@ -7245,9 +7328,17 @@ app.delete('/api/relationships/:id/historical-documents/:docId', async (req, res
         }
       } catch (err) {
         console.error(`[DELETE /api/relationships/${id}/historical-documents/${docId}] ⚠️ Error deleting from Supabase:`, err);
+        return res.status(500).json({ error: 'Error eliminando de Supabase' });
       }
     }
 
+    // Guardar también en DB local como backup
+    const db = getDb();
+    if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
+    const localRelIdx = db.careRelationships.findIndex(rel => rel.id === id);
+    if (localRelIdx >= 0) {
+      db.careRelationships[localRelIdx] = relationship;
+    }
     await saveDb(db, { awaitPersistence: true });
     console.log(`[DELETE /api/relationships/${id}/historical-documents/${docId}] Document deleted`);
     
@@ -7271,12 +7362,37 @@ app.post('/api/relationships/:id/historical-documents/generate-summary', async (
       return res.status(503).json({ error: 'Servicio de IA no disponible. Configure GEMINI_API_KEY.' });
     }
 
-    const db = getDb();
-    if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
-    
-    const relationship = db.careRelationships.find(rel => rel.id === id);
+    let relationship = null;
+
+    // Intentar cargar desde Supabase primero
+    if (supabaseAdmin) {
+      try {
+        const { data: rows, error } = await supabaseAdmin
+          .from('care_relationships')
+          .select('*')
+          .eq('id', id)
+          .limit(1);
+        
+        if (error) throw error;
+        
+        if (rows && rows[0]) {
+          relationship = rows[0];
+          if (!relationship.data) relationship.data = {};
+        }
+      } catch (err) {
+        console.error(`[POST /api/relationships/${id}/historical-documents/generate-summary] ⚠️ Error loading from Supabase:`, err);
+      }
+    }
+
+    // Fallback a DB local si no se encontró en Supabase
     if (!relationship) {
-      return res.status(404).json({ error: 'Relación no encontrada' });
+      const db = getDb();
+      if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
+      
+      relationship = db.careRelationships.find(rel => rel.id === id);
+      if (!relationship) {
+        return res.status(404).json({ error: 'Relación no encontrada' });
+      }
     }
 
     const docs = relationship.data?.historicalDocuments?.documents || [];
@@ -7286,19 +7402,68 @@ app.post('/api/relationships/:id/historical-documents/generate-summary', async (
 
     console.log(`[POST /api/relationships/${id}/historical-documents/generate-summary] Generating summary for ${docs.length} documents`);
 
-    // Preparar información de documentos para la IA
-    const docsInfo = docs.map(doc => {
+    // Preparar información de documentos para la IA incluyendo contenido
+    const docsContent = await Promise.all(docs.map(async (doc) => {
       const uploadDate = new Date(doc.uploadedAt).toLocaleDateString('es-ES');
+      let content = '';
+      
+      // Si el documento tiene contenido en base64, intentar extraerlo
+      if (doc.content) {
+        try {
+          // El contenido ya está en base64 en el documento
+          const base64Data = doc.content.includes(',') ? doc.content.split(',')[1] : doc.content;
+          
+          // Para PDFs y archivos multimedia, usar Gemini para extraer el contenido
+          if (doc.fileType === 'application/pdf' || doc.fileType.startsWith('audio/') || doc.fileType.startsWith('video/')) {
+            try {
+              const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+              
+              const promptText = doc.fileType === 'application/pdf'
+                ? 'Extrae todo el texto de este documento PDF. Proporciona únicamente el contenido textual sin añadir comentarios adicionales.'
+                : 'Transcribe el siguiente archivo de audio/video. Proporciona únicamente la transcripción del contenido hablado, sin añadir comentarios adicionales.';
+              
+              const result = await model.generateContent([
+                { text: promptText },
+                {
+                  inlineData: {
+                    mimeType: doc.fileType,
+                    data: base64Data
+                  }
+                }
+              ]);
+              
+              content = result.response.text() || '';
+              console.log(`✓ Contenido extraído del documento: ${doc.fileName} (${content.length} caracteres)`);
+            } catch (extractError) {
+              console.error(`⚠️ Error extrayendo contenido de ${doc.fileName}:`, extractError.message);
+              content = '[No se pudo extraer el contenido del documento]';
+            }
+          } else if (doc.fileType.startsWith('text/')) {
+            // Para archivos de texto plano, decodificar directamente
+            content = Buffer.from(base64Data, 'base64').toString('utf-8');
+          }
+        } catch (err) {
+          console.error(`⚠️ Error procesando contenido de ${doc.fileName}:`, err.message);
+          content = '[Error al procesar el contenido del documento]';
+        }
+      }
+      
       return `
-Documento: ${doc.fileName}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DOCUMENTO: ${doc.fileName}
 Tipo: ${doc.fileType}
 Fecha de subida: ${uploadDate}
 Tamaño: ${(doc.fileSize / 1024).toFixed(1)} KB
----`;
-    }).join('\n\n');
+
+CONTENIDO:
+${content || '[Sin contenido disponible - solo metadatos]'}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+    }));
+
+    const docsInfo = docsContent.join('\n\n');
 
     // Generar resumen con Gemini
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
     
     const prompt = `Eres un psicólogo clínico experto. Se te proporcionan documentos históricos de un paciente que está siendo transferido desde otro terapeuta. 
 
@@ -7306,18 +7471,20 @@ DOCUMENTOS HISTÓRICOS:
 ${docsInfo}
 
 INSTRUCCIONES:
-1. Genera un resumen clínico estructurado del historial del paciente basándote en los documentos proporcionados
+1. Genera un resumen clínico estructurado del historial del paciente basándote en el CONTENIDO REAL de los documentos proporcionados
 2. El resumen debe incluir:
    - Contexto general del paciente
    - Motivos de consulta previos
    - Diagnósticos o evaluaciones previas (si se mencionan)
    - Tratamientos o intervenciones realizadas
+   - Evolución del proceso terapéutico
    - Aspectos relevantes para la continuidad terapéutica
 3. Mantén un tono profesional y clínico
 4. Si alguna información no está disponible en los documentos, indícalo brevemente
-5. El resumen debe ser conciso pero completo (máximo 500 palabras)
+5. El resumen debe ser conciso pero completo (máximo 800 palabras)
+6. Estructura el resumen con subtítulos claros
 
-IMPORTANTE: Solo puedes ver los metadatos de los documentos (nombre, tipo, fecha). Genera el resumen basándote en esa información y en lo que típicamente contendrían esos tipos de documentos. Indica claramente que se trata de una vista preliminar basada en los documentos disponibles.`;
+IMPORTANTE: Analiza el contenido REAL de los documentos proporcionados arriba. No hagas suposiciones, basa tu resumen únicamente en la información contenida en los textos.`;
 
     const result = await model.generateContent(prompt);
     const summary = result.response.text();
@@ -7330,12 +7497,15 @@ IMPORTANTE: Solo puedes ver los metadatos de los documentos (nombre, tipo, fecha
     relationship.data.historicalDocuments.aiSummary = summary;
     relationship.data.historicalDocuments.lastUpdated = Date.now();
 
-    // Persistir en Supabase
+    // Persistir en Supabase (guardando tanto en data.historicalDocuments como en historical_info)
     if (supabaseAdmin) {
       try {
         const { error } = await supabaseAdmin
           .from('care_relationships')
-          .update({ data: relationship.data })
+          .update({ 
+            data: relationship.data,
+            historical_info: summary  // Guardar también en el campo de nivel superior
+          })
           .eq('id', id);
         
         if (error) throw error;
@@ -7350,9 +7520,17 @@ IMPORTANTE: Solo puedes ver los metadatos de los documentos (nombre, tipo, fecha
         }
       } catch (err) {
         console.error(`[POST /api/relationships/${id}/historical-documents/generate-summary] ⚠️ Error saving to Supabase:`, err);
+        return res.status(500).json({ error: 'Error guardando resumen en Supabase' });
       }
     }
 
+    // Guardar también en DB local como backup
+    const db = getDb();
+    if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
+    const localRelIdx = db.careRelationships.findIndex(rel => rel.id === id);
+    if (localRelIdx >= 0) {
+      db.careRelationships[localRelIdx] = relationship;
+    }
     await saveDb(db, { awaitPersistence: true });
     console.log(`[POST /api/relationships/${id}/historical-documents/generate-summary] Summary generated successfully`);
     

@@ -313,7 +313,7 @@ Mantén un tono profesional y objetivo.`;
 
         // Usar File API de Gemini
         const result = await ai.models.generateContent({
-          model: 'gemini-2.0-flash-exp',
+          model: 'gemini-2.5-flash',
           contents: [
             {
               role: 'user',
@@ -385,7 +385,7 @@ Mantén un tono profesional y objetivo.`;
 
         // Usar File API de Gemini
         const result = await ai.models.generateContent({
-          model: 'gemini-2.0-flash-exp',
+          model: 'gemini-2.5-flash',
           contents: [
             {
               role: 'user',

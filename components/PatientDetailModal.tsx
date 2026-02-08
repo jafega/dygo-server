@@ -111,12 +111,14 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
     if (!currentPsychologistId || !patientUserId) return;
     
     try {
-      const response = await fetch(`${API_URL}/relationships?psychologistId=${currentPsychologistId}&patientId=${patientUserId}`);
+      // Importante: incluir includeInactive=true para poder cargar relaciones inactivas
+      const response = await fetch(`${API_URL}/relationships?psychologistId=${currentPsychologistId}&patientId=${patientUserId}&includeInactive=true`);
       if (response.ok) {
         const data = await response.json();
         if (data && data.length > 0) {
           const rel = data[0];
           console.log('[PatientDetailModal] Relationship loaded:', rel);
+          console.log('[PatientDetailModal] active:', rel.active);
           console.log('[PatientDetailModal] uses_bonos:', rel.uses_bonos, 'usesBonos:', rel.usesBonos);
           setRelationship(rel);
           setRelationshipSettings({
@@ -127,7 +129,10 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
             centerId: rel.centerId || rel.center_id || null,
             active: rel.active !== false // Leer de la columna directa (por defecto true)
           });
-          console.log('[PatientDetailModal] relationshipSettings.usesBonos:', rel.usesBonos || rel.uses_bonos || false);
+          console.log('[PatientDetailModal] relationshipSettings loaded:', {
+            active: rel.active !== false,
+            usesBonos: rel.usesBonos || rel.uses_bonos || false
+          });
           setClinicalNotes(rel.data?.clinicalNotes || '');
         }
       }
@@ -747,7 +752,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
         await loadAllPsychologistTags(); // Recargar todas las tags del psicólogo
         
         // Si se cambió el estado activo, cerrar el modal y recargar la lista
-        if (updatedRelationship.data?.active !== relationship.data?.active) {
+        if (updatedRelationship.active !== relationship.active) {
           setTimeout(() => {
             onClose();
           }, 500);
@@ -969,8 +974,16 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
             <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0">
               <User size={20} className="sm:w-6 sm:h-6" />
             </div>
-            <div className="min-w-0">
-              <h2 className="text-base sm:text-xl font-bold truncate">{patient.name}</h2>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-base sm:text-xl font-bold truncate">{patient.name}</h2>
+                {!relationshipSettings.active && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-500 text-white text-xs font-bold rounded-full shadow-lg animate-pulse">
+                    <XCircle size={12} />
+                    INACTIVO
+                  </span>
+                )}
+              </div>
               <p className="text-xs sm:text-sm text-purple-100">Paciente</p>
             </div>
           </div>
@@ -988,14 +1001,20 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
             {tabs.map(tab => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
+              const isActionTab = ['SESSIONS', 'TIMELINE', 'BILLING', 'BONOS'].includes(tab.id);
+              const isDisabled = !relationshipSettings.active && isActionTab;
+              
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id as any)}
+                  onClick={() => !isDisabled && setActiveTab(tab.id as any)}
+                  disabled={isDisabled}
                   className={`flex-1 sm:flex-none px-3 sm:px-4 py-3 sm:py-3 font-medium text-xs sm:text-sm flex items-center justify-center sm:justify-start gap-1 sm:gap-2 border-b-2 transition-colors whitespace-nowrap ${
                     isActive
                       ? 'border-purple-600 text-purple-600'
-                      : 'border-transparent text-slate-600 hover:text-slate-900'
+                      : isDisabled 
+                        ? 'border-transparent text-slate-400 cursor-not-allowed opacity-50'
+                        : 'border-transparent text-slate-600 hover:text-slate-900'
                   }`}
                 >
                   <Icon size={22} className="sm:w-4 sm:h-4" />
@@ -1008,6 +1027,22 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
 
         {/* Content */}
         <div className="flex-1 overflow-auto">
+          {/* Mensaje de advertencia para paciente inactivo */}
+          {!relationshipSettings.active && activeTab !== 'RELATIONSHIP' && (
+            <div className="bg-red-50 border-l-4 border-red-500 p-4 mx-4 mt-4">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="text-red-600 flex-shrink-0 mt-0.5" size={20} />
+                <div className="flex-1">
+                  <h3 className="text-sm font-bold text-red-900 mb-1">Paciente Inactivo</h3>
+                  <p className="text-sm text-red-700">
+                    Este paciente está marcado como inactivo. Solo puedes visualizar su información, pero no realizar acciones.
+                    Para reactivarlo, ve a la pestaña <strong>Configuración</strong> y activa el toggle "Paciente Activo".
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+          
           {activeTab === 'PATIENT' && (
             <div className="p-3 sm:p-6 md:p-8 space-y-6 sm:space-y-8 bg-gradient-to-br from-slate-50 to-slate-100">
               {isLoadingStats ? (
