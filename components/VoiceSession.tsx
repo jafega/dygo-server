@@ -50,6 +50,7 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
   // Web Speech Recognition como respaldo
   const recognitionRef = useRef<any>(null);
   const userSpeechTranscriptRef = useRef<string>('');
+  const lastInterimResultRef = useRef<string>(''); // Guardar último resultado intermedio
 
   // Format seconds into MM:SS
   const formatTime = (secs: number) => {
@@ -205,8 +206,12 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
                 fullTranscriptRef.current += `Usuario: ${transcript}\n`;
                 console.log('[VoiceSession] 💾 Saved to fullTranscriptRef. Current length:', fullTranscriptRef.current.length);
                 setTranscriptWarning(false);
+                lastInterimResultRef.current = ''; // Limpiar interim cuando llega el final
               } else {
+                // CAMBIO CRÍTICO: Guardar el último resultado intermedio
                 console.log('[VoiceSession] 🎤 INTERIM Web Speech:', transcript.substring(0, 50));
+                lastInterimResultRef.current = transcript;
+                console.log('[VoiceSession] 💾 Saved INTERIM result as backup (length:', transcript.length, ')');
               }
             }
           };
@@ -509,16 +514,42 @@ ${contextStr}`,
       }
     }
     
-    // Esperar 500ms para que Web Speech procese los últimos resultados
+    // CAMBIO CRÍTICO: Aumentar espera de 500ms a 2000ms para dar más tiempo a Web Speech
     setTimeout(() => {
-      console.log('[VoiceSession] ⏱️ Timeout completed, proceeding with cleanup');
+      console.log('[VoiceSession] ⏱️ Timeout completed (2s), proceeding with cleanup');
       console.log('[VoiceSession] 📊 Transcript length after waiting:', fullTranscriptRef.current.length);
+      console.log('[VoiceSession] 📊 Web Speech buffer:', userSpeechTranscriptRef.current.length, 'chars');
+      console.log('[VoiceSession] 📊 Last interim result:', lastInterimResultRef.current.length, 'chars');
       
       // Verificar si tenemos transcripción DESPUÉS de esperar
       if (fullTranscriptRef.current.length < 20) {
         console.error('[VoiceSession] ⚠️⚠️⚠️ WARNING: Very short or empty transcript!');
         console.error('[VoiceSession] This will cause "No se detectó audio" error');
         console.error('[VoiceSession] fullTranscriptRef:', fullTranscriptRef.current);
+        console.error('[VoiceSession] userSpeechTranscriptRef:', userSpeechTranscriptRef.current);
+        console.error('[VoiceSession] lastInterimResultRef:', lastInterimResultRef.current);
+        
+        // ÚLTIMO RECURSO: Usar lo que tengamos disponible
+        let rescueTranscript = '';
+        
+        // Prioridad 1: Buffer de Web Speech
+        if (userSpeechTranscriptRef.current.length > 10) {
+          console.log('[VoiceSession] 🆘 Rescuing from Web Speech final buffer!');
+          rescueTranscript += userSpeechTranscriptRef.current;
+        }
+        
+        // Prioridad 2: Último resultado intermedio (si no está ya incluido)
+        if (lastInterimResultRef.current.length > 10 && !rescueTranscript.includes(lastInterimResultRef.current)) {
+          console.log('[VoiceSession] 🆘 Adding last interim result!');
+          rescueTranscript += ' ' + lastInterimResultRef.current;
+        }
+        
+        if (rescueTranscript.length > 10) {
+          console.log('[VoiceSession] ✅ Rescued', rescueTranscript.length, 'characters!');
+          fullTranscriptRef.current = `Usuario: ${rescueTranscript}\n`;
+        } else {
+          console.error('[VoiceSession] 💀 No data to rescue - transcript will be empty');
+        }
       } else {
         console.log('[VoiceSession] ✅ Transcript looks good, length:', fullTranscriptRef.current.length);
       }
@@ -527,7 +558,7 @@ ${contextStr}`,
       const finalTranscript = fullTranscriptRef.current;
       console.log('[VoiceSession] 📤 Sending transcript to onSessionEnd. Length:', finalTranscript.length);
       onSessionEnd(finalTranscript);
-    }, 500);
+    }, 2000);
   };
 
   const toggleMute = () => {
