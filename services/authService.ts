@@ -606,19 +606,29 @@ export const checkSupabaseConnection = async (): Promise<boolean> => {
   }
 
   try {
-    const res = await fetch(`${API_URL}/health/supabase`, {
-      method: 'GET',
-      // Timeout de 10 segundos (aumentado desde 5s para conexiones más lentas)
-      signal: AbortSignal.timeout(10000)
-    });
+    // Usar AbortController manual para compatibilidad iOS (AbortSignal.timeout no soportado en iOS < 15.4)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    
+    try {
+      const res = await fetch(`${API_URL}/health/supabase`, {
+        method: 'GET',
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
 
-    if (!res.ok) {
-      console.warn('⚠️ Supabase health check falló:', res.status);
-      return false;
+      if (!res.ok) {
+        console.warn('⚠️ Supabase health check falló:', res.status);
+        return false;
+      }
+
+      const data = await res.json();
+      return data.connected === true;
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      throw fetchError;
     }
-
-    const data = await res.json();
-    return data.connected === true;
   } catch (error) {
     console.warn('⚠️ Error verificando conexión a Supabase:', error);
     return false;
