@@ -109,7 +109,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
              <h2 className="text-xl font-bold text-slate-800">Ajustes</h2>
              <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
         </div>
-        <div className="p-6 overflow-y-auto">
+        <div className="flex-1 p-6 overflow-y-auto">{/* Scroll container */}
                 <div className="space-y-6">
                     <div className="rounded-2xl border border-slate-100 bg-gradient-to-br from-indigo-50 via-white to-white p-4">
                         <div className="flex items-center gap-4">
@@ -328,13 +328,14 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                                 </button>
                             </div>
                         )}
-
-                        <div className="space-y-2">
-                            <button onClick={handleSave} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium">Guardar Cambios</button>
-                            <button onClick={handleLogoutClick} className="w-full py-3 text-red-500 hover:bg-red-50 rounded-xl font-medium flex items-center justify-center gap-2"><LogOut size={16} /> Cerrar Sesión</button>
-                        </div>
                     </div>
                 </div>
+            </div>
+            
+            {/* Footer fijo con botones de acción - Siempre visible */}
+            <div className="shrink-0 p-6 border-t border-slate-100 bg-white space-y-2">
+                <button onClick={handleSave} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium transition-colors">Guardar Cambios</button>
+                <button onClick={handleLogoutClick} className="w-full py-3 text-red-600 hover:bg-red-50 rounded-xl font-medium flex items-center justify-center gap-2 transition-colors"><LogOut size={16} /> Cerrar Sesión</button>
             </div>
         </div>
     </div>

@@ -25,7 +25,7 @@ import PsychologistDashboard from './components/PsychologistDashboard';
 import SessionsList from './components/SessionsList';
 import CentrosPanel, { CentrosPanelRef } from './components/CentrosPanel';
 import ConnectionsPanel from './components/ConnectionsPanel';
-import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock, AlertCircle, Smile, Shield, Building2 } from 'lucide-react';
+import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock, AlertCircle, Smile, Shield, Building2, LogOut } from 'lucide-react';
 
 // Custom Dygo Logo Component
 const DygoLogo: React.FC<{ className?: string }> = ({ className = "w-8 h-8" }) => (
@@ -1176,6 +1176,20 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                 <p className="text-xs text-slate-500 truncate">{currentUser?.email}</p>
               </div>
             </button>
+            
+            {/* Botón de Cerrar Sesión - Visible directamente en el sidebar */}
+            <button
+              onClick={() => {
+                if (window.confirm('¿Cerrar sesión?')) {
+                  handleLogout();
+                }
+              }}
+              className="w-full px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors text-left flex items-center gap-2"
+            >
+              <LogOut size={16} />
+              <span>Cerrar Sesión</span>
+            </button>
+            
             {currentUser?.is_psychologist === true && (
               <button
                 onClick={() => {
