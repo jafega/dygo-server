@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { JournalEntry } from '../types';
 import { ChevronLeft, ChevronRight, Layers, Plus, Calendar as CalendarIcon, LayoutGrid, Clock, Lightbulb, FileText, MessageCircle, Mic, Heart, Smile, ChevronDown, ChevronUp, Sparkles, TrendingUp } from 'lucide-react';
+import { decompressTranscript } from '../services/genaiService';
 
 interface CalendarViewProps {
   entries: JournalEntry[];
@@ -84,6 +85,22 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
             const isVoiceSession = entryType === 'voice_session' || entryType === 'voiceSession';
             const isFeedback = entryType === 'feedback';
             
+            // Debug: ver qué campos tiene la entrada
+            if (isVoiceSession) {
+              const decompressedTranscript = entry.transcript ? decompressTranscript(entry.transcript) : '';
+              console.log('📝 VoiceSession entry:', {
+                id: entry.id,
+                hasSummary: !!entry.summary,
+                summaryPreview: entry.summary?.substring(0, 50),
+                hasTranscript: !!entry.transcript,
+                transcriptLength: entry.transcript?.length || 0,
+                decompressedTranscriptLength: decompressedTranscript?.length || 0,
+                transcriptPreview: decompressedTranscript?.substring(0, 100),
+                hasAdvice: !!entry.advice,
+                emotions: entry.emotions
+              });
+            }
+            
             // Para entradas de tipo feedback, el contenido está en entry.content
             // Para feedback adjunto a voice sessions, está en psychologistFeedback
             const feedback = isFeedback && entry.content
@@ -147,17 +164,25 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
                   {/* Voice Session Content */}
                   {isVoiceSession && (
                     <>
-                      {/* Resumen Principal */}
+                      {/* Resumen del Día - Destacado */}
                       {entry.summary && (
-                        <div className="prose prose-sm md:prose-base max-w-none">
-                          <p className="text-slate-800 leading-relaxed">{entry.summary}</p>
+                        <div className="border border-purple-200 rounded-xl md:rounded-2xl overflow-hidden bg-gradient-to-br from-purple-50 to-indigo-50 p-4 md:p-5">
+                          <div className="flex items-center gap-2 mb-3">
+                            <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-purple-200 flex items-center justify-center">
+                              <Sparkles className="w-4 h-4 md:w-5 md:h-5 text-purple-700" />
+                            </div>
+                            <span className="font-semibold text-sm md:text-base text-purple-900">Resumen de tu día</span>
+                          </div>
+                          <div className="prose prose-sm md:prose-base max-w-none">
+                            <p className="text-slate-800 leading-relaxed">{entry.summary}</p>
+                          </div>
                         </div>
                       )}
 
-                      {/* Emociones - Pills style */}
+                      {/* Emociones - Pills style (sin duplicados) */}
                       {entry.emotions && entry.emotions.length > 0 && (
                         <div className="flex flex-wrap gap-2">
-                          {entry.emotions.slice(0, 6).map((em, idx) => (
+                          {Array.from(new Set(entry.emotions)).slice(0, 6).map((em, idx) => (
                             <span 
                               key={`${em}-${idx}`} 
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-700 rounded-full text-xs md:text-sm font-medium"
@@ -224,7 +249,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
                       )}
 
                       {/* Transcripción - Collapsible */}
-                      {entry.transcript && entry.transcript.length > 50 && (
+                      {entry.transcript && entry.transcript.trim().length > 0 && (
                         <div className="border border-slate-200 rounded-xl md:rounded-2xl overflow-hidden bg-slate-50">
                           <button
                             onClick={() => toggleTranscript(entry.id)}
@@ -243,12 +268,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
                           {showTranscript && (
                             <div className="px-4 pb-4 md:px-5 md:pb-5 pt-2 bg-white border-t border-slate-200">
                               <div className="max-h-60 md:max-h-80 overflow-y-auto">
-                                <p className="text-xs md:text-sm text-slate-600 leading-relaxed whitespace-normal">{entry.transcript.replace(/\n{3,}/g, '\n\n').split('\n\n').map((para, i) => (
-                                  <span key={i}>
-                                    {para.replace(/\n/g, ' ')}
-                                    {i < entry.transcript.split('\n\n').length - 1 && <><br /><br /></>}
-                                  </span>
-                                ))}</p>
+                                <p className="text-xs md:text-sm text-slate-600 leading-relaxed whitespace-pre-wrap">{decompressTranscript(entry.transcript)}</p>
                               </div>
                             </div>
                           )}

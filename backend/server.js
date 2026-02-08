@@ -651,8 +651,9 @@ function normalizeSupabaseRow(row) {
     delete cleanData.paid;                 // Usar columna de tabla (sessions)
     delete cleanData.default_session_price; // Usar columna de tabla (care_relationships)
     delete cleanData.default_psych_percent; // Usar columna de tabla (care_relationships)
-    delete cleanData.summary;               // Usar columna de tabla (session_entry)
-    delete cleanData.transcript;            // Usar columna de tabla (session_entry)
+    delete cleanData.summary;               // Usar columna de tabla (entries)
+    delete cleanData.transcript;            // Usar columna de tabla (entries)
+    delete cleanData.center_id;             // Usar columna de tabla (entries)
     // NOTA: uses_bonos NO se elimina porque está en data JSONB, no en columna de tabla
     
     // Combinar: primero data limpia, luego columnas de tabla
@@ -694,6 +695,19 @@ function normalizeSupabaseRow(row) {
     if (base.entry_type !== undefined) {
       merged.entry_type = base.entry_type;
       merged.entryType = base.entry_type; // Compatibilidad frontend
+    }
+    
+    // Para entries: mapear transcript y summary desde columnas
+    if (base.transcript !== undefined && base.transcript !== null) {
+      merged.transcript = base.transcript;
+    }
+    if (base.summary !== undefined && base.summary !== null) {
+      merged.summary = base.summary;
+    }
+    
+    // Para entries: mapear center_id desde columna
+    if (base.center_id !== undefined && base.center_id !== null) {
+      merged.center_id = base.center_id;
     }
     
     // Para goals: mapear patient_user_id
@@ -806,7 +820,7 @@ function buildSupabaseRowFromEntity(originalRow, entity) {
 
 // Función específica para entries que maneja creator_user_id y target_user_id correctamente
 function buildSupabaseEntryRow(entry) {
-  const { id, creator_user_id, target_user_id, userId, createdByPsychologistId, entryType, psychologistEntryType, type, ...restData } = entry;
+  const { id, creator_user_id, target_user_id, userId, createdByPsychologistId, entryType, psychologistEntryType, type, transcript, summary, center_id, ...restData } = entry;
   
   // Determinar creator_user_id y target_user_id
   // Si la entrada es del psicólogo (createdBy === 'PSYCHOLOGIST'):
@@ -852,7 +866,9 @@ function buildSupabaseEntryRow(entry) {
     dataEntryType2,
     psychologistEntryType,
     type,
-    finalEntryType
+    finalEntryType,
+    hasTranscript: !!transcript,
+    hasSummary: !!summary
   });
   
   return {
@@ -860,6 +876,9 @@ function buildSupabaseEntryRow(entry) {
     creator_user_id: finalCreatorId,
     target_user_id: finalTargetId,
     entry_type: finalEntryType,
+    transcript: transcript || null,
+    summary: summary || null,
+    center_id: center_id || null,
     data: cleanData
   };
 }
@@ -3974,12 +3993,27 @@ app.post('/api/entries', (req, res) => {
           target_user_id: entry.target_user_id,
           hasTranscript: !!entry.transcript,
           transcriptLength: entry.transcript?.length || 0,
-          summary: entry.summary?.substring(0, 50) + '...',
-          entryType: entry.psychologistEntryType || entry.createdBy
+          transcriptPreview: entry.transcript?.substring(0, 100),
+          hasSummary: !!entry.summary,
+          summaryPreview: entry.summary?.substring(0, 100),
+          entryType: entry.entry_type || entry.entryType
         });
         
         const payload = buildSupabaseEntryRow(entry);
-        console.log('[POST /api/entries] 📝 Payload a enviar:', JSON.stringify(payload, null, 2).substring(0, 500));
+        console.log('[POST /api/entries] 📝 Payload completo:', JSON.stringify({
+          id: payload.id,
+          creator_user_id: payload.creator_user_id,
+          target_user_id: payload.target_user_id,
+          entry_type: payload.entry_type,
+          center_id: payload.center_id,
+          hasTranscript: !!payload.transcript,
+          transcriptLength: payload.transcript?.length || 0,
+          transcriptPreview: payload.transcript?.substring(0, 100),
+          hasSummary: !!payload.summary,
+          summaryLength: payload.summary?.length || 0,
+          summaryPreview: payload.summary?.substring(0, 100),
+          dataKeys: Object.keys(payload.data || {})
+        }, null, 2));
         
         await trySupabaseUpsert('entries', [payload]);
 

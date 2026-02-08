@@ -196,23 +196,42 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
           
           recognition.onresult = (event: any) => {
             console.log('[VoiceSession] 🎤 Web Speech onresult triggered, results:', event.results.length);
-            for (let i = event.resultIndex; i < event.results.length; i++) {
+            
+            // CAMBIO CRÍTICO: Procesar TODOS los resultados, no solo desde resultIndex
+            let fullText = '';
+            for (let i = 0; i < event.results.length; i++) {
               const result = event.results[i];
               const transcript = result[0].transcript;
+              fullText += transcript + ' ';
               
               if (result.isFinal) {
                 console.log('[VoiceSession] 🗣️ FINAL Web Speech captured:', transcript);
-                userSpeechTranscriptRef.current += transcript + ' ';
-                fullTranscriptRef.current += `Usuario: ${transcript}\n`;
-                console.log('[VoiceSession] 💾 Saved to fullTranscriptRef. Current length:', fullTranscriptRef.current.length);
-                setTranscriptWarning(false);
-                lastInterimResultRef.current = ''; // Limpiar interim cuando llega el final
               } else {
-                // CAMBIO CRÍTICO: Guardar el último resultado intermedio
                 console.log('[VoiceSession] 🎤 INTERIM Web Speech:', transcript.substring(0, 50));
-                lastInterimResultRef.current = transcript;
-                console.log('[VoiceSession] 💾 Saved INTERIM result as backup (length:', transcript.length, ')');
               }
+            }
+            
+            // GUARDAR TODO INMEDIATAMENTE
+            if (fullText.trim()) {
+              userSpeechTranscriptRef.current = fullText;
+              console.log('[VoiceSession] 💾💾💾 FORCE SAVED to userSpeechTranscriptRef. Length:', fullText.length);
+              setTranscriptWarning(false);
+              
+              // También actualizar fullTranscript
+              const userPrefix = 'Usuario: ';
+              const lines = fullTranscriptRef.current.split('\n');
+              const lastUserLineIndex = lines.findIndex(line => line.startsWith(userPrefix));
+              
+              if (lastUserLineIndex === -1) {
+                // Primera vez, agregar
+                fullTranscriptRef.current += `Usuario: ${fullText.trim()}\n`;
+              } else {
+                // Actualizar la última línea de usuario
+                lines[lastUserLineIndex] = `Usuario: ${fullText.trim()}`;
+                fullTranscriptRef.current = lines.join('\n');
+              }
+              
+              console.log('[VoiceSession] 📊 fullTranscriptRef updated. Length:', fullTranscriptRef.current.length);
             }
           };
           
@@ -503,62 +522,43 @@ ${contextStr}`,
 
   const handleHangUp = () => {
     console.log('[VoiceSession] 📞 Hanging up...');
+    console.log('[VoiceSession] 📊 BEFORE STOP - userSpeechTranscriptRef:', userSpeechTranscriptRef.current.length, 'chars');
+    console.log('[VoiceSession] 📊 BEFORE STOP - fullTranscriptRef:', fullTranscriptRef.current.length, 'chars');
     
-    // Primero detener Web Speech para forzar el procesamiento de resultados finales
+    // Detener Web Speech
     if (recognitionRef.current) {
       try {
-        console.log('[VoiceSession] 🛑 Stopping Web Speech to force final results...');
         recognitionRef.current.stop();
+        console.log('[VoiceSession] 🛑 Web Speech stopped');
       } catch (e) {
         console.warn('[VoiceSession] Could not stop recognition:', e);
       }
     }
     
-    // CAMBIO CRÍTICO: Aumentar espera de 500ms a 2000ms para dar más tiempo a Web Speech
+    // Esperar solo 500ms y luego FORZAR el uso de lo capturado
     setTimeout(() => {
-      console.log('[VoiceSession] ⏱️ Timeout completed (2s), proceeding with cleanup');
-      console.log('[VoiceSession] 📊 Transcript length after waiting:', fullTranscriptRef.current.length);
-      console.log('[VoiceSession] 📊 Web Speech buffer:', userSpeechTranscriptRef.current.length, 'chars');
-      console.log('[VoiceSession] 📊 Last interim result:', lastInterimResultRef.current.length, 'chars');
+      console.log('[VoiceSession] ⏱️ Timeout completed, forcing transcript save');
+      console.log('[VoiceSession] 📊 userSpeechTranscriptRef:', userSpeechTranscriptRef.current.length, 'chars');
+      console.log('[VoiceSession] 📊 fullTranscriptRef:', fullTranscriptRef.current.length, 'chars');
       
-      // Verificar si tenemos transcripción DESPUÉS de esperar
-      if (fullTranscriptRef.current.length < 20) {
-        console.error('[VoiceSession] ⚠️⚠️⚠️ WARNING: Very short or empty transcript!');
-        console.error('[VoiceSession] This will cause "No se detectó audio" error');
-        console.error('[VoiceSession] fullTranscriptRef:', fullTranscriptRef.current);
-        console.error('[VoiceSession] userSpeechTranscriptRef:', userSpeechTranscriptRef.current);
-        console.error('[VoiceSession] lastInterimResultRef:', lastInterimResultRef.current);
-        
-        // ÚLTIMO RECURSO: Usar lo que tengamos disponible
-        let rescueTranscript = '';
-        
-        // Prioridad 1: Buffer de Web Speech
-        if (userSpeechTranscriptRef.current.length > 10) {
-          console.log('[VoiceSession] 🆘 Rescuing from Web Speech final buffer!');
-          rescueTranscript += userSpeechTranscriptRef.current;
-        }
-        
-        // Prioridad 2: Último resultado intermedio (si no está ya incluido)
-        if (lastInterimResultRef.current.length > 10 && !rescueTranscript.includes(lastInterimResultRef.current)) {
-          console.log('[VoiceSession] 🆘 Adding last interim result!');
-          rescueTranscript += ' ' + lastInterimResultRef.current;
-        }
-        
-        if (rescueTranscript.length > 10) {
-          console.log('[VoiceSession] ✅ Rescued', rescueTranscript.length, 'characters!');
-          fullTranscriptRef.current = `Usuario: ${rescueTranscript}\n`;
-        } else {
-          console.error('[VoiceSession] 💀 No data to rescue - transcript will be empty');
-        }
-      } else {
-        console.log('[VoiceSession] ✅ Transcript looks good, length:', fullTranscriptRef.current.length);
+      // FORZAR: Si Web Speech capturó algo, usarlo SIEMPRE
+      if (userSpeechTranscriptRef.current.trim().length > 0) {
+        console.log('[VoiceSession] ✅ Using Web Speech capture:', userSpeechTranscriptRef.current);
+        fullTranscriptRef.current = `Usuario: ${userSpeechTranscriptRef.current.trim()}\n`;
+      }
+      
+      // Si aún está vacío, poner un mensaje de error
+      if (fullTranscriptRef.current.trim().length < 5) {
+        console.error('[VoiceSession] 💀💀💀 NO AUDIO CAPTURED AT ALL!');
+        fullTranscriptRef.current = '';
       }
       
       cleanup();
       const finalTranscript = fullTranscriptRef.current;
-      console.log('[VoiceSession] 📤 Sending transcript to onSessionEnd. Length:', finalTranscript.length);
+      console.log('[VoiceSession] 📤 Sending transcript. Length:', finalTranscript.length);
+      console.log('[VoiceSession] 📤 Content:', finalTranscript);
       onSessionEnd(finalTranscript);
-    }, 2000);
+    }, 500);
   };
 
   const toggleMute = () => {

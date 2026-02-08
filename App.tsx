@@ -601,8 +601,8 @@ const App: React.FC = () => {
     console.log('[App] 📝 Transcript preview:', transcript?.substring(0, 200) || '(empty)');
     console.log('[App] 📝 Full transcript:', transcript);
     
-    // Verificar con umbral más bajo (5 caracteres en lugar de vacío)
-    if (!transcript || transcript.trim().length < 5) {
+    // Verificar con umbral muy bajo (solo 3 caracteres)
+    if (!transcript || transcript.trim().length < 3) {
         console.error('[App] ❌ Transcript too short or empty, cancelling save');
         console.error('[App] Transcript received:', transcript);
         console.error('[App] Possible causes: microphone not working, permissions denied, or transcription failed');
@@ -640,7 +640,8 @@ const App: React.FC = () => {
       const updatedEntries = await StorageService.getEntriesForUser(currentUser.id);
       setEntries(updatedEntries);
       
-      setSelectedDate(targetDate);
+      // No abrir el modal automáticamente después de guardar una sesión de voz
+      // setSelectedDate(targetDate);
       setSessionDate(null);
     } catch (error) {
       console.error('[App] ❌ Error in handleSessionEnd:', error);
