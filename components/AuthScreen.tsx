@@ -109,14 +109,18 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                     window.location.hash = '';
                     history.replaceState(null, '', url.pathname + url.search);
                     
-                    // Limpiar estado de autenticación ANTES de llamar a onAuthSuccess
-                    // para que App.tsx tome control del loading
-                    setIsAuthenticating(false);
+                    // NO cambiar isAuthenticating aquí - dejar que App.tsx maneje el loading
+                    // Esto evita que AuthScreen se desmonte antes de que App.tsx esté listo
                     setError(''); // Limpiar cualquier error previo
                     
                     console.log('📤 Llamando a onAuthSuccess con usuario...');
                     // Pasar el usuario directamente para evitar una segunda llamada al backend
                     onAuthSuccess(user);
+                    
+                    // Dar tiempo a que App.tsx tome control antes de desmontar AuthScreen
+                    setTimeout(() => {
+                        setIsAuthenticating(false);
+                    }, 100);
                 } catch (signInErr: any) {
                     // NO recargar la página, mostrar el error
                     console.error('❌ Error en sign-in de Supabase:', signInErr);

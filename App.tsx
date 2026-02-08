@@ -207,18 +207,22 @@ const App: React.FC = () => {
 
   const loadUserData = async (userId: string) => {
     try {
+      console.log('📥 Cargando datos del usuario:', userId);
       // Optimización: Solo cargar últimas 50 entradas por defecto
       const [e, g, s] = await Promise.all([
           StorageService.getEntriesForUser(userId, undefined, { limit: 50 }),
           StorageService.getGoalsForUser(userId),
           StorageService.getSettings(userId)
       ]);
+      console.log('✅ Datos cargados - Entradas:', e.length, 'Metas:', g.length);
       setEntries(e);
       setGoals(g);
       setSettings(s);
     } catch (error) {
       console.error('❌ Error cargando datos del usuario:', error);
       // Establecer valores por defecto para evitar pantalla en blanco
+      // La UI debe seguir funcionando aunque fallen las llamadas al servidor
+      console.log('⚠️ Usando valores por defecto para datos del usuario');
       setEntries([]);
       setGoals([]);
       setSettings({ 
@@ -233,6 +237,7 @@ const App: React.FC = () => {
 
   const refreshUserData = async (userId: string) => {
     try {
+      console.log('🔄 Refrescando datos del usuario:', userId);
       const refreshed = await AuthService.getUserById(userId);
       if (refreshed) {
         // BUGFIX: Asegurar que is_psychologist siempre tenga un valor booleano
@@ -240,6 +245,7 @@ const App: React.FC = () => {
           refreshed.is_psychologist = false;
           refreshed.isPsychologist = false;
         }
+        console.log('✅ Usuario refrescado:', refreshed.email);
         setCurrentUser(refreshed);
       }
       // Siempre cargar datos del usuario, incluso si falla la actualización
@@ -263,10 +269,13 @@ const App: React.FC = () => {
       // Don't logout on refresh errors - user can continue with cached data
       // Intentar cargar datos localmente como fallback
       try {
+        console.log('⚠️ Intentando cargar datos localmente como fallback...');
         await loadUserData(userId);
       } catch (loadError) {
         console.error('❌ Error cargando datos localmente:', loadError);
         // Establecer valores por defecto para evitar pantalla en blanco
+        // CRÍTICO: Nunca dejar la UI sin datos mínimos
+        console.log('⚠️ Usando valores por defecto mínimos');
         setEntries([]);
         setGoals([]);
         setSettings({ 
@@ -367,36 +376,42 @@ const App: React.FC = () => {
           }
           
           console.log('✅ Usuario obtenido:', user.email || user.id, '| is_psychologist:', user.is_psychologist);
-          setCurrentUser(user);
           
-          // Cargar datos del usuario ANTES de cambiar la vista
-          // IMPORTANTE: Usar try-catch interno para que un error en refreshUserData no bloquee la UI
-          try {
-              await refreshUserData(user.id);
-          } catch (refreshErr) {
-              console.error('❌ Error refrescando datos (no crítico, continuando):', refreshErr);
-              // No lanzar el error, permitir que la app continúe con el usuario y datos por defecto
-          }
+          // Establecer el usuario PRIMERO para que React pueda empezar a renderizar
+          setCurrentUser(user);
           
           // Solo permitir vista de psicólogo si is_psychologist es true
           const canAccessPsychologistView = user.is_psychologist === true;
           console.log('🎯 Estableciendo vista:', canAccessPsychologistView ? 'PATIENTS' : 'CALENDAR');
+          
+          // Establecer la vista ANTES de cargar los datos para evitar pantalla en blanco
           setViewState(canAccessPsychologistView ? ViewState.PATIENTS : ViewState.CALENDAR);
           setPsychViewMode(canAccessPsychologistView ? 'DASHBOARD' : 'PERSONAL');
-          
-          // Establecer tab por defecto según el rol
           setActiveTab(canAccessPsychologistView ? 'dashboard' : 'calendar');
           
+          // Desactivar loading ANTES de cargar datos para mostrar la UI
+          // Los datos se cargarán en segundo plano
+          setIsLoadingData(false);
+          clearTimeout(timeoutId);
+          
+          // Cargar datos del usuario EN SEGUNDO PLANO
+          // Esto permite que la UI se muestre inmediatamente
+          console.log('📥 Cargando datos de usuario en segundo plano...');
+          try {
+              await refreshUserData(user.id);
+              console.log('✅ Datos de usuario cargados');
+          } catch (refreshErr) {
+              console.error('❌ Error refrescando datos (no crítico):', refreshErr);
+              // No lanzar el error, la UI ya está visible
+          }
+          
           console.log('✅ handleAuthSuccess completado exitosamente');
-          clearTimeout(timeoutId); // Limpiar timeout si todo salió bien
       } catch (err) {
           console.error('❌ Error en handleAuthSuccess:', err);
           clearTimeout(timeoutId);
           setError('Error al cargar datos del usuario. Por favor, intenta de nuevo.');
           setViewState(ViewState.AUTH);
           setCurrentUser(null);
-      } finally {
-          console.log('🏁 handleAuthSuccess finalizando, limpiando loading...');
           setIsLoadingData(false);
       }
   };

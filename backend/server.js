@@ -3088,8 +3088,98 @@ app.patch('/api/users/:id', async (req, res) => {
       // Si se está cambiando desde un email temporal a uno real, actualizar la bandera
       let updatedFields = { ...req.body };
       if (hasTempEmail && req.body?.email && !req.body.email.includes('@noemail.dygo.local')) {
+        const newEmail = normalizeEmail(req.body.email);
+        
+        // 🔍 Verificar si ya existe un usuario con ese email
+        const existingUserWithEmail = db.users.find(u => 
+          u.id !== userId && 
+          normalizeEmail(u.email || u.user_email) === newEmail
+        );
+        
+        if (existingUserWithEmail) {
+          // ✨ Ya existe un usuario con ese email
+          console.log(`📧 Usuario con email ${newEmail} ya existe (ID: ${existingUserWithEmail.id}). Consolidando...`);
+          
+          // 1. Actualizar todas las relaciones donde el usuario temporal es paciente
+          if (Array.isArray(db.careRelationships)) {
+            db.careRelationships.forEach(rel => {
+              if (rel.patient_user_id === userId) {
+                // Verificar si ya existe una relación con el usuario real
+                const duplicateRel = db.careRelationships.find(r => 
+                  r.psychologist_user_id === rel.psychologist_user_id && 
+                  r.patient_user_id === existingUserWithEmail.id &&
+                  r.id !== rel.id
+                );
+                
+                if (!duplicateRel) {
+                  rel.patient_user_id = existingUserWithEmail.id;
+                  console.log(`   ✓ Relación ${rel.id} actualizada`);
+                }
+              }
+            });
+            
+            // Eliminar relaciones duplicadas
+            db.careRelationships = db.careRelationships.filter(rel => {
+              if (rel.patient_user_id === userId) {
+                const hasDuplicate = db.careRelationships.some(r => 
+                  r.psychologist_user_id === rel.psychologist_user_id && 
+                  r.patient_user_id === existingUserWithEmail.id &&
+                  r.id !== rel.id
+                );
+                return !hasDuplicate;
+              }
+              return true;
+            });
+          }
+          
+          // 2. Migrar otros datos (entradas, metas, sesiones, etc.)
+          if (Array.isArray(db.entries)) {
+            db.entries.forEach(entry => {
+              if (entry.userId === userId) entry.userId = existingUserWithEmail.id;
+              if (entry.target_user_id === userId) entry.target_user_id = existingUserWithEmail.id;
+              if (entry.creator_user_id === userId) entry.creator_user_id = existingUserWithEmail.id;
+            });
+          }
+          
+          if (Array.isArray(db.goals)) {
+            db.goals.forEach(goal => {
+              if (goal.userId === userId) goal.userId = existingUserWithEmail.id;
+              if (goal.patient_user_id === userId) goal.patient_user_id = existingUserWithEmail.id;
+            });
+          }
+          
+          if (Array.isArray(db.invoices)) {
+            db.invoices.forEach(invoice => {
+              if (invoice.patient_user_id === userId) invoice.patient_user_id = existingUserWithEmail.id;
+              if (invoice.psychologist_user_id === userId) invoice.psychologist_user_id = existingUserWithEmail.id;
+            });
+          }
+          
+          if (Array.isArray(db.sessions)) {
+            db.sessions.forEach(session => {
+              if (session.patient_user_id === userId) session.patient_user_id = existingUserWithEmail.id;
+              if (session.psychologist_user_id === userId) session.psychologist_user_id = existingUserWithEmail.id;
+            });
+          }
+          
+          // 3. Eliminar el usuario temporal
+          db.users = db.users.filter(u => u.id !== userId);
+          await saveDb(db, { awaitPersistence: true });
+          
+          console.log(`✅ Usuario temporal ${userId} eliminado. Datos consolidados en ${existingUserWithEmail.id}`);
+          
+          // Retornar el usuario existente
+          return res.json({
+            ...existingUserWithEmail,
+            consolidated: true,
+            message: `Usuario consolidado con ${existingUserWithEmail.id}`
+          });
+        }
+        
+        // Si no existe otro usuario con ese email, actualizar normalmente
         updatedFields.has_temp_email = false;
-        updatedFields.email = req.body.email.trim().toLowerCase();
+        updatedFields.email = newEmail;
+        updatedFields.user_email = newEmail;
       } else if (!req.body?.email) {
         // Si no se proporciona email, mantener el email temporal
         delete updatedFields.email;
@@ -3134,7 +3224,125 @@ app.patch('/api/users/:id', async (req, res) => {
     
     // Si se está cambiando desde un email temporal a uno real
     if (hasTempEmail && req.body?.email && !req.body.email.includes('@noemail.dygo.local')) {
-      updateFields.user_email = normalizeEmail(req.body.email);
+      const newEmail = normalizeEmail(req.body.email);
+      
+      // 🔍 Verificar si ya existe un usuario con ese email
+      const { data: existingUserWithEmail } = await supabaseAdmin
+        .from('users')
+        .select('id, data, user_email')
+        .eq('user_email', newEmail)
+        .neq('id', userId) // Excluir el usuario actual
+        .maybeSingle();
+      
+      if (existingUserWithEmail) {
+        // ✨ Ya existe un usuario con ese email
+        console.log(`📧 Usuario con email ${newEmail} ya existe (ID: ${existingUserWithEmail.id}). Consolidando...`);
+        
+        // 1. Actualizar todas las relaciones donde el usuario temporal es paciente
+        const { data: relationships } = await supabaseAdmin
+          .from('care_relationships')
+          .select('id, psychologist_user_id, patient_user_id')
+          .eq('patient_user_id', userId);
+        
+        if (relationships && relationships.length > 0) {
+          console.log(`   Actualizando ${relationships.length} relaciones...`);
+          
+          for (const rel of relationships) {
+            // Verificar si ya existe una relación entre el psicólogo y el usuario con email
+            const { data: existingRel } = await supabaseAdmin
+              .from('care_relationships')
+              .select('id')
+              .eq('psychologist_user_id', rel.psychologist_user_id)
+              .eq('patient_user_id', existingUserWithEmail.id)
+              .maybeSingle();
+            
+            if (!existingRel) {
+              // Actualizar la relación para apuntar al usuario con email
+              await supabaseAdmin
+                .from('care_relationships')
+                .update({ patient_user_id: existingUserWithEmail.id })
+                .eq('id', rel.id);
+              console.log(`   ✓ Relación ${rel.id} actualizada`);
+            } else {
+              // Ya existe una relación, eliminar la duplicada
+              await supabaseAdmin
+                .from('care_relationships')
+                .delete()
+                .eq('id', rel.id);
+              console.log(`   ✓ Relación duplicada ${rel.id} eliminada`);
+            }
+          }
+        }
+        
+        // 2. Migrar otros datos si es necesario (entradas, metas, sesiones, etc.)
+        // Actualizar session_entry
+        await supabaseAdmin
+          .from('session_entry')
+          .update({ target_user_id: existingUserWithEmail.id })
+          .eq('target_user_id', userId);
+        
+        await supabaseAdmin
+          .from('session_entry')
+          .update({ creator_user_id: existingUserWithEmail.id })
+          .eq('creator_user_id', userId);
+        
+        // Actualizar goals
+        await supabaseAdmin
+          .from('goals')
+          .update({ patient_user_id: existingUserWithEmail.id })
+          .eq('patient_user_id', userId);
+        
+        // Actualizar invoices
+        await supabaseAdmin
+          .from('invoices')
+          .update({ patient_user_id: existingUserWithEmail.id })
+          .eq('patient_user_id', userId);
+        
+        await supabaseAdmin
+          .from('invoices')
+          .update({ psychologist_user_id: existingUserWithEmail.id })
+          .eq('psychologist_user_id', userId);
+        
+        // Actualizar sessions
+        await supabaseAdmin
+          .from('sessions')
+          .update({ patient_user_id: existingUserWithEmail.id })
+          .eq('patient_user_id', userId);
+        
+        await supabaseAdmin
+          .from('sessions')
+          .update({ psychologist_user_id: existingUserWithEmail.id })
+          .eq('psychologist_user_id', userId);
+        
+        // 3. Eliminar el usuario temporal
+        const { error: deleteError } = await supabaseAdmin
+          .from('users')
+          .delete()
+          .eq('id', userId);
+        
+        if (deleteError) {
+          console.error('❌ Error eliminando usuario temporal:', deleteError);
+        } else {
+          console.log(`✅ Usuario temporal ${userId} eliminado. Datos consolidados en ${existingUserWithEmail.id}`);
+        }
+        
+        // También eliminar de db.json si existe
+        if (!supabaseAdmin) {
+          const db = getDb();
+          db.users = db.users.filter(u => u.id !== userId);
+          await saveDb(db, { awaitPersistence: true });
+        }
+        
+        // Retornar el usuario existente
+        return res.json({
+          ...existingUserWithEmail,
+          consolidated: true,
+          message: `Usuario consolidado con ${existingUserWithEmail.id}`
+        });
+      }
+      
+      // Si no existe otro usuario con ese email, actualizar normalmente
+      updateFields.user_email = newEmail;
       // Actualizar has_temp_email en el campo data
       const currentData = existingUser.data || {};
       currentData.has_temp_email = false;
@@ -6633,6 +6841,20 @@ app.post('/api/relationships', async (req, res) => {
           return res.json(normalizeSupabaseRow(existing));
         }
         
+        // Calcular el siguiente número de paciente para este psicólogo
+        let nextPatientNumber = 1;
+        const { data: allRels } = await supabaseAdmin
+          .from('care_relationships')
+          .select('patientnumber')
+          .eq('psychologist_user_id', psychId);
+        
+        if (allRels && allRels.length > 0) {
+          const numbers = allRels
+            .map(r => r.patientnumber)
+            .filter(n => typeof n === 'number');
+          nextPatientNumber = numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
+        }
+        
         // Crear nueva relación
         const newRel = {
           id: crypto.randomUUID(),
@@ -6640,6 +6862,7 @@ app.post('/api/relationships', async (req, res) => {
           patient_user_id: patId,
           default_session_price: defaultPrice,
           default_psych_percent: defaultPercent,
+          patientnumber: nextPatientNumber,
           data: { tags }
         };
         
