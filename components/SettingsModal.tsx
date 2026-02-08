@@ -53,7 +53,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
 
   const handleSave = () => {
     const newSettings: UserSettings = { notificationsEnabled: enabled, feedbackNotificationsEnabled: feedbackEnabled, notificationTime: time, language, voice, allowPsychologistAccess };
-    if ((enabled || feedbackEnabled) && Notification.permission !== 'granted') {
+    
+    // Verificar que Notification API esté disponible (no siempre en iOS)
+    if ((enabled || feedbackEnabled) && typeof Notification !== 'undefined' && Notification.permission !== 'granted') {
         Notification.requestPermission().then(permission => {
             const granted = permission === 'granted';
             onSave({
@@ -64,7 +66,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
             onClose();
         });
     } else {
-        onSave(newSettings);
+        // Si Notification no está disponible, guardar sin notificaciones
+        onSave({
+            ...newSettings,
+            notificationsEnabled: typeof Notification !== 'undefined' && enabled,
+            feedbackNotificationsEnabled: typeof Notification !== 'undefined' && feedbackEnabled
+        });
         onClose();
     }
   };

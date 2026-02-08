@@ -485,6 +485,9 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!settings.notificationsEnabled || !currentUser) return;
+    // Verificar que Notification API esté disponible (no siempre en iOS)
+    if (typeof Notification === 'undefined') return;
+    
     const checkTime = async () => {
       const now = new Date();
       const currentHm = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -541,6 +544,8 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!currentUser) return;
     if (!settings.feedbackNotificationsEnabled) return;
+    // Verificar que Notification API esté disponible (no siempre en iOS)
+    if (typeof Notification === 'undefined') return;
     if (Notification.permission !== 'granted') return;
 
     const storageKey = `dygo_feedback_notified_${currentUser.id}`;
