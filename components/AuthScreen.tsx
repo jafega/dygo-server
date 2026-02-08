@@ -103,13 +103,18 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                     
                     console.log('✅ Autenticación exitosa:', user.email || user.id);
                     
-                    // Limpiar parámetros de la URL
+                    // Limpiar parámetros de la URL ANTES de llamar a onAuthSuccess
                     url.searchParams.delete('code');
                     url.searchParams.delete('supabase_auth');
                     window.location.hash = '';
                     history.replaceState(null, '', url.pathname + url.search);
                     
+                    // Limpiar estado de autenticación ANTES de llamar a onAuthSuccess
+                    // para que App.tsx tome control del loading
                     setIsAuthenticating(false);
+                    setError(''); // Limpiar cualquier error previo
+                    
+                    console.log('📤 Llamando a onAuthSuccess con usuario...');
                     // Pasar el usuario directamente para evitar una segunda llamada al backend
                     onAuthSuccess(user);
                 } catch (signInErr: any) {
@@ -124,7 +129,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                     
                     setIsAuthenticating(false);
                     authCallbackExecutedRef.current = false; // Permitir reintentar
-                    setError(signInErr?.message || 'Error al autenticar con el servidor');
+                    setError(signInErr?.message || 'Error al autenticar con el servidor. Por favor, intenta de nuevo.');
                 }
             } catch (err: any) {
                 console.error('❌ Error general en callback de Supabase:', err);

@@ -242,10 +242,22 @@ const App: React.FC = () => {
         }
         setCurrentUser(refreshed);
       }
+      // Siempre cargar datos del usuario, incluso si falla la actualización
       await loadUserData(userId);
-      if (refreshed?.email) await checkInvitations(refreshed.email, refreshed.id);
+      // Solo verificar invitaciones y perfil si tenemos datos del usuario
+      if (refreshed?.email) {
+        try {
+          await checkInvitations(refreshed.email, refreshed.id);
+        } catch (invErr) {
+          console.warn('⚠️ Error verificando invitaciones (no crítico):', invErr);
+        }
+      }
       // Check profile for both psychologists and patients
-      await checkProfileComplete(userId);
+      try {
+        await checkProfileComplete(userId);
+      } catch (profileErr) {
+        console.warn('⚠️ Error verificando perfil (no crítico):', profileErr);
+      }
     } catch (e) {
       console.error('❌ Error refrescando datos del usuario:', e);
       // Don't logout on refresh errors - user can continue with cached data
@@ -254,6 +266,16 @@ const App: React.FC = () => {
         await loadUserData(userId);
       } catch (loadError) {
         console.error('❌ Error cargando datos localmente:', loadError);
+        // Establecer valores por defecto para evitar pantalla en blanco
+        setEntries([]);
+        setGoals([]);
+        setSettings({ 
+          notificationsEnabled: false, 
+          feedbackNotificationsEnabled: true,
+          notificationTime: '20:00',
+          language: 'es-ES',
+          voice: 'Kore' 
+        });
       }
     }
   };
@@ -309,17 +331,28 @@ const App: React.FC = () => {
       
       // Mostrar indicador de carga mientras se obtiene y cargan los datos del usuario
       setIsLoadingData(true);
+      setError(''); // Limpiar errores previos
+      
+      // Timeout de seguridad: si después de 15 segundos aún está cargando, forzar error
+      const timeoutId = setTimeout(() => {
+          console.error('⏱️ Timeout: handleAuthSuccess tardó demasiado');
+          setIsLoadingData(false);
+          setError('La carga está tardando más de lo esperado. Por favor, recarga la página.');
+          setViewState(ViewState.AUTH);
+      }, 15000); // 15 segundos
       
       try {
           // Si ya tenemos el usuario (ej: desde signInWithSupabase), usarlo directamente
           let user = providedUser;
           
           if (!user) {
+              console.log('🔄 Obteniendo usuario actual desde localStorage...');
               user = await AuthService.getCurrentUser();
           }
           
           if (!user) {
               console.error('❌ No se pudo obtener el usuario después de autenticación');
+              clearTimeout(timeoutId);
               setCurrentUser(null);
               setViewState(ViewState.AUTH);
               setError('Error al cargar usuario. Por favor, intenta de nuevo.');
@@ -337,20 +370,33 @@ const App: React.FC = () => {
           setCurrentUser(user);
           
           // Cargar datos del usuario ANTES de cambiar la vista
-          await refreshUserData(user.id);
+          // IMPORTANTE: Usar try-catch interno para que un error en refreshUserData no bloquee la UI
+          try {
+              await refreshUserData(user.id);
+          } catch (refreshErr) {
+              console.error('❌ Error refrescando datos (no crítico, continuando):', refreshErr);
+              // No lanzar el error, permitir que la app continúe con el usuario y datos por defecto
+          }
           
           // Solo permitir vista de psicólogo si is_psychologist es true
           const canAccessPsychologistView = user.is_psychologist === true;
+          console.log('🎯 Estableciendo vista:', canAccessPsychologistView ? 'PATIENTS' : 'CALENDAR');
           setViewState(canAccessPsychologistView ? ViewState.PATIENTS : ViewState.CALENDAR);
           setPsychViewMode(canAccessPsychologistView ? 'DASHBOARD' : 'PERSONAL');
           
           // Establecer tab por defecto según el rol
           setActiveTab(canAccessPsychologistView ? 'dashboard' : 'calendar');
+          
+          console.log('✅ handleAuthSuccess completado exitosamente');
+          clearTimeout(timeoutId); // Limpiar timeout si todo salió bien
       } catch (err) {
           console.error('❌ Error en handleAuthSuccess:', err);
+          clearTimeout(timeoutId);
           setError('Error al cargar datos del usuario. Por favor, intenta de nuevo.');
           setViewState(ViewState.AUTH);
+          setCurrentUser(null);
       } finally {
+          console.log('🏁 handleAuthSuccess finalizando, limpiando loading...');
           setIsLoadingData(false);
       }
   };
@@ -938,7 +984,27 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
   }
 
   if (isLoadingData) {
-      return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-indigo-600"><Loader2 className="animate-spin w-10 h-10" /></div>;
+      return (
+          <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-indigo-50 to-slate-100 p-4">
+              <div className="text-center">
+                  <div className="mb-6 flex justify-center">
+                      <DygoLogo className="w-16 h-16 text-indigo-600 animate-pulse" />
+                  </div>
+                  <h1 className="text-4xl font-bold text-indigo-600 tracking-tight mb-4 font-dygo">dygo</h1>
+                  <div className="relative w-64 h-2 bg-indigo-100 rounded-full overflow-hidden mx-auto mb-3">
+                      <div className="absolute top-0 left-0 h-full bg-indigo-600 rounded-full animate-[loading_1.5s_ease-in-out_infinite]"></div>
+                  </div>
+                  <p className="text-slate-500 text-sm">Cargando tu información...</p>
+              </div>
+              <style>{`
+                  @keyframes loading {
+                      0% { width: 0%; }
+                      50% { width: 70%; }
+                      100% { width: 100%; }
+                  }
+              `}</style>
+          </div>
+      );
   }
 
   // Patient View
