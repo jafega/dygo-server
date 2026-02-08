@@ -40,7 +40,6 @@ export function decompressTranscript(transcript: string): string {
 
 interface AnalysisResult {
   summary: string;
-  sentimentScore: number;
   structuredEmotions: EmotionStructure[];
   advice: string;
 }
@@ -94,9 +93,8 @@ export async function analyzeJournalEntry(transcript: string, date: string, user
     
     Extrae:
     1. Resumen conciso EN PRIMERA PERSONA (como si fuera el usuario escribiendo su diario). Ejemplo: "Me sentí..." en lugar de "El usuario se sintió...".
-    2. Sentimiento (1-10).
-    3. Estructura de emociones (Nivel 1, 2, 3).
-    4. Consejo Clínico (breve, 1-2 frases).
+    2. Estructura de emociones (Nivel 1, 2, 3) basada en la Rueda de los Sentimientos.
+    3. Consejo Clínico (breve, 1-2 frases).
     
     Transcripción:
     "${transcript}"
@@ -116,7 +114,6 @@ export async function analyzeJournalEntry(transcript: string, date: string, user
         type: Type.OBJECT,
         properties: {
           summary: { type: Type.STRING },
-          sentimentScore: { type: Type.NUMBER },
           structuredEmotions: {
             type: Type.ARRAY,
             items: {
@@ -131,7 +128,7 @@ export async function analyzeJournalEntry(transcript: string, date: string, user
           },
           advice: { type: Type.STRING }
         },
-        required: ["summary", "sentimentScore", "structuredEmotions", "advice"]
+        required: ["summary", "structuredEmotions", "advice"]
       }
     }
   });
@@ -139,8 +136,7 @@ export async function analyzeJournalEntry(transcript: string, date: string, user
   console.log('[genaiService] ✅ Gemini API response received');
   const result: AnalysisResult = JSON.parse(response.text || "{}");
   console.log('[genaiService] 📊 Analysis result:', { 
-    summaryLength: result.summary?.length, 
-    sentimentScore: result.sentimentScore,
+    summaryLength: result.summary?.length,
     emotionsCount: result.structuredEmotions?.length
   });
   
@@ -166,7 +162,6 @@ export async function analyzeJournalEntry(transcript: string, date: string, user
     timestamp: Date.now(),
     transcript: compressedTranscript, // Comprimir para ahorrar espacio
     summary: result.summary || "No summary available.",
-    sentimentScore: result.sentimentScore || 5,
     emotions: flatEmotions,
     structuredEmotions: safeStructuredEmotions,
     advice: result.advice || "Reflexiona sobre lo vivido hoy."
@@ -265,14 +260,14 @@ export async function generateClinicalSummary(entries: JournalEntry[]): Promise<
   const prompt = `
     Actúa como un asistente clínico redactando un informe para un psicólogo.
     Aquí tienes los registros recientes del paciente:
-    ${JSON.stringify(entries.map(e => ({ date: e.date, summary: e.summary, emotions: e.emotions, sentiment: e.sentimentScore })))}
+    ${JSON.stringify(entries.map(e => ({ date: e.date, summary: e.summary, emotions: e.emotions })))}
     
     Genera un "Resumen de Estado" objetivo y técnico en tercera persona (ej: "El paciente reporta...", "Se observa...").
     NO des consejos. 
     Enfócate en:
     1. Estabilidad emocional reciente.
     2. Principales estresores o temas recurrentes detectados.
-    3. Evolución del estado de ánimo.
+    3. Emociones predominantes.
     
     Máximo 4 frases concisas.
   `;

@@ -813,11 +813,18 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">Precio/h (€)</label>
                   <input
-                    type="number"
-                    step="0.01"
-                    value={editedSession.price || 0}
-                    onChange={(e) => handleFieldChange('price', parseFloat(e.target.value) || 0)}
+                    type="text"
+                    inputMode="decimal"
+                    value={editedSession.price === 0 ? '' : editedSession.price || ''}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      // Permitir vacío, números y decimales
+                      if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                        handleFieldChange('price', value === '' ? 0 : parseFloat(value) || 0);
+                      }
+                    }}
                     className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                    placeholder="0.00"
                   />
                   <p className="text-xs text-slate-500 mt-1">
                     Total: {getSessionTotalPrice(editedSession).toFixed(2)}€

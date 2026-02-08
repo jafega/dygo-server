@@ -130,20 +130,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
                       </div>
                     </div>
 
-                    {/* Badge de ánimo (solo en voice sessions) */}
-                    {!isFeedback && typeof entry.sentimentScore === 'number' && (
-                      <div className={`flex items-center gap-1.5 px-3 py-1.5 md:px-4 md:py-2 rounded-full font-bold text-sm md:text-base ${
-                        entry.sentimentScore >= 7 
-                          ? 'bg-green-100 text-green-700' 
-                          : entry.sentimentScore >= 4 
-                          ? 'bg-yellow-100 text-yellow-700' 
-                          : 'bg-red-100 text-red-700'
-                      }`}>
-                        <Smile className="w-4 h-4 md:w-5 md:h-5" />
-                        <span className="hidden sm:inline">{entry.sentimentScore}/10</span>
-                        <span className="sm:hidden">{entry.sentimentScore}</span>
-                      </div>
-                    )}
+                    {/* Sin badge de puntuación - Solo emociones se mantienen */}
                   </div>
                 </div>
 

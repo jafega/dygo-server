@@ -233,9 +233,6 @@ const EntryCard: React.FC<{
                          </h4>
                          <p className="text-slate-700 leading-relaxed text-sm">{entry.summary}</p>
                                                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                                                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${entry.sentimentScore >= 7 ? 'bg-green-50 text-green-700 border-green-200' : entry.sentimentScore >= 4 ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
-                                                         {entry.sentimentScore}/10
-                                                     </span>
                                                      {entry.emotions?.length > 0 && entry.emotions.slice(0, 6).map(em => (
                                                          <span key={em} className="text-[10px] bg-white text-slate-600 px-2 py-0.5 rounded-full border border-slate-200 font-semibold">
                                                              {em}
@@ -369,21 +366,9 @@ const EntryCard: React.FC<{
                          )}
                      </div>
                    );
-                 })()}
+                 })}
 
-                 {/* Stats Bar (Only for User Entries) */}
-                 {!isPsychEntry && (
-                     <div className="flex items-center gap-3 pt-2">
-                         <span className="text-xs text-slate-400">Bienestar:</span>
-                         <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                             <div 
-                               className={`h-full rounded-full ${entry.sentimentScore >= 7 ? 'bg-green-400' : entry.sentimentScore >= 4 ? 'bg-yellow-400' : 'bg-red-400'}`}
-                               style={{width: `${entry.sentimentScore * 10}%`}} 
-                             />
-                         </div>
-                         <span className="text-xs font-bold text-slate-600">{entry.sentimentScore}/10</span>
-                     </div>
-                 )}
+                 {/* Stats Bar eliminada - sentimentScore ya no se usa */}
             </div>
         </div>
     );

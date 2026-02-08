@@ -2105,11 +2105,18 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">Precio por hora (€)</label>
                   <input
-                    type="number"
-                    step="0.01"
-                    value={editedSession.price || 0}
-                    onChange={(e) => handleFieldChange('price', parseFloat(e.target.value) || 0)}
+                    type="text"
+                    inputMode="decimal"
+                    value={editedSession.price === 0 ? '' : editedSession.price || ''}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      // Permitir vacío, números y decimales
+                      if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                        handleFieldChange('price', value === '' ? 0 : parseFloat(value) || 0);
+                      }
+                    }}
                     className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    placeholder="0.00"
                   />
                   <p className="text-xs text-slate-500 mt-1">
                     Duración: {getSessionDurationHours(editedSession).toFixed(2)}h → Total: {getSessionTotalPrice(editedSession).toFixed(2)}€
@@ -2295,16 +2302,23 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                       }
                     }}
                     onFocus={() => setShowPatientDropdown(true)}
-                    placeholder="Buscar paciente..."
+                    placeholder="Buscar paciente por nombre..."
                     className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   />
                   {showPatientDropdown && (
                     <div className="absolute z-10 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
                       {patients
-                        .filter(patient => 
-                          patient.name.toLowerCase().includes(patientSearchQuery.toLowerCase()) ||
-                          patient.email?.toLowerCase().includes(patientSearchQuery.toLowerCase())
-                        )
+                        .filter(patient => {
+                          // Solo mostrar pacientes con relación activa
+                          const hasActiveRelationship = careRelationships.some(
+                            rel => (rel.patient_user_id || rel.patientId) === patient.id && 
+                                   (rel.psychologist_user_id || rel.psychologistId) === psychologistId &&
+                                   rel.active !== false
+                          );
+                          // Filtrar por nombre solamente
+                          const matchesSearch = patient.name.toLowerCase().includes(patientSearchQuery.toLowerCase());
+                          return hasActiveRelationship && matchesSearch;
+                        })
                         .map(patient => (
                           <div
                             key={patient.id}
@@ -2334,11 +2348,16 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                             )}
                           </div>
                         ))}
-                      {patients.filter(patient => 
-                        patient.name.toLowerCase().includes(patientSearchQuery.toLowerCase()) ||
-                        patient.email?.toLowerCase().includes(patientSearchQuery.toLowerCase())
-                      ).length === 0 && (
-                        <div className="px-4 py-2 text-slate-500 text-sm">No se encontraron pacientes</div>
+                      {patients.filter(patient => {
+                        const hasActiveRelationship = careRelationships.some(
+                          rel => (rel.patient_user_id || rel.patientId) === patient.id && 
+                                 (rel.psychologist_user_id || rel.psychologistId) === psychologistId &&
+                                 rel.active !== false
+                        );
+                        const matchesSearch = patient.name.toLowerCase().includes(patientSearchQuery.toLowerCase());
+                        return hasActiveRelationship && matchesSearch;
+                      }).length === 0 && (
+                        <div className="px-4 py-2 text-slate-500 text-sm">No se encontraron pacientes con relación activa</div>
                       )}
                     </div>
                   )}
@@ -2399,11 +2418,16 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">Precio por hora (€) *</label>
                   <input
-                    type="number"
-                    value={newSession.price}
-                    onChange={(e) => setNewSession({ ...newSession, price: parseFloat(e.target.value) || 0 })}
-                    min="0"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
+                    value={newSession.price === 0 ? '' : newSession.price}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      // Permitir vacío, números y decimales
+                      if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                        setNewSession({ ...newSession, price: value === '' ? 0 : parseFloat(value) || 0 });
+                      }
+                    }}
                     className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                     placeholder="0.00"
                   />
@@ -2723,16 +2747,23 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                       }
                     }}
                     onFocus={() => setShowAssignPatientDropdown(true)}
-                    placeholder="Buscar paciente..."
+                    placeholder="Buscar paciente por nombre..."
                     className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                   />
                   {showAssignPatientDropdown && (
                     <div className="absolute z-10 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
                       {patients
-                        .filter(patient => 
-                          patient.name.toLowerCase().includes(assignPatientSearchQuery.toLowerCase()) ||
-                          patient.email?.toLowerCase().includes(assignPatientSearchQuery.toLowerCase())
-                        )
+                        .filter(patient => {
+                          // Solo mostrar pacientes con relación activa
+                          const hasActiveRelationship = careRelationships.some(
+                            rel => (rel.patient_user_id || rel.patientId) === patient.id && 
+                                   (rel.psychologist_user_id || rel.psychologistId) === psychologistId &&
+                                   rel.active !== false
+                          );
+                          // Filtrar por nombre solamente
+                          const matchesSearch = patient.name.toLowerCase().includes(assignPatientSearchQuery.toLowerCase());
+                          return hasActiveRelationship && matchesSearch;
+                        })
                         .map(patient => (
                           <div
                             key={patient.id}
@@ -2749,19 +2780,42 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                             )}
                           </div>
                         ))}
-                      {patients.filter(patient => 
-                        patient.name.toLowerCase().includes(assignPatientSearchQuery.toLowerCase()) ||
-                        patient.email?.toLowerCase().includes(assignPatientSearchQuery.toLowerCase())
-                      ).length === 0 && (
-                        <div className="px-4 py-2 text-slate-500 text-sm">No se encontraron pacientes</div>
+                      {patients.filter(patient => {
+                        const hasActiveRelationship = careRelationships.some(
+                          rel => (rel.patient_user_id || rel.patientId) === patient.id && 
+                                 (rel.psychologist_user_id || rel.psychologistId) === psychologistId &&
+                                 rel.active !== false
+                        );
+                        const matchesSearch = patient.name.toLowerCase().includes(assignPatientSearchQuery.toLowerCase());
+                        return hasActiveRelationship && matchesSearch;
+                      }).length === 0 && (
+                        <div className="px-4 py-2 text-slate-500 text-sm">No se encontraron pacientes con relación activa</div>
                       )}
                     </div>
                   )}
                 </div>
                 <p className="text-xs text-slate-500 mt-1">
-                  {patients.length === 0 
-                    ? 'No tienes pacientes asociados aún' 
-                    : `${patients.length} paciente${patients.length !== 1 ? 's' : ''} disponible${patients.length !== 1 ? 's' : ''}`
+                  {patients.filter(patient => 
+                    careRelationships.some(
+                      rel => (rel.patient_user_id || rel.patientId) === patient.id && 
+                             (rel.psychologist_user_id || rel.psychologistId) === psychologistId &&
+                             rel.active !== false
+                    )
+                  ).length === 0 
+                    ? 'No tienes pacientes con relación activa' 
+                    : `${patients.filter(patient => 
+                        careRelationships.some(
+                          rel => (rel.patient_user_id || rel.patientId) === patient.id && 
+                                 (rel.psychologist_user_id || rel.psychologistId) === psychologistId &&
+                                 rel.active !== false
+                        )
+                      ).length} paciente${patients.filter(patient => 
+                        careRelationships.some(
+                          rel => (rel.patient_user_id || rel.patientId) === patient.id && 
+                                 (rel.psychologist_user_id || rel.psychologistId) === psychologistId &&
+                                 rel.active !== false
+                        )
+                      ).length !== 1 ? 's' : ''} con relación activa`
                   }
                 </p>
               </div>

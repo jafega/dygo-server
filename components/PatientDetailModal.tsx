@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, User, Calendar, Phone, Mail, FileText, DollarSign, Settings, Tag, Trash2, Save, Edit2, CreditCard, MapPin, Cake, Clock as ClockIcon, BookOpen, Sparkles, CheckCircle, AlertCircle, Download, Loader2, Ticket, Building2, TrendingUp, BarChart3 } from 'lucide-react';
+import { X, User, Calendar, Phone, Mail, FileText, DollarSign, Settings, Tag, Trash2, Save, Edit2, CreditCard, MapPin, Cake, Clock as ClockIcon, BookOpen, Sparkles, CheckCircle, AlertCircle, Download, Loader2, Ticket, Building2, TrendingUp, BarChart3, Upload, File, XCircle } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser } from '../services/authService';
 import InsightsPanel from './InsightsPanel';
@@ -7,6 +7,7 @@ import BillingPanel from './BillingPanel';
 import PsychologistPatientSessions from './PsychologistPatientSessions';
 import PatientTimeline from './PatientTimeline';
 import BonosPanel from './BonosPanel';
+import { HistoricalDocument, HistoricalDocumentsSummary } from '../types';
 
 interface PatientSummary {
   id: string;
@@ -34,7 +35,8 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
     defaultPercent: 70,
     tags: [] as string[],
     usesBonos: false,
-    centerId: '' as string | null
+    centerId: '' as string | null,
+    active: true // Estado activo/inactivo del paciente
   });
   const [centers, setCenters] = useState<any[]>([]);
   const [tagInput, setTagInput] = useState('');
@@ -51,6 +53,14 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   const [isSavingNotes, setIsSavingNotes] = useState(false);
   const [patientStats, setPatientStats] = useState<any>(null);
   const [isLoadingStats, setIsLoadingStats] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  
+  // Historical documents states
+  const [historicalDocs, setHistoricalDocs] = useState<HistoricalDocumentsSummary>({ documents: [], lastUpdated: 0 });
+  const [isLoadingDocs, setIsLoadingDocs] = useState(false);
+  const [isUploadingDoc, setIsUploadingDoc] = useState(false);
+  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
 
   const patientUserId = patient.userId || patient.user_id || patient.id;
   const currentPsychologistId = psychologistId || patient.psychologistId || '';
@@ -66,8 +76,9 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   useEffect(() => {
     if (activeTab === 'HISTORY') {
       loadClinicalHistory();
+      loadHistoricalDocuments();
     }
-  }, [activeTab, patientUserId]);
+  }, [activeTab, patientUserId, relationship?.id]);
 
   const loadPatientData = async () => {
     if (!patientUserId) return;
@@ -359,6 +370,162 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
     }
   };
 
+  // Funciones para documentos históricos
+  const loadHistoricalDocuments = async () => {
+    if (!relationship?.id) return;
+    
+    setIsLoadingDocs(true);
+    try {
+      const response = await fetch(`${API_URL}/relationships/${relationship.id}/historical-documents`);
+      if (response.ok) {
+        const data = await response.json();
+        setHistoricalDocs(data);
+      }
+    } catch (error) {
+      console.error('Error loading historical documents:', error);
+    } finally {
+      setIsLoadingDocs(false);
+    }
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0 || !relationship?.id) return;
+
+    setIsUploadingDoc(true);
+    try {
+      const currentUser = await getCurrentUser();
+      if (!currentUser) {
+        alert('Error: Usuario no autenticado');
+        return;
+      }
+
+      for (const file of Array.from(files) as File[]) {
+        // Validar tamaño (máx 10MB)
+        if (file.size > 10 * 1024 * 1024) {
+          alert(`El archivo ${file.name} es demasiado grande. Máximo 10MB.`);
+          continue;
+        }
+
+        // Convertir a base64
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+
+        // Subir documento
+        const response = await fetch(`${API_URL}/relationships/${relationship.id}/historical-documents`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-user-id': currentUser.id
+          },
+          body: JSON.stringify({
+            fileName: file.name,
+            fileType: file.type,
+            fileSize: file.size,
+            content: base64
+          })
+        });
+
+        if (!response.ok) {
+          alert(`Error al subir ${file.name}`);
+        }
+      }
+
+      // Recargar documentos
+      await loadHistoricalDocuments();
+      alert('Documentos subidos correctamente');
+      
+      // Limpiar input
+      event.target.value = '';
+    } catch (error) {
+      console.error('Error uploading documents:', error);
+      alert('Error al subir documentos');
+    } finally {
+      setIsUploadingDoc(false);
+    }
+  };
+
+  const deleteHistoricalDocument = async (docId: string) => {
+    if (!relationship?.id || !confirm('¿Eliminar este documento?')) return;
+
+    try {
+      const currentUser = await getCurrentUser();
+      if (!currentUser) {
+        alert('Error: Usuario no autenticado');
+        return;
+      }
+
+      const response = await fetch(`${API_URL}/relationships/${relationship.id}/historical-documents/${docId}`, {
+        method: 'DELETE',
+        headers: {
+          'x-user-id': currentUser.id
+        }
+      });
+
+      if (response.ok) {
+        await loadHistoricalDocuments();
+      } else {
+        alert('Error al eliminar documento');
+      }
+    } catch (error) {
+      console.error('Error deleting document:', error);
+      alert('Error al eliminar documento');
+    }
+  };
+
+  const generateDocumentsSummary = async () => {
+    if (!relationship?.id || historicalDocs.documents.length === 0) return;
+
+    setIsGeneratingSummary(true);
+    try {
+      const currentUser = await getCurrentUser();
+      if (!currentUser) {
+        alert('Error: Usuario no autenticado');
+        return;
+      }
+
+      const response = await fetch(`${API_URL}/relationships/${relationship.id}/historical-documents/generate-summary`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': currentUser.id
+        }
+      });
+
+      if (response.ok) {
+        await loadHistoricalDocuments();
+        alert('Resumen generado correctamente');
+      } else {
+        const errorData = await response.json();
+        alert(errorData.error || 'Error al generar resumen');
+      }
+    } catch (error) {
+      console.error('Error generating summary:', error);
+      alert('Error al generar resumen');
+    } finally {
+      setIsGeneratingSummary(false);
+    }
+  };
+
+  const downloadDocument = (doc: HistoricalDocument) => {
+    const link = document.createElement('a');
+    link.href = doc.content;
+    link.download = doc.fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  };
+
   const downloadAllEntriesAsPDF = () => {
     if (clinicalHistory.length === 0) {
       alert('No hay entradas para descargar');
@@ -556,7 +723,8 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
         default_psych_percent: relationshipSettings.defaultPercent,
         tags: relationshipSettings.tags,
         uses_bonos: relationshipSettings.usesBonos,
-        center_id: relationshipSettings.centerId || null
+        center_id: relationshipSettings.centerId || null,
+        active: relationshipSettings.active
       };
       
       console.log('[PatientDetailModal] Guardando configuración:', payload);
@@ -576,6 +744,13 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
         alert('Configuración guardada correctamente');
         await loadRelationship();
         await loadAllPsychologistTags(); // Recargar todas las tags del psicólogo
+        
+        // Si se cambió el estado activo, cerrar el modal y recargar la lista
+        if (updatedRelationship.data?.active !== relationship.data?.active) {
+          setTimeout(() => {
+            onClose();
+          }, 500);
+        }
       } else {
         const errorData = await response.json();
         console.error('Error response:', errorData);
@@ -586,6 +761,48 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
       alert('Error al guardar la configuración');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleDeletePatient = async () => {
+    if (!currentPsychologistId || !patientUserId) {
+      alert('Error: Faltan datos para eliminar el paciente');
+      return;
+    }
+
+    setIsDeleting(true);
+    try {
+      const currentUser = await getCurrentUser();
+      if (!currentUser) {
+        alert('Error: Usuario no autenticado');
+        return;
+      }
+
+      const response = await fetch(`${API_URL}/relationships/${currentPsychologistId}/patients/${patientUserId}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': currentUser.id
+        }
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        alert(result.message || 'Paciente eliminado correctamente');
+        onClose(); // Cerrar el modal
+        // Recargar la página para reflejar los cambios
+        window.location.reload();
+      } else {
+        const errorData = await response.json();
+        console.error('Error response:', errorData);
+        alert('Error al eliminar el paciente: ' + (errorData.error || 'Error desconocido'));
+      }
+    } catch (error) {
+      console.error('Error deleting patient:', error);
+      alert('Error al eliminar el paciente');
+    } finally {
+      setIsDeleting(false);
+      setShowDeleteConfirm(false);
     }
   };
 
@@ -1635,6 +1852,138 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                   })}
                 </div>
               )}
+
+              {/* Sección de Documentos Históricos */}
+              <div className="bg-white rounded-lg sm:rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 px-3 sm:px-4 py-2.5 sm:py-3 border-b border-slate-200">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <File className="text-blue-600 w-4 h-4 sm:w-5 sm:h-5" />
+                      <h4 className="text-sm sm:text-base font-bold text-slate-900">Documentos Históricos</h4>
+                      <span className="text-xs text-slate-500">
+                        ({historicalDocs.documents.length} {historicalDocs.documents.length === 1 ? 'documento' : 'documentos'})
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {historicalDocs.documents.length > 0 && (
+                        <button
+                          onClick={generateDocumentsSummary}
+                          disabled={isGeneratingSummary}
+                          className="px-2 sm:px-3 py-1 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-all flex items-center gap-1 text-xs sm:text-sm font-medium disabled:opacity-50"
+                          title="Generar resumen automático con IA"
+                        >
+                          {isGeneratingSummary ? (
+                            <>
+                              <Loader2 className="animate-spin" size={14} />
+                              <span className="hidden sm:inline">Generando...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles size={14} />
+                              <span className="hidden sm:inline">Generar Resumen</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                      <label className="px-2 sm:px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all flex items-center gap-1 text-xs sm:text-sm font-medium cursor-pointer disabled:opacity-50">
+                        {isUploadingDoc ? (
+                          <>
+                            <Loader2 className="animate-spin" size={14} />
+                            <span className="hidden sm:inline">Subiendo...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Upload size={14} />
+                            <span className="hidden sm:inline">Subir</span>
+                          </>
+                        )}
+                        <input
+                          type="file"
+                          multiple
+                          accept=".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png"
+                          onChange={handleFileUpload}
+                          disabled={isUploadingDoc}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-3 sm:p-4 space-y-3">
+                  {/* Resumen generado por IA */}
+                  {historicalDocs.aiSummary && (
+                    <div className="bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-200 rounded-lg p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Sparkles size={16} className="text-indigo-600" />
+                        <h5 className="text-sm font-bold text-slate-900">Resumen del Histórico Previo</h5>
+                      </div>
+                      <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{historicalDocs.aiSummary}</p>
+                      <p className="text-xs text-slate-500 mt-2">
+                        Generado: {new Date(historicalDocs.lastUpdated).toLocaleString('es-ES')}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Lista de documentos */}
+                  {isLoadingDocs ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="animate-spin text-blue-600" size={32} />
+                    </div>
+                  ) : historicalDocs.documents.length === 0 ? (
+                    <div className="text-center py-8">
+                      <File size={48} className="mx-auto mb-3 text-slate-300" />
+                      <p className="text-sm text-slate-500">No hay documentos históricos</p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Sube documentos del historial previo del paciente para tener contexto completo
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {historicalDocs.documents.map((doc) => (
+                        <div
+                          key={doc.id}
+                          className="flex items-center gap-3 p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors"
+                        >
+                          <File size={20} className="text-blue-600 flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-slate-900 truncate">{doc.fileName}</p>
+                            <div className="flex items-center gap-2 text-xs text-slate-500">
+                              <span>{formatFileSize(doc.fileSize)}</span>
+                              <span>•</span>
+                              <span>{new Date(doc.uploadedAt).toLocaleDateString('es-ES')}</span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => downloadDocument(doc)}
+                              className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title="Descargar"
+                            >
+                              <Download size={16} />
+                            </button>
+                            <button
+                              onClick={() => deleteHistoricalDocument(doc.id)}
+                              className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Eliminar"
+                            >
+                              <XCircle size={16} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Información adicional */}
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mt-3">
+                    <p className="text-xs text-yellow-800">
+                      💡 <strong>Tip:</strong> Los documentos históricos son útiles para pacientes que migran de otro terapeuta. 
+                      Puedes subir informes previos, evaluaciones, etc. La IA generará un resumen automático para tu referencia.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1726,6 +2075,27 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                       </label>
                     </div>
 
+                    <div className="bg-white border border-slate-200 rounded-lg p-4">
+                      <label className="flex items-center justify-between cursor-pointer group">
+                        <div className="flex-1">
+                          <span className="text-sm font-semibold text-slate-700">Paciente Activo</span>
+                          <p className="text-xs text-slate-500 mt-1">Desactiva esta opción para ocultar el paciente de la lista principal (no se elimina)</p>
+                        </div>
+                        <div className="relative ml-4">
+                          <input
+                            type="checkbox"
+                            checked={relationshipSettings.active}
+                            onChange={(e) => setRelationshipSettings({
+                              ...relationshipSettings,
+                              active: e.target.checked
+                            })}
+                            className="sr-only peer"
+                          />
+                          <div className={`w-11 h-6 ${relationshipSettings.active ? 'bg-green-600' : 'bg-slate-300'} peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-green-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all`}></div>
+                        </div>
+                      </label>
+                    </div>
+
                     <div className="space-y-2">
                       <label className="text-sm font-semibold text-slate-600">Etiquetas</label>
                       <div className="relative">
@@ -1813,23 +2183,34 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                       </div>
                     </div>
 
-                    <button
-                      onClick={saveRelationshipSettings}
-                      disabled={isSaving}
-                      className="w-full px-6 py-3 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-                    >
-                      {isSaving ? (
-                        <>
-                          <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                          Guardando...
-                        </>
-                      ) : (
-                        <>
-                          <Save size={20} />
-                          Guardar Configuración
-                        </>
-                      )}
-                    </button>
+                    <div className="space-y-3">
+                      <button
+                        onClick={saveRelationshipSettings}
+                        disabled={isSaving}
+                        className="w-full px-6 py-3 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                      >
+                        {isSaving ? (
+                          <>
+                            <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            Guardando...
+                          </>
+                        ) : (
+                          <>
+                            <Save size={20} />
+                            Guardar Configuración
+                          </>
+                        )}
+                      </button>
+
+                      {/* Botón de Eliminar Paciente */}
+                      <button
+                        onClick={() => setShowDeleteConfirm(true)}
+                        className="w-full px-6 py-3 bg-red-50 text-red-600 border-2 border-red-200 rounded-lg font-medium hover:bg-red-100 transition-colors flex items-center justify-center gap-2"
+                      >
+                        <Trash2 size={20} />
+                        Eliminar Paciente
+                      </button>
+                    </div>
                   </>
                 ) : (
                   <div className="text-center py-8 text-slate-500">
@@ -1842,6 +2223,65 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
           )}
         </div>
       </div>
+
+      {/* Modal de Confirmación de Eliminación */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4" onClick={() => setShowDeleteConfirm(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3 text-red-600">
+              <div className="bg-red-100 p-3 rounded-full">
+                <AlertCircle size={24} />
+              </div>
+              <h3 className="text-xl font-bold text-slate-900">¿Eliminar Paciente?</h3>
+            </div>
+            
+            <div className="space-y-3 text-slate-700">
+              <p className="font-semibold">
+                Esta acción eliminará permanentemente:
+              </p>
+              <ul className="list-disc list-inside space-y-1 text-sm">
+                <li>La relación entre tú y el paciente</li>
+                <li>Todas las sesiones registradas con este paciente</li>
+              </ul>
+              <p className="text-sm">
+                <strong>No se eliminarán:</strong> Las facturas emitidas
+              </p>
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mt-3">
+                <p className="text-sm text-yellow-800">
+                  ⚠️ <strong>Esta acción no se puede deshacer.</strong> Si el paciente tiene una cuenta propia, podrá seguir accediendo a su información personal.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={isDeleting}
+                className="flex-1 px-4 py-3 bg-slate-100 text-slate-700 rounded-lg font-medium hover:bg-slate-200 transition-colors disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleDeletePatient}
+                disabled={isDeleting}
+                className="flex-1 px-4 py-3 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {isDeleting ? (
+                  <>
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Eliminando...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={18} />
+                    Eliminar
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

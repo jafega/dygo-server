@@ -2213,34 +2213,63 @@ const handleAdminCreatePatient = async (req, res) => {
     if (!psychologistId) return res.status(401).json({ error: 'Missing psychologist id in header x-user-id' });
 
     const { name, email, phone } = req.body || {};
-    if (!name || !email) return res.status(400).json({ error: 'Name and email are required' });
+    if (!name) return res.status(400).json({ error: 'Name is required' });
+
+    // Validar formato de email si se proporciona
+    if (email && email.trim()) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email.trim())) {
+        return res.status(400).json({ error: 'El email proporcionado no tiene un formato válido' });
+      }
+    }
 
     const db = getDb();
-    const psychologist = db.users.find(u => u.id === String(psychologistId));
+    
+    // Primero intentar buscar en Supabase si está disponible
+    let psychologist = null;
+    if (supabaseAdmin) {
+      const { data: psychData } = await supabaseAdmin
+        .from('users')
+        .select('id, data')
+        .eq('id', psychologistId)
+        .maybeSingle();
+      
+      if (psychData && psychData.data) {
+        psychologist = psychData.data;
+      }
+    }
+    
+    // Si no se encontró en Supabase, buscar en DB local
+    if (!psychologist) {
+      psychologist = db.users.find(u => u.id === String(psychologistId));
+    }
+    
     if (!psychologist || !psychologist.is_psychologist) {
       return res.status(403).json({ error: 'Only psychologists can create patients' });
     }
 
-    // Verificar si el email ya existe
-    const normalizedEmail = normalizeEmail(email);
+    // Verificar si el email ya existe (solo si se proporcionó email)
+    const normalizedEmail = email && email.trim() ? normalizeEmail(email.trim()) : null;
     let existingPatientId = null;
     let existingPatient = null;
     
-    if (supabaseAdmin) {
-      const { data: existingInSupabase } = await supabaseAdmin
-        .from('users')
-        .select('id, data')
-        .eq('user_email', normalizedEmail)
-        .maybeSingle();
-      
-      if (existingInSupabase) {
-        existingPatientId = existingInSupabase.id;
-        existingPatient = existingInSupabase.data;
-      }
-    } else {
-      existingPatient = db.users.find(u => normalizeEmail(u.email) === normalizedEmail);
-      if (existingPatient) {
-        existingPatientId = existingPatient.id;
+    if (normalizedEmail) {
+      if (supabaseAdmin) {
+        const { data: existingInSupabase } = await supabaseAdmin
+          .from('users')
+          .select('id, data')
+          .eq('user_email', normalizedEmail)
+          .maybeSingle();
+        
+        if (existingInSupabase) {
+          existingPatientId = existingInSupabase.id;
+          existingPatient = existingInSupabase.data;
+        }
+      } else {
+        existingPatient = db.users.find(u => u.email && normalizeEmail(u.email) === normalizedEmail);
+        if (existingPatient) {
+          existingPatientId = existingPatient.id;
+        }
       }
     }
 
@@ -2272,6 +2301,28 @@ const handleAdminCreatePatient = async (req, res) => {
       }
       
       // Crear solo la relación de cuidado
+      // Calcular el siguiente número de paciente para este psicólogo
+      let nextPatientNumber = 1;
+      if (supabaseAdmin) {
+        const { data: allRels } = await supabaseAdmin
+          .from('care_relationships')
+          .select('data')
+          .eq('psychologist_user_id', psychologistId);
+        
+        if (allRels && allRels.length > 0) {
+          const numbers = allRels
+            .map(r => r.data?.patientNumber)
+            .filter(n => typeof n === 'number');
+          nextPatientNumber = numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
+        }
+      } else {
+        const psychRels = db.careRelationships?.filter(r => r.psychologist_user_id === psychologistId) || [];
+        const numbers = psychRels
+          .map(r => r.data?.patientNumber)
+          .filter(n => typeof n === 'number');
+        nextPatientNumber = numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
+      }
+      
       const relationship = {
         id: crypto.randomUUID(),
         psychologist_user_id: psychologistId,
@@ -2283,7 +2334,9 @@ const handleAdminCreatePatient = async (req, res) => {
           psychologistId: psychologistId,
           patientId: existingPatientId,
           status: 'active',
-          tags: []
+          tags: [],
+          active: true,
+          patientNumber: nextPatientNumber
         },
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -2316,25 +2369,51 @@ const handleAdminCreatePatient = async (req, res) => {
       }
       db.careRelationships.push(relationship);
       await saveDb(db, { awaitPersistence: false });
-      
-      console.log(`✅ Relación creada con paciente existente: ${existingPatient.name || existingPatient.email} (${existingPatientId}) por psicólogo ${psychologist.name}`);
+
+      console.log(`✅ Relación creada con paciente existente: ${existingPatient.name} por psicólogo ${psychologist.name}`);
       
       return res.json({
         success: true,
+        message: 'Relación creada con paciente existente',
         patient: existingPatient,
-        relationship: relationship,
-        message: 'Relación creada con paciente existente'
+        relationship: relationship
       });
     }
 
     // Si el usuario no existe, crear el nuevo paciente
+    // Si no hay email, usar un identificador temporal
+    const patientEmail = normalizedEmail || `temp_${crypto.randomUUID()}@noemail.dygo.local`;
+    
+    // Calcular el siguiente número de paciente para este psicólogo
+    let nextPatientNumber = 1;
+    if (supabaseAdmin) {
+      const { data: allRels } = await supabaseAdmin
+        .from('care_relationships')
+        .select('data')
+        .eq('psychologist_user_id', psychologistId);
+      
+      if (allRels && allRels.length > 0) {
+        const numbers = allRels
+          .map(r => r.data?.patientNumber)
+          .filter(n => typeof n === 'number');
+        nextPatientNumber = numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
+      }
+    } else {
+      const psychRels = db.careRelationships?.filter(r => r.psychologist_user_id === psychologistId) || [];
+      const numbers = psychRels
+        .map(r => r.data?.patientNumber)
+        .filter(n => typeof n === 'number');
+      nextPatientNumber = numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
+    }
+
     const newPatient = {
       id: crypto.randomUUID(),
-      email: normalizedEmail,
+      email: patientEmail,
       name: name.trim(),
       phone: phone ? phone.trim() : '',
       is_psychologist: false,
       auth_user_id: null,
+      has_temp_email: !normalizedEmail, // Bandera para indicar que el email es temporal
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
@@ -2351,7 +2430,9 @@ const handleAdminCreatePatient = async (req, res) => {
         psychologistId: psychologistId,
         patientId: newPatient.id,
         status: 'active',
-        tags: []
+        tags: [],
+        active: true,
+        patientNumber: nextPatientNumber
       },
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -6758,6 +6839,16 @@ app.put('/api/relationships/:id', async (req, res) => {
           newData.uses_bonos = updatedData.uses_bonos;
         }
         
+        // Si se envía active, guardarlo en data
+        if (updatedData.active !== undefined) {
+          newData.active = updatedData.active;
+        }
+        
+        // Si se envía patientNumber, guardarlo en data
+        if (updatedData.patientNumber !== undefined) {
+          newData.patientNumber = updatedData.patientNumber;
+        }
+        
         // Merge cualquier otro campo de data que venga
         if (updatedData.data) {
           Object.assign(newData, updatedData.data);
@@ -6816,6 +6907,16 @@ app.put('/api/relationships/:id', async (req, res) => {
 
     // Actualizar campos directos y mantener compatibilidad con data
     const existingData = db.careRelationships[idx].data || {};
+    // Si se envía active, guardarlo en data
+    if (updatedData.active !== undefined) {
+      newData.active = updatedData.active;
+    }
+    
+    // Si se envía patientNumber, guardarlo en data
+    if (updatedData.patientNumber !== undefined) {
+      newData.patientNumber = updatedData.patientNumber;
+    }
+    
     const newData = {
       ...existingData,
       ...(updatedData.data || {})
@@ -6845,6 +6946,423 @@ app.put('/api/relationships/:id', async (req, res) => {
   } catch (err) {
     console.error('❌ Error updating relationship', err);
     return res.status(500).json({ error: err?.message || 'No se pudo actualizar la relación' });
+  }
+});
+
+// Eliminar paciente (relación y sesiones)
+app.delete('/api/relationships/:psychologistId/patients/:patientId', async (req, res) => {
+  try {
+    const { psychologistId, patientId } = req.params;
+    
+    console.log('[DELETE /api/relationships/:psychologistId/patients/:patientId] Eliminando paciente:', { psychologistId, patientId });
+    
+    if (!psychologistId || !patientId) {
+      return res.status(400).json({ error: 'Se requieren psychologistId y patientId' });
+    }
+
+    // Verificar si el paciente tiene auth (user_id)
+    let patientHasAuth = false;
+    
+    if (supabaseAdmin) {
+      try {
+        // Buscar si existe un usuario con ese ID
+        const { data: userData, error: userError } = await supabaseAdmin
+          .from('users')
+          .select('id, email')
+          .eq('id', patientId)
+          .limit(1);
+        
+        if (userError && userError.code !== 'PGRST116') { // PGRST116 = no rows returned
+          console.error('[DELETE patient] Error al buscar usuario:', userError);
+          throw userError;
+        }
+        
+        patientHasAuth = userData && userData.length > 0 && userData[0].email;
+        console.log('[DELETE patient] ¿Paciente tiene auth?:', patientHasAuth);
+        
+        // Eliminar la relación
+        const { error: relError } = await supabaseAdmin
+          .from('care_relationships')
+          .delete()
+          .eq('psychologist_user_id', psychologistId)
+          .eq('patient_user_id', patientId);
+        
+        if (relError) {
+          console.error('[DELETE patient] Error eliminando relación:', relError);
+          throw relError;
+        }
+        
+        // Eliminar sesiones relacionadas con este psicólogo y paciente
+        const { error: sessionsError } = await supabaseAdmin
+          .from('sessions')
+          .delete()
+          .eq('psychologist_user_id', psychologistId)
+          .eq('patient_user_id', patientId);
+        
+        if (sessionsError) {
+          console.error('[DELETE patient] Error eliminando sesiones:', sessionsError);
+          throw sessionsError;
+        }
+        
+        // Actualizar cache
+        if (supabaseDbCache) {
+          if (supabaseDbCache.careRelationships) {
+            supabaseDbCache.careRelationships = supabaseDbCache.careRelationships.filter(rel =>
+              !(rel.psychologist_user_id === psychologistId && rel.patient_user_id === patientId)
+            );
+          }
+          if (supabaseDbCache.sessions) {
+            supabaseDbCache.sessions = supabaseDbCache.sessions.filter(session =>
+              !(session.psychologist_user_id === psychologistId && session.patient_user_id === patientId)
+            );
+          }
+        }
+        
+        console.log('[DELETE patient] ✓ Paciente eliminado correctamente (Supabase)');
+        return res.json({ 
+          success: true, 
+          message: patientHasAuth 
+            ? 'Relación eliminada. El paciente puede seguir accediendo a su información.' 
+            : 'Paciente y sesiones eliminados correctamente.'
+        });
+      } catch (err) {
+        console.error('[DELETE patient] ❌ Error en Supabase:', err);
+        return res.status(500).json({ error: 'Error eliminando el paciente' });
+      }
+    }
+    
+    // Fallback a DB local
+    const db = getDb();
+    
+    // Verificar si tiene auth en DB local
+    const userExists = db.users && db.users.find(u => u.id === patientId && u.email);
+    patientHasAuth = !!userExists;
+    
+    // Eliminar relación
+    if (Array.isArray(db.careRelationships)) {
+      const removed = removeCareRelationshipByPair(db, psychologistId, patientId);
+      if (!removed) {
+        return res.status(404).json({ error: 'Relación no encontrada' });
+      }
+    }
+    
+    // Eliminar sesiones
+    if (Array.isArray(db.sessions)) {
+      db.sessions = db.sessions.filter(session =>
+        !(session.psychologist_user_id === psychologistId && session.patient_user_id === patientId)
+      );
+    }
+    
+    await saveDb(db, { awaitPersistence: true });
+    console.log('[DELETE patient] ✓ Paciente eliminado correctamente (DB local)');
+    return res.json({ 
+      success: true,
+      message: patientHasAuth 
+        ? 'Relación eliminada. El paciente puede seguir accediendo a su información.' 
+        : 'Paciente y sesiones eliminados correctamente.'
+    });
+  } catch (err) {
+    console.error('❌ Error deleting patient:', err);
+    return res.status(500).json({ error: err?.message || 'No se pudo eliminar el paciente' });
+  }
+});
+
+// --- HISTORICAL DOCUMENTS ---
+// GET /api/relationships/:id/historical-documents - Obtener documentos históricos
+app.get('/api/relationships/:id/historical-documents', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    if (!id) {
+      return res.status(400).json({ error: 'Relationship ID requerido' });
+    }
+
+    // Intentar cargar desde Supabase primero
+    if (supabaseAdmin) {
+      try {
+        const { data: rows, error } = await supabaseAdmin
+          .from('care_relationships')
+          .select('data')
+          .eq('id', id)
+          .limit(1);
+        
+        if (error) throw error;
+        
+        if (rows && rows[0]) {
+          const historicalDocs = rows[0].data?.historicalDocuments || { documents: [], lastUpdated: 0 };
+          console.log(`[GET /api/relationships/${id}/historical-documents] Returning ${historicalDocs.documents?.length || 0} documents from Supabase`);
+          return res.json(historicalDocs);
+        }
+      } catch (err) {
+        console.error(`[GET /api/relationships/${id}/historical-documents] ⚠️ Error loading from Supabase:`, err);
+      }
+    }
+
+    // Fallback a DB local
+    const db = getDb();
+    if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
+    
+    const relationship = db.careRelationships.find(rel => rel.id === id);
+    if (!relationship) {
+      return res.status(404).json({ error: 'Relación no encontrada' });
+    }
+
+    const historicalDocs = relationship.data?.historicalDocuments || { documents: [], lastUpdated: 0 };
+    console.log(`[GET /api/relationships/${id}/historical-documents] Returning ${historicalDocs.documents?.length || 0} documents from local DB`);
+    
+    return res.json(historicalDocs);
+  } catch (err) {
+    console.error('❌ Error getting historical documents:', err);
+    return res.status(500).json({ error: err?.message || 'No se pudieron obtener los documentos' });
+  }
+});
+
+// POST /api/relationships/:id/historical-documents - Subir documento histórico
+app.post('/api/relationships/:id/historical-documents', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { fileName, fileType, fileSize, content } = req.body;
+    
+    if (!id || !fileName || !fileType || !content) {
+      return res.status(400).json({ error: 'Faltan campos requeridos' });
+    }
+
+    const db = getDb();
+    if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
+    
+    const relationship = db.careRelationships.find(rel => rel.id === id);
+    if (!relationship) {
+      return res.status(404).json({ error: 'Relación no encontrada' });
+    }
+
+    // Inicializar estructura de documentos históricos si no existe
+    if (!relationship.data) relationship.data = {};
+    if (!relationship.data.historicalDocuments) {
+      relationship.data.historicalDocuments = { documents: [], lastUpdated: 0 };
+    }
+
+    // Crear nuevo documento
+    const newDocument = {
+      id: crypto.randomBytes(16).toString('hex'),
+      fileName,
+      fileType,
+      fileSize,
+      content,
+      uploadedAt: Date.now()
+    };
+
+    relationship.data.historicalDocuments.documents.push(newDocument);
+    relationship.data.historicalDocuments.lastUpdated = Date.now();
+
+    // Persistir en Supabase
+    if (supabaseAdmin) {
+      try {
+        const { error } = await supabaseAdmin
+          .from('care_relationships')
+          .update({ data: relationship.data })
+          .eq('id', id);
+        
+        if (error) throw error;
+        console.log(`[POST /api/relationships/${id}/historical-documents] ✅ Document saved to Supabase: ${fileName}`);
+        
+        // Actualizar cache
+        if (supabaseDbCache?.careRelationships) {
+          const idx = supabaseDbCache.careRelationships.findIndex(rel => rel.id === id);
+          if (idx >= 0) {
+            supabaseDbCache.careRelationships[idx].data = relationship.data;
+          }
+        }
+      } catch (err) {
+        console.error(`[POST /api/relationships/${id}/historical-documents] ⚠️ Error saving to Supabase:`, err);
+      }
+    }
+
+    await saveDb(db, { awaitPersistence: true });
+    console.log(`[POST /api/relationships/${id}/historical-documents] Document uploaded: ${fileName}`);
+    
+    return res.json(newDocument);
+  } catch (err) {
+    console.error('❌ Error uploading historical document:', err);
+    return res.status(500).json({ error: err?.message || 'No se pudo subir el documento' });
+  }
+});
+
+// DELETE /api/relationships/:id/historical-documents/:docId - Eliminar documento histórico
+app.delete('/api/relationships/:id/historical-documents/:docId', async (req, res) => {
+  try {
+    const { id, docId } = req.params;
+    
+    if (!id || !docId) {
+      return res.status(400).json({ error: 'IDs requeridos' });
+    }
+
+    const db = getDb();
+    if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
+    
+    const relationship = db.careRelationships.find(rel => rel.id === id);
+    if (!relationship) {
+      return res.status(404).json({ error: 'Relación no encontrada' });
+    }
+
+    if (!relationship.data?.historicalDocuments?.documents) {
+      return res.status(404).json({ error: 'No hay documentos' });
+    }
+
+    const initialLength = relationship.data.historicalDocuments.documents.length;
+    relationship.data.historicalDocuments.documents = relationship.data.historicalDocuments.documents.filter(
+      doc => doc.id !== docId
+    );
+
+    if (relationship.data.historicalDocuments.documents.length === initialLength) {
+      return res.status(404).json({ error: 'Documento no encontrado' });
+    }
+
+    relationship.data.historicalDocuments.lastUpdated = Date.now();
+    
+    // Si no quedan documentos, limpiar el resumen
+    if (relationship.data.historicalDocuments.documents.length === 0) {
+      relationship.data.historicalDocuments.aiSummary = undefined;
+    }
+
+    // Persistir en Supabase
+    if (supabaseAdmin) {
+      try {
+        const { error } = await supabaseAdmin
+          .from('care_relationships')
+          .update({ data: relationship.data })
+          .eq('id', id);
+        
+        if (error) throw error;
+        console.log(`[DELETE /api/relationships/${id}/historical-documents/${docId}] ✅ Document deleted from Supabase`);
+        
+        // Actualizar cache
+        if (supabaseDbCache?.careRelationships) {
+          const idx = supabaseDbCache.careRelationships.findIndex(rel => rel.id === id);
+          if (idx >= 0) {
+            supabaseDbCache.careRelationships[idx].data = relationship.data;
+          }
+        }
+      } catch (err) {
+        console.error(`[DELETE /api/relationships/${id}/historical-documents/${docId}] ⚠️ Error deleting from Supabase:`, err);
+      }
+    }
+
+    await saveDb(db, { awaitPersistence: true });
+    console.log(`[DELETE /api/relationships/${id}/historical-documents/${docId}] Document deleted`);
+    
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('❌ Error deleting historical document:', err);
+    return res.status(500).json({ error: err?.message || 'No se pudo eliminar el documento' });
+  }
+});
+
+// POST /api/relationships/:id/historical-documents/generate-summary - Generar resumen con IA
+app.post('/api/relationships/:id/historical-documents/generate-summary', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    if (!id) {
+      return res.status(400).json({ error: 'Relationship ID requerido' });
+    }
+
+    if (!genAI) {
+      return res.status(503).json({ error: 'Servicio de IA no disponible. Configure GEMINI_API_KEY.' });
+    }
+
+    const db = getDb();
+    if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
+    
+    const relationship = db.careRelationships.find(rel => rel.id === id);
+    if (!relationship) {
+      return res.status(404).json({ error: 'Relación no encontrada' });
+    }
+
+    const docs = relationship.data?.historicalDocuments?.documents || [];
+    if (docs.length === 0) {
+      return res.status(400).json({ error: 'No hay documentos para resumir' });
+    }
+
+    console.log(`[POST /api/relationships/${id}/historical-documents/generate-summary] Generating summary for ${docs.length} documents`);
+
+    // Preparar información de documentos para la IA
+    const docsInfo = docs.map(doc => {
+      const uploadDate = new Date(doc.uploadedAt).toLocaleDateString('es-ES');
+      return `
+Documento: ${doc.fileName}
+Tipo: ${doc.fileType}
+Fecha de subida: ${uploadDate}
+Tamaño: ${(doc.fileSize / 1024).toFixed(1)} KB
+---`;
+    }).join('\n\n');
+
+    // Generar resumen con Gemini
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    
+    const prompt = `Eres un psicólogo clínico experto. Se te proporcionan documentos históricos de un paciente que está siendo transferido desde otro terapeuta. 
+
+DOCUMENTOS HISTÓRICOS:
+${docsInfo}
+
+INSTRUCCIONES:
+1. Genera un resumen clínico estructurado del historial del paciente basándote en los documentos proporcionados
+2. El resumen debe incluir:
+   - Contexto general del paciente
+   - Motivos de consulta previos
+   - Diagnósticos o evaluaciones previas (si se mencionan)
+   - Tratamientos o intervenciones realizadas
+   - Aspectos relevantes para la continuidad terapéutica
+3. Mantén un tono profesional y clínico
+4. Si alguna información no está disponible en los documentos, indícalo brevemente
+5. El resumen debe ser conciso pero completo (máximo 500 palabras)
+
+IMPORTANTE: Solo puedes ver los metadatos de los documentos (nombre, tipo, fecha). Genera el resumen basándote en esa información y en lo que típicamente contendrían esos tipos de documentos. Indica claramente que se trata de una vista preliminar basada en los documentos disponibles.`;
+
+    const result = await model.generateContent(prompt);
+    const summary = result.response.text();
+
+    // Guardar resumen
+    if (!relationship.data.historicalDocuments) {
+      relationship.data.historicalDocuments = { documents: docs, lastUpdated: 0 };
+    }
+    
+    relationship.data.historicalDocuments.aiSummary = summary;
+    relationship.data.historicalDocuments.lastUpdated = Date.now();
+
+    // Persistir en Supabase
+    if (supabaseAdmin) {
+      try {
+        const { error } = await supabaseAdmin
+          .from('care_relationships')
+          .update({ data: relationship.data })
+          .eq('id', id);
+        
+        if (error) throw error;
+        console.log(`[POST /api/relationships/${id}/historical-documents/generate-summary] ✅ Summary saved to Supabase`);
+        
+        // Actualizar cache
+        if (supabaseDbCache?.careRelationships) {
+          const idx = supabaseDbCache.careRelationships.findIndex(rel => rel.id === id);
+          if (idx >= 0) {
+            supabaseDbCache.careRelationships[idx].data = relationship.data;
+          }
+        }
+      } catch (err) {
+        console.error(`[POST /api/relationships/${id}/historical-documents/generate-summary] ⚠️ Error saving to Supabase:`, err);
+      }
+    }
+
+    await saveDb(db, { awaitPersistence: true });
+    console.log(`[POST /api/relationships/${id}/historical-documents/generate-summary] Summary generated successfully`);
+    
+    return res.json({ 
+      success: true, 
+      summary,
+      documentsCount: docs.length 
+    });
+  } catch (err) {
+    console.error('❌ Error generating documents summary:', err);
+    return res.status(500).json({ error: err?.message || 'No se pudo generar el resumen' });
   }
 });
 
@@ -8582,32 +9100,45 @@ app.patch('/api/session-entries/:id', async (req, res) => {
 // --- PATIENTS LIST ---
 app.get('/api/psychologist/:psychologistId/patients', (req, res) => {
   const { psychologistId } = req.params;
+  const { showInactive } = req.query; // Recibir parámetro para mostrar inactivos
   const db = getDb();
   
   console.log(`[GET /api/psychologist/${psychologistId}/patients] Total relationships:`, db.careRelationships?.length);
+  console.log(`[GET /api/psychologist/${psychologistId}/patients] showInactive:`, showInactive);
   
-  // Filtrar solo relaciones activas (sin endedAt) del psicólogo
-  const linkedPatientIds = new Set(
-    (db.careRelationships || [])
-      .filter(rel => {
-        const psychId = rel.psychologist_user_id || rel.psych_user_id || rel.psychologistId;
-        const patId = rel.patient_user_id || rel.patientId;
-        const isMatch = psychId === psychologistId;
-        const isActive = !rel.endedAt; // Solo relaciones activas
-        
-        console.log(`  Evaluating relationship:`, {
-          psychId,
-          patId,
-          endedAt: rel.endedAt,
-          isMatch,
-          isActive,
-          result: isMatch && isActive
-        });
-        
-        return isMatch && isActive;
-      })
-      .map(rel => rel.patient_user_id || rel.patientId)
-  );
+  // Filtrar solo relaciones del psicólogo (sin endedAt significa que la relación sigue activa)
+  const relationships = (db.careRelationships || [])
+    .filter(rel => {
+      const psychId = rel.psychologist_user_id || rel.psych_user_id || rel.psychologistId;
+      const isMatch = psychId === psychologistId;
+      const isActive = !rel.endedAt; // Relación no finalizada
+      
+      // Filtrar por estado activo/inactivo del paciente si no se pide mostrar inactivos
+      const patientActive = rel.data?.active !== false; // Por defecto es true
+      const shouldShow = showInactive === 'true' || patientActive;
+      
+      console.log(`  Evaluating relationship:`, {
+        psychId,
+        patId: rel.patient_user_id || rel.patientId,
+        endedAt: rel.endedAt,
+        patientActive,
+        isMatch,
+        isActive,
+        shouldShow,
+        result: isMatch && isActive && shouldShow
+      });
+      
+      return isMatch && isActive && shouldShow;
+    });
+
+  // Crear mapa de relaciones por paciente
+  const relationshipMap = new Map();
+  relationships.forEach(rel => {
+    const patId = rel.patient_user_id || rel.patientId;
+    relationshipMap.set(patId, rel);
+  });
+
+  const linkedPatientIds = new Set(Array.from(relationshipMap.keys()));
 
   console.log(`[GET /api/psychologist/${psychologistId}/patients] Linked patient IDs:`, Array.from(linkedPatientIds));
   
@@ -8616,18 +9147,24 @@ app.get('/api/psychologist/:psychologistId/patients', (req, res) => {
         const isLinked = linkedPatientIds.has(user.id);
         console.log(`  Evaluating user ${user.id} (${user.name}):`, { isLinked });
         return isLinked;
-      }).map(u => ({
-        id: u.id,
-        name: u.name,
-        email: u.email || u.user_email,
-        phone: u.phone || '',
-        billing_name: u.billing_name || u.name,
-        billing_address: u.billing_address || u.address || '',
-        billing_tax_id: u.billing_tax_id || u.tax_id || ''
-      }))
+      }).map(u => {
+        const rel = relationshipMap.get(u.id);
+        return {
+          id: u.id,
+          name: u.name,
+          email: u.email || u.user_email,
+          phone: u.phone || '',
+          billing_name: u.billing_name || u.name,
+          billing_address: u.billing_address || u.address || '',
+          billing_tax_id: u.billing_tax_id || u.tax_id || '',
+          tags: rel?.data?.tags || [],
+          active: rel?.data?.active !== false, // Por defecto true
+          patientNumber: rel?.data?.patientNumber || 0
+        };
+      })
     : [];
   
-  console.log(`[GET /api/psychologist/${psychologistId}/patients] Found ${patients.length} active patients:`, patients);
+  console.log(`[GET /api/psychologist/${psychologistId}/patients] Found ${patients.length} patients:`, patients);
   res.json(patients);
 });
 

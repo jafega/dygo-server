@@ -3,7 +3,7 @@ import { PatientSummary } from '../types';
 import { getPatientsForPsychologist } from '../services/storageService';
 import { getCurrentUser } from '../services/authService';
 import PatientDetailModal from './PatientDetailModal';
-import { Users, Clock, Loader2, ToggleLeft, ToggleRight, Search, Filter, X, UserPlus } from 'lucide-react';
+import { Users, Clock, Loader2, ToggleLeft, ToggleRight, Search, Filter, X, UserPlus, Mail } from 'lucide-react';
 import { API_URL } from '../services/config';
 
 export interface PatientDashboardHandle {
@@ -61,7 +61,7 @@ const PatientDashboard = forwardRef<PatientDashboardHandle>((props, ref) => {
 
   // Filtrar pacientes por búsqueda y tags
   const filteredPatients = useMemo(() => {
-    return patients.filter(patient => {
+    let result = patients.filter(patient => {
       // Filtro por búsqueda (nombre)
       if (searchTerm) {
         const matchesSearch = patient.name.toLowerCase().includes(searchTerm.toLowerCase());
@@ -77,6 +77,15 @@ const PatientDashboard = forwardRef<PatientDashboardHandle>((props, ref) => {
       
       return true;
     });
+    
+    // Ordenar: primero separar el psicólogo (isSelf), luego ordenar por número descendente (más nuevo arriba)
+    const psychologist = result.filter(p => p.isSelf);
+    const otherPatients = result.filter(p => !p.isSelf);
+    
+    // Ordenar otros pacientes por número descendente (más alto = más nuevo)
+    otherPatients.sort((a, b) => (b.patientNumber || 0) - (a.patientNumber || 0));
+    
+    return [...psychologist, ...otherPatients];
   }, [patients, searchTerm, filterTags]);
 
   const loadData = async (showLoader = true) => {
@@ -160,6 +169,15 @@ const PatientDashboard = forwardRef<PatientDashboardHandle>((props, ref) => {
       return;
     }
 
+    // Validar formato de email si se proporciona
+    if (newPatient.email.trim()) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(newPatient.email.trim())) {
+        alert('El email proporcionado no tiene un formato válido');
+        return;
+      }
+    }
+
     setIsCreating(true);
     try {
       const fullName = `${newPatient.firstName.trim()} ${newPatient.lastName.trim()}`.trim();
@@ -172,7 +190,7 @@ const PatientDashboard = forwardRef<PatientDashboardHandle>((props, ref) => {
         },
         body: JSON.stringify({
           name: fullName,
-          email: newPatient.email.trim().toLowerCase(),
+          email: newPatient.email.trim() ? newPatient.email.trim().toLowerCase() : undefined,
           phone: newPatient.phone.trim(),
           psychologistId: currentUser.id
         })
@@ -336,9 +354,19 @@ const PatientDashboard = forwardRef<PatientDashboardHandle>((props, ref) => {
                 </div>
             ) : (
                 filteredPatients.map(patient => (
-                    <div key={patient.id} onClick={() => setSelectedPatientId(patient.id)} className="border border-slate-200 rounded-lg sm:rounded-xl p-2.5 sm:p-4 hover:shadow-md transition-shadow bg-white cursor-pointer group">
-                        <div className="flex justify-between items-start sm:items-center gap-2 sm:gap-3">
-                            <div className="flex items-start sm:items-center gap-2 sm:gap-3 min-w-0 flex-1">
+                    <div key={patient.id} onClick={() => setSelectedPatientId(patient.id)} className="border border-slate-200 rounded-lg sm:rounded-xl p-3 sm:p-4 hover:shadow-md transition-shadow bg-white cursor-pointer group">
+                        <div className="flex justify-between items-start gap-3">
+                            {/* Columna izquierda: Número y Avatar */}
+                            <div className="flex items-start gap-2 sm:gap-3">
+                                {/* Número de paciente */}
+                                {patient.patientNumber > 0 && (
+                                    <div className="flex-shrink-0 w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-indigo-100 flex items-center justify-center border-2 border-indigo-200">
+                                        <span className="text-indigo-700 font-bold text-xs sm:text-sm">
+                                            {patient.patientNumber}
+                                        </span>
+                                    </div>
+                                )}
+                                
                                 {/* Avatar del paciente */}
                                 <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0 overflow-hidden border-2 border-slate-200">
                                     {patient.avatarUrl ? (
@@ -349,30 +377,42 @@ const PatientDashboard = forwardRef<PatientDashboardHandle>((props, ref) => {
                                         </span>
                                     )}
                                 </div>
-                                
-                                <div className="min-w-0 flex-1">
-                                    <h4 className="font-bold text-slate-800 text-sm sm:text-base group-hover:text-indigo-600 transition-colors truncate">{patient.name}</h4>
-                                    <div className="flex items-center gap-1 sm:gap-1.5 text-[9px] sm:text-xs text-slate-400 mt-0.5">
-                                        <Clock size={10} className="shrink-0" /> 
-                                        <span className="truncate">{patient.lastUpdate}</span>
-                                    </div>
-                                    
-                                    {/* Tags del paciente */}
-                                    {patient.tags && patient.tags.length > 0 && (
-                                      <div className="flex flex-wrap gap-1 sm:gap-1.5 mt-1.5 sm:mt-2">
-                                        {patient.tags.map((tag, idx) => (
-                                          <span
-                                            key={idx}
-                                            className="inline-flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-[9px] sm:text-[10px] font-medium"
-                                          >
-                                            🏷️ {tag}
-                                          </span>
-                                        ))}
-                                      </div>
-                                    )}
-                                </div>
                             </div>
                             
+                            {/* Columna central: Información del paciente */}
+                            <div className="min-w-0 flex-1">
+                                <h4 className="font-bold text-slate-800 text-sm sm:text-base group-hover:text-indigo-600 transition-colors truncate">{patient.name}</h4>
+                                
+                                {/* Email */}
+                                {patient.email && (
+                                    <div className="flex items-center gap-1 text-[10px] sm:text-xs text-slate-500 mt-0.5">
+                                        <Mail size={12} className="shrink-0" />
+                                        <span className="truncate">{patient.email}</span>
+                                    </div>
+                                )}
+                                
+                                {/* Última actualización */}
+                                <div className="flex items-center gap-1 sm:gap-1.5 text-[9px] sm:text-xs text-slate-400 mt-0.5">
+                                    <Clock size={10} className="shrink-0" /> 
+                                    <span className="truncate">{patient.lastUpdate}</span>
+                                </div>
+                                
+                                {/* Tags del paciente */}
+                                {patient.tags && patient.tags.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 sm:gap-1.5 mt-1.5 sm:mt-2">
+                                    {patient.tags.map((tag, idx) => (
+                                      <span
+                                        key={idx}
+                                        className="inline-flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-[9px] sm:text-[10px] font-medium"
+                                      >
+                                        🏷️ {tag}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                            </div>
+                            
+                            {/* Columna derecha: Indicadores */}
                             <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1.5 sm:gap-3 shrink-0">
                                 <span className={`px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-full text-[9px] sm:text-xs font-bold border ${getRiskColor(patient.riskLevel)} whitespace-nowrap`}>
                                     <span className="hidden sm:inline">Riesgo </span>{patient.riskLevel}
@@ -446,7 +486,7 @@ const PatientDashboard = forwardRef<PatientDashboardHandle>((props, ref) => {
 
                <div>
                  <label className="block text-sm font-medium text-slate-700 mb-2">
-                   Email *
+                   Email (opcional)
                  </label>
                  <input
                    type="email"
@@ -480,7 +520,7 @@ const PatientDashboard = forwardRef<PatientDashboardHandle>((props, ref) => {
                </button>
                <button
                  onClick={handleCreatePatient}
-                 disabled={isCreating || !newPatient.firstName.trim() || !newPatient.email.trim()}
+                 disabled={isCreating || !newPatient.firstName.trim()}
                  className="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium flex items-center justify-center gap-2"
                >
                  {isCreating ? (

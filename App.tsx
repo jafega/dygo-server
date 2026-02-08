@@ -797,10 +797,8 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
 
   const unreadFeedbackCount = feedbackEntries.filter(isFeedbackUnread).length;
 
-  const diaryEntries = safeEntries.filter(e => e.createdBy !== 'PSYCHOLOGIST' && typeof e.sentimentScore === 'number');
-  const averageSentiment = diaryEntries.length > 0
-    ? (diaryEntries.reduce((acc, curr) => acc + (curr.sentimentScore || 0), 0) / diaryEntries.length)
-    : null;
+  // Contar entradas de diario (sin sentimentScore ya que se eliminó)
+  const diaryEntries = safeEntries.filter(e => e.createdBy !== 'PSYCHOLOGIST');
   const totalEntriesCount = diaryEntries.length;
   const totalSessionsCount = sessionEntries.length;
 
@@ -1376,18 +1374,6 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                     </div>
                     <div className="text-3xl md:text-4xl font-bold text-indigo-900">{totalEntriesCount}</div>
                   </div>
-                  <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl md:rounded-3xl border border-green-100 p-4 md:p-6 shadow-sm">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-green-100 flex items-center justify-center">
-                        <Smile className="w-4 h-4 md:w-5 md:h-5 text-green-600" />
-                      </div>
-                      <div className="text-xs md:text-sm font-semibold text-green-900">Ánimo</div>
-                    </div>
-                    <div className="text-3xl md:text-4xl font-bold text-green-900">
-                      {averageSentiment !== null ? averageSentiment.toFixed(1) : '—'}
-                      {averageSentiment !== null && <span className="text-lg md:text-xl text-green-600 ml-1">/10</span>}
-                    </div>
-                  </div>
                 </div>
 
                 {/* CTA Principal */}
@@ -1470,7 +1456,6 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                         const sessionFeedbackText = getFeedbackText(entry);
                         const summaryText = (entry.summary || '').trim();
                         const emotions = Array.isArray(entry.emotions) ? entry.emotions : [];
-                        const sentimentScore = typeof entry.sentimentScore === 'number' ? entry.sentimentScore : null;
                         const hasTranscript = Boolean(entry.transcript && entry.transcript.trim().length > 0);
                         const hasFeedback = sessionFeedbackText.trim().length > 0;
                         const hasAdvice = Boolean(entry.advice && entry.advice.trim().length > 0);
@@ -1506,11 +1491,6 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                               </button>
                             </div>
                             <div className="flex flex-wrap items-center gap-1.5 mb-3">
-                              {sentimentScore !== null && (
-                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${sentimentScore >= 7 ? 'bg-green-50 text-green-700 border-green-200' : sentimentScore >= 4 ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
-                                  {sentimentScore}/10
-                                </span>
-                              )}
                               {hasTranscript && (
                                 <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">
                                   Transcript

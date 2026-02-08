@@ -50,6 +50,8 @@ export interface CareRelationship {
   default_session_price: number; // Precio por defecto por sesión
   default_psych_percent: number; // Porcentaje del psicólogo por defecto (0-100)
   tags?: string[]; // Tags de la relación (en data JSONB)
+  active?: boolean; // Estado activo/inactivo del paciente (en data JSONB)
+  patient_number?: number; // Número secuencial del paciente por psicólogo (en data JSONB)
   
   // Campos adicionales en data JSONB (legacy)
   createdAt?: number; // timestamp en ms (puede estar en data)
@@ -91,6 +93,22 @@ export interface ClinicalNoteContent {
   attachments: Attachment[];
 }
 
+export interface HistoricalDocument {
+  id: string;
+  fileName: string;
+  fileType: string; // MIME type
+  fileSize: number; // In bytes
+  uploadedAt: number; // timestamp
+  content: string; // Base64 encoded file content
+  extractedText?: string; // Text extracted from the document for AI processing
+}
+
+export interface HistoricalDocumentsSummary {
+  documents: HistoricalDocument[];
+  aiSummary?: string; // AI-generated summary of all historical documents
+  lastUpdated: number; // timestamp
+}
+
 export interface EmotionStructure {
   level1: string; // Primary (e.g., Joy, Sadness, Anger, Fear, Love, Surprise)
   level2: string; // Secondary (e.g., Optimism, Lonely)
@@ -110,7 +128,7 @@ export interface JournalEntry {
   timestamp: number;
   transcript: string;
   summary: string;
-  sentimentScore: number;
+  sentimentScore?: number; // DEPRECATED: Eliminado del análisis de IA - Solo para compatibilidad con datos antiguos
   emotions: string[]; // Legacy tags (populated with Level 2 for display)
   advice: string;
   
@@ -168,13 +186,16 @@ export interface WeeklyReport {
 // Derived view for dashboard
 export interface PatientSummary {
   id: string;
-  name: string;
-  email: string;
+  phone?: string;
   avatarUrl?: string;
   lastUpdate: string;
   averageSentiment: number;
   recentSummary: string;
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+  isSelf?: boolean; // To mark if this is the psychologist themselves
+  tags?: string[]; // Tags from care_relationships
+  active?: boolean; // Estado activo/inactivo
+  patientNumber?: number; // Número secuencial del paciente
   isSelf?: boolean; // To mark if this is the psychologist themselves
   tags?: string[]; // Tags from care_relationships
 }

@@ -81,20 +81,8 @@ const InsightsPanel: React.FC<InsightsPanelProps> = ({ entries, mode = 'PERSONAL
     fetchInsights();
   }, [entries, mode, latestEntry, insight]);
 
-  // Prep Chart Data
-  const chartData = [...entries]
-    .filter(e => {
-      if (e.createdBy === 'PSYCHOLOGIST') return false;
-      const hasTranscript = Boolean(e.transcript && e.transcript.trim().length > 0);
-      const hasNonClinicalEmotion = Array.isArray(e.emotions) ? e.emotions.some(em => em !== 'Clínico') : false;
-      return hasTranscript || hasNonClinicalEmotion;
-    })
-    .sort((a, b) => a.timestamp - b.timestamp)
-    .slice(-14) // Last 14 entries
-    .map(e => ({
-      date: e.date ? e.date.substring(5) : new Date(e.timestamp).toISOString().substring(5, 10), // MM-DD
-      score: e.sentimentScore
-    }));
+  // Prep Chart Data - Eliminado sentimentScore chart, solo mantenemos emociones
+  // const chartData = []; // Ya no se usa
 
   const emotionChartData = useMemo(() => {
     const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
@@ -135,51 +123,7 @@ const InsightsPanel: React.FC<InsightsPanelProps> = ({ entries, mode = 'PERSONAL
 
   return (
     <div className="space-y-6">
-      {/* Chart Section - Conditionally Rendered */}
-      {!hideChart && (
-          <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-100">
-            <div className="flex items-center justify-between gap-3 mb-4">
-                <h3 className="text-base md:text-lg font-semibold text-slate-800 flex items-center gap-2">
-                  <TrendingUp className="w-5 h-5 text-indigo-500"/>
-                  {isClinical ? "Evolución Anímica (Últimos 14 días)" : "Tu Ánimo Reciente"}
-              </h3>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">14 días</span>
-                <div className="text-xs text-slate-400">0–10</div>
-              </div>
-            </div>
-            <div className="h-52 w-full rounded-xl bg-gradient-to-b from-slate-50 via-white to-white border border-slate-100 p-2 shadow-inner">
-              <ResponsiveContainer width="100%" aspect={2.5}>
-                <LineChart data={chartData} margin={{ top: 8, right: 12, left: -10, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="moodGradient" x1="0" y1="0" x2="1" y2="0">
-                      <stop offset="0%" stopColor="#6366f1" />
-                      <stop offset="100%" stopColor="#8b5cf6" />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="6 6" vertical={false} stroke="#e5e7eb" />
-                  <XAxis dataKey="date" tick={{fontSize: 10, fill: '#94a3b8'}} axisLine={false} tickLine={false} />
-                  <YAxis domain={[0, 10]} tick={{fontSize: 10, fill: '#94a3b8'}} axisLine={false} tickLine={false} width={28} />
-                  <Tooltip 
-                    contentStyle={{borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.08)'}}
-                    itemStyle={{color: '#4f46e5', fontSize: '12px', fontWeight: 600}}
-                    labelStyle={{fontSize: '11px', color: '#64748b'}}
-                    isAnimationActive={false}
-                    formatter={(value: number) => [value, 'Puntuación']}
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="score" 
-                    stroke="url(#moodGradient)" 
-                    strokeWidth={3} 
-                    dot={{fill: '#6366f1', strokeWidth: 2, r: 4, stroke: '#fff'}} 
-                    activeDot={{r: 7, stroke: '#6366f1', strokeWidth: 2}}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-      )}
+      {/* Gráfico de sentimentScore eliminado - Solo mantenemos emociones */}
 
           {/* AI Analysis Section */}
           <div className={`p-6 rounded-2xl border relative overflow-hidden ${isClinical ? 'bg-slate-50 border-slate-200' : 'bg-gradient-to-br from-indigo-50 to-purple-50 border-indigo-100'}`}>
