@@ -47,22 +47,6 @@ const App: React.FC = () => {
   // Ref para controlar PatientDashboard
   const patientDashboardRef = useRef<PatientDashboardHandle>(null);
   const centrosPanelRef = useRef<CentrosPanelRef>(null);
-  
-  // State for draggable menu button position (unified across personal/professional)
-  const [menuButtonPos, setMenuButtonPos] = useState(() => {
-    const saved = localStorage.getItem('dygoMenuButtonPos');
-    if (saved) return JSON.parse(saved);
-    // Default position: bottom-left (16px from edges)
-    const defaultTop = typeof window !== 'undefined' ? window.innerHeight - 64 : 700;
-    return { top: defaultTop, left: 16 };
-  });
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-
-  // Save menu button position to localStorage
-  useEffect(() => {
-    localStorage.setItem('dygoMenuButtonPos', JSON.stringify(menuButtonPos));
-  }, [menuButtonPos]);
 
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
@@ -1067,58 +1051,18 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
       )}
 
       <div className="flex h-screen overflow-hidden bg-slate-50">
-        {/* Mobile Toggle Button - Draggable */}
+        {/* Mobile Toggle Button - Simplified for iOS */}
         {!sidebarOpen && (
           <button
-            onTouchStart={(e) => {
-              const touch = e.touches[0];
-              const rect = e.currentTarget.getBoundingClientRect();
-              setDragOffset({
-                x: touch.clientX - rect.left,
-                y: touch.clientY - rect.top
-              });
-              setIsDragging(true);
-            }}
-            onTouchMove={(e) => {
-              if (!isDragging) return;
-              e.preventDefault();
-              const touch = e.touches[0];
-              const newTop = touch.clientY - dragOffset.y;
-              const newLeft = touch.clientX - dragOffset.x;
-              
-              // Keep within bounds
-              const maxTop = window.innerHeight - 48;
-              const maxLeft = window.innerWidth - 48;
-              
-              setMenuButtonPos({
-                top: Math.max(16, Math.min(newTop, maxTop)),
-                left: Math.max(16, Math.min(newLeft, maxLeft)),
-                right: undefined
-              });
-            }}
-            onTouchEnd={() => {
-              if (isDragging) {
-                setIsDragging(false);
-              } else {
-                setSidebarOpen(true);
-              }
-            }}
-            onClick={(e) => {
-              if (!isDragging) {
-                setSidebarOpen(true);
-              }
-            }}
-            style={{
-              top: `${menuButtonPos.top}px`,
-              right: menuButtonPos.right !== undefined ? `${menuButtonPos.right}px` : undefined,
-              left: menuButtonPos.left !== undefined ? `${menuButtonPos.left}px` : undefined,
-              touchAction: 'none',
-              cursor: isDragging ? 'grabbing' : 'grab',
-              transition: isDragging ? 'none' : 'all 0.3s'
-            }}
+            onClick={() => setSidebarOpen(true)}
             className="md:hidden fixed z-50 w-12 h-12 bg-gradient-to-br from-indigo-600 to-blue-600 rounded-full shadow-lg hover:shadow-xl hover:from-indigo-700 hover:to-blue-700 flex items-center justify-center transition-all"
+            style={{
+              bottom: '20px',
+              left: '20px'
+            }}
+            aria-label="Abrir menú"
           >
-            <DygoLogo className="w-7 h-7 text-white" />
+            <Menu className="w-6 h-6 text-white" />
           </button>
         )}
 
