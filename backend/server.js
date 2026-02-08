@@ -2215,7 +2215,7 @@ const handleAdminCreatePatient = async (req, res) => {
     const { name, email, phone } = req.body || {};
     if (!name) return res.status(400).json({ error: 'Name is required' });
 
-    // Validar formato de email si se proporciona
+    // Validar formato de email solo si se proporciona
     if (email && email.trim()) {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(email.trim())) {
@@ -2306,19 +2306,19 @@ const handleAdminCreatePatient = async (req, res) => {
       if (supabaseAdmin) {
         const { data: allRels } = await supabaseAdmin
           .from('care_relationships')
-          .select('data')
+          .select('patientnumber')
           .eq('psychologist_user_id', psychologistId);
         
         if (allRels && allRels.length > 0) {
           const numbers = allRels
-            .map(r => r.data?.patientNumber)
+            .map(r => r.patientnumber)
             .filter(n => typeof n === 'number');
           nextPatientNumber = numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
         }
       } else {
         const psychRels = db.careRelationships?.filter(r => r.psychologist_user_id === psychologistId) || [];
         const numbers = psychRels
-          .map(r => r.data?.patientNumber)
+          .map(r => r.patientnumber || r.data?.patientNumber)
           .filter(n => typeof n === 'number');
         nextPatientNumber = numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
       }
@@ -2331,12 +2331,12 @@ const handleAdminCreatePatient = async (req, res) => {
         default_session_price: 0,
         default_psych_percent: 80,
         active: true, // Campo directo en la tabla
+        patientnumber: nextPatientNumber, // Campo directo en la tabla
         data: {
           psychologistId: psychologistId,
           patientId: existingPatientId,
           status: 'active',
-          tags: [],
-          patientNumber: nextPatientNumber
+          tags: []
         },
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -2390,19 +2390,19 @@ const handleAdminCreatePatient = async (req, res) => {
     if (supabaseAdmin) {
       const { data: allRels } = await supabaseAdmin
         .from('care_relationships')
-        .select('data')
+        .select('patientnumber')
         .eq('psychologist_user_id', psychologistId);
       
       if (allRels && allRels.length > 0) {
         const numbers = allRels
-          .map(r => r.data?.patientNumber)
+          .map(r => r.patientnumber)
           .filter(n => typeof n === 'number');
         nextPatientNumber = numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
       }
     } else {
       const psychRels = db.careRelationships?.filter(r => r.psychologist_user_id === psychologistId) || [];
       const numbers = psychRels
-        .map(r => r.data?.patientNumber)
+        .map(r => r.patientnumber || r.data?.patientNumber)
         .filter(n => typeof n === 'number');
       nextPatientNumber = numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
     }
@@ -2426,13 +2426,14 @@ const handleAdminCreatePatient = async (req, res) => {
       patient_user_id: newPatient.id,
       status: 'active',
       default_session_price: 0,
+      default_psych_percent: 80,
       active: true, // Campo directo en la tabla
+      patientnumber: nextPatientNumber, // Campo directo en la tabla
       data: {
         psychologistId: psychologistId,
         patientId: newPatient.id,
         status: 'active',
-        tags: [],
-        patientNumber: nextPatientNumber
+        tags: []
       },
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -3076,21 +3077,32 @@ app.patch('/api/users/:id', async (req, res) => {
       const idx = db.users.findIndex((u) => u.id === userId);
       if (idx === -1) return res.status(404).json({ error: 'Usuario no encontrado' });
       
-      // IMPORTANTE: El email NUNCA se puede cambiar
-      if (req.body?.email && req.body.email !== db.users[idx].email) {
+      const currentUser = db.users[idx];
+      const hasTempEmail = currentUser.has_temp_email || (currentUser.email && currentUser.email.includes('@noemail.dygo.local'));
+      
+      // Permitir cambiar email solo si es temporal o si el nuevo email coincide con el actual
+      if (req.body?.email && req.body.email !== currentUser.email && !hasTempEmail) {
         return res.status(400).json({ error: 'No se puede cambiar el email del usuario' });
       }
       
-      // Eliminar email del body para asegurar que no se modifique
-      const { email, user_email, ...bodyWithoutEmail } = req.body;
+      // Si se está cambiando desde un email temporal a uno real, actualizar la bandera
+      let updatedFields = { ...req.body };
+      if (hasTempEmail && req.body?.email && !req.body.email.includes('@noemail.dygo.local')) {
+        updatedFields.has_temp_email = false;
+        updatedFields.email = req.body.email.trim().toLowerCase();
+      } else if (!req.body?.email) {
+        // Si no se proporciona email, mantener el email temporal
+        delete updatedFields.email;
+        delete updatedFields.user_email;
+      }
       
       // Merge data fields
-      const currentData = db.users[idx].data || {};
-      const newData = bodyWithoutEmail.data || {};
+      const currentData = currentUser.data || {};
+      const newData = updatedFields.data || {};
       
       const updated = { 
-        ...db.users[idx], 
-        ...bodyWithoutEmail,
+        ...currentUser, 
+        ...updatedFields,
         data: { ...currentData, ...newData }
       };
       
@@ -3106,24 +3118,35 @@ app.patch('/api/users/:id', async (req, res) => {
       return res.status(404).json({ error: 'Usuario no encontrado' });
     }
 
-    // IMPORTANTE: El email NUNCA se puede cambiar
     const currentEmail = existingUser.user_email || existingUser.email;
-    if (req.body?.email && normalizeEmail(req.body.email) !== normalizeEmail(currentEmail)) {
+    const hasTempEmail = existingUser.has_temp_email || (currentEmail && currentEmail.includes('@noemail.dygo.local'));
+    
+    // Permitir cambiar email solo si es temporal o si el nuevo email coincide con el actual
+    if (req.body?.email && normalizeEmail(req.body.email) !== normalizeEmail(currentEmail) && !hasTempEmail) {
       return res.status(400).json({ error: 'No se puede cambiar el email del usuario' });
     }
-    if (req.body?.user_email && normalizeEmail(req.body.user_email) !== normalizeEmail(currentEmail)) {
+    if (req.body?.user_email && normalizeEmail(req.body.user_email) !== normalizeEmail(currentEmail) && !hasTempEmail) {
       return res.status(400).json({ error: 'No se puede cambiar el email del usuario' });
     }
 
-    // Preparar datos para actualizar (sin email)
+    // Preparar datos para actualizar
     const updateFields = {};
+    
+    // Si se está cambiando desde un email temporal a uno real
+    if (hasTempEmail && req.body?.email && !req.body.email.includes('@noemail.dygo.local')) {
+      updateFields.user_email = normalizeEmail(req.body.email);
+      // Actualizar has_temp_email en el campo data
+      const currentData = existingUser.data || {};
+      currentData.has_temp_email = false;
+      updateFields.data = currentData;
+    }
     
     // Merge data field (JSONB column) - name, phone y otros campos van aquí
     const currentData = existingUser.data || {};
     const newData = req.body.data || {};
     
     // Agregar name, firstName, lastName, phone al data si vienen en el body
-    const mergedData = { ...currentData, ...newData };
+    const mergedData = { ...(updateFields.data || currentData), ...newData };
     if (req.body.name !== undefined) mergedData.name = req.body.name;
     if (req.body.firstName !== undefined) mergedData.firstName = req.body.firstName;
     if (req.body.lastName !== undefined) mergedData.lastName = req.body.lastName;
@@ -9386,7 +9409,7 @@ app.get('/api/psychologist/:psychologistId/patients', async (req, res) => {
           billing_tax_id: u.billing_tax_id || u.tax_id || '',
           tags: rel?.data?.tags || [],
           active: rel?.active !== false, // Leer de la columna directa (por defecto true)
-          patientNumber: rel?.data?.patientNumber || 0
+          patientNumber: rel?.patientnumber || 0 // Leer del campo directo patientnumber
         };
       });
     

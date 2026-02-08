@@ -928,7 +928,7 @@ export const getPatientsForPsychologist = async (psychId: string, includeInactiv
                 isSelf: false,
                 tags: patientData.tags || [],
                 active: patientData.active !== false, // Por defecto true
-                patientNumber: patientData.patientNumber || 0
+                patientNumber: patientData.patientNumber || 0 // Ahora viene del backend desde el campo directo
             } as PatientSummary;
         };
         

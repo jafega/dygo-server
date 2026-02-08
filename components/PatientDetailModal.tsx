@@ -1510,17 +1510,45 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                       {patientData?.auth_user_id && (
                         <span className="text-[10px] sm:text-xs text-slate-500 font-normal">(vinculado a cuenta)</span>
                       )}
+                      {(!editedPatientData.email || editedPatientData.email.includes('@noemail.dygo.local')) && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full">
+                          <AlertCircle size={12} />
+                          <span className="text-[10px] sm:text-xs font-medium">Sin email</span>
+                        </span>
+                      )}
                     </label>
-                    {isEditingInfo && !patientData?.auth_user_id ? (
-                      <input
-                        type="email"
-                        value={editedPatientData.email}
-                        onChange={(e) => setEditedPatientData({ ...editedPatientData, email: e.target.value })}
-                        className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-white border-2 border-slate-300 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all text-sm"
-                      />
+                    {/* Permitir editar si: está en modo edición, no tiene auth_user_id vinculado, o tiene un email temporal */}
+                    {isEditingInfo && (!patientData?.auth_user_id || patientData?.has_temp_email || (editedPatientData.email && editedPatientData.email.includes('@noemail.dygo.local'))) ? (
+                      <div className="space-y-2">
+                        <input
+                          type="email"
+                          value={editedPatientData.email && !editedPatientData.email.includes('@noemail.dygo.local') ? editedPatientData.email : ''}
+                          onChange={(e) => setEditedPatientData({ ...editedPatientData, email: e.target.value })}
+                          className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-white border-2 border-slate-300 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all text-sm"
+                          placeholder="correo@ejemplo.com"
+                        />
+                        {(!editedPatientData.email || editedPatientData.email.includes('@noemail.dygo.local')) && (
+                          <p className="text-xs text-amber-600 flex items-center gap-1">
+                            <AlertCircle size={12} />
+                            Agrega un email para poder enviar comunicaciones al paciente
+                          </p>
+                        )}
+                      </div>
                     ) : (
-                      <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-4 bg-white border-2 border-slate-200 rounded-lg sm:rounded-xl">
-                        <span className={`text-xs sm:text-sm md:text-base font-medium break-all ${(editedPatientData.email || patient.email) ? 'text-slate-900' : 'text-slate-400'}`}>{editedPatientData.email || patient.email || 'No especificado'}</span>
+                      <div className={`flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-4 border-2 rounded-lg sm:rounded-xl ${
+                        !editedPatientData.email || editedPatientData.email.includes('@noemail.dygo.local')
+                          ? 'bg-amber-50 border-amber-200' 
+                          : 'bg-white border-slate-200'
+                      }`}>
+                        <span className={`text-xs sm:text-sm md:text-base font-medium break-all ${
+                          (editedPatientData.email && !editedPatientData.email.includes('@noemail.dygo.local'))
+                            ? 'text-slate-900' 
+                            : 'text-amber-700'
+                        }`}>
+                          {(editedPatientData.email && !editedPatientData.email.includes('@noemail.dygo.local')) 
+                            ? editedPatientData.email 
+                            : 'Email no configurado - Edita para agregar'}
+                        </span>
                       </div>
                     )}
                   </div>

@@ -10,6 +10,7 @@ CREATE TABLE public.bono (
   total_price_bono_amount double precision NOT NULL CHECK (total_price_bono_amount > 0::double precision),
   invoice_id text,
   paid boolean NOT NULL DEFAULT false,
+  percent_psych double precision CHECK (percent_psych <= 100::double precision),
   CONSTRAINT bono_pkey PRIMARY KEY (id),
   CONSTRAINT bono_psychologist_user_id_fkey FOREIGN KEY (psychologist_user_id) REFERENCES public.users(id),
   CONSTRAINT bono_pacient_user_id_fkey FOREIGN KEY (pacient_user_id) REFERENCES public.users(id),
@@ -24,6 +25,9 @@ CREATE TABLE public.care_relationships (
   default_session_price double precision NOT NULL,
   default_psych_percent double precision NOT NULL,
   center_id text,
+  active boolean,
+  historical_info text,
+  patientnumber integer,
   CONSTRAINT care_relationships_pkey PRIMARY KEY (id),
   CONSTRAINT care_relationships_psychologist_user_id_fkey FOREIGN KEY (psychologist_user_id) REFERENCES public.users(id),
   CONSTRAINT care_relationships_patient_user_id_fkey FOREIGN KEY (patient_user_id) REFERENCES public.users(id),
@@ -32,10 +36,10 @@ CREATE TABLE public.care_relationships (
 CREATE TABLE public.center (
   id text NOT NULL,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
-  psychologist_user_id text NOT NULL,
   center_name text NOT NULL,
   cif text NOT NULL,
   address text NOT NULL,
+  psychologist_user_id text NOT NULL,
   CONSTRAINT center_pkey PRIMARY KEY (id),
   CONSTRAINT center_psychologist_user_id_fkey FOREIGN KEY (psychologist_user_id) REFERENCES public.users(id)
 );
@@ -80,10 +84,6 @@ CREATE TABLE public.invitations (
 CREATE TABLE public.invoices (
   id text NOT NULL,
   data jsonb NOT NULL,
-  -- data.invoice_type: 'patient' | 'center' (tipo de factura)
-  -- data.centerId: text (solo para invoice_type='center', referencia al centro)
-  -- data.sessionIds: array (solo para invoice_type='patient', sesiones incluidas)
-  -- data.bonoIds: array (solo para invoice_type='patient', bonos incluidos)
   created_at timestamp with time zone NOT NULL DEFAULT timezone('utc'::text, now()),
   psychologist_user_id text NOT NULL,
   patient_user_id text,
@@ -92,6 +92,9 @@ CREATE TABLE public.invoices (
   total double precision NOT NULL,
   status text NOT NULL,
   psych_invoice_id text,
+  invoice_date date NOT NULL,
+  invoiceNumber text NOT NULL,
+  irpf_percent double precision,
   CONSTRAINT invoices_pkey PRIMARY KEY (id),
   CONSTRAINT invoices_psychologist_user_id_fkey FOREIGN KEY (psychologist_user_id) REFERENCES public.users(id),
   CONSTRAINT invoices_patient_user_id_fkey FOREIGN KEY (patient_user_id) REFERENCES public.users(id)
@@ -112,6 +115,8 @@ CREATE TABLE public.session_entry (
   creator_user_id text NOT NULL,
   target_user_id text NOT NULL,
   status text NOT NULL,
+  summary text,
+  transcript text,
   CONSTRAINT session_entry_pkey PRIMARY KEY (id),
   CONSTRAINT session_entry_creator_user_id_fkey FOREIGN KEY (creator_user_id) REFERENCES public.users(id),
   CONSTRAINT session_entry_target_user_id_fkey FOREIGN KEY (target_user_id) REFERENCES public.users(id)
@@ -131,6 +136,7 @@ CREATE TABLE public.sessions (
   session_entry_id text,
   invoice_id text,
   bonus_id bigint,
+  session_name text,
   CONSTRAINT sessions_pkey PRIMARY KEY (id),
   CONSTRAINT sessions_psychologist_user_id_fkey FOREIGN KEY (psychologist_user_id) REFERENCES public.users(id),
   CONSTRAINT sessions_patient_user_id_fkey FOREIGN KEY (patient_user_id) REFERENCES public.users(id),

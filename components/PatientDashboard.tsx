@@ -3,7 +3,7 @@ import { PatientSummary } from '../types';
 import { getPatientsForPsychologist } from '../services/storageService';
 import { getCurrentUser } from '../services/authService';
 import PatientDetailModal from './PatientDetailModal';
-import { Users, Clock, Loader2, ToggleLeft, ToggleRight, Search, Filter, X, UserPlus, Mail } from 'lucide-react';
+import { Users, Clock, Loader2, ToggleLeft, ToggleRight, Search, Filter, X, UserPlus, Mail, AlertCircle } from 'lucide-react';
 import { API_URL } from '../services/config';
 
 export interface PatientDashboardHandle {
@@ -161,8 +161,8 @@ const PatientDashboard = forwardRef<PatientDashboardHandle>((props, ref) => {
   };
 
   const handleCreatePatient = async () => {
-    if (!newPatient.firstName.trim() || !newPatient.email.trim()) {
-      alert('Por favor, completa al menos el nombre y el email');
+    if (!newPatient.firstName.trim()) {
+      alert('Por favor, completa al menos el nombre');
       return;
     }
 
@@ -171,7 +171,7 @@ const PatientDashboard = forwardRef<PatientDashboardHandle>((props, ref) => {
       return;
     }
 
-    // Validar formato de email si se proporciona
+    // Validar formato de email solo si se proporciona
     if (newPatient.email.trim()) {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(newPatient.email.trim())) {
@@ -192,7 +192,7 @@ const PatientDashboard = forwardRef<PatientDashboardHandle>((props, ref) => {
         },
         body: JSON.stringify({
           name: fullName,
-          email: newPatient.email.trim().toLowerCase(),
+          email: newPatient.email.trim() ? newPatient.email.trim().toLowerCase() : null,
           phone: newPatient.phone.trim(),
           psychologistId: currentUser.id
         })
@@ -380,13 +380,27 @@ const PatientDashboard = forwardRef<PatientDashboardHandle>((props, ref) => {
                             
                             {/* Columna central: Información del paciente */}
                             <div className="min-w-0 flex-1">
-                                <h4 className="font-bold text-slate-800 text-sm sm:text-base group-hover:text-indigo-600 transition-colors truncate">{patient.name}</h4>
+                                <div className="flex items-center gap-2">
+                                    <h4 className="font-bold text-slate-800 text-sm sm:text-base group-hover:text-indigo-600 transition-colors truncate">{patient.name}</h4>
+                                    {/* Alerta si no tiene email válido */}
+                                    {(!patient.email || patient.email.includes('@noemail.dygo.local')) && (
+                                        <div className="flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full" title="Paciente sin email">
+                                            <AlertCircle size={12} className="shrink-0" />
+                                            <span className="text-[9px] sm:text-[10px] font-medium hidden sm:inline">Sin email</span>
+                                        </div>
+                                    )}
+                                </div>
                                 
-                                {/* Email */}
-                                {patient.email && (
+                                {/* Email - solo mostrar si no es temporal */}
+                                {patient.email && !patient.email.includes('@noemail.dygo.local') ? (
                                     <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-slate-500 mt-0.5">
                                         <Mail size={12} className="shrink-0" />
                                         <span className="truncate">{patient.email}</span>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-amber-600 mt-0.5">
+                                        <AlertCircle size={12} className="shrink-0" />
+                                        <span className="truncate">Email no configurado</span>
                                     </div>
                                 )}
                                 
