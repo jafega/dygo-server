@@ -1,24 +1,41 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar as CalendarIcon, Clock, Plus, X, Users, Video, MapPin, ChevronLeft, ChevronRight, MessageCircle, Trash2, Save, Copy, Send, ExternalLink } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, Plus, X, Users, Video, MapPin, ChevronLeft, ChevronRight, MessageCircle, Trash2, Save, Copy, Send, ExternalLink, CheckCircle, XCircle, Ticket } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser } from '../services/authService';
+import SessionDetailsModal from './SessionDetailsModal';
 
 interface Session {
   id: string;
   patientId: string;
+  patient_user_id?: string;
   patientName: string;
   patientPhone?: string;
   date: string;
   startTime: string;
   endTime: string;
   type: 'in-person' | 'online' | 'home-visit';
-  status: 'scheduled' | 'completed' | 'cancelled' | 'available' | 'paid';
+  status: 'scheduled' | 'completed' | 'cancelled' | 'available';
   notes?: string;
   meetLink?: string;
   price: number;
   paid: boolean;
+  paymentMethod?: '' | 'Bizum' | 'Transferencia' | 'Efectivo';
   percent_psych: number;
   tags?: string[]; // Tags heredadas de la relación
+  invoice_id?: string;
+  bonus_id?: string;
+}
+
+interface Bono {
+  id: string;
+  pacient_user_id: string;
+  psychologist_user_id: string;
+  total_sessions_amount: number;
+  total_price_bono_amount: number;
+  paid: boolean;
+  sessions_used?: number;
+  sessions_remaining?: number;
+  created_at: string;
 }
 
 interface PsychologistCalendarProps {
@@ -50,6 +67,8 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
   const [listStartDate, setListStartDate] = useState('');
   const [listEndDate, setListEndDate] = useState('');
   const [showPastListSessions, setShowPastListSessions] = useState(false);
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc'); // Orden por defecto: más antiguas primero
+  const [showSessionDetails, setShowSessionDetails] = useState(false);
   const [resizingSession, setResizingSession] = useState<{ id: string, edge: 'top' | 'bottom', date: string } | null>(null);
   const [tempSessionTimes, setTempSessionTimes] = useState<{ startTime: string, endTime: string } | null>(null);
   const [creatingSession, setCreatingSession] = useState<{ date: string, startY: number, currentY: number } | null>(null);
@@ -59,6 +78,11 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
   const [showPatientDropdown, setShowPatientDropdown] = useState(false);
   const [assignPatientSearchQuery, setAssignPatientSearchQuery] = useState('');
   const [showAssignPatientDropdown, setShowAssignPatientDropdown] = useState(false);
+  
+  // Estados para bonos
+  const [availableBonos, setAvailableBonos] = useState<Bono[]>([]);
+  const [isLoadingBonos, setIsLoadingBonos] = useState(false);
+  const [isAssigningBono, setIsAssigningBono] = useState(false);
   
   const [newSession, setNewSession] = useState({
     patientId: '',
@@ -70,7 +94,15 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
     generateMeetLink: false,
     price: 0,
     paid: false,
-    percent_psych: 100
+    percent_psych: 100,
+    selectedBonoId: '', // Bono seleccionado para asociar a la sesión
+    // Campos de recurrencia
+    recurrence: {
+      enabled: false,
+      frequency: 'weekly' as 'daily' | 'weekly' | 'monthly',
+      daysOfWeek: [] as number[], // 0=Domingo, 1=Lunes, ... 6=Sábado
+      endDate: '', // Fecha de finalización de la recurrencia
+    }
   });
 
   const [newAvailability, setNewAvailability] = useState({
@@ -95,6 +127,37 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
       loadSessions();
     }
   }, [viewMode, currentDate]);
+  
+  // Cargar bonos disponibles cuando cambia el paciente en nueva sesión
+  useEffect(() => {
+    const loadAvailableBonosForNewSession = async () => {
+      if (!newSession.patientId) {
+        setAvailableBonos([]);
+        return;
+      }
+      
+      setIsLoadingBonos(true);
+      try {
+        const currentUser = await getCurrentUser();
+        if (!currentUser) return;
+        
+        const response = await fetch(
+          `${API_URL}/bonos/available/${newSession.patientId}?psychologist_user_id=${currentUser.id}`
+        );
+        
+        if (response.ok) {
+          const bonos = await response.json();
+          setAvailableBonos(bonos);
+        }
+      } catch (error) {
+        console.error('Error loading available bonos:', error);
+      } finally {
+        setIsLoadingBonos(false);
+      }
+    };
+    
+    loadAvailableBonosForNewSession();
+  }, [newSession.patientId]);
 
   // Cerrar dropdowns al hacer clic fuera
   useEffect(() => {
@@ -226,12 +289,29 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
         }
         
         // Open modal with pre-filled times
+        // Reset first to avoid inheriting previous patient selection
         setNewSession({
-          ...newSession,
+          patientId: '',
           date: creatingSession.date,
           startTime: startTime,
-          endTime: endTime
+          endTime: endTime,
+          type: 'online',
+          notes: '',
+          generateMeetLink: false,
+          price: 0,
+          paid: false,
+          percent_psych: 100,
+          selectedBonoId: '',
+          recurrence: {
+            enabled: false,
+            frequency: 'weekly',
+            daysOfWeek: [],
+            endDate: '',
+          }
         });
+        setPatientSearchQuery('');
+        setShowPatientDropdown(false);
+        setAvailableBonos([]);
         setShowNewSession(true);
       }
       setCreatingSession(null);
@@ -477,10 +557,88 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
     setCurrentDate(newDate);
   };
 
+  // Generar fechas recurrentes según las reglas
+  const generateRecurringDates = (startDate: string, recurrence: typeof newSession.recurrence): string[] => {
+    if (!recurrence.enabled || !recurrence.endDate) {
+      return [startDate];
+    }
+
+    const dates: string[] = [];
+    const start = new Date(startDate);
+    const end = new Date(recurrence.endDate);
+
+    // Siempre incluir la fecha inicial
+    dates.push(startDate);
+
+    let currentDate = new Date(start);
+
+    switch (recurrence.frequency) {
+      case 'daily':
+        // Repetir diariamente
+        while (currentDate < end) {
+          currentDate.setDate(currentDate.getDate() + 1);
+          if (currentDate <= end) {
+            dates.push(currentDate.toISOString().split('T')[0]);
+          }
+        }
+        break;
+
+      case 'weekly':
+        // Repetir semanalmente en los días seleccionados
+        if (recurrence.daysOfWeek.length === 0) {
+          // Si no hay días seleccionados, solo devolver la fecha inicial
+          break;
+        }
+
+        // Iterar día por día hasta la fecha fin
+        currentDate = new Date(start);
+        currentDate.setDate(currentDate.getDate() + 1); // Empezar desde el día siguiente
+
+        while (currentDate <= end) {
+          const dayOfWeek = currentDate.getDay();
+          if (recurrence.daysOfWeek.includes(dayOfWeek)) {
+            dates.push(currentDate.toISOString().split('T')[0]);
+          }
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+        break;
+
+      case 'monthly':
+        // Repetir mensualmente en el mismo día del mes
+        const dayOfMonth = start.getDate();
+        currentDate = new Date(start);
+        
+        while (currentDate < end) {
+          currentDate.setMonth(currentDate.getMonth() + 1);
+          // Ajustar por si el mes tiene menos días
+          currentDate.setDate(Math.min(dayOfMonth, new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate()));
+          
+          if (currentDate <= end) {
+            dates.push(currentDate.toISOString().split('T')[0]);
+          }
+        }
+        break;
+    }
+
+    return dates;
+  };
+
   const handleCreateSession = async () => {
     if (!newSession.patientId || !newSession.date || !newSession.startTime || !newSession.endTime || newSession.price <= 0) {
       alert('Por favor completa todos los campos requeridos (incluido el precio)');
       return;
+    }
+
+    // Validaciones adicionales para recurrencia
+    if (newSession.recurrence.enabled) {
+      if (!newSession.recurrence.endDate) {
+        alert('Por favor selecciona una fecha de finalización para la recurrencia');
+        return;
+      }
+      if (newSession.recurrence.frequency === 'weekly' && newSession.recurrence.daysOfWeek.length === 0) {
+        alert('Por favor selecciona al menos un día de la semana');
+        return;
+      }
     }
 
     const patient = patients.find(p => p.id === newSession.patientId);
@@ -493,46 +651,80 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
       return;
     }
 
+    // Generar todas las fechas según la recurrencia
+    const dates = generateRecurringDates(newSession.date, newSession.recurrence);
+
+    // Confirmar si hay muchas sesiones
+    if (dates.length > 1) {
+      const confirmed = confirm(`Se crearán ${dates.length} sesiones. ¿Deseas continuar?`);
+      if (!confirmed) return;
+    }
+
     // Generate Google Meet link if requested
     let meetLink = '';
     if (newSession.generateMeetLink && newSession.type === 'online') {
       meetLink = `https://meet.google.com/${Math.random().toString(36).substring(2, 15)}`;
     }
 
-    const session: Session = {
-      id: Date.now().toString(),
-      patientId: newSession.patientId,
-      patientName: patient.name,
-      patientPhone: patient.phone || '',
-      date: newSession.date,
-      startTime: newSession.startTime,
-      endTime: newSession.endTime,
-      type: newSession.type,
-      status: 'scheduled',
-      notes: newSession.notes,
-      meetLink: meetLink || undefined,
-      price: newSession.price,
-      paid: newSession.paid,
-      percent_psych: Math.min(newSession.percent_psych, 100)
-    };
-
     try {
-      const response = await fetch(`${API_URL}/sessions`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-user-id': currentUser.id
-        },
-        body: JSON.stringify({ ...session, psychologistId })
-      });
+      // Crear todas las sesiones
+      let createdCount = 0;
+      let failedCount = 0;
 
-      if (response.ok) {
+      for (const date of dates) {
+        const session: Session = {
+          id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+          patientId: newSession.patientId,
+          patient_user_id: newSession.patientId, // Asegurar que también se envía patient_user_id
+          patientName: patient.name,
+          patientPhone: patient.phone || '',
+          date: date,
+          startTime: newSession.startTime,
+          endTime: newSession.endTime,
+          type: newSession.type,
+          status: 'scheduled',
+          notes: newSession.notes,
+          meetLink: meetLink || undefined,
+          price: newSession.price,
+          paid: newSession.paid,
+          percent_psych: Math.min(newSession.percent_psych, 100),
+          bonus_id: newSession.selectedBonoId || undefined // Incluir bonus_id si fue seleccionado
+        };
+
+        try {
+          const response = await fetch(`${API_URL}/sessions`, {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              'x-user-id': currentUser.id
+            },
+            body: JSON.stringify({ ...session, psychologistId })
+          });
+
+          if (response.ok) {
+            createdCount++;
+          } else {
+            console.error('Error creating session for date:', date);
+            failedCount++;
+          }
+        } catch (error) {
+          console.error('Error creating session for date:', date, error);
+          failedCount++;
+        }
+      }
+
+      if (createdCount > 0) {
         await loadSessions();
         setShowNewSession(false);
         resetNewSession();
+        
+        if (failedCount > 0) {
+          alert(`Se crearon ${createdCount} sesiones correctamente. ${failedCount} sesiones fallaron.`);
+        } else if (createdCount > 1) {
+          alert(`Se crearon ${createdCount} sesiones correctamente.`);
+        }
       } else {
-        const error = await response.json();
-        alert('Error al crear la sesión: ' + (error.error || 'Error desconocido'));
+        alert('Error al crear las sesiones');
       }
     } catch (error) {
       console.error('Error creating session:', error);
@@ -661,7 +853,10 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
           startTime: current.toTimeString().slice(0, 5),
           endTime: slotEnd.toTimeString().slice(0, 5),
           type: newAvailability.type,
-          status: 'available'
+          status: 'available',
+          price: 0,
+          paid: false,
+          percent_psych: 100
         });
         
         current = slotEnd;
@@ -744,15 +939,123 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
   };
 
   const handleOpenSession = (session: Session) => {
+    console.log('🔍 Opening session:', session);
+    console.log('🔍 patient_user_id:', session.patient_user_id);
+    console.log('🔍 patientId:', session.patientId);
     setSelectedSession(session);
     setEditedSession({ ...session });
+    loadAvailableBonos(session.patient_user_id || session.patientId);
   };
 
   const handleCloseModal = () => {
     setSelectedSession(null);
     setEditedSession(null);
+    setShowSessionDetails(false);
   };
-
+  
+  const loadAvailableBonos = async (patientUserId: string) => {
+    console.log('🔍 loadAvailableBonos called with patientUserId:', patientUserId);
+    if (!patientUserId) {
+      console.log('❌ No patientUserId provided, aborting load');
+      return;
+    }
+    
+    setIsLoadingBonos(true);
+    try {
+      const currentUser = await getCurrentUser();
+      if (!currentUser) {
+        console.log('❌ No current user found');
+        return;
+      }
+      
+      console.log('📞 Fetching bonos for patient:', patientUserId, 'psychologist:', currentUser.id);
+      const response = await fetch(
+        `${API_URL}/bonos/available/${patientUserId}?psychologist_user_id=${currentUser.id}`
+      );
+      
+      console.log('📡 Response status:', response.status);
+      if (response.ok) {
+        const bonos = await response.json();
+        console.log('✅ Bonos loaded:', bonos);
+        setAvailableBonos(bonos);
+      } else {
+        console.log('❌ Failed to load bonos, status:', response.status);
+      }
+    } catch (error) {
+      console.error('❌ Error loading available bonos:', error);
+    } finally {
+      setIsLoadingBonos(false);
+    }
+  };
+  
+  const handleAssignBono = async (bonoId: string) => {
+    if (!editedSession) return;
+    
+    setIsAssigningBono(true);
+    try {
+      const response = await fetch(`${API_URL}/sessions/${editedSession.id}/assign-bonus`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ bonus_id: bonoId })
+      });
+      
+      if (response.ok) {
+        alert('Sesión asignada al bono correctamente');
+        setEditedSession({ ...editedSession, bonus_id: bonoId });
+        await loadAvailableBonos(editedSession.patient_user_id || editedSession.patientId);
+        await loadSessions();
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Error al asignar sesión al bono');
+      }
+    } catch (error) {
+      console.error('Error assigning bono:', error);
+      alert('Error al asignar sesión al bono');
+    } finally {
+      setIsAssigningBono(false);
+    }
+  };
+  
+  const handleUnassignBono = async () => {
+    if (!editedSession) return;
+    
+    if (!confirm('¿Estás seguro de que quieres desasignar esta sesión del bono?')) return;
+    
+    setIsAssigningBono(true);
+    try {
+      const response = await fetch(`${API_URL}/sessions/${editedSession.id}/assign-bonus`, {
+        method: 'DELETE'
+      });
+      
+      if (response.ok) {
+        alert('Sesión desasignada del bono correctamente');
+        setEditedSession({ ...editedSession, bonus_id: undefined });
+        await loadAvailableBonos(editedSession.patient_user_id || editedSession.patientId);
+        await loadSessions();
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Error al desasignar sesión del bono');
+      }
+    } catch (error) {
+      console.error('Error unassigning bono:', error);
+      alert('Error al desasignar sesión del bono');
+    } finally {
+      setIsAssigningBono(false);
+    }
+  };
+  
+  const handleFieldChange = (field: keyof Session, value: any) => {
+    if (!editedSession) return;
+    // Si se desmarca 'paid', limpiar el método de pago
+    if (field === 'paid' && !value) {
+      setEditedSession({ ...editedSession, [field]: value, paymentMethod: '' });
+    } else {
+      setEditedSession({ ...editedSession, [field]: value });
+    }
+  };
+  
   const handleDeleteSession = async () => {
     if (!editedSession) return;
 
@@ -791,14 +1094,9 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
       setIsSaving(false);
     }
   };
-
-  const handleFieldChange = (field: keyof Session, value: any) => {
-    if (!editedSession) return;
-    setEditedSession({ ...editedSession, [field]: value });
-  };
-
+  
   const handleSaveSession = async () => {
-    if (!editedSession || !selectedSession) return;
+    if (!editedSession) return;
 
     setIsSaving(true);
     try {
@@ -809,26 +1107,19 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
       }
 
       // Solo enviar los campos que pueden ser actualizados
-      const updatePayload: any = {
+      const updatePayload = {
+        date: editedSession.date,
+        startTime: editedSession.startTime,
+        endTime: editedSession.endTime,
         type: editedSession.type,
         status: editedSession.status,
         price: editedSession.price ?? 0,
         paid: editedSession.paid ?? false,
+        paymentMethod: editedSession.paymentMethod || '',
         percent_psych: editedSession.percent_psych ?? 70,
         notes: editedSession.notes,
         meetLink: editedSession.meetLink
       };
-
-      // Solo incluir fecha y hora si fueron modificadas
-      if (editedSession.date !== selectedSession.date) {
-        updatePayload.date = editedSession.date;
-      }
-      if (editedSession.startTime !== selectedSession.startTime) {
-        updatePayload.startTime = editedSession.startTime;
-      }
-      if (editedSession.endTime !== selectedSession.endTime) {
-        updatePayload.endTime = editedSession.endTime;
-      }
 
       const response = await fetch(`${API_URL}/sessions/${editedSession.id}`, {
         method: 'PATCH',
@@ -853,6 +1144,10 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
     } finally {
       setIsSaving(false);
     }
+  };
+  
+  const handleOpenSessionDetails = () => {
+    setShowSessionDetails(true);
   };
 
   const handleUpdateSessionStatus = async (sessionId: string, status: Session['status']) => {
@@ -957,10 +1252,18 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
       generateMeetLink: false,
       price: 0,
       paid: false,
-      percent_psych: 100
+      percent_psych: 100,
+      selectedBonoId: '', // Limpiar bono seleccionado
+      recurrence: {
+        enabled: false,
+        frequency: 'weekly',
+        daysOfWeek: [],
+        endDate: '',
+      }
     });
     setPatientSearchQuery('');
     setShowPatientDropdown(false);
+    setAvailableBonos([]); // Limpiar bonos disponibles
   };
 
   const resetNewAvailability = () => {
@@ -1103,8 +1406,10 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
   const getSortedSessions = () => {
     return [...sessions].sort((a, b) => {
       const dateCompare = a.date.localeCompare(b.date);
-      if (dateCompare !== 0) return dateCompare;
-      return a.startTime.localeCompare(b.startTime);
+      const timeCompare = a.startTime.localeCompare(b.startTime);
+      const result = dateCompare !== 0 ? dateCompare : timeCompare;
+      // Aplicar orden ascendente o descendente
+      return sortOrder === 'asc' ? result : -result;
     });
   };
 
@@ -1162,13 +1467,17 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
     setListStartDate('');
     setListEndDate('');
     setShowPastListSessions(false);
+    setSortOrder('asc');
   };
 
   return (
     <div className="space-y-6" data-calendar-component ref={(el) => {
       if (el) {
         (el as any).openNewAvailability = () => setShowNewAvailability(true);
-        (el as any).openNewSession = () => setShowNewSession(true);
+        (el as any).openNewSession = () => {
+          resetNewSession();
+          setShowNewSession(true);
+        };
       }
     }}>
       {/* Header - Only visible on mobile */}
@@ -1181,7 +1490,10 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
           <span>Añadir Disponibilidad</span>
           </button>
           <button
-            onClick={() => setShowNewSession(true)}
+            onClick={() => {
+              resetNewSession();
+              setShowNewSession(true);
+            }}
             className="flex items-center justify-center gap-2 px-4 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors shadow-md font-medium"
           >
             <Plus size={18} />
@@ -1254,6 +1566,16 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                     onChange={(event) => setListEndDate(event.target.value)}
                     className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
+                </div>
+                <div className="flex flex-col">
+                  <label className="text-xs font-semibold text-slate-500 uppercase mb-1">Ordenar</label>
+                  <button
+                    onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 flex items-center gap-2"
+                    title={sortOrder === 'asc' ? 'Más antiguas primero' : 'Más recientes primero'}
+                  >
+                    <span>{sortOrder === 'asc' ? '↑ Antiguas' : '↓ Recientes'}</span>
+                  </button>
                 </div>
                 <label className="flex items-center gap-2 text-xs font-semibold text-slate-500 uppercase mb-1">
                   <input
@@ -1387,8 +1709,6 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                                   ? 'bg-indigo-50 border-indigo-200 hover:bg-indigo-100'
                                   : session.status === 'completed'
                                   ? 'bg-slate-50 border-slate-200 hover:bg-slate-100'
-                                  : session.status === 'paid'
-                                  ? 'bg-green-50 border-green-200 hover:bg-green-100'
                                   : 'bg-red-50 border-red-200 hover:bg-red-100'
                               }`}
                               onClick={() => {
@@ -1405,8 +1725,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                                   <span className={`text-xs font-semibold ${
                                     session.status === 'available' ? 'text-purple-700' :
                                     session.status === 'scheduled' ? 'text-blue-700' :
-                                    session.status === 'completed' ? 'text-green-700' :
-                                    session.status === 'paid' ? 'text-green-700' : 'text-red-700'
+                                    session.status === 'completed' ? 'text-green-700' : 'text-red-700'
                                   }`}>
                                     {session.startTime} - {session.endTime}
                                   </span>
@@ -1425,13 +1744,11 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                                   <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
                                     session.status === 'available' ? 'bg-purple-100 text-purple-700' :
                                     session.status === 'scheduled' ? 'bg-blue-100 text-blue-700' :
-                                    session.status === 'completed' ? 'bg-green-100 text-green-700' :
-                                    session.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                                    session.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
                                   }`}>
                                     {session.status === 'available' ? 'Disponible' :
                                      session.status === 'scheduled' ? 'Programada' :
-                                     session.status === 'completed' ? 'Completada' :
-                                     session.status === 'paid' ? 'Pagada' : 'Cancelada'}
+                                     session.status === 'completed' ? 'Completada' : 'Cancelada'}
                                   </span>
                                   {session.status === 'available' && (
                                     <button
@@ -1627,8 +1944,6 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                                     ? 'bg-indigo-100 border-indigo-300 hover:bg-indigo-200'
                                     : session.status === 'completed'
                                     ? 'bg-slate-100 border-slate-300 hover:bg-slate-200'
-                                    : session.status === 'paid'
-                                    ? 'bg-green-100 border-green-300 hover:bg-green-200'
                                     : 'bg-red-100 border-red-300 hover:bg-red-200'
                                 }`}
                                 style={{
@@ -1704,8 +2019,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                                       <span className={`text-[9px] font-bold leading-tight ${
                                         session.status === 'available' ? 'text-purple-800' :
                                         session.status === 'scheduled' ? 'text-blue-800' :
-                                        session.status === 'completed' ? 'text-green-800' :
-                                        session.status === 'paid' ? 'text-green-800' : 'text-red-800'
+                                        session.status === 'completed' ? 'text-green-800' : 'text-red-800'
                                       }`}>
                                         {session.startTime}
                                       </span>
@@ -1854,14 +2168,13 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                               ? 'bg-indigo-100 text-indigo-700'
                               : session.status === 'completed'
                               ? 'bg-slate-100 text-slate-700'
-                              : session.status === 'paid'
+                              : session.status === 'completed'
                               ? 'bg-green-100 text-green-700'
                               : 'bg-red-100 text-red-700'
                           }`}>
                             {session.status === 'available' ? 'Disponible' : 
                              session.status === 'scheduled' ? 'Programada' :
-                             session.status === 'completed' ? 'Completada' :
-                             session.status === 'paid' ? 'Pagada' : 'Cancelada'}
+                             session.status === 'completed' ? 'Completada' : 'Cancelada'}
                           </span>
                           {session.status === 'available' && (
                             <button
@@ -1998,26 +2311,26 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
       )}
 
       {/* Edit Session Modal */}
-      {selectedSession && editedSession && (
-        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={handleCloseModal}>
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      {selectedSession && editedSession && !showSessionDetails && (
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-0 sm:p-4" onClick={handleCloseModal}>
+          <div className="bg-white rounded-none sm:rounded-2xl shadow-2xl max-w-2xl w-full h-full sm:h-auto sm:max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             {/* Modal Header */}
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
-              <h3 className="text-xl font-bold text-slate-800">Editar Sesión</h3>
+            <div className="flex-shrink-0 bg-white border-b border-slate-200 px-4 py-3 sm:px-6 sm:py-4 flex items-center justify-between">
+              <h3 className="text-lg sm:text-xl font-bold text-slate-800">Editar Sesión</h3>
               <button
                 onClick={handleCloseModal}
-                className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                className="p-2 hover:bg-slate-100 active:bg-slate-200 rounded-lg transition-colors"
               >
                 <X size={20} className="text-slate-500" />
               </button>
             </div>
 
             {/* Modal Body */}
-            <div className="p-6 space-y-4">
+            <div className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6 space-y-4">
               {/* Patient Name (Read-only) */}
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-2">Paciente</label>
-                <div className="px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg text-slate-700">
+                <div className="px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 text-base">
                   {editedSession.patientName || 'Paciente no disponible'}
                 </div>
               </div>
@@ -2029,19 +2342,19 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                   type="date"
                   value={editedSession.date}
                   onChange={(e) => handleFieldChange('date', e.target.value)}
-                  className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base"
                 />
               </div>
 
               {/* Time Range */}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3 sm:gap-4">
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">Hora inicio</label>
                   <input
                     type="time"
                     value={editedSession.startTime}
                     onChange={(e) => handleFieldChange('startTime', e.target.value)}
-                    className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base"
                   />
                 </div>
                 <div>
@@ -2050,7 +2363,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                     type="time"
                     value={editedSession.endTime}
                     onChange={(e) => handleFieldChange('endTime', e.target.value)}
-                    className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base"
                   />
                 </div>
               </div>
@@ -2061,7 +2374,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                 <select
                   value={editedSession.type}
                   onChange={(e) => handleFieldChange('type', e.target.value as 'in-person' | 'online' | 'home-visit')}
-                  className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base bg-white"
                 >
                   <option value="online">Online</option>
                   <option value="in-person">Presencial</option>
@@ -2075,63 +2388,89 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                 <select
                   value={editedSession.status}
                   onChange={(e) => handleFieldChange('status', e.target.value as Session['status'])}
-                  className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base bg-white"
                 >
                   <option value="scheduled">Programada</option>
                   <option value="completed">Completada</option>
                   <option value="cancelled">Cancelada</option>
-                  <option value="paid">Pagada</option>
                 </select>
               </div>
 
               {/* Paid Checkbox */}
               <div>
-                <label className="flex items-center gap-3 px-4 py-3 bg-green-50 border border-green-200 rounded-lg cursor-pointer hover:bg-green-100 transition-colors">
+                <label className={`flex items-center gap-3 px-4 py-3 bg-green-50 border border-green-200 rounded-lg ${editedSession.bonus_id ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:bg-green-100'} transition-colors`}>
                   <input
                     type="checkbox"
                     checked={editedSession.paid || false}
                     onChange={(e) => handleFieldChange('paid', e.target.checked)}
-                    className="w-5 h-5 rounded border-green-300 text-green-600 focus:ring-2 focus:ring-green-500"
+                    disabled={!!editedSession.bonus_id}
+                    className="w-5 h-5 rounded border-green-300 text-green-600 focus:ring-2 focus:ring-green-500 disabled:cursor-not-allowed"
                   />
                   <div>
                     <div className="font-semibold text-green-700">Sesión pagada</div>
-                    <div className="text-xs text-green-600">Marcar como pagada independientemente del estado</div>
+                    <div className="text-xs text-green-600">
+                      {editedSession.bonus_id 
+                        ? 'Estado heredado del bono'
+                        : 'Marcar como pagada independientemente del estado'
+                      }
+                    </div>
                   </div>
                 </label>
               </div>
 
-              {/* Price and Percent */}
-              <div className="grid grid-cols-2 gap-4">
+              {/* Payment Method */}
+              {editedSession.paid && (
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Precio por hora (€)</label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Método de pago</label>
+                  <select
+                    value={editedSession.paymentMethod || ''}
+                    onChange={(e) => handleFieldChange('paymentMethod', e.target.value)}
+                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base bg-white"
+                  >
+                    <option value="">-- Seleccionar --</option>
+                    <option value="Bizum">Bizum</option>
+                    <option value="Transferencia">Transferencia</option>
+                    <option value="Efectivo">Efectivo</option>
+                  </select>
+                </div>
+              )}
+
+              {/* Price and Percent */}
+              <div className="grid grid-cols-2 gap-3 sm:gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Precio/h (€)</label>
                   <input
                     type="text"
                     inputMode="decimal"
                     value={editedSession.price === 0 ? '' : editedSession.price || ''}
                     onChange={(e) => {
                       const value = e.target.value;
-                      // Permitir vacío, números y decimales
                       if (value === '' || /^\d*\.?\d*$/.test(value)) {
                         handleFieldChange('price', value === '' ? 0 : parseFloat(value) || 0);
                       }
                     }}
-                    className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base"
                     placeholder="0.00"
                   />
                   <p className="text-xs text-slate-500 mt-1">
-                    Duración: {getSessionDurationHours(editedSession).toFixed(2)}h → Total: {getSessionTotalPrice(editedSession).toFixed(2)}€
+                    {getSessionDurationHours(editedSession).toFixed(2)}h → {getSessionTotalPrice(editedSession).toFixed(2)}€
                   </p>
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">% Psicólogo</label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">% Psic.</label>
                   <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max="100"
-                    value={editedSession.percent_psych || 0}
-                    onChange={(e) => handleFieldChange('percent_psych', parseFloat(e.target.value) || 0)}
-                    className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    type="text"
+                    inputMode="decimal"
+                    value={editedSession.percent_psych === 0 ? '' : editedSession.percent_psych || ''}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                        const numValue = value === '' ? 0 : parseFloat(value) || 0;
+                        handleFieldChange('percent_psych', Math.min(numValue, 100));
+                      }
+                    }}
+                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base"
+                    placeholder="0.00"
                   />
                 </div>
               </div>
@@ -2145,7 +2484,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                     value={editedSession.meetLink || ''}
                     onChange={(e) => handleFieldChange('meetLink', e.target.value)}
                     placeholder="https://meet.google.com/..."
-                    className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base"
                   />
                   {editedSession.meetLink && (
                     <div className="mt-3 flex flex-wrap gap-2">
@@ -2201,11 +2540,88 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                   onChange={(e) => handleFieldChange('notes', e.target.value)}
                   rows={4}
                   placeholder="Notas sobre la sesión..."
-                  className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+                  className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none text-base"
                 />
               </div>
 
-              {/* Tags (Read-only - heredadas de la relación) */}
+              {/* Sección de Bonos - Solo si no tiene invoice_id */}
+              {!editedSession.invoice_id && (
+                <div className="space-y-3">
+                  <label className="block text-sm font-semibold text-slate-700">Gestión de Bonos</label>
+                  
+                  {editedSession.bonus_id ? (
+                    <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-purple-700">
+                          <Ticket size={16} />
+                          <span className="text-sm font-medium">Asignada a bono</span>
+                        </div>
+                        <button
+                          onClick={handleUnassignBono}
+                          disabled={isAssigningBono}
+                          className="text-xs text-purple-600 hover:text-purple-800 underline disabled:opacity-50"
+                        >
+                          Desasignar
+                        </button>
+                      </div>
+                      <p className="text-xs text-purple-600 mt-1">Esta sesión pertenece a un bono del paciente</p>
+                    </div>
+                  ) : availableBonos.length > 0 ? (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                      <div className="mb-2">
+                        <span className="text-sm font-medium text-blue-900">Asignar a bono</span>
+                        <p className="text-xs text-blue-600 mt-0.5">El paciente tiene bonos disponibles</p>
+                      </div>
+                      <div className="space-y-2 max-h-40 overflow-y-auto">
+                        {availableBonos.map(bono => (
+                          <button
+                            key={bono.id}
+                            onClick={() => handleAssignBono(bono.id)}
+                            disabled={isAssigningBono}
+                            className="w-full text-left px-3 py-2 bg-white border border-blue-300 rounded-lg hover:bg-blue-50 hover:border-blue-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <div className="text-sm font-medium text-blue-900">
+                                  Bono - {bono.total_price_bono_amount}€
+                                </div>
+                                <div className="text-xs text-blue-600">
+                                  {bono.sessions_remaining} sesión{bono.sessions_remaining !== 1 ? 'es' : ''} disponible{bono.sessions_remaining !== 1 ? 's' : ''}
+                                </div>
+                              </div>
+                              <div className="text-xs text-blue-500">
+                                {new Date(bono.created_at).toLocaleDateString('es-ES')}
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                      <div className="flex items-center gap-2 text-slate-600">
+                        <XCircle size={16} />
+                        <span className="text-sm font-medium">Sin asignar</span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-1">
+                        {isLoadingBonos ? 'Cargando bonos...' : 'El paciente no tiene bonos disponibles'}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {editedSession.invoice_id && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                  <div className="flex items-center gap-2 text-green-700">
+                    <CheckCircle size={16} />
+                    <span className="text-sm font-medium">Facturada</span>
+                  </div>
+                  <p className="text-xs text-green-600 mt-1">Esta sesión está asociada a una factura</p>
+                </div>
+              )}
+
+              {/* Tags (Read-only) */}
               {editedSession.tags && editedSession.tags.length > 0 && (
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">Tags de la Relación</label>
@@ -2238,20 +2654,29 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
             </div>
 
             {/* Modal Footer */}
-            <div className="sticky bottom-0 bg-slate-50 border-t border-slate-200 px-6 py-4 flex items-center justify-between gap-3">
-              <button
-                onClick={handleDeleteSession}
-                disabled={isSaving}
-                className="px-4 py-2 bg-red-600 text-white hover:bg-red-700 rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
-              >
-                <Trash2 size={16} />
-                Eliminar
-              </button>
-              <div className="flex items-center gap-3">
+            <div className="flex-shrink-0 bg-slate-50 border-t border-slate-200 px-4 py-3 sm:px-6 sm:py-4 flex items-center justify-between gap-2 sm:gap-3">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleDeleteSession}
+                  disabled={isSaving}
+                  className="px-4 py-3 bg-red-600 text-white hover:bg-red-700 active:bg-red-800 rounded-xl font-medium transition-colors disabled:opacity-50 flex items-center gap-2 text-sm sm:text-base"
+                >
+                  <Trash2 size={16} />
+                  <span className="hidden xs:inline">Eliminar</span>
+                </button>
+                <button
+                  onClick={handleOpenSessionDetails}
+                  className="px-4 py-3 bg-indigo-600 text-white hover:bg-indigo-700 active:bg-indigo-800 rounded-xl font-medium transition-colors flex items-center gap-2 text-sm sm:text-base"
+                >
+                  <MessageCircle size={16} />
+                  <span className="hidden sm:inline">Documentar</span>
+                </button>
+              </div>
+              <div className="flex items-center gap-2 sm:gap-3">
                 <button
                   onClick={handleCloseModal}
                   disabled={isSaving}
-                  className="px-4 py-2 text-slate-700 hover:bg-slate-200 rounded-lg font-medium transition-colors disabled:opacity-50"
+                  className="px-4 py-3 text-slate-700 hover:bg-slate-200 active:bg-slate-300 rounded-xl font-medium transition-colors disabled:opacity-50 text-sm sm:text-base"
                 >
                   Cancelar
                 </button>
@@ -2278,9 +2703,26 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
         </div>
       )}
 
+      {/* Session Details Modal (para documentar la sesión) */}
+      {selectedSession && showSessionDetails && (
+        <SessionDetailsModal
+          session={selectedSession}
+          onClose={() => {
+            setShowSessionDetails(false);
+          }}
+          onSave={() => {
+            loadSessions();
+            setShowSessionDetails(false);
+          }}
+        />
+      )}
+
       {/* New Session Modal */}
       {showNewSession && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setShowNewSession(false)}>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => {
+          setShowNewSession(false);
+          resetNewSession();
+        }}>
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full" onClick={(e) => e.stopPropagation()}>
             <div className="p-6 border-b border-slate-200">
               <h3 className="text-xl font-bold text-slate-900">Nueva Sesión</h3>
@@ -2293,7 +2735,7 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                 <div className="relative">
                   <input
                     type="text"
-                    value={patientSearchQuery || patients.find(p => p.id === newSession.patientId)?.name || ''}
+                    value={patientSearchQuery}
                     onChange={(e) => {
                       setPatientSearchQuery(e.target.value);
                       setShowPatientDropdown(true);
@@ -2373,6 +2815,111 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                   className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   placeholder="dd/mm/yyyy"
                 />
+              </div>
+
+              {/* Recurrence Section */}
+              <div className="border border-slate-200 rounded-lg p-4 bg-slate-50">
+                <label className="flex items-center gap-2 mb-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newSession.recurrence.enabled}
+                    onChange={(e) => {
+                      const enabled = e.target.checked;
+                      const oneMonthLater = newSession.date ? 
+                        new Date(new Date(newSession.date).getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] : '';
+                      setNewSession({ 
+                        ...newSession, 
+                        recurrence: { 
+                          ...newSession.recurrence, 
+                          enabled,
+                          endDate: enabled && !newSession.recurrence.endDate ? oneMonthLater : newSession.recurrence.endDate
+                        } 
+                      });
+                    }}
+                    className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
+                  />
+                  <span className="text-sm font-medium text-slate-700">Repetir sesión</span>
+                </label>
+
+                {newSession.recurrence.enabled && (
+                  <div className="space-y-3 animate-in fade-in">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-2">Frecuencia</label>
+                      <select
+                        value={newSession.recurrence.frequency}
+                        onChange={(e) => setNewSession({ 
+                          ...newSession, 
+                          recurrence: { 
+                            ...newSession.recurrence, 
+                            frequency: e.target.value as 'daily' | 'weekly' | 'monthly',
+                            // Si cambia a diaria o mensual, limpiar días de la semana
+                            daysOfWeek: e.target.value === 'weekly' ? newSession.recurrence.daysOfWeek : []
+                          } 
+                        })}
+                        className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      >
+                        <option value="daily">Diaria</option>
+                        <option value="weekly">Semanal</option>
+                        <option value="monthly">Mensual</option>
+                      </select>
+                    </div>
+
+                    {newSession.recurrence.frequency === 'weekly' && (
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-2">Días de la semana</label>
+                        <div className="grid grid-cols-7 gap-1">
+                          {['D', 'L', 'M', 'X', 'J', 'V', 'S'].map((day, index) => {
+                            const isSelected = newSession.recurrence.daysOfWeek.includes(index);
+                            return (
+                              <button
+                                key={index}
+                                type="button"
+                                onClick={() => {
+                                  const daysOfWeek = isSelected
+                                    ? newSession.recurrence.daysOfWeek.filter(d => d !== index)
+                                    : [...newSession.recurrence.daysOfWeek, index];
+                                  setNewSession({ 
+                                    ...newSession, 
+                                    recurrence: { ...newSession.recurrence, daysOfWeek } 
+                                  });
+                                }}
+                                className={`px-2 py-2 text-xs font-medium rounded-lg transition-colors ${
+                                  isSelected
+                                    ? 'bg-indigo-600 text-white'
+                                    : 'bg-white text-slate-600 border border-slate-300 hover:bg-slate-100'
+                                }`}
+                              >
+                                {day}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {newSession.recurrence.daysOfWeek.length === 0 && (
+                          <p className="text-xs text-amber-600 mt-1">Selecciona al menos un día</p>
+                        )}
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-2">
+                        Repetir hasta
+                      </label>
+                      <input
+                        type="date"
+                        value={newSession.recurrence.endDate}
+                        onChange={(e) => setNewSession({ 
+                          ...newSession, 
+                          recurrence: { ...newSession.recurrence, endDate: e.target.value } 
+                        })}
+                        min={newSession.date}
+                        className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      />
+                      <p className="text-xs text-slate-500 mt-1">
+                        Por defecto se establece un mes desde la fecha inicial
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -2502,6 +3049,128 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                   placeholder="Notas adicionales sobre la sesión..."
                 />
               </div>
+
+              {/* Sección de Bonos - Solo si el paciente está seleccionado */}
+              {newSession.patientId && (
+                <div className="space-y-3">
+                  <label className="block text-sm font-semibold text-slate-700">Bono (Opcional)</label>
+                  
+                  {isLoadingBonos ? (
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                      <div className="flex items-center gap-2 text-slate-600">
+                        <div className="w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></div>
+                        <span className="text-sm">Cargando bonos disponibles...</span>
+                      </div>
+                    </div>
+                  ) : availableBonos.length > 0 ? (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                      <div className="mb-2">
+                        <span className="text-sm font-medium text-blue-900">Asignar a bono</span>
+                        <p className="text-xs text-blue-600 mt-0.5">El paciente tiene bonos disponibles</p>
+                      </div>
+                      <div className="space-y-2 max-h-40 overflow-y-auto">
+                        {/* Opción para no asignar bono */}
+                        <button
+                          type="button"
+                          onClick={() => setNewSession({ ...newSession, selectedBonoId: '' })}
+                          className={`w-full text-left px-3 py-2 border rounded-lg transition-all ${
+                            !newSession.selectedBonoId
+                              ? 'bg-indigo-100 border-indigo-400 text-indigo-900'
+                              : 'bg-white border-blue-300 hover:bg-blue-50 hover:border-blue-400'
+                          }`}
+                        >
+                          <div className="text-sm font-medium">Sin asignar a bono</div>
+                          <div className="text-xs opacity-75">La sesión no se asociará a ningún bono</div>
+                        </button>
+                        
+                        {availableBonos.map(bono => (
+                          <button
+                            key={bono.id}
+                            type="button"
+                            onClick={() => setNewSession({ ...newSession, selectedBonoId: bono.id })}
+                            className={`w-full text-left px-3 py-2 border rounded-lg transition-all ${
+                              newSession.selectedBonoId === bono.id
+                                ? 'bg-purple-100 border-purple-400 text-purple-900'
+                                : 'bg-white border-blue-300 hover:bg-blue-50 hover:border-blue-400'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <Ticket size={14} className={newSession.selectedBonoId === bono.id ? 'text-purple-700' : 'text-blue-700'} />
+                                  <div className="text-sm font-medium">
+                                    Bono - {bono.total_price_bono_amount}€
+                                  </div>
+                                </div>
+                                <div className="text-xs opacity-75 mt-0.5">
+                                  {bono.sessions_remaining} sesión{bono.sessions_remaining !== 1 ? 'es' : ''} disponible{bono.sessions_remaining !== 1 ? 's' : ''}
+                                </div>
+                              </div>
+                              <div className="text-xs opacity-60">
+                                {new Date(bono.created_at).toLocaleDateString('es-ES')}
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                      {newSession.selectedBonoId && (
+                        <div className="mt-2 flex items-center gap-1.5 text-xs text-purple-700 bg-purple-100 px-2 py-1.5 rounded">
+                          <CheckCircle size={12} />
+                          <span>Esta sesión se asociará automáticamente al bono seleccionado</span>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                      <div className="flex items-center gap-2 text-slate-600">
+                        <XCircle size={16} />
+                        <span className="text-sm font-medium">Sin bonos disponibles</span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-1">Este paciente no tiene bonos con sesiones disponibles</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Preview de sesiones recurrentes */}
+              {newSession.recurrence.enabled && newSession.date && newSession.recurrence.endDate && (
+                <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <CalendarIcon size={16} className="text-indigo-600" />
+                    <span className="text-sm font-semibold text-indigo-900">
+                      Vista previa de sesiones
+                    </span>
+                  </div>
+                  <div className="text-xs text-indigo-700">
+                    {(() => {
+                      const dates = generateRecurringDates(newSession.date, newSession.recurrence);
+                      const previewDates = dates.slice(0, 5);
+                      return (
+                        <>
+                          <p className="mb-1">Se crearán <strong>{dates.length}</strong> sesiones:</p>
+                          <ul className="list-disc list-inside ml-2 space-y-0.5">
+                            {previewDates.map((date, idx) => (
+                              <li key={idx}>
+                                {new Date(date).toLocaleDateString('es-ES', { 
+                                  weekday: 'short', 
+                                  day: 'numeric', 
+                                  month: 'short', 
+                                  year: 'numeric' 
+                                })}
+                              </li>
+                            ))}
+                            {dates.length > 5 && (
+                              <li className="text-indigo-600 font-medium">
+                                ... y {dates.length - 5} sesiones más
+                              </li>
+                            )}
+                          </ul>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="p-6 border-t border-slate-200 flex gap-3 justify-end">
@@ -2518,7 +3187,10 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
                 onClick={handleCreateSession}
                 className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium shadow-md"
               >
-                Crear Sesión
+                {newSession.recurrence.enabled && newSession.date && newSession.recurrence.endDate
+                  ? `Crear ${generateRecurringDates(newSession.date, newSession.recurrence).length} Sesiones`
+                  : 'Crear Sesión'
+                }
               </button>
             </div>
           </div>

@@ -179,7 +179,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       return;
     }
     
-    if (!formData.patientId || !formData.date || !formData.dueDate) {
+    if (!formData.patientId || !formData.date) {
       alert('Por favor completa todos los campos requeridos');
       return;
     }
@@ -190,13 +190,15 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       return;
     }
 
-    // Validar que la fecha de factura sea anterior a la fecha de vencimiento
-    const invoiceDate = new Date(formData.date);
-    const dueDate = new Date(formData.dueDate);
-    
-    if (invoiceDate >= dueDate) {
-      alert('La fecha de factura debe ser anterior a la fecha de vencimiento');
-      return;
+    // Validar que la fecha de factura sea anterior a la fecha de vencimiento (solo si se proporciona dueDate)
+    if (formData.dueDate) {
+      const invoiceDate = new Date(formData.date);
+      const dueDate = new Date(formData.dueDate);
+      
+      if (invoiceDate >= dueDate) {
+        alert('La fecha de factura debe ser anterior a la fecha de vencimiento');
+        return;
+      }
     }
 
     const patient = patients.find(p => p.id === formData.patientId);
@@ -924,7 +926,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
 
               {/* Due Date */}
               <div>
-                <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1.5 sm:mb-2">Fecha de Vencimiento *</label>
+                <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1.5 sm:mb-2">Fecha de Vencimiento</label>
                 <input
                   type="date"
                   value={formData.dueDate}
@@ -932,7 +934,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                   min={formData.date}
                   className="w-full px-3 sm:px-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 />
-                <p className="text-[10px] sm:text-xs text-slate-500 mt-1">Debe ser posterior a la fecha de factura</p>
+                <p className="text-[10px] sm:text-xs text-slate-500 mt-1">Opcional - Debe ser posterior a la fecha de factura</p>
               </div>
 
               {/* Description */}

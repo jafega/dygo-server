@@ -323,11 +323,15 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
             <label className="block text-sm font-medium text-slate-700 mb-2">Precio por Sesión</label>
             <div className="flex flex-col sm:flex-row gap-2">
               <input
-                type="number"
-                value={profile.sessionPrice}
-                onChange={(e) => handleChange('sessionPrice', parseFloat(e.target.value) || 0)}
-                step="0.01"
-                min="0"
+                type="text"
+                inputMode="decimal"
+                value={profile.sessionPrice === 0 ? '' : profile.sessionPrice}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                    handleChange('sessionPrice', value === '' ? 0 : parseFloat(value) || 0);
+                  }
+                }}
                 className="flex-1 px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 placeholder="0.00"
               />

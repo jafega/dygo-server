@@ -95,10 +95,10 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
           lastName: data.lastName || data.data?.lastName || '',
           email: data.email || patient.email,
           phone: data.phone || patient.phone,
-          dni: data.data?.dni || '',
-          address: data.data?.address || '',
-          birthDate: data.data?.birthDate || '',
-          notes: data.data?.notes || ''
+          dni: data.data?.dni || data.dni || '',
+          address: data.data?.address || data.address || '',
+          birthDate: data.data?.birthDate || data.birthDate || '',
+          notes: data.data?.notes || data.notes || ''
         });
       }
     } catch (error) {
@@ -2062,30 +2062,41 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                       <div className="space-y-2">
                         <label className="text-sm font-semibold text-slate-600">Precio por Defecto (€/hora)</label>
                         <input
-                          type="number"
-                          step="0.01"
-                          value={relationshipSettings.defaultPrice}
-                          onChange={(e) => setRelationshipSettings({
-                            ...relationshipSettings,
-                            defaultPrice: parseFloat(e.target.value) || 0
-                          })}
+                          type="text"
+                          inputMode="decimal"
+                          value={relationshipSettings.defaultPrice === 0 ? '' : relationshipSettings.defaultPrice}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                              setRelationshipSettings({
+                                ...relationshipSettings,
+                                defaultPrice: value === '' ? 0 : parseFloat(value) || 0
+                              });
+                            }
+                          }}
                           className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                          placeholder="0.00"
                         />
                       </div>
 
                       <div className="space-y-2">
                         <label className="text-sm font-semibold text-slate-600">Porcentaje del Psicólogo (%)</label>
                         <input
-                          type="number"
-                          min="0"
-                          max="100"
-                          step="0.01"
-                          value={relationshipSettings.defaultPercent}
-                          onChange={(e) => setRelationshipSettings({
-                            ...relationshipSettings,
-                            defaultPercent: parseFloat(e.target.value) || 0
-                          })}
+                          type="text"
+                          inputMode="decimal"
+                          value={relationshipSettings.defaultPercent === 0 ? '' : relationshipSettings.defaultPercent}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                              const numValue = value === '' ? 0 : parseFloat(value) || 0;
+                              setRelationshipSettings({
+                                ...relationshipSettings,
+                                defaultPercent: Math.min(numValue, 100)
+                              });
+                            }
+                          }}
                           className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                          placeholder="0.00"
                         />
                       </div>
                     </div>

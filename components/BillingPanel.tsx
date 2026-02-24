@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, Plus, DollarSign, Check, Clock, ExternalLink, Download, Eye, Edit, Trash2, Send, CheckSquare, Square, Search, Building, User, X } from 'lucide-react';
+import { FileText, Plus, DollarSign, Check, Clock, ExternalLink, Download, Eye, Edit, Trash2, Send, CheckSquare, Square, Search, Building, User, X, ArrowUpDown } from 'lucide-react';
 import { API_URL } from '../services/config';
 
 interface Invoice {
@@ -37,6 +37,9 @@ interface Invoice {
   billing_psychologist_address?: string;
   billing_psychologist_tax_id?: string;
   
+  // Notas de la factura
+  notes?: string;
+  
   // Campos para facturas rectificativas
   is_rectificativa?: boolean;
   rectifies_invoice_id?: string;
@@ -60,6 +63,8 @@ interface Session {
   percent_psych?: number;
   invoice_id?: string;
   bonus_id?: string;
+  patient_user_id?: string;
+  patientName?: string;
 }
 
 interface Bono {
@@ -72,6 +77,8 @@ interface Bono {
   created_at: string;
   invoice_id?: string;
   percent_psych?: number;
+  pacient_user_id?: string;
+  patientName?: string;
 }
 
 interface Patient {
@@ -111,6 +118,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
   const [invoiceToCancel, setInvoiceToCancel] = useState<Invoice | null>(null);
   const [showInvoiceStartModal, setShowInvoiceStartModal] = useState(false);
   const [invoiceStartNumber, setInvoiceStartNumber] = useState<string>('');
+  const [invoiceSeriesInput, setInvoiceSeriesInput] = useState<string>('');
   const [pendingInvoiceData, setPendingInvoiceData] = useState<any>(null);
   
   // Filtros
@@ -118,6 +126,11 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+
+  // Detalle de sesiones/bonos de la factura seleccionada
+  const [invoiceItems, setInvoiceItems] = useState<{ sessions: any[], bonos: any[] } | null>(null);
+  const [isLoadingItems, setIsLoadingItems] = useState(false);
   
   // Form state
   const [invoiceType, setInvoiceType] = useState<'patient' | 'center'>('patient');
@@ -132,6 +145,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
     date: new Date().toISOString().split('T')[0],
     dueDate: '',
     description: '',
+    notes: 'Servicio exento de IVA según el artículo 20 3a de la ley 37/1992 del Impuesto sobre el Valor Añadido.',
     taxRate: 21,
     irpf: 15,
     billing_client_name: '',
@@ -144,6 +158,13 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
   
   const [psychologistProfile, setPsychologistProfile] = useState<any>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // Estado para búsqueda de pacientes/centros
+  const [patientSearchTerm, setPatientSearchTerm] = useState('');
+  const [centerSearchTerm, setCenterSearchTerm] = useState('');
+  const [showPatientDropdown, setShowPatientDropdown] = useState(false);
+  const [showCenterDropdown, setShowCenterDropdown] = useState(false);
+  const [patientCenterWarning, setPatientCenterWarning] = useState<{ centerName: string; centerId: string } | null>(null);
 
   useEffect(() => {
     loadInvoices();
@@ -153,6 +174,26 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       loadCenters();
     }
   }, [psychologistId, patientId]);
+
+  // Cargar detalles de sesiones/bonos cuando se abre el modal de ver factura
+  useEffect(() => {
+    if (!selectedInvoice) {
+      setInvoiceItems(null);
+      return;
+    }
+    const hasItems = (selectedInvoice.sessionIds && selectedInvoice.sessionIds.length > 0) ||
+                     (selectedInvoice.bonoIds && selectedInvoice.bonoIds.length > 0);
+    if (!hasItems) {
+      setInvoiceItems({ sessions: [], bonos: [] });
+      return;
+    }
+    setIsLoadingItems(true);
+    fetch(`${API_URL}/invoices/${selectedInvoice.id}/items`)
+      .then(r => r.ok ? r.json() : { sessions: [], bonos: [] })
+      .then(data => setInvoiceItems(data))
+      .catch(() => setInvoiceItems({ sessions: [], bonos: [] }))
+      .finally(() => setIsLoadingItems(false));
+  }, [selectedInvoice?.id]);
 
   const loadInvoices = async () => {
     setIsLoading(true);
@@ -243,6 +284,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
 
   const handlePatientSelect = async (patId: string) => {
     setSelectedPatientId(patId);
+    setPatientCenterWarning(null);
     const patient = patients.find(p => p.id === patId);
     console.log('[BillingPanel] Paciente seleccionado:', patient);
     if (patient) {
@@ -258,7 +300,25 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
         billing_client_address: patient.billing_address,
         billing_client_tax_id: patient.billing_tax_id
       });
-      
+
+      // Comprobar si el paciente pertenece a un centro
+      try {
+        const relResp = await fetch(`${API_URL}/relationships?psychologistId=${psychologistId}&patientId=${patId}`);
+        if (relResp.ok) {
+          const rels = await relResp.json();
+          const relWithCenter = rels.find((r: any) => r.center_id);
+          if (relWithCenter) {
+            const center = centers.find(c => c.id === relWithCenter.center_id);
+            setPatientCenterWarning({
+              centerName: center?.center_name || relWithCenter.center_id,
+              centerId: relWithCenter.center_id
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Error comprobando centro del paciente:', err);
+      }
+
       // Cargar sesiones y bonos sin facturar
       await loadUnbilledItems(patId);
     }
@@ -362,7 +422,19 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
     }
   };
 
-  const saveInvoiceStartNumber = async (year: number, startNumber: number) => {
+  const getInvoiceSeries = async (year: number): Promise<string | null> => {
+    try {
+      const response = await fetch(`${API_URL}/psychologist/${psychologistId}/profile`);
+      if (!response.ok) return null;
+      const profile = await response.json();
+      return profile?.invoice_series?.[year] || null;
+    } catch (error) {
+      console.error('Error getting invoice series:', error);
+      return null;
+    }
+  };
+
+  const saveInvoiceStartNumber = async (year: number, startNumber: number, series?: string) => {
     try {
       // Obtener el perfil actual
       const response = await fetch(`${API_URL}/psychologist/${psychologistId}/profile`);
@@ -373,6 +445,10 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       
       // Actualizar con el nuevo número inicial para este año
       startNumbers[year] = startNumber;
+
+      // Guardar la serie personalizada si se proporcionó
+      const invoiceSeriesMap = profile.invoice_series || {};
+      if (series) invoiceSeriesMap[year] = series;
       
       // Guardar en el perfil
       const updateResponse = await fetch(`${API_URL}/psychologist/${psychologistId}/profile`, {
@@ -380,7 +456,8 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...profile,
-          invoice_start_numbers: startNumbers
+          invoice_start_numbers: startNumbers,
+          invoice_series: invoiceSeriesMap
         })
       });
       
@@ -401,36 +478,57 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       
       const allInvoices = await response.json();
       const year = new Date().getFullYear();
-      const yearSuffix = String(year).slice(-2); // Últimos 2 dígitos del año (26)
-      const yearPrefix = `F${yearSuffix}`;
+      const yearSuffix = String(year).slice(-2); // Últimos 2 dígitos del año (ej: 26)
+      const defaultPrefix = `F${yearSuffix}`;
       
-      // Filtrar facturas del año actual que empiecen con F26
+      // Comprobar si hay una serie personalizada configurada para este año
+      const customSeries = await getInvoiceSeries(year);
+
+      if (customSeries) {
+        // --- Serie personalizada (sin padding fijo) ---
+        const invoicesThisSeries = allInvoices.filter((inv: any) =>
+          inv.invoiceNumber && inv.invoiceNumber.startsWith(customSeries)
+        );
+
+        if (invoicesThisSeries.length === 0) {
+          const startNumber = await getInvoiceStartNumber(year);
+          if (startNumber === null) return null;
+          return `${customSeries}${startNumber}`;
+        }
+
+        const numbers = invoicesThisSeries.map((inv: any) => {
+          const numPart = inv.invoiceNumber.slice(customSeries.length);
+          return parseInt(numPart || '0', 10);
+        });
+        const maxNumber = Math.max(...numbers, 0);
+        return `${customSeries}${maxNumber + 1}`;
+      }
+
+      // --- Sin serie personalizada: usar prefijo por defecto (F26 + 6 dígitos) ---
       const invoicesThisYear = allInvoices.filter((inv: any) => 
-        inv.invoiceNumber && inv.invoiceNumber.startsWith(yearPrefix)
+        inv.invoiceNumber && inv.invoiceNumber.startsWith(defaultPrefix)
       );
       
       // Si es la primera factura del año, verificar si hay un número inicial configurado
       if (invoicesThisYear.length === 0) {
         const startNumber = await getInvoiceStartNumber(year);
         
-        // Si no hay número inicial configurado, pedir al usuario
+        // Si no hay número inicial configurado, pedir al usuario (mostrar modal)
         if (startNumber === null) {
-          return null; // Señal para mostrar modal
+          return null;
         }
         
-        return `${yearPrefix}${String(startNumber).padStart(6, '0')}`;
+        return `${defaultPrefix}${String(startNumber).padStart(6, '0')}`;
       }
       
-      // Extraer los números de secuencia (últimos 6 dígitos)
+      // Extraer los números de secuencia y buscar el siguiente
       const numbers = invoicesThisYear.map((inv: any) => {
-        const numPart = inv.invoiceNumber.replace(yearPrefix, '');
+        const numPart = inv.invoiceNumber.replace(defaultPrefix, '');
         return parseInt(numPart || '0', 10);
       });
       
-      const maxNumber = Math.max(...numbers);
-      const nextNumber = maxNumber + 1;
-      
-      return `${yearPrefix}${String(nextNumber).padStart(6, '0')}`;
+      const maxNumber = Math.max(...numbers, 0);
+      return `${defaultPrefix}${String(maxNumber + 1).padStart(6, '0')}`;
     } catch (error) {
       console.error('Error generating invoice number:', error);
       const year = new Date().getFullYear();
@@ -474,6 +572,10 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       if (invoiceNumber === null && !editingInvoice) {
         setIsSubmitting(false);
         setPendingInvoiceData({ isDraft });
+        // Pre-rellenar la serie por defecto (F26) como sugerencia
+        const yearSuffix = String(new Date().getFullYear()).slice(-2);
+        setInvoiceSeriesInput(`F${yearSuffix}`);
+        setInvoiceStartNumber('1');
         setShowInvoiceStartModal(true);
         return;
       }
@@ -490,6 +592,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
         dueDate: formData.dueDate,
         status: isDraft ? 'draft' : 'pending',
         description: formData.description,
+        notes: formData.notes,
         items: [],
         psychologist_user_id: psychologistId,
         psychologistId: psychologistId,
@@ -561,8 +664,14 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       return;
     }
 
+    const trimmedSeries = invoiceSeriesInput.trim();
+    if (!trimmedSeries) {
+      alert('Por favor ingresa una serie de facturación (ej: F26)');
+      return;
+    }
+
     const year = new Date().getFullYear();
-    const success = await saveInvoiceStartNumber(year, startNum);
+    const success = await saveInvoiceStartNumber(year, startNum, trimmedSeries);
     
     if (!success) {
       alert('Error al guardar la configuración. Inténtalo de nuevo.');
@@ -572,6 +681,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
     // Cerrar el modal y reintentar crear la factura
     setShowInvoiceStartModal(false);
     setInvoiceStartNumber('');
+    setInvoiceSeriesInput('');
     
     // Llamar nuevamente a handleSaveInvoice con los datos pendientes
     if (pendingInvoiceData) {
@@ -664,6 +774,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       date: invoice.date,
       dueDate: invoice.dueDate,
       description: invoice.description || '',
+      notes: (invoice as any).notes || '',
       taxRate: invoice.taxRate || 21,
       irpf: invoice.irpf || 15,
       billing_client_name: invoice.billing_client_name || '',
@@ -677,10 +788,19 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
     // Cargar sesiones según el tipo de factura
     if (invoice.invoice_type === 'center' && (invoice as any).centerId) {
       setSelectedCenterId((invoice as any).centerId);
+      const center = centers.find(c => c.id === (invoice as any).centerId);
+      if (center) {
+        setCenterSearchTerm(center.center_name);
+      }
       await loadCenterUnbilledSessions((invoice as any).centerId);
     } else {
-      setSelectedPatientId(invoice.patient_user_id || invoice.patientId || '');
-      await loadUnbilledItems(invoice.patient_user_id || invoice.patientId || '');
+      const patientId = invoice.patient_user_id || invoice.patientId || '';
+      setSelectedPatientId(patientId);
+      const patient = patients.find(p => p.id === patientId);
+      if (patient) {
+        setPatientSearchTerm(patient.name);
+      }
+      await loadUnbilledItems(patientId);
     }
     
     setSelectedSessionIds(new Set(invoice.sessionIds || []));
@@ -693,6 +813,11 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
     setInvoiceType('patient');
     setSelectedPatientId('');
     setSelectedCenterId('');
+    setPatientSearchTerm('');
+    setCenterSearchTerm('');
+    setShowPatientDropdown(false);
+    setShowCenterDropdown(false);
+    setPatientCenterWarning(null);
     setAvailableSessions([]);
     setAvailableBonos([]);
     setSelectedSessionIds(new Set());
@@ -708,6 +833,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       date: new Date().toISOString().split('T')[0],
       dueDate: '',
       description: '',
+      notes: invoiceType === 'patient' ? 'Servicio exento de IVA según el artículo 20 3a de la ley 37/1992 del Impuesto sobre el Valor Añadido.' : '',
       taxRate: invoiceType === 'center' ? 21 : 0,
       billing_client_name: '',
       billing_client_address: '',
@@ -726,15 +852,44 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
     console.log('[BillingPanel] Perfil del psicólogo:', psychologistProfile);
     console.log('[BillingPanel] Abriendo nueva factura con datos del psicólogo:', psychData);
     
-    // Resetear todo el formulario con los datos del psicólogo precargados
+    // Verificar si hay un paciente o centro seleccionado para mantener sus datos
+    let clientData = {
+      billing_client_name: '',
+      billing_client_address: '',
+      billing_client_tax_id: ''
+    };
+    
+    if (invoiceType === 'patient' && selectedPatientId) {
+      const patient = patients.find(p => p.id === selectedPatientId);
+      if (patient) {
+        clientData = {
+          billing_client_name: patient.billing_name || patient.name || '',
+          billing_client_address: patient.billing_address || '',
+          billing_client_tax_id: patient.billing_tax_id || ''
+        };
+        console.log('[BillingPanel] Manteniendo datos del paciente seleccionado:', clientData);
+      }
+    } else if (invoiceType === 'center' && selectedCenterId) {
+      const center = centers.find(c => c.id === selectedCenterId);
+      if (center) {
+        clientData = {
+          billing_client_name: center.center_name || '',
+          billing_client_address: center.address || '',
+          billing_client_tax_id: center.cif || ''
+        };
+        console.log('[BillingPanel] Manteniendo datos del centro seleccionado:', clientData);
+      }
+    }
+    
+    // Resetear el formulario con los datos del psicólogo y cliente precargados
     setFormData({
       date: new Date().toISOString().split('T')[0],
       dueDate: '',
       description: '',
+      notes: invoiceType === 'patient' ? 'Servicio exento de IVA según el artículo 20 3a de la ley 37/1992 del Impuesto sobre el Valor Añadido.' : '',
       taxRate: invoiceType === 'center' ? 21 : 0,
-      billing_client_name: '',
-      billing_client_address: '',
-      billing_client_tax_id: '',
+      irpf: 15,
+      ...clientData,
       ...psychData
     });
     setShowNewInvoice(true);
@@ -805,6 +960,13 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
     }
     
     return matchesSearch && matchesStatus;
+  });
+
+  // Ordenar facturas filtradas
+  const sortedFilteredInvoices = [...filteredInvoices].sort((a, b) => {
+    const dateA = new Date(a.invoice_date || a.date).getTime();
+    const dateB = new Date(b.invoice_date || b.date).getTime();
+    return sortOrder === 'desc' ? dateB - dateA : dateA - dateB;
   });
 
   // Calcular estadísticas (sin filtros de fecha, todas las facturas)
@@ -971,16 +1133,28 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
         </div>
       )}
 
+      {/* Sort order toggle */}
+      <div className="flex justify-end">
+        <button
+          onClick={() => setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
+          title={sortOrder === 'desc' ? 'Más recientes primero' : 'Más antiguas primero'}
+        >
+          <ArrowUpDown size={15} />
+          {sortOrder === 'desc' ? '↓ Más recientes primero' : '↑ Más antiguas primero'}
+        </button>
+      </div>
+
       {/* Invoices List */}
       <div className="grid gap-4">
         {isLoading ? (
           <div className="text-center py-8">Cargando...</div>
-        ) : filteredInvoices.length === 0 ? (
+        ) : sortedFilteredInvoices.length === 0 ? (
           <div className="text-center py-8 text-slate-500">
             No hay {showDrafts ? 'borradores' : showRectificativas ? 'facturas rectificativas' : 'facturas'}
           </div>
         ) : (
-          filteredInvoices.map(invoice => (
+          sortedFilteredInvoices.map(invoice => (
             <div key={invoice.id} className="bg-white rounded-lg shadow p-6 border border-slate-200">
               <div className="flex items-center justify-between">
                 <div className="flex-1">
@@ -992,7 +1166,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                   </div>
                   <p className="text-sm text-slate-600">{invoice.patientName}</p>
                   <p className="text-sm text-slate-500">
-                    {new Date(invoice.invoice_date || invoice.date).toLocaleDateString()} - Vence: {new Date(invoice.dueDate).toLocaleDateString()}
+                    {new Date(invoice.invoice_date || invoice.date).toLocaleDateString()}
                   </p>
                 </div>
                 <div className="text-right">
@@ -1074,7 +1248,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                     <div className="font-medium">Paciente</div>
                   </button>
                   <button
-                    onClick={() => setInvoiceType('center')}
+                    onClick={() => { setInvoiceType('center'); setPatientCenterWarning(null); }}
                     disabled={!!editingInvoice}
                     className={`flex-1 p-4 rounded-lg border-2 transition-colors ${
                       invoiceType === 'center'
@@ -1094,33 +1268,137 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                   {invoiceType === 'patient' ? 'Paciente' : 'Centro'} *
                 </label>
                 {invoiceType === 'patient' ? (
-                  <select
-                    value={selectedPatientId}
-                    onChange={(e) => handlePatientSelect(e.target.value)}
-                    disabled={!!editingInvoice}
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <option value="">Seleccionar paciente...</option>
-                    {patients.map((patient) => (
-                      <option key={patient.id} value={patient.id}>
-                        {patient.name} ({patient.email})
-                      </option>
-                    ))}
-                  </select>
+                  <div className="relative">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={patientSearchTerm}
+                        onChange={(e) => {
+                          setPatientSearchTerm(e.target.value);
+                          setShowPatientDropdown(true);
+                          if (!e.target.value && selectedPatientId) {
+                            setSelectedPatientId('');
+                            handlePatientSelect('');
+                          }
+                        }}
+                        onFocus={() => setShowPatientDropdown(true)}
+                        placeholder="Buscar paciente por nombre..."
+                        disabled={!!editingInvoice}
+                        className="w-full px-4 py-2 pr-10 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                      />
+                      <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                    </div>
+                    {showPatientDropdown && !editingInvoice && (
+                      <div className="absolute z-50 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                        {patients
+                          .filter(patient => 
+                            patient.name.toLowerCase().includes(patientSearchTerm.toLowerCase()) ||
+                            patient.email.toLowerCase().includes(patientSearchTerm.toLowerCase())
+                          )
+                          .map((patient) => (
+                            <div
+                              key={patient.id}
+                              onClick={() => {
+                                setSelectedPatientId(patient.id);
+                                setPatientSearchTerm(patient.name);
+                                setShowPatientDropdown(false);
+                                handlePatientSelect(patient.id);
+                              }}
+                              className={`px-4 py-3 cursor-pointer hover:bg-indigo-50 border-b border-slate-100 last:border-b-0 ${
+                                selectedPatientId === patient.id ? 'bg-indigo-50' : ''
+                              }`}
+                            >
+                              <div className="font-medium text-slate-900">{patient.name}</div>
+                              <div className="text-sm text-slate-500">{patient.email}</div>
+                            </div>
+                          ))}
+                        {patients.filter(patient => 
+                          patient.name.toLowerCase().includes(patientSearchTerm.toLowerCase()) ||
+                          patient.email.toLowerCase().includes(patientSearchTerm.toLowerCase())
+                        ).length === 0 && (
+                          <div className="px-4 py-3 text-slate-500 text-center">
+                            No se encontraron pacientes
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {/* Overlay para cerrar el dropdown al hacer clic fuera */}
+                    {showPatientDropdown && (
+                      <div 
+                        className="fixed inset-0 z-40" 
+                        onClick={() => setShowPatientDropdown(false)}
+                      />
+                    )}
+                    {/* Alerta si el paciente pertenece a un centro */}
+                    {patientCenterWarning && (
+                      <div className="mt-2 flex gap-2 items-start bg-amber-50 border border-amber-300 rounded-lg px-3 py-2.5 text-sm">
+                        <span className="text-amber-500 mt-0.5 shrink-0">⚠️</span>
+                        <div className="text-amber-800">
+                          <span className="font-semibold">Atención:</span> Este paciente pertenece al centro <span className="font-semibold">{patientCenterWarning.centerName}</span>. Facturarle directamente puede provocar un descuadre en la facturación del centro.
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 ) : (
-                  <select
-                    value={selectedCenterId}
-                    onChange={(e) => handleCenterSelect(e.target.value)}
-                    disabled={!!editingInvoice}
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <option value="">Seleccionar centro...</option>
-                    {centers.map((center) => (
-                      <option key={center.id} value={center.id}>
-                        {center.center_name}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="relative">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={centerSearchTerm}
+                        onChange={(e) => {
+                          setCenterSearchTerm(e.target.value);
+                          setShowCenterDropdown(true);
+                          if (!e.target.value && selectedCenterId) {
+                            setSelectedCenterId('');
+                            handleCenterSelect('');
+                          }
+                        }}
+                        onFocus={() => setShowCenterDropdown(true)}
+                        placeholder="Buscar centro..."
+                        disabled={!!editingInvoice}
+                        className="w-full px-4 py-2 pr-10 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                      />
+                      <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                    </div>
+                    {showCenterDropdown && !editingInvoice && (
+                      <div className="absolute z-50 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                        {centers
+                          .filter(center => 
+                            center.center_name.toLowerCase().includes(centerSearchTerm.toLowerCase())
+                          )
+                          .map((center) => (
+                            <div
+                              key={center.id}
+                              onClick={() => {
+                                setSelectedCenterId(center.id);
+                                setCenterSearchTerm(center.center_name);
+                                setShowCenterDropdown(false);
+                                handleCenterSelect(center.id);
+                              }}
+                              className={`px-4 py-3 cursor-pointer hover:bg-indigo-50 border-b border-slate-100 last:border-b-0 ${
+                                selectedCenterId === center.id ? 'bg-indigo-50' : ''
+                              }`}
+                            >
+                              <div className="font-medium text-slate-900">{center.center_name}</div>
+                            </div>
+                          ))}
+                        {centers.filter(center => 
+                          center.center_name.toLowerCase().includes(centerSearchTerm.toLowerCase())
+                        ).length === 0 && (
+                          <div className="px-4 py-3 text-slate-500 text-center">
+                            No se encontraron centros
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {/* Overlay para cerrar el dropdown al hacer clic fuera */}
+                    {showCenterDropdown && (
+                      <div 
+                        className="fixed inset-0 z-40" 
+                        onClick={() => setShowCenterDropdown(false)}
+                      />
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -1156,6 +1434,9 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                                   <div className="font-medium text-slate-900">
                                     {new Date(session.starts_on).toLocaleString()}
                                   </div>
+                                  {invoiceType === 'center' && session.patientName && (
+                                    <div className="text-sm font-medium text-indigo-700 mt-0.5">👤 {session.patientName}</div>
+                                  )}
                                   {session.notes && (
                                     <div className="text-sm text-slate-600 mt-1">{session.notes}</div>
                                   )}
@@ -1210,6 +1491,9 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                                   <div className="font-medium text-slate-900">
                                     Bono de {bono.total_sessions_amount} sesiones
                                   </div>
+                                  {invoiceType === 'center' && bono.patientName && (
+                                    <div className="text-sm font-medium text-indigo-700 mt-0.5">👤 {bono.patientName}</div>
+                                  )}
                                   <div className="text-sm text-slate-600">
                                     {bono.used_sessions} usadas, {bono.remaining_sessions} restantes
                                   </div>
@@ -1323,7 +1607,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Fecha de Vencimiento *</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Fecha de Vencimiento</label>
                   <input
                     type="date"
                     value={formData.dueDate}
@@ -1353,12 +1637,16 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                     IVA (%)
                   </label>
                   <input
-                    type="number"
-                    value={formData.taxRate}
-                    onChange={(e) => setFormData({ ...formData, taxRate: parseFloat(e.target.value) || 0 })}
-                    min="0"
-                    max="100"
-                    step="0.1"
+                    type="text"
+                    inputMode="decimal"
+                    value={formData.taxRate === 0 ? '' : formData.taxRate}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                        const numValue = value === '' ? 0 : parseFloat(value) || 0;
+                        setFormData({ ...formData, taxRate: Math.min(numValue, 100) });
+                      }
+                    }}
                     className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                     placeholder="21"
                   />
@@ -1369,12 +1657,16 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                       IRPF (%) - Retención
                     </label>
                     <input
-                      type="number"
-                      value={formData.irpf}
-                      onChange={(e) => setFormData({ ...formData, irpf: parseFloat(e.target.value) || 0 })}
-                      min="0"
-                      max="100"
-                      step="0.1"
+                      type="text"
+                      inputMode="decimal"
+                      value={formData.irpf === 0 ? '' : formData.irpf}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                          const numValue = value === '' ? 0 : parseFloat(value) || 0;
+                          setFormData({ ...formData, irpf: Math.min(numValue, 100) });
+                        }
+                      }}
                       className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                       placeholder="15"
                     />
@@ -1383,6 +1675,18 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
               </div>
 
               {/* Totales */}
+              {/* Notas */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Notas</label>
+                <textarea
+                  value={formData.notes}
+                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                  rows={3}
+                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                  placeholder="Ej: Servicio exento de IVA según el artículo 20 3a de la ley 37/1992..."
+                />
+              </div>
+
               {((invoiceType === 'patient' && (selectedSessionIds.size > 0 || selectedBonoIds.size > 0)) || 
                 (invoiceType === 'center' && selectedSessionIds.size > 0)) && (
                 <div className="pt-4 border-t border-slate-200 space-y-3">
@@ -1510,51 +1814,217 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       {selectedInvoice && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setSelectedInvoice(null)}>
           <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
             <div className="p-6 border-b border-slate-200">
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1">
                   <h3 className="text-xl font-bold text-slate-900">Factura {selectedInvoice.invoiceNumber}</h3>
-                  <p className="text-sm text-slate-500 mt-1">{selectedInvoice.patientName}</p>
+                  <div className="flex flex-wrap gap-4 mt-1 text-sm text-slate-500">
+                    <span>Emisión: <span className="text-slate-700">{new Date(selectedInvoice.invoice_date || selectedInvoice.date).toLocaleDateString('es-ES')}</span></span>
+                    {selectedInvoice.dueDate && (
+                      <span>Vencimiento: <span className="text-slate-700">{new Date(selectedInvoice.dueDate).toLocaleDateString('es-ES')}</span></span>
+                    )}
+                  </div>
                 </div>
                 <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium border ${getStatusColor(selectedInvoice.status)}`}>
                   {getStatusLabel(selectedInvoice.status)}
                 </span>
               </div>
             </div>
-            
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Emisión</div>
-                  <div className="text-sm text-slate-900">{new Date(selectedInvoice.invoice_date || selectedInvoice.date).toLocaleDateString()}</div>
+
+            <div className="p-6 space-y-5">
+
+              {/* Emisor / Receptor */}
+              <div className="grid grid-cols-2 gap-0 border border-slate-200 rounded-lg overflow-hidden">
+                <div className="p-4 bg-slate-50 border-r border-slate-200">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Emisor</div>
+                  {selectedInvoice.billing_psychologist_name ? (
+                    <>
+                      <div className="font-semibold text-slate-900 text-sm leading-snug">{selectedInvoice.billing_psychologist_name}</div>
+                      {selectedInvoice.billing_psychologist_address && (
+                        <div className="text-xs text-slate-600 mt-1 whitespace-pre-line leading-relaxed">{selectedInvoice.billing_psychologist_address}</div>
+                      )}
+                      {selectedInvoice.billing_psychologist_tax_id && (
+                        <div className="text-xs text-slate-500 mt-1">NIF/CIF: <span className="font-medium">{selectedInvoice.billing_psychologist_tax_id}</span></div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="text-xs text-slate-400 italic">Sin datos de emisor</div>
+                  )}
                 </div>
-                <div>
-                  <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Vencimiento</div>
-                  <div className="text-sm text-slate-900">{new Date(selectedInvoice.dueDate).toLocaleDateString()}</div>
+                <div className="p-4 bg-white">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Receptor</div>
+                  {selectedInvoice.billing_client_name ? (
+                    <>
+                      <div className="font-semibold text-slate-900 text-sm leading-snug">{selectedInvoice.billing_client_name}</div>
+                      {selectedInvoice.billing_client_address && (
+                        <div className="text-xs text-slate-600 mt-1 whitespace-pre-line leading-relaxed">{selectedInvoice.billing_client_address}</div>
+                      )}
+                      {selectedInvoice.billing_client_tax_id && (
+                        <div className="text-xs text-slate-500 mt-1">NIF/CIF: <span className="font-medium">{selectedInvoice.billing_client_tax_id}</span></div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="font-semibold text-slate-900 text-sm">{selectedInvoice.patientName}</div>
+                  )}
                 </div>
               </div>
 
+              {/* Descripción / nota legal */}
               {selectedInvoice.description && (
-                <div>
-                  <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Descripción</div>
-                  <div className="text-sm text-slate-700">{selectedInvoice.description}</div>
+                <div className="text-xs text-slate-500 italic border-l-2 border-slate-200 pl-3 leading-relaxed">
+                  {selectedInvoice.description}
                 </div>
               )}
 
-              <div className="pt-4 border-t border-slate-200 space-y-2">
-                <div className="flex justify-between items-center text-sm">
-                  <span className="text-slate-600">Subtotal:</span>
-                  <span className="font-semibold text-slate-900">€{selectedInvoice.amount.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between items-center text-sm">
-                  <span className="text-slate-600">IVA ({selectedInvoice.taxRate || 21}%):</span>
-                  <span className="font-semibold text-slate-900">€{(selectedInvoice.tax || (selectedInvoice.amount * 0.21)).toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between items-center pt-2 border-t border-slate-100">
-                  <span className="text-lg font-semibold text-slate-900">Total:</span>
-                  <span className="text-2xl font-bold text-indigo-600">€{(selectedInvoice.total || (selectedInvoice.amount * 1.21)).toFixed(2)}</span>
-                </div>
+              {/* Conceptos */}
+              {isLoadingItems && (
+                <div className="pt-2 text-xs text-slate-400">Cargando detalle...</div>
+              )}
+              {!isLoadingItems && invoiceItems && (invoiceItems.sessions.length > 0 || invoiceItems.bonos.length > 0) && (() => {
+                const taxRate = selectedInvoice.taxRate ?? 0;
+                const irpfRate = selectedInvoice.irpf ?? 0;
+                const showIva = taxRate > 0;
+                const showIrpf = irpfRate > 0;
+                return (
+                  <div className="border border-slate-200 rounded-lg overflow-hidden">
+                    <div className="bg-slate-50 px-4 py-2 border-b border-slate-200">
+                      <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Conceptos</span>
+                    </div>
+
+                    {/* Sesiones */}
+                    {invoiceItems.sessions.length > 0 && (
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-slate-100 bg-white text-xs text-slate-500 uppercase">
+                            <th className="px-4 py-2 text-left font-semibold">Concepto</th>
+                            <th className="px-4 py-2 text-center font-semibold w-10">Uds</th>
+                            <th className="px-4 py-2 text-right font-semibold">Precio/ud</th>
+                            {showIva  && <th className="px-4 py-2 text-right font-semibold">IVA</th>}
+                            {showIrpf && <th className="px-4 py-2 text-right font-semibold">IRPF</th>}
+                            <th className="px-4 py-2 text-right font-semibold">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {invoiceItems.sessions.map((s: any, i: number) => {
+                            const price    = Number(s.price || 0);
+                            const ivaAmt   = showIva  ? price * taxRate  / 100 : 0;
+                            const irpfAmt  = showIrpf ? price * irpfRate / 100 : 0;
+                            const lineTotal = price + ivaAmt - irpfAmt;
+                            const showPatient = selectedInvoice.invoice_type === 'center' && s.patientName;
+                            return (
+                              <tr key={s.id || i} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                                <td className="px-4 py-2.5">
+                                  <div className="text-slate-800 font-medium text-sm">Sesión de psicología</div>
+                                  <div className="text-xs text-slate-500 mt-0.5">
+                                    {s.date}{s.time ? ` · ${s.time}` : ''}{showPatient ? ` — ${s.patientName}` : ''}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-2.5 text-center text-slate-600">1</td>
+                                <td className="px-4 py-2.5 text-right text-slate-700">€{price.toFixed(2)}</td>
+                                {showIva  && <td className="px-4 py-2.5 text-right text-slate-500">{taxRate}%</td>}
+                                {showIrpf && <td className="px-4 py-2.5 text-right text-rose-500">−{irpfRate}%</td>}
+                                <td className="px-4 py-2.5 text-right font-semibold text-slate-900">€{lineTotal.toFixed(2)}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    )}
+
+                    {/* Bonos */}
+                    {invoiceItems.bonos.length > 0 && (
+                      <div className={invoiceItems.sessions.length > 0 ? 'border-t border-slate-200' : ''}>
+                        <div className="px-4 py-2 bg-emerald-50 border-b border-slate-200">
+                          <span className="text-xs font-semibold text-emerald-700">Bonos ({invoiceItems.bonos.length})</span>
+                        </div>
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b border-slate-100 bg-white text-xs text-slate-500 uppercase">
+                              <th className="px-4 py-2 text-left font-semibold">Concepto</th>
+                              <th className="px-4 py-2 text-center font-semibold w-10">Uds</th>
+                              <th className="px-4 py-2 text-right font-semibold">Precio/ud</th>
+                              {showIva  && <th className="px-4 py-2 text-right font-semibold">IVA</th>}
+                              {showIrpf && <th className="px-4 py-2 text-right font-semibold">IRPF</th>}
+                              <th className="px-4 py-2 text-right font-semibold">Total</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {invoiceItems.bonos.map((b: any, i: number) => {
+                              const price    = Number(b.totalPrice || 0);
+                              const ivaAmt   = showIva  ? price * taxRate  / 100 : 0;
+                              const irpfAmt  = showIrpf ? price * irpfRate / 100 : 0;
+                              const lineTotal = price + ivaAmt - irpfAmt;
+                              const showPatient = selectedInvoice.invoice_type === 'center' && b.patientName;
+                              return (
+                                <tr key={b.id || i} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                                  <td className="px-4 py-2.5">
+                                    <div className="text-slate-800 font-medium text-sm">
+                                      Bono de {b.totalSessions} sesiones{showPatient ? ` — ${b.patientName}` : ''}
+                                    </div>
+                                    <div className="text-xs text-slate-500 mt-0.5">
+                                      Creado: {b.createdAt || '—'} · {b.usedSessions} usadas · {b.remainingSessions} restantes
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-2.5 text-center text-slate-600">1</td>
+                                  <td className="px-4 py-2.5 text-right text-slate-700">€{price.toFixed(2)}</td>
+                                  {showIva  && <td className="px-4 py-2.5 text-right text-slate-500">{taxRate}%</td>}
+                                  {showIrpf && <td className="px-4 py-2.5 text-right text-rose-500">−{irpfRate}%</td>}
+                                  <td className="px-4 py-2.5 text-right font-semibold text-slate-900">€{lineTotal.toFixed(2)}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Totales */}
+              <div className="border border-slate-200 rounded-lg overflow-hidden">
+                <table className="w-full text-sm">
+                  <tbody>
+                    <tr className="border-b border-slate-100">
+                      <td className="px-4 py-2.5 text-slate-600">Base imponible</td>
+                      <td className="px-4 py-2.5 text-right font-semibold text-slate-900">€{selectedInvoice.amount.toFixed(2)}</td>
+                    </tr>
+                    {(selectedInvoice.taxRate ?? 0) > 0 ? (
+                      <tr className="border-b border-slate-100">
+                        <td className="px-4 py-2.5 text-slate-600">IVA ({selectedInvoice.taxRate}%)</td>
+                        <td className="px-4 py-2.5 text-right font-semibold text-slate-900">€{(selectedInvoice.tax ?? selectedInvoice.amount * (selectedInvoice.taxRate ?? 0) / 100).toFixed(2)}</td>
+                      </tr>
+                    ) : (
+                      <tr className="border-b border-slate-100">
+                        <td className="px-4 py-2.5 text-slate-400 italic text-xs">Exento de IVA</td>
+                        <td className="px-4 py-2.5 text-right text-slate-400 text-xs">€0,00</td>
+                      </tr>
+                    )}
+                    {(selectedInvoice.irpf ?? 0) > 0 && (
+                      <tr className="border-b border-slate-100">
+                        <td className="px-4 py-2.5 text-slate-600">IRPF ({selectedInvoice.irpf}%)</td>
+                        <td className="px-4 py-2.5 text-right font-semibold text-rose-600">−€{(selectedInvoice.amount * (selectedInvoice.irpf ?? 0) / 100).toFixed(2)}</td>
+                      </tr>
+                    )}
+                    <tr className="bg-slate-50">
+                      <td className="px-4 py-3 text-base font-bold text-slate-900">Total</td>
+                      <td className="px-4 py-3 text-right text-2xl font-bold text-indigo-600">€{(selectedInvoice.total ?? selectedInvoice.amount).toFixed(2)}</td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
+
+              {/* Notas */}
+              {(selectedInvoice as any).notes && (
+                <div className="border border-slate-200 rounded-lg p-4 bg-slate-50">
+                  <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Notas</div>
+                  <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
+                    {(selectedInvoice as any).notes}
+                  </div>
+                </div>
+              )}
+
             </div>
 
             <div className="p-6 border-t border-slate-200 flex gap-3 justify-between">
@@ -1604,43 +2074,70 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
         </div>
       )}
 
-      {/* Modal para configurar número inicial de factura */}
+      {/* Modal para configurar serie y número inicial de factura */}
       {showInvoiceStartModal && (
         <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full" onClick={(e) => e.stopPropagation()}>
             <div className="p-6 border-b border-slate-200">
-              <h3 className="text-xl font-bold text-slate-900">Primera Factura del Año</h3>
+              <h3 className="text-xl font-bold text-slate-900">Configura tu serie de facturación</h3>
               <p className="text-sm text-slate-600 mt-2">
-                Vas a crear tu primera factura de {new Date().getFullYear()}. ¿Qué número quieres que sea?
+                Es tu primera factura de {new Date().getFullYear()}. Define la serie y el número con el que empezar.
               </p>
             </div>
             
             <div className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Número inicial de factura para {new Date().getFullYear()}
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Serie <span className="text-slate-400 font-normal">(prefijo)</span>
+                </label>
+                <input
+                  type="text"
+                  value={invoiceSeriesInput}
+                  onChange={(e) => setInvoiceSeriesInput(e.target.value.toUpperCase())}
+                  placeholder={`Ej: F${String(new Date().getFullYear()).slice(-2)}, FAC, ${new Date().getFullYear()}/`}
+                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono"
+                  autoFocus
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Serie por defecto: <span className="font-mono font-semibold">F{String(new Date().getFullYear()).slice(-2)}</span>
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Número inicial
                 </label>
                 <input
                   type="number"
                   min="1"
                   value={invoiceStartNumber}
                   onChange={(e) => setInvoiceStartNumber(e.target.value)}
-                  placeholder="Ej: 1, 50, 100..."
+                  placeholder="Ej: 1, 15, 50..."
                   className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  autoFocus
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       handleConfirmInvoiceStart();
                     }
                   }}
                 />
-                <p className="text-xs text-slate-500 mt-2">
-                  Este número se usará para tu primera factura de {new Date().getFullYear()} y las siguientes se incrementarán automáticamente.
+              </div>
+
+              {/* Vista previa */}
+              <div className="bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3">
+                <p className="text-xs text-indigo-500 font-semibold uppercase tracking-wide mb-1">Vista previa</p>
+                <p className="font-mono text-2xl font-bold text-indigo-800">
+                  {(invoiceSeriesInput || `F${String(new Date().getFullYear()).slice(-2)}`) + (invoiceStartNumber || '1')}
                 </p>
-                <p className="text-xs text-slate-500 mt-1">
-                  Formato: F{String(new Date().getFullYear()).slice(-2)}{String(invoiceStartNumber || '000001').padStart(6, '0')}
+                <p className="text-xs text-indigo-400 mt-1">
+                  La siguiente sería: <span className="font-mono font-medium">
+                    {(invoiceSeriesInput || `F${String(new Date().getFullYear()).slice(-2)}`) + (parseInt(invoiceStartNumber || '1', 10) + 1)}
+                  </span>
                 </p>
               </div>
+
+              <p className="text-xs text-slate-500">
+                Esta configuración se guardará para {new Date().getFullYear()} y los números se incrementarán automáticamente.
+              </p>
             </div>
 
             <div className="p-6 border-t border-slate-200 flex gap-3 justify-end">
@@ -1648,6 +2145,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                 onClick={() => {
                   setShowInvoiceStartModal(false);
                   setInvoiceStartNumber('');
+                  setInvoiceSeriesInput('');
                   setPendingInvoiceData(null);
                 }}
                 className="px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 rounded-lg transition-colors font-medium"

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, MessageSquare, Mic, ThumbsUp, Clock, User, X, Paperclip, Download, Eye, FileText, Image as ImageIcon, File, Music, Trash2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Plus, MessageSquare, Mic, MicOff, ThumbsUp, Clock, User, X, Paperclip, Download, Eye, FileText, Image as ImageIcon, File, Music, Trash2 } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser } from '../services/authService';
 
@@ -42,6 +42,9 @@ const PatientTimeline: React.FC<PatientTimelineProps> = ({ patientId, psychologi
   const [uploadProgress, setUploadProgress] = useState<{current: number, total: number}>({current: 0, total: 0});
   const [relationship, setRelationship] = useState<any>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingError, setRecordingError] = useState<string | null>(null);
+  const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
     loadCurrentUser();
@@ -291,6 +294,49 @@ const PatientTimeline: React.FC<PatientTimelineProps> = ({ patientId, psychologi
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  };
+
+  const toggleRecording = () => {
+    if (isRecording) {
+      recognitionRef.current?.stop();
+      setIsRecording(false);
+      return;
+    }
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setRecordingError('Tu navegador no soporta grabación de voz. Usa Chrome o Edge.');
+      return;
+    }
+
+    setRecordingError(null);
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'es-ES';
+    recognition.continuous = true;
+    recognition.interimResults = false;
+
+    recognition.onresult = (event: any) => {
+      const transcript = Array.from(event.results)
+        .slice(event.resultIndex)
+        .map((result: any) => result[0].transcript)
+        .join(' ');
+      setNewEntryContent(prev => prev ? prev.trimEnd() + ' ' + transcript : transcript);
+    };
+
+    recognition.onerror = (event: any) => {
+      if (event.error !== 'no-speech') {
+        setRecordingError('Error al grabar: ' + event.error);
+      }
+      setIsRecording(false);
+    };
+
+    recognition.onend = () => {
+      setIsRecording(false);
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+    setIsRecording(true);
   };
 
   const getEntryIcon = (type?: string) => {
@@ -577,7 +623,45 @@ const PatientTimeline: React.FC<PatientTimelineProps> = ({ patientId, psychologi
 
               {/* Content */}
               <div className="space-y-2">
-                <label className="text-sm font-semibold text-slate-700">Contenido</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-semibold text-slate-700">Contenido</label>
+                  <button
+                    type="button"
+                    onClick={toggleRecording}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      isRecording
+                        ? 'bg-red-100 text-red-700 hover:bg-red-200'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    {isRecording ? (
+                      <>
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                        </span>
+                        <MicOff size={13} />
+                        Detener grabación
+                      </>
+                    ) : (
+                      <>
+                        <Mic size={13} />
+                        Dictar con voz
+                      </>
+                    )}
+                  </button>
+                </div>
+                {recordingError && (
+                  <p className="text-xs text-red-600 flex items-center gap-1">
+                    <X size={12} />{recordingError}
+                  </p>
+                )}
+                {isRecording && (
+                  <p className="text-xs text-red-600 animate-pulse flex items-center gap-1">
+                    <span className="inline-block w-1.5 h-1.5 bg-red-500 rounded-full"></span>
+                    Grabando... habla ahora
+                  </p>
+                )}
                 <textarea
                   value={newEntryContent}
                   onChange={(e) => setNewEntryContent(e.target.value)}
@@ -586,7 +670,11 @@ const PatientTimeline: React.FC<PatientTimelineProps> = ({ patientId, psychologi
                       ? 'Escribe una nota privada sobre el paciente...'
                       : 'Escribe un feedback para el paciente...'
                   }
-                  className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                  className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 resize-none transition-colors ${
+                    isRecording
+                      ? 'border-red-300 focus:ring-red-400 bg-red-50/30'
+                      : 'border-slate-300 focus:ring-indigo-500'
+                  }`}
                   rows={8}
                 />
               </div>
@@ -687,8 +775,11 @@ const PatientTimeline: React.FC<PatientTimelineProps> = ({ patientId, psychologi
             <div className="sticky bottom-0 bg-slate-50 border-t border-slate-200 px-6 py-4 flex items-center justify-end gap-3">
               <button
                 onClick={() => {
+                  if (isRecording) recognitionRef.current?.stop();
                   setShowAddModal(false);
                   setAttachments([]);
+                  setIsRecording(false);
+                  setRecordingError(null);
                 }}
                 className="px-4 py-2 text-slate-700 hover:bg-slate-200 rounded-lg transition-colors font-medium"
               >

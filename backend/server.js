@@ -10,7 +10,6 @@ import Stripe from 'stripe';
 import dotenv from 'dotenv';
 import Busboy from 'busboy';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import FormData from 'form-data';
 
 dotenv.config();
 
@@ -200,8 +199,6 @@ const createInitialDb = () => ({
   psychologistProfiles: {}
 });
 
-// migrateLegacyAccessLists eliminada - ya no es necesaria con la nueva estructura
-
 const ensureDbShape = (db) => {
   if (!db || typeof db !== 'object') {
     db = createInitialDb();
@@ -220,8 +217,6 @@ const ensureDbShape = (db) => {
 
   return db;
 };
-
-const relationshipKey = (psychUserId, patientUserId) => `${psychUserId}:${patientUserId}`;
 
 const ensureCareRelationship = (db, psychUserId, patientUserId) => {
   if (!psychUserId || !patientUserId) {
@@ -794,6 +789,11 @@ function normalizeSupabaseRow(row) {
       merged.tags = cleanData.tags;
     }
     
+    // Preservar el objeto data JSONB completo para que el frontend y el backend
+    // puedan leer/escribir data.data?.xxx y hacer merges correctos.
+    // Sin esto, campos como dni, address, birthDate, notes se pierden al actualizar.
+    merged.data = cleanData;
+    
     return merged;
   }
   
@@ -1298,6 +1298,67 @@ async function dedupeSupabaseUsers() {
 function dateTimeToISO(date, time) {
   if (!date || !time) return null;
   return `${date}T${time}:00`;
+}
+
+// Función para autocompletar sesiones pasadas que están pendientes
+async function autoCompletePassedSessions() {
+  try {
+    const now = new Date().toISOString();
+    let updatedCount = 0;
+    
+    // Actualizar en Supabase si está disponible
+    if (supabaseAdmin) {
+      const { data: passedSessions, error: fetchError } = await supabaseAdmin
+        .from('sessions')
+        .select('*')
+        .in('status', ['scheduled', 'confirmed'])
+        .lt('ends_on', now);
+      
+      if (fetchError) {
+        console.error('❌ [autoCompletePassedSessions] Error al obtener sesiones:', fetchError);
+        return;
+      }
+      
+      if (passedSessions && passedSessions.length > 0) {
+        console.log(`🔄 [autoCompletePassedSessions] Actualizando ${passedSessions.length} sesiones pasadas a completadas`);
+        
+        const { error: updateError } = await supabaseAdmin
+          .from('sessions')
+          .update({ status: 'completed' })
+          .in('status', ['scheduled', 'confirmed'])
+          .lt('ends_on', now);
+        
+        if (updateError) {
+          console.error('❌ [autoCompletePassedSessions] Error al actualizar sesiones:', updateError);
+        } else {
+          updatedCount = passedSessions.length;
+          console.log(`✅ [autoCompletePassedSessions] ${updatedCount} sesiones actualizadas a completadas`);
+        }
+      }
+    }
+    
+    // También actualizar en db.json local
+    const db = getDb();
+    if (db.sessions) {
+      const localUpdated = db.sessions.filter(s => {
+        if (!s.ends_on) return false;
+        if (!['scheduled', 'confirmed'].includes(s.status)) return false;
+        return s.ends_on < now;
+      });
+      
+      if (localUpdated.length > 0) {
+        localUpdated.forEach(s => {
+          s.status = 'completed';
+        });
+        saveDb(db, { awaitPersistence: false });
+        console.log(`✅ [autoCompletePassedSessions] ${localUpdated.length} sesiones actualizadas en db.json local`);
+      }
+    }
+    
+    return updatedCount;
+  } catch (error) {
+    console.error('❌ [autoCompletePassedSessions] Error:', error);
+  }
 }
 
 async function saveSupabaseDb(data, prevCache = null) {
@@ -4460,14 +4521,6 @@ app.delete('/api/invitations/:id', (req, res) => {
 
   console.log('✅ [DELETE /api/invitations/:id] Invitación eliminada del cache:', deletedInvitation);
   
-  // Eliminar también la care_relationship si existe
-  if (deletedInvitation && deletedInvitation.toUserId) {
-    const removedRel = removeCareRelationshipByPair(db, deletedInvitation.fromPsychologistId, deletedInvitation.toUserId);
-    if (removedRel) {
-      console.log('🔗 [DELETE /api/invitations/:id] Relación de cuidado eliminada también');
-    }
-  }
-  
   console.log('📊 [DELETE /api/invitations/:id] Invitaciones después:', db.invitations.length);
 
   // Pasar prevDb como segundo argumento para que deleteMissing funcione en Supabase
@@ -4515,14 +4568,6 @@ app.delete('/api/invitations', (req, res) => {
   }
 
   console.log('✅ [DELETE /api/invitations] Invitación eliminada del cache:', deletedInvitation);
-  
-  // Eliminar también la care_relationship si existe
-  if (deletedInvitation && deletedInvitation.toUserId) {
-    const removedRel = removeCareRelationshipByPair(db, deletedInvitation.fromPsychologistId, deletedInvitation.toUserId);
-    if (removedRel) {
-      console.log('🔗 [DELETE /api/invitations] Relación de cuidado eliminada también');
-    }
-  }
   
   console.log('📊 [DELETE /api/invitations] Invitaciones después:', db.invitations.length);
 
@@ -5210,7 +5255,10 @@ app.post('/api/invoices/:id/cancel', async (req, res) => {
     // Actualizar en Supabase si está disponible
     if (supabaseAdmin) {
       try {
-        await upsertTable('invoices', [db.invoices[idx]]);
+        await supabaseAdmin
+          .from('invoices')
+          .update({ status: 'cancelled', cancelledAt: db.invoices[idx].cancelledAt })
+          .eq('id', id);
         console.log('✅ Factura cancelada en Supabase:', id);
       } catch (err) {
         console.error('❌ Error cancelando factura en Supabase:', err);
@@ -5870,6 +5918,96 @@ app.get('/api/patient-stats/:patientId', async (req, res) => {
   }
 });
 
+// Get invoice items detail (sessions + bonos)
+app.get('/api/invoices/:id/items', async (req, res) => {
+  const { id } = req.params;
+  const result = { sessions: [], bonos: [] };
+
+  if (!supabaseAdmin) return res.json(result);
+
+  try {
+    const { data: invoiceRows, error: invError } = await supabaseAdmin
+      .from('invoices')
+      .select('*')
+      .eq('id', id)
+      .limit(1);
+
+    if (invError || !invoiceRows || invoiceRows.length === 0) {
+      return res.status(404).json({ error: 'Invoice not found' });
+    }
+
+    const invoice = normalizeSupabaseRow(invoiceRows[0]);
+
+    // Obtener sesiones
+    if (invoice.sessionIds && invoice.sessionIds.length > 0) {
+      const { data: sessions, error: sessErr } = await supabaseAdmin
+        .from('sessions')
+        .select('*')
+        .in('id', invoice.sessionIds);
+
+      if (!sessErr && sessions) {
+        result.sessions = sessions.map(s => {
+          const d = s.data || {};
+          const startDate = s.starts_on
+            ? new Date(s.starts_on).toLocaleDateString('es-ES', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })
+            : 'Fecha no disponible';
+          const startTime = s.starts_on
+            ? s.starts_on.substring(11, 16)
+            : '';
+          const endTime = s.ends_on
+            ? s.ends_on.substring(11, 16)
+            : '';
+          return {
+            id: s.id,
+            date: startDate,
+            time: startTime && endTime ? `${startTime} - ${endTime}` : startTime,
+            patientName: d.patientName || invoice.patientName || '',
+            notes: d.notes || '',
+            price: s.price || d.price || 0,
+            status: s.status || d.status || ''
+          };
+        });
+        // Ordenar por fecha
+        result.sessions.sort((a, b) => {
+          const rowA = sessions.find(s => s.id === a.id);
+          const rowB = sessions.find(s => s.id === b.id);
+          return new Date(rowA?.starts_on || 0) - new Date(rowB?.starts_on || 0);
+        });
+      }
+    }
+
+    // Obtener bonos
+    if (invoice.bonoIds && invoice.bonoIds.length > 0) {
+      const { data: bonos, error: bonoErr } = await supabaseAdmin
+        .from('bono')
+        .select('*')
+        .in('id', invoice.bonoIds);
+
+      if (!bonoErr && bonos) {
+        result.bonos = bonos.map(b => {
+          const d = b.data || {};
+          return {
+            id: b.id,
+            patientName: d.patientName || invoice.patientName || '',
+            totalSessions: b.total_sessions_amount || d.total_sessions_amount || 0,
+            usedSessions: b.used_sessions || d.used_sessions || 0,
+            remainingSessions: b.remaining_sessions || d.remaining_sessions || 0,
+            totalPrice: b.total_price_bono_amount || d.total_price_bono_amount || 0,
+            createdAt: b.created_at
+              ? new Date(b.created_at).toLocaleDateString('es-ES', { year: 'numeric', month: 'short', day: 'numeric' })
+              : ''
+          };
+        });
+      }
+    }
+
+    return res.json(result);
+  } catch (err) {
+    console.error('Error en /api/invoices/:id/items:', err);
+    return res.status(500).json({ error: 'Error interno' });
+  }
+});
+
 // Generate PDF invoice
 app.get('/api/invoices/:id/pdf', async (req, res) => {
   const { id } = req.params;
@@ -6028,12 +6166,21 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
         .in('id', invoice.sessionIds);
       
       if (!sessionsError && sessions) {
+        // Ordenar por fecha ascendente
+        sessions.sort((a, b) => new Date(a.starts_on || 0) - new Date(b.starts_on || 0));
         sessions.forEach(session => {
           const sessionData = session.data || {};
           const sessionPrice = session.price || sessionData.price || 0;
-          const startDate = session.starts_on ? new Date(session.starts_on).toLocaleDateString('es-ES') : 'Fecha no disponible';
+          const startDate = session.starts_on
+            ? new Date(session.starts_on).toLocaleDateString('es-ES', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })
+            : 'Fecha no disponible';
+          const startTime = session.starts_on ? session.starts_on.substring(11, 16) : '';
+          const endTime = session.ends_on ? session.ends_on.substring(11, 16) : '';
+          const timeStr = startTime && endTime ? ` (${startTime}–${endTime})` : '';
+          const patientStr = sessionData.patientName || invoice.patientName || '';
+          const patientPart = patientStr ? ` — ${patientStr}` : '';
           detailedItems.push({
-            description: `Sesión de psicología - ${startDate}${sessionData.notes ? ` (${sessionData.notes})` : ''}`,
+            description: `Sesión de psicología${patientPart} — ${startDate}${timeStr}`,
             quantity: 1,
             unitPrice: sessionPrice
           });
@@ -6048,17 +6195,24 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
     // Obtener bonos desde Supabase
     try {
       const { data: bonos, error: bonosError } = await supabaseAdmin
-        .from('bonos')
+        .from('bono')
         .select('*')
         .in('id', invoice.bonoIds);
       
       if (!bonosError && bonos) {
         bonos.forEach(bono => {
           const bonoData = bono.data || {};
-          const bonoPrice = bonoData.total_price_bono_amount || 0;
-          const totalSessions = bonoData.total_sessions_amount || 0;
+          const bonoPrice = bono.total_price_bono_amount || bonoData.total_price_bono_amount || 0;
+          const totalSessions = bono.total_sessions_amount || bonoData.total_sessions_amount || 0;
+          const patientStr = bonoData.patientName || invoice.patientName || '';
+          const patientPart = patientStr ? ` — ${patientStr}` : '';
+          const pricePerSession = totalSessions > 0 ? (bonoPrice / totalSessions).toFixed(2) : '0.00';
+          const createdAt = bono.created_at
+            ? new Date(bono.created_at).toLocaleDateString('es-ES', { year: 'numeric', month: 'short', day: 'numeric' })
+            : '';
+          const createdPart = createdAt ? ` (creado ${createdAt})` : '';
           detailedItems.push({
-            description: `Bono de ${totalSessions} sesiones`,
+            description: `Bono de psicología${patientPart} — ${totalSessions} sesiones${createdPart} · ${pricePerSession} €/sesión`,
             quantity: 1,
             unitPrice: bonoPrice
           });
@@ -6386,12 +6540,6 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
           <span class="info-value">${patientData.phone}</span>
         </div>
         ` : ''}
-        ${invoice.description ? `
-        <div class="info-row">
-          <span class="info-label">Concepto:</span>
-          <span class="info-value">${invoice.description}</span>
-        </div>
-        ` : ''}
       </div>
     </div>
     
@@ -6445,6 +6593,14 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
     ${invoice.status === 'cancelled' ? `
       <div class="cancelled-notice">
         ⚠️ Esta factura fue cancelada el ${new Date(invoice.cancelledAt || invoice.date).toLocaleDateString('es-ES')}
+      </div>
+    ` : ''}
+    
+    <!-- Notas -->
+    ${invoice.notes ? `
+      <div style="margin-top: 30px; padding: 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;">
+        <div style="font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Notas</div>
+        <div style="font-size: 13px; color: #475569; line-height: 1.6; white-space: pre-line;">${invoice.notes}</div>
       </div>
     ` : ''}
     
@@ -7938,6 +8094,59 @@ app.post('/api/bonos', async (req, res) => {
   }
 });
 
+// GET: Obtener un bono individual por ID
+app.get('/api/bonos/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    console.log(`[GET /api/bonos/${id}] Obteniendo bono individual`);
+    
+    if (supabaseAdmin) {
+      // Obtener el bono
+      const { data: bono, error: bonoError } = await supabaseAdmin
+        .from('bono')
+        .select('*')
+        .eq('id', id)
+        .single();
+      
+      if (bonoError) {
+        if (bonoError.code === 'PGRST116') {
+          return res.status(404).json({ error: 'Bono no encontrado' });
+        }
+        console.error(`[GET /api/bonos/${id}] Error en Supabase:`, bonoError);
+        throw bonoError;
+      }
+      
+      // Contar sesiones asociadas
+      const { data: sessions, error: sessionsError } = await supabaseAdmin
+        .from('sessions')
+        .select('id')
+        .eq('bonus_id', id);
+      
+      if (sessionsError) {
+        console.error(`[GET /api/bonos/${id}] Error al contar sesiones:`, sessionsError);
+      }
+      
+      const sessionsUsed = sessions?.length || 0;
+      const sessionsRemaining = bono.total_sessions_amount - sessionsUsed;
+      
+      const bonoWithCounts = {
+        ...bono,
+        sessions_used: sessionsUsed,
+        sessions_remaining: sessionsRemaining
+      };
+      
+      console.log(`[GET /api/bonos/${id}] ✓ Bono encontrado:`, bonoWithCounts);
+      return res.json(bonoWithCounts);
+    }
+    
+    return res.status(501).json({ error: 'Consulta de bonos solo disponible con Supabase' });
+  } catch (error) {
+    console.error('[GET /api/bonos/:id] Error:', error);
+    res.status(500).json({ error: 'Error al obtener el bono' });
+  }
+});
+
 // PUT: Actualizar un bono
 app.put('/api/bonos/:id', async (req, res) => {
   try {
@@ -7971,6 +8180,18 @@ app.put('/api/bonos/:id', async (req, res) => {
       
       if (!data) {
         return res.status(404).json({ error: 'Bono no encontrado' });
+      }
+      
+      // Actualizar el estado 'paid' de todas las sesiones asociadas a este bono
+      const { error: updateSessionsError } = await supabaseAdmin
+        .from('sessions')
+        .update({ paid: Boolean(paid) })
+        .eq('bonus_id', id);
+      
+      if (updateSessionsError) {
+        console.warn('[PUT /api/bonos/:id] ⚠️ Error al actualizar sesiones asociadas:', updateSessionsError);
+      } else {
+        console.log('[PUT /api/bonos/:id] ✓ Sesiones asociadas actualizadas con paid:', Boolean(paid));
       }
       
       console.log('[PUT /api/bonos/:id] ✓ Bono actualizado en Supabase:', data);
@@ -8167,10 +8388,17 @@ app.post('/api/sessions/:sessionId/assign-bonus', async (req, res) => {
         return res.status(400).json({ error: 'El bono no tiene sesiones disponibles' });
       }
       
-      // Asignar el bono a la sesión
+      // Calcular precio por sesión del bono
+      const pricePerSession = bono.total_price_bono_amount / bono.total_sessions_amount;
+      
+      // Asignar el bono a la sesión y heredar el estado 'paid' y precio del bono
       const { data: updatedSession, error: updateError } = await supabaseAdmin
         .from('sessions')
-        .update({ bonus_id })
+        .update({ 
+          bonus_id,
+          paid: bono.paid, // Heredar el estado 'paid' del bono
+          price: pricePerSession // Asignar precio por sesión del bono
+        })
         .eq('id', sessionId)
         .select()
         .single();
@@ -8180,7 +8408,7 @@ app.post('/api/sessions/:sessionId/assign-bonus', async (req, res) => {
         throw updateError;
       }
       
-      console.log('[POST assign-bonus] ✓ Sesión asignada a bono correctamente');
+      console.log('[POST assign-bonus] ✓ Sesión asignada a bono correctamente (paid heredado del bono:', bono.paid, ')');
       return res.json({ 
         success: true, 
         session: updatedSession,
@@ -8238,6 +8466,13 @@ app.get('/api/sessions', async (req, res) => {
   const { psychologistId, patientId, year, month, startDate, endDate, status, futureOnly } = req.query;
   if (!psychologistId && !patientId) {
     return res.status(400).json({ error: 'Missing psychologistId or patientId' });
+  }
+  
+  // Autocompletar sesiones pasadas al cargar el schedule
+  if (psychologistId) {
+    autoCompletePassedSessions().catch(err => {
+      console.error('⚠️ Error en autoCompletePassedSessions:', err);
+    });
   }
   
   try {
@@ -8314,8 +8549,14 @@ app.get('/api/sessions', async (req, res) => {
           normalized.ends_on = row.ends_on;
         }
         // Agregar compatibilidad con campos legacy
-        if (row.psychologist_user_id) normalized.psychologistId = row.psychologist_user_id;
-        if (row.patient_user_id) normalized.patientId = row.patient_user_id;
+        if (row.psychologist_user_id) {
+          normalized.psychologistId = row.psychologist_user_id;
+          normalized.psychologist_user_id = row.psychologist_user_id; // Mantener también el campo original
+        }
+        if (row.patient_user_id) {
+          normalized.patientId = row.patient_user_id;
+          normalized.patient_user_id = row.patient_user_id; // Mantener también el campo original
+        }
         return normalized;
       });
       
@@ -8438,7 +8679,7 @@ app.post('/api/sessions', async (req, res) => {
     }
 
     // Si se proporciona deleteDispoId, borrar de la tabla dispo
-    const { deleteDispoId, ...sessionData } = req.body;
+    const { deleteDispoId, bonus_id, ...sessionData } = req.body;
     
     // NO PERMITIR crear disponibilidad desde este endpoint
     if (sessionData.status === 'available' || !sessionData.patientId) {
@@ -8474,10 +8715,40 @@ app.post('/api/sessions', async (req, res) => {
       return res.status(400).json({ error: 'El porcentaje del psicólogo no puede exceder 100%' });
     }
     
+    // Validar que no exista solapamiento con otra sesión del psicólogo
+    const newStarts = dateTimeToISO(sessionData.date, sessionData.startTime);
+    const newEnds = dateTimeToISO(sessionData.date, sessionData.endTime);
+    
+    if (newStarts && newEnds) {
+      const overlappingSession = db.sessions.find(s => {
+        // Ignorar sesiones canceladas o del mismo paciente
+        if (s.status === 'cancelled' || s.status === 'available') return false;
+        // Solo verificar sesiones del mismo psicólogo
+        if (s.psychologist_user_id !== psychologistUserId) return false;
+        
+        const existingStarts = s.starts_on || dateTimeToISO(s.date, s.startTime);
+        const existingEnds = s.ends_on || dateTimeToISO(s.date, s.endTime);
+        
+        if (!existingStarts || !existingEnds) return false;
+        
+        // Verificar solapamiento: (newStart < existingEnd) && (newEnd > existingStart)
+        return (newStarts < existingEnds) && (newEnds > existingStarts);
+      });
+      
+      if (overlappingSession) {
+        console.error('❌ Session overlap detected with session:', overlappingSession.id);
+        return res.status(409).json({ 
+          error: `Ya existe una sesión programada para este horario (${overlappingSession.date} ${overlappingSession.startTime}-${overlappingSession.endTime} con ${overlappingSession.patientName || 'paciente'}). Por favor elige otro horario.` 
+        });
+      }
+    }
+    
     // Calcular starts_on y ends_on a partir de date, startTime, endTime
     const starts_on = dateTimeToISO(sessionData.date, sessionData.startTime);
     const ends_on = dateTimeToISO(sessionData.date, sessionData.endTime);
     
+    // Reservar la sesión en memoria ANTES de cualquier await para cerrar la ventana de race condition.
+    // Si llega un segundo request idéntico mientras validamos el bono, el check de solapamiento lo rechazará.
     const session = { 
       ...sessionData, 
       id: sessionData.id || Date.now().toString(),
@@ -8485,22 +8756,116 @@ app.post('/api/sessions', async (req, res) => {
       patient_user_id: patientUserId,
       starts_on,
       ends_on,
-      percent_psych: Math.min(sessionData.percent_psych ?? 70, 100)
+      percent_psych: Math.min(sessionData.percent_psych ?? 70, 100),
+      bonus_id: bonus_id || null,
+      paid: sessionData.paid || false // se actualiza abajo si tiene bono
     };
+    
+    db.sessions.push(session);
+    
+    // Validar bonus_id si se proporcionó
+    let bonoPaid = false;
+    if (bonus_id && supabaseAdmin) {
+      console.log('[POST /api/sessions] Validando bono:', bonus_id);
+      
+      // Verificar que el bono existe y tiene sesiones disponibles
+      const { data: bono, error: bonoError } = await supabaseAdmin
+        .from('bono')
+        .select('*, sessions!sessions_bonus_id_fkey(id)')
+        .eq('id', bonus_id)
+        .eq('pacient_user_id', patientUserId)
+        .single();
+      
+      if (bonoError || !bono) {
+        console.error('[POST /api/sessions] Bono no encontrado:', bonoError);
+        // Revertir la reserva en memoria
+        db.sessions = db.sessions.filter(s => s.id !== session.id);
+        return res.status(404).json({ error: 'Bono no encontrado o no pertenece al paciente' });
+      }
+      
+      const sessionsUsed = bono.sessions?.length || 0;
+      const sessionsRemaining = bono.total_sessions_amount - sessionsUsed;
+      
+      if (sessionsRemaining <= 0) {
+        console.error('[POST /api/sessions] Bono sin sesiones disponibles');
+        // Revertir la reserva en memoria
+        db.sessions = db.sessions.filter(s => s.id !== session.id);
+        return res.status(400).json({ error: 'El bono no tiene sesiones disponibles' });
+      }
+      
+      // Heredar el estado 'paid' del bono y actualizar la sesión reservada
+      bonoPaid = bono.paid;
+      session.paid = bonoPaid;
+      const idx = db.sessions.findIndex(s => s.id === session.id);
+      if (idx !== -1) db.sessions[idx] = session;
+      console.log('[POST /api/sessions] ✓ Bono válido con', sessionsRemaining, 'sesiones disponibles. Paid:', bonoPaid);
+    }
     
     console.log('📝 Creating session:', { 
       sessionId: session.id, 
       psychologistUserId, 
       patientUserId,
-      patientId: sessionData.patientId 
+      patientId: sessionData.patientId,
+      bonus_id: bonus_id || 'none',
+      paid: session.paid
     });
-    
-    db.sessions.push(session);
     
     // Limpiar sesiones de disponibilidad (sin paciente) antes de guardar
     db.sessions = db.sessions.filter(s => s.patient_user_id || s.patientId);
     
-    await saveDb(db, { awaitPersistence: true });
+    // Insertar directamente en Supabase antes de devolver respuesta para evitar race conditions
+    if (supabaseAdmin) {
+      try {
+        console.log(`🔄 [POST /api/sessions] Insertando sesión en Supabase...`);
+        
+        // Preparar row para Supabase
+        const supabaseRow = {
+          id: session.id,
+          data: session,
+          psychologist_user_id: session.psychologist_user_id,
+          patient_user_id: session.patient_user_id,
+          status: session.status || 'scheduled',
+          starts_on: session.starts_on,
+          ends_on: session.ends_on,
+          price: session.price ?? 0,
+          percent_psych: session.percent_psych ?? 100,
+          paid: session.paid ?? false,
+          bonus_id: session.bonus_id || null
+        };
+        
+        const { error: insertErr } = await supabaseAdmin
+          .from('sessions')
+          .upsert(supabaseRow, { onConflict: 'id' });
+        
+        if (insertErr) {
+          console.error(`❌ [POST /api/sessions] Error insertando en Supabase:`, insertErr);
+          // No fallar la creación, solo loguear
+          console.warn(`⚠️ [POST /api/sessions] Sesión creada en memoria pero no se sincronizó con Supabase`);
+        } else {
+          console.log(`✅ [POST /api/sessions] Sesión insertada en Supabase`);
+        }
+        
+        // También eliminar de dispo en Supabase si corresponde
+        if (deleteDispoId) {
+          const { error: deleteDispoErr } = await supabaseAdmin
+            .from('dispo')
+            .delete()
+            .eq('id', deleteDispoId);
+          
+          if (deleteDispoErr) {
+            console.error(`❌ [POST /api/sessions] Error eliminando dispo de Supabase:`, deleteDispoErr);
+          } else {
+            console.log(`✅ [POST /api/sessions] Dispo eliminado de Supabase`);
+          }
+        }
+      } catch (supaErr) {
+        console.error(`❌ [POST /api/sessions] Error en operaciones de Supabase:`, supaErr);
+      }
+    }
+    
+    // Guardar también en db.json como fallback (no await - en background)
+    saveDb(db, { awaitPersistence: false });
+    
     return res.json(session);
   } catch (err) {
     console.error('❌ Error creating session', err);
@@ -8550,7 +8915,29 @@ app.post('/api/sessions/availability', async (req, res) => {
     // Limpiar sesiones de disponibilidad (sin paciente) antes de guardar
     db.sessions = (db.sessions || []).filter(s => s.patient_user_id || s.patientId);
     
-    await saveDb(db, { awaitPersistence: true });
+    // Insertar directamente en Supabase para evitar race conditions
+    if (supabaseAdmin) {
+      try {
+        console.log(`🔄 [POST /api/sessions/availability] Insertando ${newSlots.length} slots en Supabase dispo...`);
+        
+        const { error: insertErr } = await supabaseAdmin
+          .from('dispo')
+          .upsert(newSlots, { onConflict: 'id' });
+        
+        if (insertErr) {
+          console.error(`❌ [POST /api/sessions/availability] Error insertando en Supabase:`, insertErr);
+          console.warn(`⚠️ [POST /api/sessions/availability] Slots creados en memoria pero no se sincronizaron con Supabase`);
+        } else {
+          console.log(`✅ [POST /api/sessions/availability] Slots insertados en Supabase`);
+        }
+      } catch (supaErr) {
+        console.error(`❌ [POST /api/sessions/availability] Error en Supabase:`, supaErr);
+      }
+    }
+    
+    // Guardar en db.json en background
+    saveDb(db, { awaitPersistence: false });
+    
     console.log('✅ Availability slots created successfully in dispo table:', newSlots.length);
     res.json({ success: true, count: newSlots.length, slots: newSlots });
   } catch (error) {
@@ -8916,6 +9303,74 @@ app.put('/api/sessions/:id', async (req, res) => {
   } catch (err) {
     console.error('❌ Error updating session (PUT)', err);
     return res.status(500).json({ error: err?.message || 'No se pudo actualizar la sesión' });
+  }
+});
+
+// DELETE future pending sessions for a patient from a given date onwards
+// Must be registered BEFORE /api/sessions/:id to avoid route conflict
+app.delete('/api/sessions/future-pending', async (req, res) => {
+  try {
+    const { patient_user_id, fromDate, excludeId, psychologistId: bodyPsychologistId } = req.body;
+    const psychologistUserId = req.headers['x-user-id'] || req.headers['x-userid'] || bodyPsychologistId;
+
+    if (!patient_user_id || !fromDate) {
+      return res.status(400).json({ error: 'Se requieren patient_user_id y fromDate' });
+    }
+
+    console.log(`🗑️ [DELETE /future-pending] patient=${patient_user_id} from=${fromDate} psychologist=${psychologistUserId} exclude=${excludeId}`);
+
+    let deletedCount = 0;
+
+    // Delete from Supabase
+    if (supabaseAdmin) {
+      let query = supabaseAdmin
+        .from('sessions')
+        .delete()
+        .eq('patient_user_id', patient_user_id)
+        .eq('status', 'scheduled')
+        .gte('date', fromDate);
+
+      if (psychologistUserId) {
+        query = query.eq('psychologist_user_id', psychologistUserId);
+      }
+
+      // Exclude the session that the caller will delete separately
+      if (excludeId) {
+        query = query.neq('id', excludeId);
+      }
+
+      const { data: deleted, error } = await query.select('id');
+      if (error) {
+        console.error('❌ Error deleting future sessions from Supabase:', error);
+        return res.status(500).json({ error: 'Error al eliminar sesiones futuras' });
+      }
+      deletedCount = deleted?.length || 0;
+      console.log(`✅ [DELETE /future-pending] Eliminadas ${deletedCount} sesiones de Supabase`);
+    }
+
+    // Also remove from local cache
+    const db = getDb();
+    if (!db.sessions) db.sessions = [];
+    const before = db.sessions.length;
+    db.sessions = db.sessions.filter(s => {
+      if (s.patient_user_id !== patient_user_id) return true;
+      if (psychologistUserId && s.psychologist_user_id !== psychologistUserId) return true;
+      if (s.status !== 'scheduled') return true;
+      if (s.date < fromDate) return true;
+      if (excludeId && s.id === excludeId) return true;
+      return false;
+    });
+    const localDeleted = before - db.sessions.length;
+
+    if (localDeleted > 0 || !supabaseAdmin) {
+      await saveDb(db, { awaitPersistence: true });
+    }
+
+    console.log(`✅ [DELETE /future-pending] Total eliminadas: Supabase=${deletedCount}, local=${localDeleted}`);
+    return res.json({ success: true, deletedCount: deletedCount || localDeleted });
+  } catch (err) {
+    console.error('❌ Error deleting future pending sessions:', err);
+    return res.status(500).json({ error: err?.message || 'Error al eliminar sesiones futuras' });
   }
 });
 
@@ -9662,8 +10117,8 @@ app.get('/api/psychologist/:psychologistId/patients', async (req, res) => {
           email: u.email || u.user_email,
           phone: u.phone || '',
           billing_name: u.billing_name || u.name,
-          billing_address: u.billing_address || u.address || '',
-          billing_tax_id: u.billing_tax_id || u.tax_id || '',
+          billing_address: u.billing_address || u.address || u.data?.address || '',
+          billing_tax_id: u.billing_tax_id || u.tax_id || u.dni || u.data?.dni || '',
           tags: rel?.data?.tags || [],
           active: rel?.active !== false, // Leer de la columna directa (por defecto true)
           patientNumber: rel?.patientnumber || 0 // Leer del campo directo patientnumber
@@ -9951,9 +10406,46 @@ app.get('/api/center/:centerId/unbilled', async (req, res) => {
         
         console.log(`✅ Encontrados ${bonos?.length || 0} bonos sin facturar para el centro`);
         
+        // Calcular used_sessions y remaining_sessions para cada bono (igual que /api/bonos)
+        const bonosWithCounts = await Promise.all((bonos || []).map(async (bono) => {
+          const { data: bonoSessions } = await supabaseAdmin
+            .from('sessions')
+            .select('id')
+            .eq('bonus_id', bono.id);
+          const sessionsUsed = bonoSessions?.length || 0;
+          const sessionsRemaining = (bono.total_sessions_amount || 0) - sessionsUsed;
+          return { ...bono, used_sessions: sessionsUsed, remaining_sessions: sessionsRemaining };
+        }));
+        
+        // Obtener nombres de los pacientes para enriquecer sesiones y bonos
+        let patientNamesMap = {};
+        if (patientIds.length > 0) {
+          const { data: usersData } = await supabaseAdmin
+            .from('users')
+            .select('id, data')
+            .in('id', patientIds);
+          if (usersData) {
+            usersData.forEach(u => {
+              const normalized = normalizeSupabaseRow(u);
+              patientNamesMap[u.id] = normalized.name || normalized.displayName || normalized.username || null;
+            });
+          }
+          console.log('[unbilled] patientNamesMap:', patientNamesMap);
+        }
+        
+        const enrichedSessions = (sessions || []).map(s => ({
+          ...s,
+          patientName: patientNamesMap[s.patient_user_id] || null
+        }));
+        
+        const enrichedBonos = bonosWithCounts.map(b => ({
+          ...b,
+          patientName: patientNamesMap[b.pacient_user_id] || null
+        }));
+        
         return res.json({
-          sessions: sessions || [],
-          bonos: bonos || []
+          sessions: enrichedSessions,
+          bonos: enrichedBonos
         });
         
       } catch (err) {

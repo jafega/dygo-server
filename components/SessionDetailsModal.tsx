@@ -16,6 +16,8 @@ interface Session {
   status: string;
   notes?: string;
   price: number;
+  paid?: boolean;
+  paymentMethod?: '' | 'Bizum' | 'Transferencia' | 'Efectivo';
   session_entry_id?: string;
   invoice_id?: string;
   bonus_id?: string;
@@ -55,7 +57,7 @@ interface SessionDetailsModalProps {
 
 type EntryMode = 'transcript' | 'upload' | 'record';
 
-const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session, onClose, onSave }) => {
+const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session: initialSession, onClose, onSave }) => {
   const [entryMode, setEntryMode] = useState<EntryMode>('transcript');
   const [transcript, setTranscript] = useState('');
   const [aiSummary, setAiSummary] = useState('');
@@ -79,6 +81,29 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session, onCl
   const [availableBonos, setAvailableBonos] = useState<Bono[]>([]);
   const [isLoadingBonos, setIsLoadingBonos] = useState(false);
   const [isAssigningBono, setIsAssigningBono] = useState(false);
+  const [assignedBono, setAssignedBono] = useState<Bono | null>(null);
+  
+  // Estado para la sesión actualizada
+  const [session, setSession] = useState<Session>(initialSession);
+
+  // Recargar sesión completa al abrir el modal para asegurar que tiene todos los campos
+  useEffect(() => {
+    const reloadSession = async () => {
+      try {
+        const response = await fetch(`${API_URL}/sessions/${initialSession.id}`);
+        if (response.ok) {
+          const sessionData = await response.json();
+          setSession(sessionData);
+        }
+      } catch (error) {
+        console.error('Error reloading session:', error);
+        // Si falla, usar la sesión inicial
+        setSession(initialSession);
+      }
+    };
+
+    reloadSession();
+  }, [initialSession.id]);
 
   // Cargar session_entry existente si existe
   useEffect(() => {
@@ -155,6 +180,29 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session, onCl
 
     loadAvailableBonos();
   }, [session.patient_user_id, session.patientId]);
+
+  // Cargar información del bono asignado si existe
+  useEffect(() => {
+    const loadAssignedBono = async () => {
+      if (!session.bonus_id) {
+        setAssignedBono(null);
+        return;
+      }
+      
+      try {
+        const response = await fetch(`${API_URL}/bonos/${session.bonus_id}`);
+        if (response.ok) {
+          const bono = await response.json();
+          setAssignedBono(bono);
+          console.log('📦 Bono asignado cargado:', bono);
+        }
+      } catch (error) {
+        console.error('Error loading assigned bono:', error);
+      }
+    };
+
+    loadAssignedBono();
+  }, [session.bonus_id]);
 
   const handleAssignBono = async (bonoId: string) => {
     setIsAssigningBono(true);
@@ -689,6 +737,17 @@ Mantén un tono profesional y objetivo.`;
     }
   };
 
+  // Debug logging
+  console.log('🔍 SessionDetailsModal render:', {
+    sessionId: session.id,
+    invoice_id: session.invoice_id,
+    bonus_id: session.bonus_id,
+    availableBonos: availableBonos.length,
+    assignedBono: assignedBono?.id,
+    patient_user_id: session.patient_user_id,
+    patientId: session.patientId
+  });
+
   return (
     <div className="fixed inset-0 bg-white z-[200] flex flex-col">
       {/* Header */}
@@ -737,12 +796,30 @@ Mantén un tono profesional y objetivo.`;
               </div>
             )}
             
+            {/* Payment Method - Mostrar si está pagada */}
+            {session.paid && session.paymentMethod && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <div className="flex items-center gap-2 text-blue-700">
+                  <CheckCircle size={16} />
+                  <span className="text-sm font-medium">Método de pago: {session.paymentMethod}</span>
+                </div>
+                <p className="text-xs text-blue-600 mt-1">Sesión marcada como pagada</p>
+              </div>
+            )}
+            
             {/* Bonus Section - Solo mostrar si NO tiene invoice_id */}
+            {console.log('🔍 Bonus section check:', {
+              hasInvoiceId: !!session.invoice_id,
+              invoiceIdValue: session.invoice_id,
+              hasBonusId: !!session.bonus_id,
+              bonusIdValue: session.bonus_id,
+              shouldShow: !session.invoice_id
+            })}
             {!session.invoice_id && (
               <>
                 {session.bonus_id ? (
                   <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2 text-purple-700">
                         <CheckCircle size={16} />
                         <span className="text-sm font-medium">Asignada a bono</span>
@@ -755,7 +832,25 @@ Mantén un tono profesional y objetivo.`;
                         Desasignar
                       </button>
                     </div>
-                    <p className="text-xs text-purple-600 mt-1">Esta sesión pertenece a un bono del paciente</p>
+                    {assignedBono ? (
+                      <div className="bg-white border border-purple-200 rounded p-2">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="text-sm font-medium text-purple-900">
+                              Bono ID: {assignedBono.id}
+                            </div>
+                            <div className="text-xs text-purple-600">
+                              Precio: {assignedBono.total_price_bono_amount}€ | {assignedBono.sessions_remaining || 0} sesión{assignedBono.sessions_remaining !== 1 ? 'es' : ''} restante{assignedBono.sessions_remaining !== 1 ? 's' : ''}
+                            </div>
+                          </div>
+                          <div className="text-xs text-purple-500">
+                            {new Date(assignedBono.created_at).toLocaleDateString('es-ES')}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-purple-600">Bono ID: {session.bonus_id}</p>
+                    )}
                   </div>
                 ) : availableBonos.length > 0 ? (
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">

@@ -21,6 +21,7 @@ interface Session {
   meetLink?: string;
   price: number;
   paid: boolean;
+  paymentMethod?: '' | 'Bizum' | 'Transferencia' | 'Efectivo';
   percent_psych: number;
   tags?: string[];
   session_entry_id?: string;
@@ -215,7 +216,12 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
 
   const handleFieldChange = (field: keyof Session, value: any) => {
     if (!editedSession) return;
-    setEditedSession({ ...editedSession, [field]: value });
+    // Si se desmarca 'paid', limpiar el método de pago
+    if (field === 'paid' && !value) {
+      setEditedSession({ ...editedSession, [field]: value, paymentMethod: '' });
+    } else {
+      setEditedSession({ ...editedSession, [field]: value });
+    }
   };
 
   const handleSaveSession = async () => {
@@ -237,6 +243,7 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
         status: editedSession.status,
         price: editedSession.price ?? 0,
         paid: editedSession.paid ?? false,
+        paymentMethod: editedSession.paymentMethod || '',
         percent_psych: editedSession.percent_psych ?? 70,
         notes: editedSession.notes,
         meetLink: editedSession.meetLink
@@ -407,7 +414,7 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
   const sortedSessions = [...sessions].sort((a, b) => {
     const dateA = new Date(`${a.date} ${a.startTime}`);
     const dateB = new Date(`${b.date} ${b.startTime}`);
-    return dateB.getTime() - dateA.getTime();
+    return dateA.getTime() - dateB.getTime(); // Orden ascendente: más antiguas primero
   });
 
   const displayedSessions = sortedSessions.filter(session => {
@@ -791,23 +798,43 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
                   <option value="scheduled">Programada</option>
                   <option value="completed">Completada</option>
                   <option value="cancelled">Cancelada</option>
-                  <option value="paid">Pagada</option>
                 </select>
               </div>
 
               <div>
-                <label className="flex items-center gap-3 px-4 py-3 bg-green-50 border border-green-200 rounded-lg cursor-pointer hover:bg-green-100">
+                <label className={`flex items-center gap-3 px-4 py-3 bg-green-50 border border-green-200 rounded-lg ${editedSession.bonus_id ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:bg-green-100'}`}>
                   <input
                     type="checkbox"
                     checked={editedSession.paid || false}
                     onChange={(e) => handleFieldChange('paid', e.target.checked)}
-                    className="w-5 h-5 rounded border-green-300 text-green-600"
+                    disabled={!!editedSession.bonus_id}
+                    className="w-5 h-5 rounded border-green-300 text-green-600 disabled:cursor-not-allowed"
                   />
                   <div>
                     <div className="font-semibold text-green-700 text-sm">Sesión pagada</div>
+                    {editedSession.bonus_id && (
+                      <div className="text-xs text-green-600 mt-0.5">Estado heredado del bono</div>
+                    )}
                   </div>
                 </label>
               </div>
+
+              {/* Payment Method */}
+              {editedSession.paid && (
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Método de pago</label>
+                  <select
+                    value={editedSession.paymentMethod || ''}
+                    onChange={(e) => handleFieldChange('paymentMethod', e.target.value)}
+                    className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 bg-white"
+                  >
+                    <option value="">-- Seleccionar --</option>
+                    <option value="Bizum">Bizum</option>
+                    <option value="Transferencia">Transferencia</option>
+                    <option value="Efectivo">Efectivo</option>
+                  </select>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -833,13 +860,18 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">% Psicólogo</label>
                   <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max="100"
-                    value={editedSession.percent_psych || 0}
-                    onChange={(e) => handleFieldChange('percent_psych', parseFloat(e.target.value) || 0)}
+                    type="text"
+                    inputMode="decimal"
+                    value={editedSession.percent_psych === 0 ? '' : editedSession.percent_psych || ''}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                        const numValue = value === '' ? 0 : parseFloat(value) || 0;
+                        handleFieldChange('percent_psych', Math.min(numValue, 100));
+                      }
+                    }}
                     className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                    placeholder="0.00"
                   />
                 </div>
               </div>

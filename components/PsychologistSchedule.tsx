@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar as CalendarIcon, Clock, Plus, X, Users, Video, MapPin, ChevronLeft, ChevronRight, MessageCircle, Trash2, Save, Copy, Send, ExternalLink } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, Plus, X, Users, Video, MapPin, ChevronLeft, ChevronRight, MessageCircle, Trash2, Save, Copy, Send, ExternalLink, CheckCircle, XCircle, Ticket, Receipt } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser } from '../services/authService';
 
 interface Session {
   id: string;
   patientId: string;
+  patient_user_id?: string;
   patientName: string;
   patientPhone?: string;
   date: string;
@@ -17,8 +18,23 @@ interface Session {
   meetLink?: string;
   price: number;
   paid: boolean;
+  paymentMethod?: '' | 'Bizum' | 'Transferencia' | 'Efectivo';
   percent_psych: number;
   tags?: string[]; // Tags heredadas de la relación
+  invoice_id?: string;
+  bonus_id?: string;
+}
+
+interface Bono {
+  id: string;
+  pacient_user_id: string;
+  psychologist_user_id: string;
+  total_sessions_amount: number;
+  total_price_bono_amount: number;
+  paid: boolean;
+  sessions_used?: number;
+  sessions_remaining?: number;
+  created_at: string;
 }
 
 interface PsychologistScheduleProps {
@@ -38,6 +54,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [editedSession, setEditedSession] = useState<Session | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showAssignPatient, setShowAssignPatient] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<Session | null>(null);
@@ -55,6 +72,16 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
   const [assignPatientSearchQuery, setAssignPatientSearchQuery] = useState('');
   const [showAssignPatientDropdown, setShowAssignPatientDropdown] = useState(false);
   
+  // Estados para bonos
+  const [availableBonos, setAvailableBonos] = useState<Bono[]>([]);
+  const [assignedBono, setAssignedBono] = useState<Bono | null>(null);
+  const [isLoadingBonos, setIsLoadingBonos] = useState(false);
+  const [isAssigningBono, setIsAssigningBono] = useState(false);
+  
+  // Estados para bonos en nueva sesión
+  const [newSessionBonos, setNewSessionBonos] = useState<Bono[]>([]);
+  const [isLoadingNewSessionBonos, setIsLoadingNewSessionBonos] = useState(false);
+  
   const [newSession, setNewSession] = useState({
     patientId: '',
     date: '',
@@ -65,7 +92,11 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
     generateMeetLink: false,
     price: 0,
     paid: false,
-    percent_psych: 100
+    percent_psych: 100,
+    bonus_id: undefined as string | undefined,
+    paymentMethod: '' as string,
+    recurrence: 'none' as 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly',
+    recurrenceEndDate: ''
   });
 
   const [newAvailability, setNewAvailability] = useState({
@@ -451,66 +482,122 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
   };
 
   const handleCreateSession = async () => {
+    if (isCreatingSession) return; // Prevent double submission
     if (!newSession.patientId || !newSession.date || !newSession.startTime || !newSession.endTime || newSession.price <= 0) {
       alert('Por favor completa todos los campos requeridos (incluido el precio)');
+      return;
+    }
+
+    if (newSession.recurrence !== 'none' && !newSession.recurrenceEndDate) {
+      alert('Por favor selecciona la fecha de fin de repetición');
+      return;
+    }
+
+    if (newSession.recurrenceEndDate && newSession.recurrenceEndDate < newSession.date) {
+      alert('La fecha de fin de repetición debe ser posterior a la fecha de inicio');
       return;
     }
 
     const patient = patients.find(p => p.id === newSession.patientId);
     if (!patient) return;
 
-    // Obtener el usuario actual para enviar el header de autenticación
     const currentUser = await getCurrentUser();
     if (!currentUser) {
       alert('Error: Usuario no autenticado');
       return;
     }
 
-    // Generate Google Meet link if requested
-    let meetLink = '';
-    if (newSession.generateMeetLink && newSession.type === 'online') {
-      meetLink = `https://meet.google.com/${Math.random().toString(36).substring(2, 15)}`;
+    // Build the list of dates to create sessions for
+    const sessionDates: string[] = [newSession.date];
+    if (newSession.recurrence !== 'none' && newSession.recurrenceEndDate) {
+      const endDate = parseLocalDate(newSession.recurrenceEndDate);
+      let current = parseLocalDate(newSession.date);
+
+      while (true) {
+        if (newSession.recurrence === 'daily') {
+          current = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 1);
+        } else if (newSession.recurrence === 'weekly') {
+          current = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 7);
+        } else if (newSession.recurrence === 'biweekly') {
+          current = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 14);
+        } else if (newSession.recurrence === 'monthly') {
+          current = new Date(current.getFullYear(), current.getMonth() + 1, current.getDate());
+        }
+        if (current > endDate) break;
+        sessionDates.push(formatLocalDate(current));
+      }
     }
 
-    const session: Session = {
-      id: Date.now().toString(),
-      patientId: newSession.patientId,
-      patientName: patient.name,
-      patientPhone: patient.phone || '',
-      date: newSession.date,
-      startTime: newSession.startTime,
-      endTime: newSession.endTime,
-      type: newSession.type,
-      status: 'scheduled',
-      notes: newSession.notes,
-      meetLink: meetLink || undefined,
-      price: newSession.price,
-      paid: newSession.paid,
-      percent_psych: Math.min(newSession.percent_psych, 100)
-    };
+    setIsCreatingSession(true);
+    let successCount = 0;
+    let firstError = '';
 
     try {
-      const response = await fetch(`${API_URL}/sessions`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-user-id': currentUser.id
-        },
-        body: JSON.stringify({ ...session, psychologistId })
-      });
-
-      if (response.ok) {
-        await loadSessions();
-        setShowNewSession(false);
-        resetNewSession();
-      } else {
-        const error = await response.json();
-        alert('Error al crear la sesión: ' + (error.error || 'Error desconocido'));
+    for (const date of sessionDates) {
+      // Generate Google Meet link if requested
+      let meetLink = '';
+      if (newSession.generateMeetLink && newSession.type === 'online') {
+        meetLink = `https://meet.google.com/${Math.random().toString(36).substring(2, 15)}`;
       }
-    } catch (error) {
-      console.error('Error creating session:', error);
-      alert('Error al crear la sesión');
+
+      const session: Session = {
+        id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        patientId: newSession.patientId,
+        patientName: patient.name,
+        patientPhone: patient.phone || '',
+        date,
+        startTime: newSession.startTime,
+        endTime: newSession.endTime,
+        type: newSession.type,
+        status: 'scheduled',
+        notes: newSession.notes,
+        meetLink: meetLink || undefined,
+        price: newSession.price,
+        paid: newSession.paid,
+        percent_psych: Math.min(newSession.percent_psych, 100),
+        bonus_id: newSession.bonus_id,
+        paymentMethod: newSession.paymentMethod || undefined
+      };
+
+      try {
+        const response = await fetch(`${API_URL}/sessions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-user-id': currentUser.id
+          },
+          body: JSON.stringify({ ...session, psychologistId })
+        });
+
+        if (response.ok) {
+          successCount++;
+        } else {
+          const error = await response.json();
+          if (!firstError) firstError = error.error || 'Error desconocido';
+          // Stop on first conflict/error to avoid flooding
+          if (response.status === 409) break;
+        }
+      } catch (error) {
+        console.error('Error creating session:', error);
+        if (!firstError) firstError = 'Error de red';
+        break;
+      }
     }
+
+    } finally {
+      setIsCreatingSession(false);
+    }
+
+    await loadSessions();
+    setShowNewSession(false);
+    resetNewSession();
+
+    if (successCount === 0) {
+      alert(`Error al crear la sesión: ${firstError}`);
+    } else if (successCount < sessionDates.length) {
+      alert(`Se crearon ${successCount} de ${sessionDates.length} sesiones. Algunas no se pudieron crear (${firstError}).`);
+    }
+    // If all succeed, close silently (no alert needed for single session or when all recurring sessions are created)
   };
 
   const handleUpdateSessionTime = async (sessionId: string, newStartTime: string, newEndTime: string) => {
@@ -727,14 +814,201 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
     return (totalPrice * percent) / 100;
   };
 
-  const handleOpenSession = (session: Session) => {
+  const handleOpenSession = async (session: Session) => {
     setSelectedSession(session);
     setEditedSession({ ...session });
+    loadAvailableBonos(session.patient_user_id || session.patientId);
+    
+    // Cargar información del bono asignado si existe
+    if (session.bonus_id) {
+      await loadAssignedBono(session.bonus_id);
+    } else {
+      setAssignedBono(null);
+    }
   };
 
   const handleCloseModal = () => {
     setSelectedSession(null);
     setEditedSession(null);
+  };
+  
+  const loadAssignedBono = async (bonoId: string) => {
+    try {
+      const currentUser = await getCurrentUser();
+      if (!currentUser) return;
+      
+      const response = await fetch(
+        `${API_URL}/bonos/${bonoId}`
+      );
+      
+      if (response.ok) {
+        const bono = await response.json();
+        // Normalizar campos
+        const normalizedBono = {
+          ...bono,
+          total_sessions: bono.total_sessions_amount || bono.total_sessions || 0,
+          used_sessions: bono.sessions_used || 0,
+          total_price: bono.total_price_bono_amount || bono.total_price || 0,
+          purchase_date: bono.created_at || bono.purchase_date
+        };
+        setAssignedBono(normalizedBono);
+      }
+    } catch (error) {
+      console.error('Error loading assigned bono:', error);
+    }
+  };
+  
+  const loadAvailableBonos = async (patientUserId: string) => {
+    if (!patientUserId) return;
+    
+    setIsLoadingBonos(true);
+    try {
+      const currentUser = await getCurrentUser();
+      if (!currentUser) return;
+      
+      const response = await fetch(
+        `${API_URL}/bonos/available/${patientUserId}?psychologist_user_id=${currentUser.id}`
+      );
+      
+      if (response.ok) {
+        const bonos = await response.json();
+        // Normalizar campos para compatibilidad
+        const normalizedBonos = bonos.map((bono: any) => ({
+          ...bono,
+          total_sessions: bono.total_sessions_amount || bono.total_sessions || 0,
+          used_sessions: bono.sessions_used || 0,
+          total_price: bono.total_price_bono_amount || bono.total_price || 0,
+          purchase_date: bono.created_at || bono.purchase_date
+        }));
+        setAvailableBonos(normalizedBonos);
+      }
+    } catch (error) {
+      console.error('Error loading available bonos:', error);
+    } finally {
+      setIsLoadingBonos(false);
+    }
+  };
+  
+  const loadNewSessionBonos = async (patientUserId: string) => {
+    if (!patientUserId) return;
+    
+    setIsLoadingNewSessionBonos(true);
+    try {
+      const currentUser = await getCurrentUser();
+      if (!currentUser) return;
+      
+      const response = await fetch(
+        `${API_URL}/bonos/available/${patientUserId}?psychologist_user_id=${currentUser.id}`
+      );
+      
+      if (response.ok) {
+        const bonos = await response.json();
+        // Normalizar campos para compatibilidad
+        const normalizedBonos = bonos.map((bono: any) => ({
+          ...bono,
+          total_sessions: bono.total_sessions_amount || bono.total_sessions || 0,
+          used_sessions: bono.sessions_used || 0,
+          total_price: bono.total_price_bono_amount || bono.total_price || 0,
+          purchase_date: bono.created_at || bono.purchase_date
+        }));
+        setNewSessionBonos(normalizedBonos);
+      }
+    } catch (error) {
+      console.error('Error loading new session bonos:', error);
+    } finally {
+      setIsLoadingNewSessionBonos(false);
+    }
+  };
+  
+  const handleAssignBono = async (bonoId: string) => {
+    if (!editedSession) return;
+    
+    setIsAssigningBono(true);
+    try {
+      const response = await fetch(`${API_URL}/sessions/${editedSession.id}/assign-bonus`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ bonus_id: bonoId })
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        alert('Sesión asignada al bono correctamente (precio y estado de pago actualizados)');
+        
+        // Usar la sesión actualizada devuelta por el backend (ya guardada en Supabase)
+        if (result.session) {
+          // Normalizar los campos de la sesión
+          const normalizedSession = {
+            ...editedSession,
+            ...result.session,
+            bonus_id: result.session.bonus_id,
+            price: result.session.price,
+            paid: result.session.paid,
+            patient_user_id: result.session.patient_user_id || editedSession.patient_user_id,
+            patientId: result.session.patient_user_id || editedSession.patientId
+          };
+          setEditedSession(normalizedSession);
+        }
+        
+        await loadAssignedBono(bonoId);
+        await loadAvailableBonos(editedSession.patient_user_id || editedSession.patientId);
+        await loadSessions();
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Error al asignar sesión al bono');
+      }
+    } catch (error) {
+      console.error('Error assigning bono:', error);
+      alert('Error al asignar sesión al bono');
+    } finally {
+      setIsAssigningBono(false);
+    }
+  };
+  
+  const handleUnassignBono = async () => {
+    if (!editedSession) return;
+    
+    if (!confirm('¿Estás seguro de que quieres desasignar esta sesión del bono?')) return;
+    
+    setIsAssigningBono(true);
+    try {
+      const response = await fetch(`${API_URL}/sessions/${editedSession.id}/assign-bonus`, {
+        method: 'DELETE'
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        alert('Sesión desasignada del bono correctamente');
+        
+        // Usar la sesión actualizada devuelta por el backend (ya guardada en Supabase)
+        if (result.session) {
+          const normalizedSession = {
+            ...editedSession,
+            ...result.session,
+            bonus_id: undefined,
+            patient_user_id: result.session.patient_user_id || editedSession.patient_user_id,
+            patientId: result.session.patient_user_id || editedSession.patientId
+          };
+          setEditedSession(normalizedSession);
+        } else {
+          setEditedSession({ ...editedSession, bonus_id: undefined });
+        }
+        
+        setAssignedBono(null);
+        await loadAvailableBonos(editedSession.patient_user_id || editedSession.patientId);
+        await loadSessions();
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Error al desasignar sesión del bono');
+      }
+    } catch (error) {
+      console.error('Error unassigning bono:', error);
+      alert('Error al desasignar sesión del bono');
+    } finally {
+      setIsAssigningBono(false);
+    }
   };
 
   const handleDeleteSession = async () => {
@@ -744,12 +1018,44 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
       return;
     }
 
+    // If session is still pending, offer to delete all future pending sessions for this patient
+    let deleteFuture = false;
+    if (editedSession.status === 'scheduled') {
+      deleteFuture = confirm(
+        `¿Deseas también eliminar todas las sesiones futuras pendientes de ${editedSession.patientName} desde esta fecha?\n\n` +
+        `• Pulsa "Aceptar" para eliminar esta sesión y todas las futuras pendientes.\n` +
+        `• Pulsa "Cancelar" para eliminar solo esta sesión.`
+      );
+    }
+
     setIsSaving(true);
     try {
       const currentUser = await getCurrentUser();
       if (!currentUser) {
         alert('Error: Usuario no autenticado');
         return;
+      }
+
+      // First, delete all future pending sessions if requested
+      if (deleteFuture) {
+        const patientUserId = editedSession.patient_user_id || editedSession.patientId;
+        try {
+          await fetch(`${API_URL}/sessions/future-pending`, {
+            method: 'DELETE',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-user-id': currentUser.id
+            },
+            body: JSON.stringify({
+              patient_user_id: patientUserId,
+              fromDate: editedSession.date,
+              excludeId: editedSession.id,
+              psychologistId
+            })
+          });
+        } catch (err) {
+          console.error('Error deleting future sessions:', err);
+        }
       }
 
       const response = await fetch(`${API_URL}/sessions/${editedSession.id}`, {
@@ -763,7 +1069,6 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
       if (response.ok) {
         await loadSessions();
         handleCloseModal();
-        alert('Sesión eliminada correctamente');
       } else {
         const error = await response.json();
         alert('Error al eliminar la sesión: ' + (error.error || 'Error desconocido'));
@@ -778,7 +1083,12 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
 
   const handleFieldChange = (field: keyof Session, value: any) => {
     if (!editedSession) return;
-    setEditedSession({ ...editedSession, [field]: value });
+    // Si se desmarca 'paid', limpiar el método de pago
+    if (field === 'paid' && !value) {
+      setEditedSession({ ...editedSession, [field]: value, paymentMethod: '' });
+    } else {
+      setEditedSession({ ...editedSession, [field]: value });
+    }
   };
 
   const handleSaveSession = async () => {
@@ -798,6 +1108,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
         status: editedSession.status,
         price: editedSession.price ?? 0,
         paid: editedSession.paid ?? false,
+        paymentMethod: editedSession.paymentMethod || '',
         percent_psych: editedSession.percent_psych ?? 70,
         notes: editedSession.notes,
         meetLink: editedSession.meetLink
@@ -941,8 +1252,14 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
       generateMeetLink: false,
       price: 0,
       paid: false,
-      percent_psych: 100
+      percent_psych: 100,
+      bonus_id: undefined,
+      paymentMethod: '',
+      recurrence: 'none',
+      recurrenceEndDate: ''
     });
+    setNewSessionBonos([]);
+    setPatientSearchQuery('');
   };
 
   const resetNewAvailability = () => {
@@ -1064,11 +1381,12 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
 
   const weekDays = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
-  // Get week days for week view
+  // Get week days for week view (Monday to Sunday)
   const getWeekDays = () => {
-    const dayOfWeek = currentDate.getDay();
+    const dayOfWeek = currentDate.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+    const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
     const startOfWeek = new Date(currentDate);
-    startOfWeek.setDate(currentDate.getDate() - dayOfWeek);
+    startOfWeek.setDate(currentDate.getDate() - daysFromMonday);
     
     const days = [];
     for (let i = 0; i < 7; i++) {
@@ -1786,21 +2104,21 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
 
       {/* Edit Session Modal */}
       {selectedSession && editedSession && (
-        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={handleCloseModal}>
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-0 sm:p-4" onClick={handleCloseModal}>
+          <div className="bg-white rounded-none sm:rounded-2xl shadow-2xl max-w-2xl w-full h-full sm:h-auto sm:max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
             {/* Modal Header */}
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
-              <h3 className="text-xl font-bold text-slate-800">Editar Sesión</h3>
+            <div className="flex-shrink-0 bg-white border-b border-slate-200 px-4 py-3 sm:px-6 sm:py-4 flex items-center justify-between">
+              <h3 className="text-lg sm:text-xl font-bold text-slate-800">Editar Sesión</h3>
               <button
                 onClick={handleCloseModal}
-                className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                className="p-2 hover:bg-slate-100 active:bg-slate-200 rounded-lg transition-colors touch-manipulation"
               >
                 <X size={20} className="text-slate-500" />
               </button>
             </div>
 
             {/* Modal Body */}
-            <div className="p-6 space-y-4">
+            <div className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6 space-y-4">
               {/* Patient Name (Read-only) */}
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-2">Paciente</label>
@@ -1816,19 +2134,19 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                   type="date"
                   value={editedSession.date}
                   onChange={(e) => handleFieldChange('date', e.target.value)}
-                  className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base bg-white"
                 />
               </div>
 
               {/* Time Range */}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3 sm:gap-4">
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">Hora inicio</label>
                   <input
                     type="time"
                     value={editedSession.startTime}
                     onChange={(e) => handleFieldChange('startTime', e.target.value)}
-                    className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base bg-white"
                   />
                 </div>
                 <div>
@@ -1837,7 +2155,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                     type="time"
                     value={editedSession.endTime}
                     onChange={(e) => handleFieldChange('endTime', e.target.value)}
-                    className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base bg-white"
                   />
                 </div>
               </div>
@@ -1848,7 +2166,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                 <select
                   value={editedSession.type}
                   onChange={(e) => handleFieldChange('type', e.target.value as 'in-person' | 'online' | 'home-visit')}
-                  className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base bg-white"
                 >
                   <option value="online">Online</option>
                   <option value="in-person">Presencial</option>
@@ -1862,30 +2180,54 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                 <select
                   value={editedSession.status}
                   onChange={(e) => handleFieldChange('status', e.target.value as Session['status'])}
-                  className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base bg-white"
                 >
                   <option value="scheduled">Programada</option>
                   <option value="completed">Completada</option>
                   <option value="cancelled">Cancelada</option>
-                  <option value="paid">Pagada</option>
                 </select>
               </div>
 
               {/* Paid Checkbox */}
               <div>
-                <label className="flex items-center gap-3 px-4 py-3 bg-green-50 border border-green-200 rounded-lg cursor-pointer hover:bg-green-100 transition-colors">
+                <label className={`flex items-center gap-3 px-4 py-3 bg-green-50 border border-green-200 rounded-lg transition-colors ${
+                  editedSession.bonus_id ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:bg-green-100'
+                }`}>
                   <input
                     type="checkbox"
                     checked={editedSession.paid || false}
                     onChange={(e) => handleFieldChange('paid', e.target.checked)}
-                    className="w-5 h-5 rounded border-green-300 text-green-600 focus:ring-2 focus:ring-green-500"
+                    disabled={!!editedSession.bonus_id}
+                    className="w-5 h-5 rounded border-green-300 text-green-600 focus:ring-2 focus:ring-green-500 disabled:cursor-not-allowed disabled:opacity-50"
                   />
                   <div>
                     <div className="font-semibold text-green-700">Sesión pagada</div>
-                    <div className="text-xs text-green-600">Marcar como pagada independientemente del estado</div>
+                    <div className="text-xs text-green-600">
+                      {editedSession.bonus_id 
+                        ? 'Estado heredado del bono asignado'
+                        : 'Marcar como pagada independientemente del estado'
+                      }
+                    </div>
                   </div>
                 </label>
               </div>
+
+              {/* Payment Method */}
+              {editedSession.paid && (
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Método de pago</label>
+                  <select
+                    value={editedSession.paymentMethod || ''}
+                    onChange={(e) => handleFieldChange('paymentMethod', e.target.value)}
+                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base bg-white"
+                  >
+                    <option value="">-- Seleccionar --</option>
+                    <option value="Bizum">Bizum</option>
+                    <option value="Transferencia">Transferencia</option>
+                    <option value="Efectivo">Efectivo</option>
+                  </select>
+                </div>
+              )}
 
               {/* Price and Percent */}
               <div className="grid grid-cols-2 gap-4">
@@ -1912,13 +2254,18 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">% Psicólogo</label>
                   <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max="100"
-                    value={editedSession.percent_psych || 0}
-                    onChange={(e) => handleFieldChange('percent_psych', parseFloat(e.target.value) || 0)}
+                    type="text"
+                    inputMode="decimal"
+                    value={editedSession.percent_psych === 0 ? '' : editedSession.percent_psych || ''}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                        const numValue = value === '' ? 0 : parseFloat(value) || 0;
+                        handleFieldChange('percent_psych', Math.min(numValue, 100));
+                      }
+                    }}
                     className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    placeholder="0.00"
                   />
                 </div>
               </div>
@@ -1932,7 +2279,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                     value={editedSession.meetLink || ''}
                     onChange={(e) => handleFieldChange('meetLink', e.target.value)}
                     placeholder="https://meet.google.com/..."
-                    className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base bg-white"
                   />
                   {editedSession.meetLink && (
                     <div className="mt-3 flex flex-wrap gap-2">
@@ -1980,6 +2327,132 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                 </div>
               )}
 
+              {/* Bonos Section */}
+              {editedSession.patient_user_id && !editedSession.invoice_id && (
+                <div className="border border-purple-200 rounded-xl bg-purple-50 p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Ticket size={18} className="text-purple-600" />
+                    <h4 className="font-semibold text-purple-900">Bonos del Paciente</h4>
+                  </div>
+                  
+                  {/* Currently Assigned Bonus */}
+                  {editedSession.bonus_id && assignedBono && (
+                    <div className="mb-4 p-4 bg-white rounded-lg border-2 border-purple-400 shadow-sm">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <Receipt size={18} className="text-purple-600" />
+                          <span className="text-base font-bold text-purple-900">Bono Asignado</span>
+                        </div>
+                        {assignedBono.paid && (
+                          <span className="text-xs bg-green-500 text-white px-2.5 py-1 rounded-full font-bold">
+                            PAGADO
+                          </span>
+                        )}
+                      </div>
+                      <div className="space-y-1.5 mb-3">
+                        <div className="text-sm text-purple-800">
+                          <span className="font-semibold">{assignedBono.total_sessions} sesiones</span> · Precio total: {assignedBono.total_price}€
+                        </div>
+                        <div className="text-sm text-purple-700">
+                          Precio por sesión: <span className="font-bold">{(assignedBono.total_price / assignedBono.total_sessions).toFixed(2)}€</span>
+                        </div>
+                        <div className="text-xs text-purple-600">
+                          Sesiones usadas: {assignedBono.used_sessions || 0} / {assignedBono.total_sessions}
+                        </div>
+                        <div className="text-xs text-purple-600">
+                          Fecha: {new Date(assignedBono.purchase_date).toLocaleDateString('es-ES')}
+                        </div>
+                      </div>
+                      <button
+                        onClick={handleUnassignBono}
+                        disabled={isAssigningBono}
+                        className="w-full px-3 py-2 text-sm bg-red-100 text-red-700 hover:bg-red-200 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2 font-medium"
+                      >
+                        <XCircle size={16} />
+                        Desasignar de este bono
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Currently Assigned Bonus (sin datos del bono) */}
+                  {editedSession.bonus_id && !assignedBono && (
+                    <div className="mb-4 p-3 bg-white rounded-lg border border-purple-300">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Receipt size={16} className="text-purple-600" />
+                          <span className="text-sm font-medium text-purple-900">Asignado a bono</span>
+                        </div>
+                        <button
+                          onClick={handleUnassignBono}
+                          disabled={isAssigningBono}
+                          className="px-3 py-1.5 text-xs bg-red-100 text-red-700 hover:bg-red-200 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                        >
+                          <XCircle size={14} />
+                          Desasignar
+                        </button>
+                      </div>
+                    </div>
+                  )}                  {/* Available Bonuses List */}
+                  {isLoadingBonos ? (
+                    <div className="flex items-center justify-center py-4">
+                      <div className="w-6 h-6 border-2 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
+                      <span className="ml-2 text-sm text-purple-600">Cargando bonos...</span>
+                    </div>
+                  ) : availableBonos.length === 0 ? (
+                    <div className="text-sm text-purple-700 bg-purple-100 rounded-lg p-3 border border-purple-200">
+                      No hay bonos disponibles para este paciente
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="text-xs font-medium text-purple-700 mb-2">
+                        Bonos disponibles ({availableBonos.length})
+                      </div>
+                      {availableBonos.map(bono => (
+                        <div
+                          key={bono.id}
+                          className="p-3 bg-white rounded-lg border border-purple-200 hover:border-purple-400 transition-colors"
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <Ticket size={16} className="text-purple-600" />
+                              <span className="text-sm font-medium text-purple-900">
+                                {bono.total_sessions} sesiones
+                              </span>
+                              {bono.paid && (
+                                <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
+                                  Pagado
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-xs text-purple-600 font-semibold">
+                              {bono.total_sessions - bono.used_sessions} restantes
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <div className="text-xs text-purple-700">
+                                Total: {bono.total_price}€ → {(bono.total_price / bono.total_sessions).toFixed(2)}€/sesión
+                              </div>
+                              <div className="text-xs text-purple-600">
+                                Fecha: {new Date(bono.purchase_date).toLocaleDateString('es-ES')}
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => handleAssignBono(bono.id)}
+                              disabled={isAssigningBono || !!editedSession.bonus_id}
+                              className="px-3 py-1.5 text-xs bg-purple-600 text-white hover:bg-purple-700 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                            >
+                              <CheckCircle size={14} />
+                              Asignar
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Notes */}
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-2">Notas</label>
@@ -1988,7 +2461,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                   onChange={(e) => handleFieldChange('notes', e.target.value)}
                   rows={4}
                   placeholder="Notas sobre la sesión..."
-                  className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+                  className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none text-base"
                 />
               </div>
 
@@ -2025,27 +2498,27 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
             </div>
 
             {/* Modal Footer */}
-            <div className="sticky bottom-0 bg-slate-50 border-t border-slate-200 px-6 py-4 flex items-center justify-between gap-3">
+            <div className="flex-shrink-0 bg-slate-50 border-t border-slate-200 px-4 py-3 sm:px-6 sm:py-4 flex items-center justify-between gap-2 sm:gap-3">
               <button
                 onClick={handleDeleteSession}
                 disabled={isSaving}
-                className="px-4 py-2 bg-red-600 text-white hover:bg-red-700 rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+                className="px-4 py-3 bg-red-600 text-white hover:bg-red-700 active:bg-red-800 rounded-xl font-medium transition-colors disabled:opacity-50 flex items-center gap-2 text-sm sm:text-base touch-manipulation"
               >
                 <Trash2 size={16} />
-                Eliminar
+                <span className="hidden xs:inline">Eliminar</span>
               </button>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 sm:gap-3">
                 <button
                   onClick={handleCloseModal}
                   disabled={isSaving}
-                  className="px-4 py-2 text-slate-700 hover:bg-slate-200 rounded-lg font-medium transition-colors disabled:opacity-50"
+                  className="px-4 py-3 text-slate-700 hover:bg-slate-200 active:bg-slate-300 rounded-xl font-medium transition-colors disabled:opacity-50 text-sm sm:text-base touch-manipulation"
                 >
                   Cancelar
                 </button>
                 <button
                   onClick={handleSaveSession}
                   disabled={isSaving}
-                  className="px-6 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+                  className="px-6 py-3 bg-purple-600 text-white rounded-xl font-medium hover:bg-purple-700 active:bg-purple-800 transition-colors flex items-center gap-2 disabled:opacity-50 text-sm sm:text-base touch-manipulation"
                 >
                   {isSaving ? (
                     <>
@@ -2122,10 +2595,14 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                                 ...newSession, 
                                 patientId,
                                 price: defaultPrice,
-                                percent_psych: defaultPercent
+                                percent_psych: defaultPercent,
+                                bonus_id: undefined
                               });
                               setPatientSearchQuery(patient.name);
                               setShowPatientDropdown(false);
+                              
+                              // Cargar bonos disponibles del paciente
+                              loadNewSessionBonos(patientId);
                             }}
                             className="px-3 sm:px-4 py-2 hover:bg-slate-100 cursor-pointer"
                           >
@@ -2189,6 +2666,70 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                 </div>
               </div>
 
+              {/* Recurrence section */}
+              <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 sm:p-4 space-y-3">
+                <div>
+                  <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-2">🔁 Repetir</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {([
+                      { value: 'none', label: 'Sin repetición' },
+                      { value: 'daily', label: 'Diariamente' },
+                      { value: 'weekly', label: 'Semanalmente' },
+                      { value: 'biweekly', label: 'Cada 2 semanas' },
+                      { value: 'monthly', label: 'Mensualmente' }
+                    ] as const).map(opt => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setNewSession({ ...newSession, recurrence: opt.value, recurrenceEndDate: '' })}
+                        className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all touch-manipulation ${
+                          newSession.recurrence === opt.value
+                            ? 'bg-indigo-600 text-white shadow-sm'
+                            : 'bg-white text-slate-600 border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {newSession.recurrence !== 'none' && (
+                  <div>
+                    <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">
+                      Repetir hasta *
+                    </label>
+                    <input
+                      type="date"
+                      value={newSession.recurrenceEndDate}
+                      min={newSession.date || undefined}
+                      onChange={(e) => setNewSession({ ...newSession, recurrenceEndDate: e.target.value })}
+                      className="w-full px-2 sm:px-4 py-2 sm:py-2.5 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent touch-manipulation bg-white"
+                      placeholder="dd/mm/yyyy"
+                    />
+                    {newSession.date && newSession.recurrenceEndDate && newSession.recurrenceEndDate >= newSession.date && (() => {
+                      // Calculate number of sessions for preview
+                      let count = 1;
+                      let current = parseLocalDate(newSession.date);
+                      const endDate = parseLocalDate(newSession.recurrenceEndDate);
+                      while (true) {
+                        if (newSession.recurrence === 'daily') current = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 1);
+                        else if (newSession.recurrence === 'weekly') current = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 7);
+                        else if (newSession.recurrence === 'biweekly') current = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 14);
+                        else if (newSession.recurrence === 'monthly') current = new Date(current.getFullYear(), current.getMonth() + 1, current.getDate());
+                        if (current > endDate) break;
+                        count++;
+                      }
+                      return (
+                        <p className="text-xs text-indigo-600 mt-1.5 font-medium">
+                          Se crearán {count} sesión{count !== 1 ? 'es' : ''} en total
+                        </p>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">Tipo de sesión *</label>
                 <div className="grid grid-cols-2 gap-2">
@@ -2246,29 +2787,131 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                   <div>
                     <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">% Psicólogo *</label>
                     <input
-                      type="number"
-                      value={newSession.percent_psych}
-                      onChange={(e) => setNewSession({ ...newSession, percent_psych: Math.min(parseFloat(e.target.value) || 0, 100) })}
-                      min="0"
-                      max="100"
-                      step="1"
+                      type="text"
+                      inputMode="decimal"
+                      value={newSession.percent_psych === 0 ? '' : newSession.percent_psych}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                          const numValue = value === '' ? 0 : parseFloat(value) || 0;
+                          setNewSession({ ...newSession, percent_psych: Math.min(numValue, 100) });
+                        }
+                      }}
                       className="w-full px-2 sm:px-4 py-2 sm:py-2.5 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent touch-manipulation"
-                      placeholder="70"
+                      placeholder="0.00"
                     />
                   </div>
                 </div>
                 
-                <div className="flex items-center">
+                {/* Bonos disponibles */}
+                {newSession.patientId && newSessionBonos.length > 0 && (
+                  <div className="col-span-2">
+                    <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-2">Asignar a bono</label>
+                    <div className="space-y-2">
+                      {/* Opción: Sin bono */}
+                      <div
+                        onClick={() => {
+                          setNewSession({ ...newSession, bonus_id: undefined, paid: false });
+                        }}
+                        className={`p-3 rounded-lg border-2 cursor-pointer transition-all ${
+                          !newSession.bonus_id
+                            ? 'border-purple-600 bg-purple-50'
+                            : 'border-slate-200 bg-white hover:border-purple-300'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                            !newSession.bonus_id ? 'border-purple-600 bg-purple-600' : 'border-slate-300'
+                          }`}>
+                            {!newSession.bonus_id && <div className="w-2 h-2 bg-white rounded-full"></div>}
+                          </div>
+                          <span className="text-sm font-medium text-slate-900">Sin bono (pago individual)</span>
+                        </div>
+                      </div>
+                      
+                      {/* Lista de bonos */}
+                      {newSessionBonos.map(bono => {
+                        const pricePerSession = bono.total_price / bono.total_sessions;
+                        return (
+                          <div
+                            key={bono.id}
+                            onClick={() => {
+                              setNewSession({ 
+                                ...newSession, 
+                                bonus_id: bono.id,
+                                price: pricePerSession,
+                                paid: bono.paid
+                              });
+                            }}
+                            className={`p-3 rounded-lg border-2 cursor-pointer transition-all ${
+                              newSession.bonus_id === bono.id
+                                ? 'border-purple-600 bg-purple-50'
+                                : 'border-slate-200 bg-white hover:border-purple-300'
+                            }`}
+                          >
+                            <div className="flex items-start gap-2">
+                              <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center mt-0.5 flex-shrink-0 ${
+                                newSession.bonus_id === bono.id ? 'border-purple-600 bg-purple-600' : 'border-slate-300'
+                              }`}>
+                                {newSession.bonus_id === bono.id && <div className="w-2 h-2 bg-white rounded-full"></div>}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-sm font-semibold text-purple-900">
+                                    {bono.total_sessions} sesiones
+                                  </span>
+                                  {bono.paid && (
+                                    <span className="text-xs bg-green-500 text-white px-2 py-0.5 rounded-full font-bold flex-shrink-0">
+                                      PAGADO
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-xs text-purple-700 mt-1">
+                                  {pricePerSession.toFixed(2)}€/sesión · {bono.total_sessions - bono.used_sessions} restantes
+                                </div>
+                                <div className="text-xs text-purple-600">
+                                  Comprado: {new Date(bono.purchase_date).toLocaleDateString('es-ES')}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                
+                <div className="flex items-center col-span-2">
                   <label className="flex items-center gap-2 cursor-pointer touch-manipulation">
                     <input
                       type="checkbox"
                       checked={newSession.paid}
                       onChange={(e) => setNewSession({ ...newSession, paid: e.target.checked })}
-                      className="w-4 h-4 rounded border-slate-300 text-green-600 focus:ring-green-500"
+                      disabled={!!newSession.bonus_id}
+                      className="w-4 h-4 rounded border-slate-300 text-green-600 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
                     />
-                    <span className="text-xs sm:text-sm font-medium text-slate-700">Marcar como pagada</span>
+                    <span className="text-xs sm:text-sm font-medium text-slate-700">
+                      {newSession.bonus_id ? 'Estado heredado del bono' : 'Marcar como pagada'}
+                    </span>
                   </label>
                 </div>
+                
+                {/* Método de pago */}
+                {newSession.paid && !newSession.bonus_id && (
+                  <div className="col-span-2">
+                    <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-2">Método de pago</label>
+                    <select
+                      value={newSession.paymentMethod || ''}
+                      onChange={(e) => setNewSession({ ...newSession, paymentMethod: e.target.value })}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white"
+                    >
+                      <option value="">-- Seleccionar --</option>
+                      <option value="Bizum">Bizum</option>
+                      <option value="Transferencia">Transferencia</option>
+                      <option value="Efectivo">Efectivo</option>
+                    </select>
+                  </div>
+                )}
               </div>
 
               {/* Earnings Preview */}
@@ -2324,9 +2967,15 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
               </button>
               <button
                 onClick={handleCreateSession}
-                className="flex-1 sm:flex-none px-3 sm:px-4 py-2.5 sm:py-2 text-xs sm:text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium shadow-md touch-manipulation"
+                disabled={isCreatingSession}
+                className="flex-1 sm:flex-none px-3 sm:px-4 py-2.5 sm:py-2 text-xs sm:text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium shadow-md touch-manipulation disabled:opacity-60 flex items-center justify-center gap-2"
               >
-                Crear Sesión
+                {isCreatingSession ? (
+                  <>
+                    <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Creando...
+                  </>
+                ) : 'Crear Sesión'}
               </button>
             </div>
           </div>

@@ -13,13 +13,14 @@ interface Session {
   date: string;
   startTime: string;
   endTime: string;
-  status: 'scheduled' | 'completed' | 'cancelled' | 'available' | 'paid';
+  status: 'scheduled' | 'completed' | 'cancelled' | 'available';
   type: 'in-person' | 'online' | 'home-visit';
   price?: number;
   percent_psych?: number;
   notes?: string;
   meetLink?: string;
   paid?: boolean;
+  paymentMethod?: '' | 'Bizum' | 'Transferencia' | 'Efectivo';
   tags?: string[]; // Tags heredadas de la relación
   session_entry_id?: string;
   invoice_id?: string;
@@ -63,6 +64,8 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
   
   // Filter states
   const [filterPatient, setFilterPatient] = useState<string>('all');
+  const [patientSearch, setPatientSearch] = useState<string>('');
+  const [patientDropdownOpen, setPatientDropdownOpen] = useState<boolean>(false);
   const [filterStatus, setFilterStatus] = useState<string[]>(['scheduled', 'completed']); // Por defecto todas menos canceladas
   const [filterPayment, setFilterPayment] = useState<string>('all'); // 'all', 'paid', 'unpaid'
   const [filterEntry, setFilterEntry] = useState<string[]>(['with-entry', 'without-entry']);
@@ -411,6 +414,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
         status: editedSession.status,
         price: editedSession.price ?? 0,
         paid: editedSession.paid ?? false,
+        paymentMethod: editedSession.paymentMethod || '',
         percent_psych: editedSession.percent_psych ?? 70,
         notes: editedSession.notes,
         meetLink: editedSession.meetLink
@@ -443,7 +447,12 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
 
   const handleFieldChange = (field: keyof Session, value: any) => {
     if (!editedSession) return;
-    setEditedSession({ ...editedSession, [field]: value });
+    // Si se desmarca 'paid', limpiar el método de pago
+    if (field === 'paid' && !value) {
+      setEditedSession({ ...editedSession, [field]: value, paymentMethod: '' });
+    } else {
+      setEditedSession({ ...editedSession, [field]: value });
+    }
   };
 
   const handleOpenSessionDetails = async (session: Session, e: React.MouseEvent) => {
@@ -612,23 +621,55 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
             
             <div className="flex flex-col sm:flex-row items-stretch sm:items-start gap-2 sm:gap-3 md:gap-4">
               {/* Filtro por Paciente */}
-              <div className="flex flex-col gap-1 sm:gap-1.5 min-w-[140px] sm:min-w-[200px]">
+              <div className="flex flex-col gap-1 sm:gap-1.5 min-w-[140px] sm:min-w-[200px] relative">
                 <label className="flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-xs md:text-xs font-semibold text-slate-600">
                   <User size={12} className="text-blue-600 flex-shrink-0" />
                   Paciente
                 </label>
-                <select
-                  value={filterPatient}
-                  onChange={(e) => setFilterPatient(e.target.value)}
-                  className="px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 md:py-2.5 border-2 border-slate-300 rounded-lg sm:rounded-xl text-xs sm:text-sm md:text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white hover:border-slate-400 transition-colors cursor-pointer"
-                >
-                  <option value="all">👥 Todos</option>
-                  {Array.from(patients.values()).map((patient: Patient) => (
-                    <option key={patient.id} value={patient.id}>
-                      👤 {patient.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={patientSearch}
+                    onChange={(e) => {
+                      setPatientSearch(e.target.value);
+                      setPatientDropdownOpen(true);
+                    }}
+                    onFocus={() => setPatientDropdownOpen(true)}
+                    onBlur={() => setTimeout(() => setPatientDropdownOpen(false), 150)}
+                    placeholder={filterPatient === 'all' ? '👥 Todos los pacientes' : (patients.get(filterPatient)?.name || '...')}
+                    className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border-2 border-slate-300 rounded-lg sm:rounded-xl text-xs sm:text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white hover:border-slate-400 transition-colors cursor-text pr-7"
+                  />
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">▾</span>
+                </div>
+                {patientDropdownOpen && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border-2 border-slate-200 rounded-xl shadow-lg z-50 max-h-56 overflow-y-auto">
+                    <button
+                      onMouseDown={() => { setFilterPatient('all'); setPatientSearch(''); setPatientDropdownOpen(false); }}
+                      className={`w-full text-left px-3 py-2 text-xs sm:text-sm hover:bg-blue-50 transition-colors ${
+                        filterPatient === 'all' ? 'bg-blue-50 font-semibold text-blue-700' : 'text-slate-700'
+                      }`}
+                    >
+                      👥 Todos los pacientes
+                    </button>
+                    {Array.from(patients.values())
+                      .filter((p: Patient) => p.name.toLowerCase().includes(patientSearch.toLowerCase()))
+                      .map((patient: Patient) => (
+                        <button
+                          key={patient.id}
+                          onMouseDown={() => { setFilterPatient(patient.id); setPatientSearch(''); setPatientDropdownOpen(false); }}
+                          className={`w-full text-left px-3 py-2 text-xs sm:text-sm hover:bg-blue-50 transition-colors ${
+                            filterPatient === patient.id ? 'bg-blue-50 font-semibold text-blue-700' : 'text-slate-700'
+                          }`}
+                        >
+                          👤 {patient.name}
+                        </button>
+                      ))
+                    }
+                    {Array.from(patients.values()).filter((p: Patient) => p.name.toLowerCase().includes(patientSearch.toLowerCase())).length === 0 && (
+                      <div className="px-3 py-2 text-xs text-slate-400">Sin resultados</div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Filtro por Estado de Pago */}
@@ -770,6 +811,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                 <button
                   onClick={() => {
                     setFilterPatient('all');
+                    setPatientSearch('');
                     setFilterStatus(['scheduled', 'completed']);
                     setFilterPayment('all');
                     setFilterEntry(['with-entry', 'without-entry']);
@@ -1107,25 +1149,47 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                   <option value="scheduled">Programada</option>
                   <option value="completed">Completada</option>
                   <option value="cancelled">Cancelada</option>
-                  <option value="paid">Pagada</option>
                 </select>
               </div>
 
               {/* Paid Checkbox */}
               <div>
-                <label className="flex items-center gap-3 px-4 py-3 bg-green-50 border border-green-200 rounded-lg cursor-pointer hover:bg-green-100 transition-colors">
+                <label className={`flex items-center gap-3 px-4 py-3 bg-green-50 border border-green-200 rounded-lg ${editedSession.bonus_id ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:bg-green-100'} transition-colors`}>
                   <input
                     type="checkbox"
                     checked={editedSession.paid || false}
                     onChange={(e) => handleFieldChange('paid', e.target.checked)}
-                    className="w-5 h-5 rounded border-green-300 text-green-600 focus:ring-2 focus:ring-green-500"
+                    disabled={!!editedSession.bonus_id}
+                    className="w-5 h-5 rounded border-green-300 text-green-600 focus:ring-2 focus:ring-green-500 disabled:cursor-not-allowed"
                   />
                   <div>
                     <div className="font-semibold text-green-700">Sesión pagada</div>
-                    <div className="text-xs text-green-600">Marcar como pagada independientemente del estado</div>
+                    <div className="text-xs text-green-600">
+                      {editedSession.bonus_id 
+                        ? 'Estado heredado del bono'
+                        : 'Marcar como pagada independientemente del estado'
+                      }
+                    </div>
                   </div>
                 </label>
               </div>
+
+              {/* Payment Method */}
+              {editedSession.paid && (
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Método de pago</label>
+                  <select
+                    value={editedSession.paymentMethod || ''}
+                    onChange={(e) => handleFieldChange('paymentMethod', e.target.value)}
+                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base bg-white"
+                  >
+                    <option value="">-- Seleccionar --</option>
+                    <option value="Bizum">Bizum</option>
+                    <option value="Transferencia">Transferencia</option>
+                    <option value="Efectivo">Efectivo</option>
+                  </select>
+                </div>
+              )}
 
               {/* Price and Percent */}
               <div className="grid grid-cols-2 gap-3 sm:gap-4">
@@ -1152,13 +1216,18 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">% Psic.</label>
                   <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max="100"
-                    value={editedSession.percent_psych || 0}
-                    onChange={(e) => handleFieldChange('percent_psych', parseFloat(e.target.value) || 0)}
+                    type="text"
+                    inputMode="decimal"
+                    value={editedSession.percent_psych === 0 ? '' : editedSession.percent_psych || ''}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                        const numValue = value === '' ? 0 : parseFloat(value) || 0;
+                        handleFieldChange('percent_psych', Math.min(numValue, 100));
+                      }
+                    }}
                     className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base"
+                    placeholder="0.00"
                   />
                 </div>
               </div>
@@ -1362,7 +1431,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                 <button
                   onClick={handleSaveSession}
                   disabled={isSaving}
-                  className="px-6 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+                  className="px-6 py-3 bg-purple-600 text-white rounded-xl font-medium hover:bg-purple-700 active:bg-purple-800 transition-colors flex items-center gap-2 disabled:opacity-50 text-sm sm:text-base touch-manipulation"
                 >
                   {isSaving ? (
                     <>
