@@ -26,6 +26,7 @@ interface Invoice {
   invoice_date?: string;
   created_at: string;
   total?: number;
+  is_rectificativa?: boolean;
 }
 
 interface PsychologistDashboardProps {
@@ -78,13 +79,9 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
         setPatients(patientsData);
       }
 
-      // Load invoices con filtro de fecha
-      const invoicesParams = new URLSearchParams({
-        psychologistId,
-        startDate: dateRange.start,
-        endDate: dateRange.end
-      });
-      const invoicesResponse = await fetch(`${API_URL}/invoices?${invoicesParams.toString()}`);
+      // Cargar TODAS las facturas sin filtro de fecha para el gráfico de 12 meses y métricas globales
+      // El filtro de rango se aplica en el frontend para la métrica "Facturado en Período"
+      const invoicesResponse = await fetch(`${API_URL}/invoices?psychologist_user_id=${psychologistId}`);
       if (invoicesResponse.ok) {
         const invoicesData = await invoicesResponse.json();
         setInvoices(invoicesData);
@@ -168,14 +165,12 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
   );
   const activePatients = activePatientsSet.size;
 
-  // Financial metrics (excluir drafts)
-  console.log('[PsychologistDashboard] All invoices:', invoices.map(inv => ({ id: inv.id, status: inv.status, total: inv.total, date: inv.date })));
-  const invoicesWithoutDrafts = invoices.filter(inv => inv.status !== 'draft');
+  // Financial metrics (excluir drafts y rectificativas — estas últimas tienen importes negativos)
+  const invoicesWithoutDrafts = invoices.filter(inv => inv.status !== 'draft' && !inv.is_rectificativa);
   const paidInvoices = invoicesWithoutDrafts.filter(inv => inv.status === 'paid');
-  const pendingInvoices = invoicesWithoutDrafts.filter(inv => inv.status === 'pending');
-  console.log('[PsychologistDashboard] Filtered paid:', paidInvoices.length, 'pending:', pendingInvoices.length);
-  const totalRevenue = paidInvoices.reduce((sum, inv) => sum + (inv.total || inv.amount || 0), 0);
-  const totalPending = pendingInvoices.reduce((sum, inv) => sum + (inv.total || inv.amount || 0), 0);
+  const pendingInvoices = invoicesWithoutDrafts.filter(inv => inv.status === 'pending' || inv.status === 'overdue');
+  const totalRevenue = paidInvoices.reduce((sum, inv) => sum + Math.max(0, inv.total ?? inv.amount ?? 0), 0);
+  const totalPending = pendingInvoices.reduce((sum, inv) => sum + Math.max(0, inv.total ?? inv.amount ?? 0), 0);
   const totalBilling = totalRevenue + totalPending; // Total incluye pagadas + pendientes
   
   // Monthly revenue breakdown - last 12 months
@@ -209,23 +204,21 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
     }
   });
   
-  console.log('[PsychologistDashboard] Total invoices:', invoices.length);
-  console.log('[PsychologistDashboard] Paid invoices:', paidInvoices.length, 'Total:', totalRevenue);
-  console.log('[PsychologistDashboard] Pending invoices:', pendingInvoices.length, 'Total:', totalPending);
-  console.log('[PsychologistDashboard] Monthly pending data:', monthlyPending);
-  console.log('[PsychologistDashboard] Monthly revenue data:', monthlyRevenue);
+
 
   // El máximo siempre es el total mensual más alto (pagado + pendiente) de los últimos 12 meses
   const revenueValues = Object.keys(monthlyRevenue).map(key => monthlyRevenue[key] + monthlyPending[key]);
   const maxRevenue = Math.max(...revenueValues, 1); // La barra más alta define la escala al 100%
   
-  // Revenue in selected date range - incluye pagadas + pendientes
+  // Revenue in selected date range - incluye pagadas + pendientes, excluye rectificativas
   const revenueInRange = invoices
     .filter(inv => {
-      const invDate = new Date(inv.date || inv.created_at);
-      return invDate >= rangeStart && invDate <= rangeEnd && (inv.status === 'paid' || inv.status === 'pending');
+      const invDate = new Date(inv.invoice_date || inv.date || inv.created_at);
+      return invDate >= rangeStart && invDate <= rangeEnd &&
+        (inv.status === 'paid' || inv.status === 'pending' || inv.status === 'overdue') &&
+        !inv.is_rectificativa;
     })
-    .reduce((sum, inv) => sum + (inv.total || inv.amount || 0), 0);
+    .reduce((sum, inv) => sum + Math.max(0, inv.total ?? inv.amount ?? 0), 0);
 
   if (isLoading) {
     return (
@@ -398,11 +391,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
               const paidPercentage = maxRevenue > 0 ? (paidValue / maxRevenue) * 100 : 0;
               const pendingPercentage = maxRevenue > 0 ? (pendingValue / maxRevenue) * 100 : 0;
               const totalPercentage = paidPercentage + pendingPercentage;
-                            // Debug log para ver valores
-              if (idx === 0 || totalValue > 0) {
-                console.log(`[Chart] ${month} (${key}): paid=${paidValue}€, pending=${pendingValue}€, total=${totalValue}€, showTotal=${showTotalBilling}`);
-              }
-                            return (
+              return (
                 <div key={key} className="flex-1 flex flex-col items-center justify-end group relative min-w-0">
                   {/* Bar */}
                   <div className="w-full h-full flex flex-col items-center justify-end">

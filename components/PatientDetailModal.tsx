@@ -7,6 +7,7 @@ import BillingPanel from './BillingPanel';
 import PsychologistPatientSessions from './PsychologistPatientSessions';
 import PatientTimeline from './PatientTimeline';
 import BonosPanel from './BonosPanel';
+import { AddressAutocomplete } from './AddressAutocomplete';
 import { HistoricalDocument, HistoricalDocumentsSummary } from '../types';
 
 interface PatientSummary {
@@ -1638,12 +1639,12 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
                       Dirección
                     </label>
                     {isEditingInfo ? (
-                      <input
-                        type="text"
+                      <AddressAutocomplete
                         value={editedPatientData.address}
-                        onChange={(e) => setEditedPatientData({ ...editedPatientData, address: e.target.value })}
-                        className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-white border-2 border-slate-300 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all text-sm"
+                        onChange={(val) => setEditedPatientData({ ...editedPatientData, address: val })}
+                        onSelect={(sel) => setEditedPatientData((prev: any) => ({ ...prev, address: sel.fullAddress }))}
                         placeholder="Calle, número, ciudad, código postal..."
+                        className="w-full"
                       />
                     ) : (
                       <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-4 bg-white border-2 border-slate-200 rounded-lg sm:rounded-xl">

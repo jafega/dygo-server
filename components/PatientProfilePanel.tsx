@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Save, Phone, Mail, MapPin, User as UserIcon } from 'lucide-react';
 import { API_URL } from '../services/config';
+import { AddressAutocomplete, AddressSelection } from './AddressAutocomplete';
 
 interface PatientProfile {
   // Personal Info
@@ -166,11 +167,17 @@ const PatientProfilePanel: React.FC<PatientProfilePanelProps> = ({ userId }) => 
 
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">Dirección</label>
-            <input
-              type="text"
+            <AddressAutocomplete
               value={profile.address}
-              onChange={(e) => handleChange('address', e.target.value)}
-              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              onChange={(val) => handleChange('address', val)}
+              onSelect={(sel: AddressSelection) => {
+                setProfile((prev) => ({
+                  ...prev,
+                  address: sel.streetAddress,
+                  postalCode: sel.postalCode || prev.postalCode,
+                  country: sel.country || prev.country,
+                }));
+              }}
               placeholder="Calle Principal, 123"
             />
           </div>

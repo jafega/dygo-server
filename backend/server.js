@@ -4952,41 +4952,89 @@ app.post('/api/invoices', async (req, res) => {
       try {
         console.log('📤 [POST /api/invoices] Invoice recibido:', JSON.stringify(invoice, null, 2).substring(0, 800));
         
-        // Validar que ninguna sesión tenga bonus_id asignado
+        // Validar sesiones seleccionadas
         if (invoice.sessionIds && invoice.sessionIds.length > 0) {
-          const { data: sessionsWithBonus, error: bonusCheckError } = await supabaseAdmin
+          const { data: allSessionData, error: sessionCheckError } = await supabaseAdmin
             .from('sessions')
             .select('id, bonus_id, invoice_id')
-            .in('id', invoice.sessionIds)
-            .not('bonus_id', 'is', null);
+            .in('id', invoice.sessionIds);
           
-          if (bonusCheckError) {
-            console.error('❌ Error verificando bonus_id en sesiones:', bonusCheckError);
-            throw bonusCheckError;
+          if (sessionCheckError) {
+            console.error('❌ Error verificando sesiones:', sessionCheckError);
+            throw sessionCheckError;
           }
           
-          if (sessionsWithBonus && sessionsWithBonus.length > 0) {
-            const sessionIdsWithBonus = sessionsWithBonus.map(s => s.id).join(', ');
-            console.error('[POST /api/invoices] Sesiones con bonus_id detectadas:', sessionIdsWithBonus);
-            return res.status(400).json({ 
-              error: 'No se puede crear una factura con sesiones que ya tienen un bono asignado',
-              sessionIds: sessionsWithBonus.map(s => s.id)
+          const allSessions = allSessionData || [];
+
+          // 1. Sesiones que pertenecen a un bono: no se pueden facturar directamente
+          //    si ese bono ya tiene una factura activa (no cancelada).
+          const sessionsWithBonus = allSessions.filter(s => s.bonus_id);
+          if (sessionsWithBonus.length > 0) {
+            const bonusIds = [...new Set(sessionsWithBonus.map(s => s.bonus_id))];
+            const { data: bonosData, error: bonoFetchErr } = await supabaseAdmin
+              .from('bono')
+              .select('id, invoice_id')
+              .in('id', bonusIds);
+            if (bonoFetchErr) throw bonoFetchErr;
+
+            const bonoInvoiceIds = (bonosData || []).filter(b => b.invoice_id).map(b => b.invoice_id);
+            let activeBonoInvoiceIds = new Set();
+            if (bonoInvoiceIds.length > 0) {
+              const { data: bonoInvoices } = await supabaseAdmin
+                .from('invoices')
+                .select('id, status')
+                .in('id', bonoInvoiceIds);
+              (bonoInvoices || [])
+                .filter(i => i.status !== 'cancelled')
+                .forEach(i => activeBonoInvoiceIds.add(i.id));
+            }
+
+            const bonoInvoiceMap = {};
+            (bonosData || []).forEach(b => { bonoInvoiceMap[b.id] = b.invoice_id; });
+
+            const blockedByBono = sessionsWithBonus.filter(s => {
+              const bonoInvoiceId = bonoInvoiceMap[s.bonus_id];
+              return bonoInvoiceId && activeBonoInvoiceIds.has(bonoInvoiceId);
             });
+
+            if (blockedByBono.length > 0) {
+              console.error('[POST /api/invoices] Sesiones bloqueadas por bono ya facturado:', blockedByBono.map(s => s.id));
+              return res.status(400).json({
+                error: 'No se puede facturar sesiones que ya están incluidas en un bono con factura activa',
+                sessionIds: blockedByBono.map(s => s.id)
+              });
+            }
           }
-          
-          // Validar que ninguna sesión ya esté facturada (a menos que sea un borrador)
-          const sessionsAlreadyInvoiced = sessionsWithBonus.filter(s => s.invoice_id && s.invoice_id !== invoice.id);
-          if (sessionsAlreadyInvoiced.length > 0) {
-            return res.status(400).json({ 
-              error: 'Algunas sesiones ya están facturadas',
-              sessionIds: sessionsAlreadyInvoiced.map(s => s.id)
-            });
+
+          // 2. Sesiones con invoice_id directo (sin bono): no se pueden facturar de nuevo
+          //    salvo que la factura existente esté cancelada.
+          const sessionsWithInvoice = allSessions.filter(s => s.invoice_id && s.invoice_id !== invoice.id && !s.bonus_id);
+          if (sessionsWithInvoice.length > 0) {
+            const existingInvoiceIds = [...new Set(sessionsWithInvoice.map(s => s.invoice_id))];
+            const { data: existingInvoices, error: invoiceCheckError } = await supabaseAdmin
+              .from('invoices')
+              .select('id, status')
+              .in('id', existingInvoiceIds);
+            if (invoiceCheckError) throw invoiceCheckError;
+
+            const cancelledInvoiceIds = new Set(
+              (existingInvoices || []).filter(i => i.status === 'cancelled').map(i => i.id)
+            );
+            const blockedSessions = sessionsWithInvoice.filter(s => !cancelledInvoiceIds.has(s.invoice_id));
+
+            if (blockedSessions.length > 0) {
+              console.error('[POST /api/invoices] Sesiones ya facturadas en factura activa:', blockedSessions.map(s => s.id));
+              return res.status(400).json({
+                error: 'Algunas sesiones ya están facturadas en una factura activa. Solo se puede volver a facturar si la factura original está cancelada.',
+                sessionIds: blockedSessions.map(s => s.id)
+              });
+            }
           }
         }
         
-        // Validar bonos
+        // Validar bonos: no se puede facturar un bono que ya tiene una factura activa (no cancelada)
         if (invoice.bonoIds && invoice.bonoIds.length > 0) {
-          const { data: bonosAlreadyInvoiced, error: bonoCheckError } = await supabaseAdmin
+          const { data: bonosWithExistingInvoice, error: bonoCheckError } = await supabaseAdmin
             .from('bono')
             .select('id, invoice_id')
             .in('id', invoice.bonoIds)
@@ -4997,12 +5045,27 @@ app.post('/api/invoices', async (req, res) => {
             throw bonoCheckError;
           }
           
-          const bonosWithInvoice = (bonosAlreadyInvoiced || []).filter(b => b.invoice_id && b.invoice_id !== invoice.id);
+          const bonosWithInvoice = (bonosWithExistingInvoice || []).filter(b => b.invoice_id && b.invoice_id !== invoice.id);
           if (bonosWithInvoice.length > 0) {
-            return res.status(400).json({ 
-              error: 'Algunos bonos ya están facturados',
-              bonoIds: bonosWithInvoice.map(b => b.id)
-            });
+            const existingBonoInvoiceIds = [...new Set(bonosWithInvoice.map(b => b.invoice_id))];
+            const { data: existingBonoInvoices, error: bonoInvoiceCheckErr } = await supabaseAdmin
+              .from('invoices')
+              .select('id, status')
+              .in('id', existingBonoInvoiceIds);
+            if (bonoInvoiceCheckErr) throw bonoInvoiceCheckErr;
+
+            const cancelledBonoInvoiceIds = new Set(
+              (existingBonoInvoices || []).filter(i => i.status === 'cancelled').map(i => i.id)
+            );
+            const blockedBonos = bonosWithInvoice.filter(b => !cancelledBonoInvoiceIds.has(b.invoice_id));
+
+            if (blockedBonos.length > 0) {
+              console.error('[POST /api/invoices] Bonos ya facturados en factura activa:', blockedBonos.map(b => b.id));
+              return res.status(400).json({
+                error: 'Algunos bonos ya están facturados en una factura activa. Solo se puede volver a facturar si la factura original está cancelada.',
+                bonoIds: blockedBonos.map(b => b.id)
+              });
+            }
           }
         }
         
@@ -5277,6 +5340,7 @@ app.post('/api/invoices/:id/rectify', async (req, res) => {
   try {
     const { id } = req.params;
     const psychologistId = req.headers['x-user-id'];
+    const { rectification_type = 'R4', rectification_reason = '' } = req.body || {};
     
     console.log(`🔄 [POST /api/invoices/${id}/rectify] Creando factura rectificativa`);
     
@@ -5356,16 +5420,20 @@ app.post('/api/invoices/:id/rectify', async (req, res) => {
           psychologist_user_id: originalInvoice.psychologist_user_id,
           psychologistId: originalInvoice.psychologistId,
           invoice_type: originalInvoice.invoice_type,
-          sessionIds: [], // No asignar sesiones a rectificativa
-          bonoIds: [], // No asignar bonos a rectificativa
+          sessionIds: originalInvoice.sessionIds || [], // Guardar para mostrar en el PDF
+          bonoIds: originalInvoice.bonoIds || [], // Guardar para mostrar en el PDF
           billing_client_name: originalInvoice.billing_client_name,
           billing_client_address: originalInvoice.billing_client_address,
           billing_client_tax_id: originalInvoice.billing_client_tax_id,
+          billing_client_postal_code: originalInvoice.billing_client_postal_code,
+          billing_client_country: originalInvoice.billing_client_country,
           billing_psychologist_name: originalInvoice.billing_psychologist_name,
           billing_psychologist_address: originalInvoice.billing_psychologist_address,
           billing_psychologist_tax_id: originalInvoice.billing_psychologist_tax_id,
           is_rectificativa: true,
-          rectifies_invoice_id: originalInvoice.id
+          rectifies_invoice_id: originalInvoice.id,
+          rectification_type: rectification_type,
+          rectification_reason: rectification_reason
         };
         
         // Cancelar la factura original
@@ -5468,10 +5536,12 @@ app.post('/api/invoices/:id/rectify', async (req, res) => {
       date: new Date().toISOString().split('T')[0],
       status: 'paid',
       description: `Factura rectificativa de ${originalInvoice.invoiceNumber}`,
-      sessionIds: [],
-      bonoIds: [],
+      sessionIds: originalInvoice.sessionIds || [], // Guardar para mostrar en el PDF
+      bonoIds: originalInvoice.bonoIds || [], // Guardar para mostrar en el PDF
       is_rectificativa: true,
-      rectifies_invoice_id: originalInvoice.id
+      rectifies_invoice_id: originalInvoice.id,
+      rectification_type: rectification_type,
+      rectification_reason: rectification_reason
     };
     
     // Cancelar original
@@ -5957,13 +6027,19 @@ app.get('/api/invoices/:id/items', async (req, res) => {
           const endTime = s.ends_on
             ? s.ends_on.substring(11, 16)
             : '';
+          const rawPrice = s.price || d.price || 0;
+          const percentPsych = s.percent_psych || d.percent_psych || null;
+          const effectivePrice = (invoice.invoice_type === 'center' && percentPsych)
+            ? rawPrice * percentPsych / 100
+            : rawPrice;
           return {
             id: s.id,
             date: startDate,
             time: startTime && endTime ? `${startTime} - ${endTime}` : startTime,
             patientName: d.patientName || invoice.patientName || '',
             notes: d.notes || '',
-            price: s.price || d.price || 0,
+            price: effectivePrice,
+            percent_psych: percentPsych,
             status: s.status || d.status || ''
           };
         });
@@ -5986,13 +6062,19 @@ app.get('/api/invoices/:id/items', async (req, res) => {
       if (!bonoErr && bonos) {
         result.bonos = bonos.map(b => {
           const d = b.data || {};
+          const rawPrice = b.total_price_bono_amount || d.total_price_bono_amount || 0;
+          const percentPsych = b.percent_psych || d.percent_psych || null;
+          const effectivePrice = (invoice.invoice_type === 'center' && percentPsych)
+            ? rawPrice * percentPsych / 100
+            : rawPrice;
           return {
             id: b.id,
             patientName: d.patientName || invoice.patientName || '',
             totalSessions: b.total_sessions_amount || d.total_sessions_amount || 0,
             usedSessions: b.used_sessions || d.used_sessions || 0,
             remainingSessions: b.remaining_sessions || d.remaining_sessions || 0,
-            totalPrice: b.total_price_bono_amount || d.total_price_bono_amount || 0,
+            totalPrice: effectivePrice,
+            percent_psych: percentPsych,
             createdAt: b.created_at
               ? new Date(b.created_at).toLocaleDateString('es-ES', { year: 'numeric', month: 'short', day: 'numeric' })
               : ''
@@ -6081,6 +6163,26 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
     billing_client_address: invoice.billing_client_address
   });
   
+  console.log('📝 [PDF] description:', JSON.stringify(invoice.description), '| notes:', JSON.stringify(invoice.notes));
+
+  // Intentar obtener la especialidad del psicólogo desde su perfil
+  let psychologistSpecialty = '';
+  if (invoice.psychologist_user_id && supabaseAdmin) {
+    try {
+      const { data: profileRows } = await supabaseAdmin
+        .from('psychologist_profiles')
+        .select('*')
+        .eq('id', invoice.psychologist_user_id)
+        .limit(1);
+      if (profileRows && profileRows.length > 0) {
+        const prof = normalizeSupabaseRow(profileRows[0]);
+        psychologistSpecialty = prof.specialty || '';
+      }
+    } catch (err) {
+      console.warn('⚠️ [PDF] No se pudo obtener especialidad del psicólogo:', err.message);
+    }
+  }
+  
   const psychProfile = {
     name: invoice.billing_psychologist_name || 'Psicólogo',
     businessName: invoice.billing_psychologist_name || 'Servicios Profesionales de Psicología',
@@ -6090,7 +6192,8 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
     postalCode: '',
     country: 'España',
     phone: '',
-    email: ''
+    email: '',
+    specialty: psychologistSpecialty
   };
 
   const patientData = {
@@ -6100,7 +6203,8 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
     address: invoice.billing_client_address || '',
     email: '',
     phone: '',
-    postalCode: '',
+    postalCode: invoice.billing_client_postal_code || '',
+    country: invoice.billing_client_country || '',
     city: ''
   };
   
@@ -6170,7 +6274,11 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
         sessions.sort((a, b) => new Date(a.starts_on || 0) - new Date(b.starts_on || 0));
         sessions.forEach(session => {
           const sessionData = session.data || {};
-          const sessionPrice = session.price || sessionData.price || 0;
+          const sessionRawPrice = session.price || sessionData.price || 0;
+          const sessionPercentPsych = session.percent_psych || sessionData.percent_psych || null;
+          const sessionPrice = (invoice.invoice_type === 'center' && sessionPercentPsych)
+            ? sessionRawPrice * sessionPercentPsych / 100
+            : sessionRawPrice;
           const startDate = session.starts_on
             ? new Date(session.starts_on).toLocaleDateString('es-ES', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })
             : 'Fecha no disponible';
@@ -6181,7 +6289,7 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
           const patientPart = patientStr ? ` — ${patientStr}` : '';
           detailedItems.push({
             description: `Sesión de psicología${patientPart} — ${startDate}${timeStr}`,
-            quantity: 1,
+            quantity: invoice.is_rectificativa ? -1 : 1,
             unitPrice: sessionPrice
           });
         });
@@ -6202,7 +6310,11 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
       if (!bonosError && bonos) {
         bonos.forEach(bono => {
           const bonoData = bono.data || {};
-          const bonoPrice = bono.total_price_bono_amount || bonoData.total_price_bono_amount || 0;
+          const bonoRawPrice = bono.total_price_bono_amount || bonoData.total_price_bono_amount || 0;
+          const bonoPercentPsych = bono.percent_psych || bonoData.percent_psych || null;
+          const bonoPrice = (invoice.invoice_type === 'center' && bonoPercentPsych)
+            ? bonoRawPrice * bonoPercentPsych / 100
+            : bonoRawPrice;
           const totalSessions = bono.total_sessions_amount || bonoData.total_sessions_amount || 0;
           const patientStr = bonoData.patientName || invoice.patientName || '';
           const patientPart = patientStr ? ` — ${patientStr}` : '';
@@ -6213,7 +6325,7 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
           const createdPart = createdAt ? ` (creado ${createdAt})` : '';
           detailedItems.push({
             description: `Bono de psicología${patientPart} — ${totalSessions} sesiones${createdPart} · ${pricePerSession} €/sesión`,
-            quantity: 1,
+            quantity: invoice.is_rectificativa ? -1 : 1,
             unitPrice: bonoPrice
           });
         });
@@ -6233,6 +6345,13 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
   }
   
   console.log('📋 [PDF] Items detallados:', detailedItems);
+
+  // Helper para escapar HTML (preserva saltos de línea con white-space: pre-line)
+  const escapeHtml = (str) => (str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
   
   // Generate professional PDF HTML
   const html = `
@@ -6451,6 +6570,44 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
       text-align: center;
     }
     .line-through { text-decoration: line-through; opacity: 0.6; }
+    
+    /* Estilos para facturas rectificativas */
+    .rectificativa-notice {
+      background: #fff7ed;
+      border: 2px solid #ea580c;
+      border-radius: 8px;
+      padding: 14px 18px;
+      margin-bottom: 30px;
+      color: #7c2d12;
+    }
+    .rectificativa-notice .rect-title {
+      font-weight: 700;
+      font-size: 14px;
+      margin-bottom: 6px;
+      color: #c2410c;
+    }
+    .rectificativa-notice .rect-row {
+      font-size: 13px;
+      margin-bottom: 4px;
+      display: flex;
+      gap: 8px;
+    }
+    .rectificativa-notice .rect-label {
+      font-weight: 600;
+      min-width: 180px;
+    }
+    .rect-title-badge {
+      display: inline-block;
+      background: #ea580c;
+      color: white;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 2px 10px;
+      border-radius: 12px;
+      letter-spacing: 0.3px;
+      margin-left: 8px;
+      vertical-align: middle;
+    }
   </style>
 </head>
 <body>
@@ -6474,10 +6631,28 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
         </div>
       </div>
       <div class="invoice-title">
-        <h1>FACTURA</h1>
-        <div class="invoice-number">${invoice.invoiceNumber}</div>
+        <h1>${invoice.is_rectificativa ? 'FACTURA RECTIFICATIVA' : 'FACTURA'}</h1>
+        <div class="invoice-number">${invoice.invoiceNumber}${invoice.is_rectificativa ? `<span class="rect-title-badge">${invoice.rectification_type || 'R4'}</span>` : ''}</div>
       </div>
     </div>
+    
+    ${invoice.is_rectificativa ? `
+    <!-- Aviso de factura rectificativa -->
+    <div class="rectificativa-notice">
+      <div class="rect-title">🔄 Factura Rectificativa
+        ${
+          invoice.rectification_type === 'R1' ? ' &mdash; R1: Error fundado en derecho' :
+          invoice.rectification_type === 'R2' ? ' &mdash; R2: Concurso de acreedores' :
+          invoice.rectification_type === 'R3' ? ' &mdash; R3: Crédito incobrable (impago)' :
+          invoice.rectification_type === 'R4' ? ' &mdash; R4: Resto de causas' :
+          invoice.rectification_type === 'R5' ? ' &mdash; R5: Factura simplificada' :
+          ''
+        }
+      </div>
+      <div class="rect-row"><span class="rect-label">Factura rectificada:</span><span>${invoice.description ? invoice.description.replace('Factura rectificativa de ', '') : invoice.rectifies_invoice_id || '—'}</span></div>
+      ${invoice.rectification_reason ? `<div class="rect-row"><span class="rect-label">Motivo:</span><span>${invoice.rectification_reason}</span></div>` : ''}
+    </div>
+    ` : ''}
     
     <!-- Información de factura y cliente -->
     <div class="info-section">
@@ -6528,6 +6703,12 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
           <span class="info-value">${patientData.postalCode || ''} ${patientData.city || ''}</span>
         </div>
         ` : ''}
+        ${patientData.country ? `
+        <div class="info-row">
+          <span class="info-label"></span>
+          <span class="info-value">${patientData.country}</span>
+        </div>
+        ` : ''}
         ${patientData.email ? `
         <div class="info-row">
           <span class="info-label">Email:</span>
@@ -6542,6 +6723,14 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
         ` : ''}
       </div>
     </div>
+    
+    <!-- Descripción global de la factura -->
+    ${invoice.description ? `
+      <div style="margin-top: 20px; margin-bottom: 4px; padding: 12px 16px; background: #f8fafc; border-left: 3px solid #6366f1; border-radius: 4px;">
+        <div style="font-size: 11px; font-weight: 600; color: #6366f1; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Descripción</div>
+        <div style="font-size: 13px; color: #334155; line-height: 1.6; white-space: pre-line;">${invoice.description}</div>
+      </div>
+    ` : ''}
     
     <!-- Tabla de items -->
     <table class="items-table">
@@ -6600,7 +6789,20 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
     ${invoice.notes ? `
       <div style="margin-top: 30px; padding: 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;">
         <div style="font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Notas</div>
-        <div style="font-size: 13px; color: #475569; line-height: 1.6; white-space: pre-line;">${invoice.notes}</div>
+        <div style="font-size: 13px; color: #475569; line-height: 1.6; white-space: pre-line;">${escapeHtml(invoice.notes)}</div>
+      </div>
+    ` : ''}
+
+    <!-- Bloque de firma -->
+    ${invoice.show_signature ? `
+      <div style="margin-top: 50px; padding-top: 20px;">
+        <div style="display: flex; justify-content: flex-end;">
+          <div style="text-align: center; min-width: 220px;">
+            <div style="border-bottom: 1px solid #94a3b8; margin-bottom: 10px; height: 48px;"></div>
+            <div style="font-size: 13px; font-weight: 600; color: #1e293b;">${escapeHtml(psychProfile.name)}</div>
+            ${psychProfile.specialty ? `<div style="font-size: 12px; color: #64748b; margin-top: 3px;">${escapeHtml(psychProfile.specialty)}</div>` : ''}
+          </div>
+        </div>
       </div>
     ` : ''}
     
@@ -6618,9 +6820,11 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
       ` : ''}
       
       <div style="margin-top: 30px;">
+        ${(psychProfile.professionalId || psychProfile.specialty) ? `
         <div class="footer-title">Datos Profesionales</div>
         ${psychProfile.professionalId ? `<div>Número de Colegiado: ${psychProfile.professionalId}</div>` : ''}
         ${psychProfile.specialty ? `<div>Especialidad: ${psychProfile.specialty}</div>` : ''}
+        ` : ''}
         <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e2e8f0;">
           <div class="footer-title">Términos y Condiciones</div>
           <div>Los servicios profesionales de psicología están exentos de retención de IRPF según la normativa vigente.</div>
@@ -8646,8 +8850,16 @@ app.get('/api/sessions', async (req, res) => {
         return enriched;
       });
       
-      console.log(`✅ [GET /api/sessions] Devolviendo ${sessionsWithDetails.length} sesiones desde Supabase`);
-      return res.json(sessionsWithDetails);
+      // Deduplicar por ID para evitar mostrar sesiones duplicadas en caso de datos inconsistentes
+      const seenIds = new Set();
+      const dedupedSessions = sessionsWithDetails.filter(s => {
+        if (seenIds.has(s.id)) return false;
+        seenIds.add(s.id);
+        return true;
+      });
+
+      console.log(`✅ [GET /api/sessions] Devolviendo ${dedupedSessions.length} sesiones desde Supabase`);
+      return res.json(dedupedSessions);
     }
     
     // Si no hay Supabase configurado, devolver error
@@ -8701,12 +8913,11 @@ app.post('/api/sessions', async (req, res) => {
     }
 
     // Obtener el patient_user_id desde el patientId
-    let patientUserId = null;
-    if (sessionData.patientId) {
+    // Primero intentar desde db local, si no se encuentra usar el patientId directamente (son equivalentes)
+    let patientUserId = sessionData.patient_user_id || null;
+    if (!patientUserId && sessionData.patientId) {
       const patient = db.users?.find(u => u.id === sessionData.patientId);
-      if (patient) {
-        patientUserId = patient.id;
-      }
+      patientUserId = patient ? patient.id : sessionData.patientId;
     }
 
     // Validar percent_psych
@@ -8716,8 +8927,8 @@ app.post('/api/sessions', async (req, res) => {
     }
     
     // Validar que no exista solapamiento con otra sesión del psicólogo
-    const newStarts = dateTimeToISO(sessionData.date, sessionData.startTime);
-    const newEnds = dateTimeToISO(sessionData.date, sessionData.endTime);
+    const newStarts = sessionData.starts_on || dateTimeToISO(sessionData.date, sessionData.startTime);
+    const newEnds   = sessionData.ends_on   || dateTimeToISO(sessionData.date, sessionData.endTime);
     
     if (newStarts && newEnds) {
       const overlappingSession = db.sessions.find(s => {
@@ -8741,11 +8952,45 @@ app.post('/api/sessions', async (req, res) => {
           error: `Ya existe una sesión programada para este horario (${overlappingSession.date} ${overlappingSession.startTime}-${overlappingSession.endTime} con ${overlappingSession.patientName || 'paciente'}). Por favor elige otro horario.` 
         });
       }
+
+      // También verificar contra Supabase (fuente de verdad principal) para evitar duplicados
+      // aunque la db en memoria esté vacía o desactualizada
+      if (supabaseAdmin) {
+        try {
+          let dupQuery = supabaseAdmin
+            .from('sessions')
+            .select('id, starts_on, ends_on, data')
+            .eq('psychologist_user_id', psychologistUserId)
+            .neq('status', 'cancelled')
+            .neq('status', 'available')
+            .lt('starts_on', newEnds)
+            .gt('ends_on', newStarts)
+            .limit(1);
+
+          const { data: supaOverlap, error: overlapErr } = await dupQuery;
+
+          if (!overlapErr && supaOverlap && supaOverlap.length > 0) {
+            const dup = supaOverlap[0];
+            const dupDate   = (dup.starts_on || '').split('T')[0] || '';
+            const dupStart  = (dup.starts_on || '').substring(11, 16);
+            const dupEnd    = (dup.ends_on   || '').substring(11, 16);
+            const dupName   = dup.data?.patientName || '';
+            console.error('❌ [POST /api/sessions] Sesión duplicada detectada en Supabase:', dup.id);
+            return res.status(409).json({
+              error: `Ya existe una sesión programada para este horario (${dupDate} ${dupStart}-${dupEnd}${dupName ? ' con ' + dupName : ''}). Por favor elige otro horario.`
+            });
+          }
+        } catch (dupCheckErr) {
+          // No bloquear la creación si el check falla, solo loguear
+          console.warn('⚠️ [POST /api/sessions] Error al verificar duplicados en Supabase:', dupCheckErr);
+        }
+      }
     }
     
-    // Calcular starts_on y ends_on a partir de date, startTime, endTime
-    const starts_on = dateTimeToISO(sessionData.date, sessionData.startTime);
-    const ends_on = dateTimeToISO(sessionData.date, sessionData.endTime);
+    // Usar starts_on/ends_on del body si ya vienen con timezone correcto,
+    // si no, calcular naivamente (retrocompatibilidad)
+    const starts_on = sessionData.starts_on || dateTimeToISO(sessionData.date, sessionData.startTime);
+    const ends_on   = sessionData.ends_on   || dateTimeToISO(sessionData.date, sessionData.endTime);
     
     // Reservar la sesión en memoria ANTES de cualquier await para cerrar la ventana de race condition.
     // Si llega un segundo request idéntico mientras validamos el bono, el check de solapamiento lo rechazará.
@@ -9028,15 +9273,24 @@ app.patch('/api/sessions/:id', async (req, res) => {
     // SOLO recalcular starts_on/ends_on si se modificaron explícitamente date, startTime o endTime
     // Esto evita problemas de zona horaria cuando solo se actualiza status, paid, etc.
     if (req.body.date !== undefined || req.body.startTime !== undefined || req.body.endTime !== undefined) {
-      const date = updatedSession.date;
-      const startTime = updatedSession.startTime;
-      const endTime = updatedSession.endTime;
-      
-      if (date && startTime) {
-        updatedSession.starts_on = dateTimeToISO(date, startTime);
+      // Si el cliente ya envía starts_on/ends_on con timezone correcto, usarlos directamente
+      if (req.body.starts_on) {
+        updatedSession.starts_on = req.body.starts_on;
+      } else {
+        const date = updatedSession.date;
+        const startTime = updatedSession.startTime;
+        if (date && startTime) {
+          updatedSession.starts_on = dateTimeToISO(date, startTime);
+        }
       }
-      if (date && endTime) {
-        updatedSession.ends_on = dateTimeToISO(date, endTime);
+      if (req.body.ends_on) {
+        updatedSession.ends_on = req.body.ends_on;
+      } else {
+        const date = updatedSession.date;
+        const endTime = updatedSession.endTime;
+        if (date && endTime) {
+          updatedSession.ends_on = dateTimeToISO(date, endTime);
+        }
       }
     }
 
@@ -10119,6 +10373,8 @@ app.get('/api/psychologist/:psychologistId/patients', async (req, res) => {
           billing_name: u.billing_name || u.name,
           billing_address: u.billing_address || u.address || u.data?.address || '',
           billing_tax_id: u.billing_tax_id || u.tax_id || u.dni || u.data?.dni || '',
+          postalCode: u.postalCode || u.postal_code || u.data?.postalCode || '',
+          country: u.country || u.data?.country || '',
           tags: rel?.data?.tags || [],
           active: rel?.active !== false, // Leer de la columna directa (por defecto true)
           patientNumber: rel?.patientnumber || 0 // Leer del campo directo patientnumber
@@ -10369,7 +10625,8 @@ app.get('/api/center/:centerId/unbilled', async (req, res) => {
           return res.json({ sessions: [] });
         }
         
-        const patientIds = relationships.map(r => r.patient_user_id);
+        // Deduplicar por si hay relaciones duplicadas para el mismo paciente
+        const patientIds = [...new Set(relationships.map(r => r.patient_user_id).filter(Boolean))];
         console.log(`📋 Pacientes del centro: ${patientIds.length}`);
         
         // Obtener sesiones completadas sin facturar de estos pacientes
@@ -10438,13 +10695,21 @@ app.get('/api/center/:centerId/unbilled', async (req, res) => {
           patientName: patientNamesMap[s.patient_user_id] || null
         }));
         
+        // Deduplicar por ID para evitar mostrar la misma sesión más de una vez
+        const seenSessionIds = new Set();
+        const uniqueSessions = enrichedSessions.filter(s => {
+          if (seenSessionIds.has(s.id)) return false;
+          seenSessionIds.add(s.id);
+          return true;
+        });
+        
         const enrichedBonos = bonosWithCounts.map(b => ({
           ...b,
           patientName: patientNamesMap[b.pacient_user_id] || null
         }));
         
         return res.json({
-          sessions: enrichedSessions,
+          sessions: uniqueSessions,
           bonos: enrichedBonos
         });
         

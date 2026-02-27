@@ -41,7 +41,12 @@ export default function PatientBillingPanel() {
       console.log('[PatientBillingPanel] Response status:', response.status);
       if (response.ok) {
         const data = await response.json();
-        setInvoices(data);
+        const sorted = [...data].sort((a: Invoice, b: Invoice) => {
+          const dateA = new Date(a.invoice_date || a.date).getTime();
+          const dateB = new Date(b.invoice_date || b.date).getTime();
+          return dateB - dateA;
+        });
+        setInvoices(sorted);
       }
     } catch (error) {
       console.error('Error loading invoices:', error);

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Calendar as CalendarIcon, Clock, Plus, X, Users, Video, MapPin, ChevronLeft, ChevronRight, MessageCircle, Trash2, Save, Copy, Send, ExternalLink, CheckCircle, XCircle, Ticket, Receipt } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Calendar as CalendarIcon, Clock, Plus, X, Users, Video, MapPin, ChevronLeft, ChevronRight, MessageCircle, Trash2, Save, Copy, Send, ExternalLink, CheckCircle, XCircle, Ticket, Receipt, Globe, ChevronDown } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser } from '../services/authService';
 
@@ -23,6 +23,8 @@ interface Session {
   tags?: string[]; // Tags heredadas de la relación
   invoice_id?: string;
   bonus_id?: string;
+  starts_on?: string;
+  ends_on?: string;
 }
 
 interface Bono {
@@ -71,6 +73,14 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
   const [showPatientDropdown, setShowPatientDropdown] = useState(false);
   const [assignPatientSearchQuery, setAssignPatientSearchQuery] = useState('');
   const [showAssignPatientDropdown, setShowAssignPatientDropdown] = useState(false);
+
+  // Timezone
+  const [selectedTimezone, setSelectedTimezone] = useState(() =>
+    Intl.DateTimeFormat().resolvedOptions().timeZone
+  );
+  const [showTimezoneDropdown, setShowTimezoneDropdown] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   
   // Estados para bonos
   const [availableBonos, setAvailableBonos] = useState<Bono[]>([]);
@@ -144,10 +154,26 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
         setShowPatientDropdown(false);
         setShowAssignPatientDropdown(false);
       }
+      if (!target.closest('.timezone-dropdown-container')) {
+        setShowTimezoneDropdown(false);
+      }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Actualizar hora actual cada minuto para el indicador de hora
+  useEffect(() => {
+    const interval = setInterval(() => setCurrentTime(new Date()), 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Scroll hasta las 7:00 al montar el componente
+  useEffect(() => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = 7 * 48; // 7 horas × 48px/hora
+    }
   }, []);
 
   // Handle resize mouse events
@@ -376,7 +402,9 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
             body: JSON.stringify({
               date: newDate,
               startTime: newStartTime,
-              endTime: newEndTime
+              endTime: newEndTime,
+              starts_on: localTzToUTCISO(newDate, newStartTime, selectedTimezone),
+              ends_on:   localTzToUTCISO(newDate, newEndTime,   selectedTimezone),
             })
           });
 
@@ -465,7 +493,13 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
   };
 
   const getSessionsForDate = (date: string) => {
-    const dateSessions = sessions.filter(s => s.date === date).sort((a, b) => a.startTime.localeCompare(b.startTime));
+    const dateSessions = sessions
+      .filter(s => (sessionDisplayTimes.get(s.id)?.date ?? s.date) === date)
+      .sort((a, b) => {
+        const aT = sessionDisplayTimes.get(a.id)?.startTime ?? a.startTime;
+        const bT = sessionDisplayTimes.get(b.id)?.startTime ?? b.startTime;
+        return aT.localeCompare(bT);
+      });
     return getFilteredSessionsByStatus(dateSessions);
   };
 
@@ -540,6 +574,10 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
         meetLink = `https://meet.google.com/${Math.random().toString(36).substring(2, 15)}`;
       }
 
+      // Calcular starts_on/ends_on con la zona horaria del psicólogo
+      const starts_on = localTzToUTCISO(date, newSession.startTime, selectedTimezone);
+      const ends_on   = localTzToUTCISO(date, newSession.endTime,   selectedTimezone);
+
       const session: Session = {
         id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         patientId: newSession.patientId,
@@ -556,7 +594,9 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
         paid: newSession.paid,
         percent_psych: Math.min(newSession.percent_psych, 100),
         bonus_id: newSession.bonus_id,
-        paymentMethod: newSession.paymentMethod || undefined
+        paymentMethod: newSession.paymentMethod || undefined,
+        starts_on,
+        ends_on,
       };
 
       try {
@@ -623,10 +663,10 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
         return;
       }
 
-      // Calcular starts_on y ends_on para Supabase
+      // Calcular starts_on y ends_on con la zona horaria del psicólogo
       const date = session.date;
-      const starts_on = date && newStartTime ? `${date}T${newStartTime}:00` : undefined;
-      const ends_on = date && newEndTime ? `${date}T${newEndTime}:00` : undefined;
+      const starts_on = date && newStartTime ? localTzToUTCISO(date, newStartTime, selectedTimezone) : undefined;
+      const ends_on   = date && newEndTime   ? localTzToUTCISO(date, newEndTime,   selectedTimezone) : undefined;
 
       // Asegurar que todos los campos requeridos estén presentes
       const updatedSession = {
@@ -1379,6 +1419,125 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
     }
   };
 
+  const commonTimezones = [
+    { label: 'Madrid', value: 'Europe/Madrid' },
+    { label: 'London', value: 'Europe/London' },
+    { label: 'París', value: 'Europe/Paris' },
+    { label: 'Berlín', value: 'Europe/Berlin' },
+    { label: 'Roma', value: 'Europe/Rome' },
+    { label: 'Lisboa', value: 'Europe/Lisbon' },
+    { label: 'Helsinki', value: 'Europe/Helsinki' },
+    { label: 'Moscú', value: 'Europe/Moscow' },
+    { label: 'Nueva York', value: 'America/New_York' },
+    { label: 'Chicago', value: 'America/Chicago' },
+    { label: 'Denver', value: 'America/Denver' },
+    { label: 'Los Ángeles', value: 'America/Los_Angeles' },
+    { label: 'México', value: 'America/Mexico_City' },
+    { label: 'Bogotá', value: 'America/Bogota' },
+    { label: 'Lima', value: 'America/Lima' },
+    { label: 'Buenos Aires', value: 'America/Argentina/Buenos_Aires' },
+    { label: 'Santiago', value: 'America/Santiago' },
+    { label: 'São Paulo', value: 'America/Sao_Paulo' },
+    { label: 'Dubai', value: 'Asia/Dubai' },
+    { label: 'Tokio', value: 'Asia/Tokyo' },
+    { label: 'Sídney', value: 'Australia/Sydney' },
+  ];
+
+  // Fecha de hoy en la zona horaria seleccionada, en formato YYYY-MM-DD
+  const getTodayInTimezone = (): string => {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: selectedTimezone,
+    }).format(currentTime);
+  };
+
+  // Posición px de la hora actual en el timeline (48px por hora)
+  const getCurrentTimePx = (): number => {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: selectedTimezone,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(currentTime);
+    const hours = parseInt(parts.find(p => p.type === 'hour')?.value ?? '0');
+    const minutes = parseInt(parts.find(p => p.type === 'minute')?.value ?? '0');
+    return ((hours * 60 + minutes) / 60) * 48;
+  };
+
+  // Nombre corto de la zona horaria (ej: "CET", "GMT+1")
+  const getTimezoneShortName = (tz: string): string => {
+    try {
+      const parts = new Intl.DateTimeFormat('es-ES', {
+        timeZone: tz,
+        timeZoneName: 'short',
+      }).formatToParts(new Date());
+      return parts.find(p => p.type === 'timeZoneName')?.value ?? tz;
+    } catch {
+      return tz;
+    }
+  };
+
+  // Etiqueta amigable para la zona horaria
+  const getTimezoneLabel = (tz: string): string => {
+    const found = commonTimezones.find(t => t.value === tz);
+    if (found) return found.label;
+    return tz.split('/').pop()?.replace(/_/g, ' ') ?? tz;
+  };
+
+  // Convierte date+time en el timezone `tz` a un ISO UTC string
+  const localTzToUTCISO = (dateStr: string, timeStr: string, tz: string): string => {
+    // Tratar el input como UTC como punto de partida
+    const guess = new Date(`${dateStr}T${timeStr}:00Z`);
+    // Formatear en el TZ de destino para ver qué hora muestra
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false,
+    }).formatToParts(guess);
+    const h = parts.find(p => p.type === 'hour')?.value ?? '00';
+    const tzYear  = parseInt(parts.find(p => p.type === 'year')?.value  ?? '2000');
+    const tzMonth = parseInt(parts.find(p => p.type === 'month')?.value ?? '1') - 1;
+    const tzDay   = parseInt(parts.find(p => p.type === 'day')?.value   ?? '1');
+    const tzHour  = h === '24' ? 0 : parseInt(h);
+    const tzMin   = parseInt(parts.find(p => p.type === 'minute')?.value ?? '0');
+    // offset = TZ_mostrado_como_UTC - guess_UTC
+    const tzDisplayedAsUTC = Date.UTC(tzYear, tzMonth, tzDay, tzHour, tzMin, 0);
+    const offsetMs = tzDisplayedAsUTC - guess.getTime();
+    // UTC_real = guess - offset
+    return new Date(guess.getTime() - offsetMs).toISOString();
+  };
+
+  // Convierte una sesión al timezone seleccionado usando starts_on/ends_on (UTC)
+  const convertSessionToTz = (session: Session, tz: string): { date: string; startTime: string; endTime: string } => {
+    const toTimeParts = (d: Date) => {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).formatToParts(d);
+      const h = parts.find(p => p.type === 'hour')?.value ?? '00';
+      const m = parts.find(p => p.type === 'minute')?.value ?? '00';
+      // '24' aparece en algunas implementaciones como medianoche — normalizamos
+      return `${h === '24' ? '00' : h}:${m}`;
+    };
+    const startDate = session.starts_on
+      ? new Date(session.starts_on)
+      : new Date(`${session.date}T${session.startTime}`);
+    const endDate = session.ends_on
+      ? new Date(session.ends_on)
+      : new Date(`${session.date}T${session.endTime}`);
+    const date = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(startDate);
+    return { date, startTime: toTimeParts(startDate), endTime: toTimeParts(endDate) };
+  };
+
+  // Mapa id → {date, startTime, endTime} en el timezone activo
+  const sessionDisplayTimes = useMemo(() => {
+    const map = new Map<string, { date: string; startTime: string; endTime: string }>();
+    sessions.forEach(s => map.set(s.id, convertSessionToTz(s, selectedTimezone)));
+    return map;
+  }, [sessions, selectedTimezone]);
+
   const weekDays = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
   // Get week days for week view (Monday to Sunday)
@@ -1525,17 +1684,47 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
           >
             <ChevronLeft size={20} />
           </button>
-          <div className="flex items-center gap-3">
-            <h3 className="text-lg font-semibold text-slate-900 capitalize">
-              Semana del {getWeekDays()[0].getDate()} al {getWeekDays()[6].getDate()} de {currentDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}
-            </h3>
+          <h3 className="text-lg font-semibold text-slate-900 capitalize">
+            Semana del {getWeekDays()[0].getDate()} al {getWeekDays()[6].getDate()} de {currentDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}
+          </h3>
+          <div className="flex items-center gap-2">
+            {/* Selector de zona horaria */}
+            <div className="relative timezone-dropdown-container">
+              <button
+                onClick={() => setShowTimezoneDropdown(v => !v)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors text-xs text-slate-600 shadow-sm"
+              >
+                <Globe size={12} className="text-indigo-500" />
+                <span className="font-semibold">{getTimezoneLabel(selectedTimezone)}</span>
+                <span className="text-slate-400 hidden sm:inline">{getTimezoneShortName(selectedTimezone)}</span>
+                <ChevronDown size={11} className={`transition-transform duration-200 ${showTimezoneDropdown ? 'rotate-180' : ''}`} />
+              </button>
+              {showTimezoneDropdown && (
+                <div className="absolute top-full right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-50 min-w-[210px] max-h-72 overflow-y-auto">
+                  <div className="p-1">
+                    {commonTimezones.map(tz => (
+                      <button
+                        key={tz.value}
+                        onClick={() => { setSelectedTimezone(tz.value); setShowTimezoneDropdown(false); }}
+                        className={`w-full text-left flex items-center justify-between px-3 py-1.5 rounded-lg text-xs hover:bg-slate-50 transition-colors ${
+                          selectedTimezone === tz.value ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-slate-700'
+                        }`}
+                      >
+                        <span>{tz.label}</span>
+                        <span className="text-slate-400 ml-2">{getTimezoneShortName(tz.value)}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            <button
+              onClick={handleNextWeek}
+              className="p-2 hover:bg-slate-200 rounded-lg transition-colors"
+            >
+              <ChevronRight size={20} />
+            </button>
           </div>
-          <button
-            onClick={handleNextWeek}
-            className="p-2 hover:bg-slate-200 rounded-lg transition-colors"
-          >
-            <ChevronRight size={20} />
-          </button>
         </div>
 
         {/* Week View */}
@@ -1545,7 +1734,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
             {getWeekDays().map(date => {
               const dateStr = formatLocalDate(date);
               const daySessions = getSessionsForDate(dateStr);
-              const isToday = new Date().toDateString() === date.toDateString();
+              const isToday = getTodayInTimezone() === dateStr;
               
               return (
                 <div
@@ -1609,7 +1798,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                                   session.status === 'completed' ? 'text-green-700' :
                                   session.status === 'paid' ? 'text-green-700' : 'text-red-700'
                                 }`}>
-                                  {session.startTime} - {session.endTime}
+                                  {sessionDisplayTimes.get(session.id)?.startTime ?? session.startTime} - {sessionDisplayTimes.get(session.id)?.endTime ?? session.endTime}
                                 </span>
                                 {session.type === 'online' ? (
                                   <Video size={14} className="text-indigo-500" />
@@ -1679,7 +1868,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                 {getWeekDays().map(date => {
                   const dateStr = formatLocalDate(date);
                   const daySessions = getSessionsForDate(dateStr);
-                  const isToday = new Date().toDateString() === date.toDateString();
+                  const isToday = getTodayInTimezone() === dateStr;
                   
                   return (
                     <div
@@ -1699,7 +1888,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
             </div>
             
             {/* Scrollable content area */}
-            <div className="h-[600px] overflow-y-auto mt-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+            <div ref={scrollContainerRef} className="h-[600px] overflow-y-auto mt-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
               <div className="flex gap-2">
                 {/* Time labels column */}
                 <div className="w-14 flex-shrink-0">
@@ -1715,7 +1904,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                   {getWeekDays().map(date => {
                     const dateStr = formatLocalDate(date);
                     const daySessions = getSessionsForDate(dateStr);
-                    const isToday = new Date().toDateString() === date.toDateString();
+                    const isToday = getTodayInTimezone() === dateStr;
                     
                     // Helper to convert time string (HH:MM) to minutes from midnight
                     const timeToMinutes = (time: string) => {
@@ -1758,6 +1947,19 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                             style={{ top: `${i * 48}px` }}
                           />
                         ))}
+
+                        {/* Indicador de hora actual */}
+                        {getTodayInTimezone() === dateStr && (
+                          <div
+                            className="absolute left-0 right-0 z-20 pointer-events-none"
+                            style={{ top: `${getCurrentTimePx()}px` }}
+                          >
+                            <div className="flex items-center">
+                              <div className="w-2.5 h-2.5 rounded-full bg-red-500 -ml-1 flex-shrink-0 shadow-sm"></div>
+                              <div className="flex-1 h-0.5 bg-red-400"></div>
+                            </div>
+                          </div>
+                        )}
                         
                         {/* Preview of new session being created */}
                         {creatingSession && creatingSession.date === dateStr && (
@@ -1818,8 +2020,11 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                         
                         {/* Sessions positioned absolutely */}
                         {daySessions.map(session => {
-                          const startMinutes = timeToMinutes(session.startTime);
-                          let endMinutes = timeToMinutes(session.endTime);
+                          const tzTimes = sessionDisplayTimes.get(session.id);
+                          const dispStart = tzTimes?.startTime ?? session.startTime;
+                          const dispEnd = tzTimes?.endTime ?? session.endTime;
+                          const startMinutes = timeToMinutes(dispStart);
+                          let endMinutes = timeToMinutes(dispEnd);
                           
                           // Si endTime es menor que startTime, la sesión cruza medianoche
                           // En ese caso, mostrar solo hasta las 24:00 (1440 minutos)
@@ -1927,7 +2132,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                                       session.status === 'completed' ? 'text-green-800' :
                                       session.status === 'paid' ? 'text-green-800' : 'text-red-800'
                                     }`}>
-                                      {session.startTime}
+                                      {sessionDisplayTimes.get(session.id)?.startTime ?? session.startTime}
                                     </span>
                                     <div className="flex items-center gap-0.5">
                                       {session.status === 'scheduled' && (

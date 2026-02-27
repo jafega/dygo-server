@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FileText, Plus, DollarSign, Check, Clock, ExternalLink, Download, Eye, Edit, Trash2, Send, CheckSquare, Square, Search, Building, User, X, ArrowUpDown } from 'lucide-react';
 import { API_URL } from '../services/config';
+import { AddressAutocomplete } from './AddressAutocomplete';
 
 interface Invoice {
   id: string;
@@ -31,6 +32,8 @@ interface Invoice {
   billing_client_name?: string;
   billing_client_address?: string;
   billing_client_tax_id?: string;
+  billing_client_postal_code?: string;
+  billing_client_country?: string;
   
   // Datos de facturación del psicólogo
   billing_psychologist_name?: string;
@@ -39,11 +42,16 @@ interface Invoice {
   
   // Notas de la factura
   notes?: string;
+
+  // Bloque de firma al pie
+  show_signature?: boolean;
   
   // Campos para facturas rectificativas
   is_rectificativa?: boolean;
   rectifies_invoice_id?: string;
   rectified_by_invoice_id?: string;
+  rectification_type?: string;  // R1, R2, R3, R4, R5
+  rectification_reason?: string;
 }
 
 interface InvoiceItem {
@@ -88,6 +96,8 @@ interface Patient {
   billing_name?: string;
   billing_address?: string;
   billing_tax_id?: string;
+  postalCode?: string;
+  country?: string;
 }
 
 interface Center {
@@ -116,6 +126,8 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
   const [showRectificativas, setShowRectificativas] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [invoiceToCancel, setInvoiceToCancel] = useState<Invoice | null>(null);
+  const [rectificationType, setRectificationType] = useState('R4');
+  const [rectificationReason, setRectificationReason] = useState('');
   const [showInvoiceStartModal, setShowInvoiceStartModal] = useState(false);
   const [invoiceStartNumber, setInvoiceStartNumber] = useState<string>('');
   const [invoiceSeriesInput, setInvoiceSeriesInput] = useState<string>('');
@@ -151,9 +163,12 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
     billing_client_name: '',
     billing_client_address: '',
     billing_client_tax_id: '',
+    billing_client_postal_code: '',
+    billing_client_country: '',
     billing_psychologist_name: '',
     billing_psychologist_address: '',
-    billing_psychologist_tax_id: ''
+    billing_psychologist_tax_id: '',
+    show_signature: false
   });
   
   const [psychologistProfile, setPsychologistProfile] = useState<any>(null);
@@ -165,6 +180,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
   const [showPatientDropdown, setShowPatientDropdown] = useState(false);
   const [showCenterDropdown, setShowCenterDropdown] = useState(false);
   const [patientCenterWarning, setPatientCenterWarning] = useState<{ centerName: string; centerId: string } | null>(null);
+  const [contextPatient, setContextPatient] = useState<Patient | null>(null);
 
   useEffect(() => {
     loadInvoices();
@@ -172,6 +188,8 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
     if (!patientId) {
       loadPatients();
       loadCenters();
+    } else {
+      loadContextPatient();
     }
   }, [psychologistId, patientId]);
 
@@ -236,6 +254,20 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
     }
   };
 
+  const loadContextPatient = async () => {
+    if (!patientId) return;
+    try {
+      const response = await fetch(`${API_URL}/psychologist/${psychologistId}/patients`);
+      if (response.ok) {
+        const data = await response.json();
+        const patient = data.find((p: Patient) => p.id === patientId);
+        if (patient) setContextPatient(patient);
+      }
+    } catch (error) {
+      console.error('Error loading context patient:', error);
+    }
+  };
+
   const loadPsychologistProfile = async () => {
     try {
       const response = await fetch(`${API_URL}/psychologist/${psychologistId}/profile`);
@@ -261,7 +293,10 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       const response = await fetch(`${API_URL}/patient/${patId}/unbilled?psychologistId=${psychologistId}`);
       if (response.ok) {
         const data = await response.json();
-        setAvailableSessions(data.sessions || []);
+        // Deduplicar por ID por seguridad
+        const sessions: Session[] = data.sessions || [];
+        const uniqueSessions = sessions.filter((s, idx, arr) => arr.findIndex(x => x.id === s.id) === idx);
+        setAvailableSessions(uniqueSessions);
         setAvailableBonos(data.bonos || []);
       }
     } catch (error) {
@@ -274,7 +309,10 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       const response = await fetch(`${API_URL}/center/${centerId}/unbilled?psychologistId=${psychologistId}`);
       if (response.ok) {
         const data = await response.json();
-        setAvailableSessions(data.sessions || []);
+        // Deduplicar por ID por seguridad
+        const sessions: Session[] = data.sessions || [];
+        const uniqueSessions = sessions.filter((s, idx, arr) => arr.findIndex(x => x.id === s.id) === idx);
+        setAvailableSessions(uniqueSessions);
         setAvailableBonos(data.bonos || []);
       }
     } catch (error) {
@@ -293,7 +331,9 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
         ...prev,
         billing_client_name: patient.billing_name || patient.name || '',
         billing_client_address: patient.billing_address || '',
-        billing_client_tax_id: patient.billing_tax_id || ''
+        billing_client_tax_id: patient.billing_tax_id || '',
+        billing_client_postal_code: patient.postalCode || '',
+        billing_client_country: patient.country || ''
       }));
       console.log('[BillingPanel] Datos de facturación del cliente precargados:', {
         billing_client_name: patient.billing_name || patient.name,
@@ -537,6 +577,23 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
     }
   };
 
+  const geocodeAddress = async (address: string): Promise<{ postalCode: string; country: string } | null> => {
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&addressdetails=1&limit=1`,
+        { headers: { 'Accept-Language': 'es', 'User-Agent': 'dygo-therapy-app/1.0' } }
+      );
+      const data = await res.json();
+      if (data && data.length > 0) {
+        const a = data[0].address;
+        return { postalCode: a.postcode || '', country: a.country || '' };
+      }
+    } catch (e) {
+      // silently ignore
+    }
+    return null;
+  };
+
   const handleSaveInvoice = async (isDraft: boolean) => {
     if (isSubmitting) return;
     
@@ -582,6 +639,17 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       
       const totals = calculateTotal();
 
+      // Si hay dirección pero faltan CP o país, geocodificar para completarlos
+      let resolvedPostalCode = formData.billing_client_postal_code;
+      let resolvedCountry = formData.billing_client_country;
+      if (formData.billing_client_address && (!resolvedPostalCode || !resolvedCountry)) {
+        const geo = await geocodeAddress(formData.billing_client_address);
+        if (geo) {
+          if (!resolvedPostalCode) resolvedPostalCode = geo.postalCode;
+          if (!resolvedCountry) resolvedCountry = geo.country;
+        }
+      }
+
       // Datos base de la factura
       const newInvoice: any = {
         id: editingInvoice?.id || Date.now().toString(),
@@ -603,9 +671,12 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
         billing_client_name: formData.billing_client_name,
         billing_client_address: formData.billing_client_address,
         billing_client_tax_id: formData.billing_client_tax_id,
+        billing_client_postal_code: resolvedPostalCode,
+        billing_client_country: resolvedCountry,
         billing_psychologist_name: formData.billing_psychologist_name,
         billing_psychologist_address: formData.billing_psychologist_address,
-        billing_psychologist_tax_id: formData.billing_psychologist_tax_id
+        billing_psychologist_tax_id: formData.billing_psychologist_tax_id,
+        show_signature: formData.show_signature
       };
 
       // Añadir IRPF solo para facturas a centros
@@ -615,7 +686,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
 
       // Añadir datos específicos según el tipo
       if (invoiceType === 'patient') {
-        const patient = patients.find(p => p.id === selectedPatientId);
+        const patient = patients.find(p => p.id === selectedPatientId) || contextPatient;
         if (!patient) return;
         
         newInvoice.patientId = selectedPatientId;
@@ -736,6 +807,30 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
     }
   };
 
+  const handleToggleSignature = async (invoice: Invoice) => {
+    const newValue = !(invoice as any).show_signature;
+    try {
+      const response = await fetch(`${API_URL}/invoices/${invoice.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-User-Id': psychologistId
+        },
+        body: JSON.stringify({ show_signature: newValue })
+      });
+      if (response.ok) {
+        const updated = { ...invoice, show_signature: newValue } as any;
+        setSelectedInvoice(updated);
+        setInvoices(prev => prev.map(inv => inv.id === invoice.id ? updated : inv));
+      } else {
+        alert('Error al actualizar la firma');
+      }
+    } catch (error) {
+      console.error('Error toggling signature:', error);
+      alert('Error al actualizar la firma');
+    }
+  };
+
   const handleCancelInvoice = async () => {
     if (!invoiceToCancel) return;
     
@@ -745,7 +840,11 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
         headers: { 
           'Content-Type': 'application/json',
           'X-User-Id': psychologistId 
-        }
+        },
+        body: JSON.stringify({
+          rectification_type: rectificationType,
+          rectification_reason: rectificationReason
+        })
       });
       
       if (response.ok) {
@@ -753,6 +852,8 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
         setShowCancelModal(false);
         setInvoiceToCancel(null);
         setSelectedInvoice(null);
+        setRectificationType('R4');
+        setRectificationReason('');
         alert('Factura cancelada y rectificativa creada correctamente');
       } else {
         const errorData = await response.json();
@@ -780,9 +881,12 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       billing_client_name: invoice.billing_client_name || '',
       billing_client_address: invoice.billing_client_address || '',
       billing_client_tax_id: invoice.billing_client_tax_id || '',
+      billing_client_postal_code: invoice.billing_client_postal_code || '',
+      billing_client_country: invoice.billing_client_country || '',
       billing_psychologist_name: invoice.billing_psychologist_name || '',
       billing_psychologist_address: invoice.billing_psychologist_address || '',
-      billing_psychologist_tax_id: invoice.billing_psychologist_tax_id || ''
+      billing_psychologist_tax_id: invoice.billing_psychologist_tax_id || '',
+      show_signature: (invoice as any).show_signature || false
     });
     
     // Cargar sesiones según el tipo de factura
@@ -835,14 +939,16 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       description: '',
       notes: invoiceType === 'patient' ? 'Servicio exento de IVA según el artículo 20 3a de la ley 37/1992 del Impuesto sobre el Valor Añadido.' : '',
       taxRate: invoiceType === 'center' ? 21 : 0,
+      irpf: 15,
       billing_client_name: '',
       billing_client_address: '',
       billing_client_tax_id: '',
+      show_signature: false,
       ...psychData
     });
   };
 
-  const handleOpenNewInvoice = () => {
+  const handleOpenNewInvoice = async () => {
     // Asegurar que los datos del psicólogo estén precargados al abrir nueva factura
     const psychData = {
       billing_psychologist_name: psychologistProfile?.businessName || psychologistProfile?.name || '',
@@ -852,20 +958,35 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
     console.log('[BillingPanel] Perfil del psicólogo:', psychologistProfile);
     console.log('[BillingPanel] Abriendo nueva factura con datos del psicólogo:', psychData);
     
-    // Verificar si hay un paciente o centro seleccionado para mantener sus datos
     let clientData = {
       billing_client_name: '',
       billing_client_address: '',
-      billing_client_tax_id: ''
+      billing_client_tax_id: '',
+      billing_client_postal_code: '',
+      billing_client_country: ''
     };
     
-    if (invoiceType === 'patient' && selectedPatientId) {
+    // Si estamos dentro del detalle de un paciente, preseleccionarlo automáticamente
+    if (patientId && contextPatient) {
+      setSelectedPatientId(patientId);
+      setPatientSearchTerm(contextPatient.name);
+      setInvoiceType('patient');
+      clientData = {
+        billing_client_name: contextPatient.billing_name || contextPatient.name || '',
+        billing_client_address: contextPatient.billing_address || '',
+        billing_client_tax_id: contextPatient.billing_tax_id || ''
+      };
+      console.log('[BillingPanel] Paciente preseleccionado desde contexto:', contextPatient.name);
+      await loadUnbilledItems(patientId);
+    } else if (invoiceType === 'patient' && selectedPatientId) {
       const patient = patients.find(p => p.id === selectedPatientId);
       if (patient) {
         clientData = {
           billing_client_name: patient.billing_name || patient.name || '',
           billing_client_address: patient.billing_address || '',
-          billing_client_tax_id: patient.billing_tax_id || ''
+          billing_client_tax_id: patient.billing_tax_id || '',
+          billing_client_postal_code: patient.postalCode || '',
+          billing_client_country: patient.country || ''
         };
         console.log('[BillingPanel] Manteniendo datos del paciente seleccionado:', clientData);
       }
@@ -1231,7 +1352,8 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
             </div>
 
             <div className="p-6 space-y-6">
-              {/* Tipo de factura */}
+              {/* Tipo de factura - ocultar cuando se viene del detalle de un paciente */}
+              {!patientId && (
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">Tipo de Factura *</label>
                 <div className="flex gap-4">
@@ -1261,13 +1383,23 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                   </button>
                 </div>
               </div>
+              )}
 
               {/* Seleccionar paciente o centro */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
                   {invoiceType === 'patient' ? 'Paciente' : 'Centro'} *
                 </label>
-                {invoiceType === 'patient' ? (
+                {/* Si venimos del detalle de un paciente, mostrar el paciente fijo */}
+                {patientId && contextPatient ? (
+                  <div className="flex items-center gap-3 p-3 rounded-lg border-2 border-indigo-600 bg-indigo-50">
+                    <User size={20} className="text-indigo-600 shrink-0" />
+                    <div>
+                      <div className="font-semibold text-slate-900">{contextPatient.name}</div>
+                      <div className="text-sm text-slate-500">{contextPatient.email}</div>
+                    </div>
+                  </div>
+                ) : invoiceType === 'patient' ? (
                   <div className="relative">
                     <div className="relative">
                       <input
@@ -1408,9 +1540,25 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                   {/* Sesiones */}
                   {availableSessions.length > 0 && (
                     <div>
-                      <label className="block text-sm font-medium text-slate-700 mb-2">
-                        Sesiones sin facturar ({availableSessions.length})
-                      </label>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="block text-sm font-medium text-slate-700">
+                          Sesiones sin facturar ({availableSessions.length})
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const allSelected = availableSessions.every(s => selectedSessionIds.has(s.id));
+                            if (allSelected) {
+                              setSelectedSessionIds(new Set());
+                            } else {
+                              setSelectedSessionIds(new Set(availableSessions.map(s => s.id)));
+                            }
+                          }}
+                          className="text-xs font-medium text-indigo-600 hover:text-indigo-800 hover:underline transition-colors"
+                        >
+                          {availableSessions.every(s => selectedSessionIds.has(s.id)) ? 'Deseleccionar todo' : 'Seleccionar todo'}
+                        </button>
+                      </div>
                       <div className="max-h-60 overflow-y-auto space-y-2 border border-slate-200 rounded-lg p-3">
                         {availableSessions.map(session => {
                           const sessionPrice = session.price || 0;
@@ -1465,9 +1613,25 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                   {/* Bonos */}
                   {availableBonos.length > 0 && (
                     <div>
-                      <label className="block text-sm font-medium text-slate-700 mb-2">
-                        Bonos sin facturar ({availableBonos.length})
-                      </label>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="block text-sm font-medium text-slate-700">
+                          Bonos sin facturar ({availableBonos.length})
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const allSelected = availableBonos.every(b => selectedBonoIds.has(b.id));
+                            if (allSelected) {
+                              setSelectedBonoIds(new Set());
+                            } else {
+                              setSelectedBonoIds(new Set(availableBonos.map(b => b.id)));
+                            }
+                          }}
+                          className="text-xs font-medium text-indigo-600 hover:text-indigo-800 hover:underline transition-colors"
+                        >
+                          {availableBonos.every(b => selectedBonoIds.has(b.id)) ? 'Deseleccionar todo' : 'Seleccionar todo'}
+                        </button>
+                      </div>
                       <div className="max-h-60 overflow-y-auto space-y-2 border border-slate-200 rounded-lg p-3">
                         {availableBonos.map(bono => {
                           const bonoPrice = bono.total_price_bono_amount || 0;
@@ -1551,11 +1715,16 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                   </div>
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-slate-700 mb-1">Dirección</label>
-                    <textarea
+                    <AddressAutocomplete
                       value={formData.billing_client_address}
-                      onChange={(e) => setFormData({ ...formData, billing_client_address: e.target.value })}
-                      rows={2}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                      onChange={(val) => setFormData({ ...formData, billing_client_address: val })}
+                      onSelect={(sel) => setFormData((prev) => ({
+                        ...prev,
+                        billing_client_address: sel.streetAddress,
+                        billing_client_postal_code: sel.postalCode,
+                        billing_client_country: sel.country,
+                      }))}
+                      placeholder="Escribe la dirección del cliente…"
                     />
                   </div>
                 </div>
@@ -1585,11 +1754,14 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                   </div>
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-slate-700 mb-1">Dirección</label>
-                    <textarea
+                    <AddressAutocomplete
                       value={formData.billing_psychologist_address}
-                      onChange={(e) => setFormData({ ...formData, billing_psychologist_address: e.target.value })}
-                      rows={2}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                      onChange={(val) => setFormData({ ...formData, billing_psychologist_address: val })}
+                      onSelect={(sel) => setFormData((prev) => ({
+                        ...prev,
+                        billing_psychologist_address: sel.fullAddress,
+                      }))}
+                      placeholder="Escribe la dirección del psicólogo…"
                     />
                   </div>
                 </div>
@@ -1626,7 +1798,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   rows={2}
                   className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                  placeholder="Notas adicionales sobre la factura..."
+                  placeholder="Descripción global de la factura (aparece encima de los conceptos)..."
                 />
               </div>
 
@@ -1685,6 +1857,25 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                   className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                   placeholder="Ej: Servicio exento de IVA según el artículo 20 3a de la ley 37/1992..."
                 />
+              </div>
+
+              {/* Bloque de firma */}
+              <div className="flex items-start gap-3 p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                <input
+                  type="checkbox"
+                  id="show_signature"
+                  checked={formData.show_signature}
+                  onChange={(e) => setFormData({ ...formData, show_signature: e.target.checked })}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                />
+                <div>
+                  <label htmlFor="show_signature" className="block text-sm font-medium text-slate-700 cursor-pointer">
+                    Incluir bloque de firma al pie
+                  </label>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Añade una línea de firma con tu nombre y especialidad al final del documento PDF.
+                  </p>
+                </div>
               </div>
 
               {((invoiceType === 'patient' && (selectedSessionIds.size > 0 || selectedBonoIds.size > 0)) || 
@@ -1778,31 +1969,70 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
 
       {/* Modal de confirmación de cancelación */}
       {showCancelModal && invoiceToCancel && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]" onClick={() => { setShowCancelModal(false); setInvoiceToCancel(null); }}>
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]" onClick={() => { setShowCancelModal(false); setInvoiceToCancel(null); setRectificationType('R4'); setRectificationReason(''); }}>
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full mx-4" onClick={(e) => e.stopPropagation()}>
             <div className="p-6">
-              <h3 className="text-lg font-semibold text-slate-900 mb-4">¿Cancelar factura y crear rectificativa?</h3>
-              <p className="text-slate-600 mb-2">
-                Se cancelará la factura <strong>{invoiceToCancel.invoiceNumber}</strong> y se creará una factura rectificativa con el mismo valor en negativo.
+              <h3 className="text-lg font-semibold text-slate-900 mb-1">Crear factura rectificativa</h3>
+              <p className="text-sm text-slate-500 mb-4">
+                Factura rectificada: <strong>{invoiceToCancel.invoiceNumber}</strong>
               </p>
-              <p className="text-slate-600 mb-6">
-                Las sesiones y bonos asociados serán desasignados de esta factura.
+
+              {/* Tipo de rectificación */}
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-slate-700 mb-2">Tipo de rectificación *</label>
+                <select
+                  value={rectificationType}
+                  onChange={(e) => setRectificationType(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="R1">R1 — Error fundado en derecho</option>
+                  <option value="R2">R2 — Concurso de acreedores</option>
+                  <option value="R3">R3 — Crédito incobrable (impago)</option>
+                  <option value="R4">R4 — Resto de causas</option>
+                  <option value="R5">R5 — Facturas simplificadas</option>
+                </select>
+                <p className="mt-1 text-xs text-slate-400">
+                  {rectificationType === 'R1' && 'Errores relacionados con la normativa fiscal: tipo de IVA incorrecto, errores en la base imponible u otras operaciones mal clasificadas.'}
+                  {rectificationType === 'R2' && 'Aplica cuando el cliente se encuentra en concurso de acreedores, permitiendo modificar la base imponible del IVA.'}
+                  {rectificationType === 'R3' && 'Ajuste de la base imponible del IVA en casos de impago total o parcial por parte del cliente.'}
+                  {rectificationType === 'R4' && 'Otros motivos no contemplados: errores en datos del destinatario, descripción de servicios, numeración o condiciones de pago que no afectan al importe o al IVA.'}
+                  {rectificationType === 'R5' && 'Solo para rectificar facturas simplificadas (tickets). No aplicable en facturas ordinarias.'}
+                </p>
+              </div>
+
+              {/* Motivo / descripción */}
+              <div className="mb-5">
+                <label className="block text-sm font-medium text-slate-700 mb-2">Motivo de la rectificación (opcional)</label>
+                <textarea
+                  value={rectificationReason}
+                  onChange={(e) => setRectificationReason(e.target.value)}
+                  rows={2}
+                  placeholder="Ej: Error en los datos del cliente, corrección del tipo impositivo…"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                />
+              </div>
+
+              <p className="text-xs text-slate-400 mb-5">
+                Se cancelará la factura original y se emitirá una rectificativa con todos los conceptos en negativo. Las sesiones y bonos asociados quedarán disponibles.
               </p>
+
               <div className="flex gap-3 justify-end">
                 <button
                   onClick={() => {
                     setShowCancelModal(false);
                     setInvoiceToCancel(null);
+                    setRectificationType('R4');
+                    setRectificationReason('');
                   }}
                   className="px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 rounded-lg transition-colors font-medium"
                 >
-                  No, mantener factura
+                  Cancelar
                 </button>
                 <button
                   onClick={handleCancelInvoice}
                   className="px-4 py-2 text-sm bg-red-600 text-white hover:bg-red-700 rounded-lg transition-colors font-medium"
                 >
-                  Sí, cancelar y rectificar
+                  Emitir rectificativa
                 </button>
               </div>
             </div>
@@ -1860,6 +2090,9 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                       {selectedInvoice.billing_client_address && (
                         <div className="text-xs text-slate-600 mt-1 whitespace-pre-line leading-relaxed">{selectedInvoice.billing_client_address}</div>
                       )}
+                      {(selectedInvoice.billing_client_postal_code || selectedInvoice.billing_client_country) && (
+                        <div className="text-xs text-slate-600 mt-1">{[selectedInvoice.billing_client_postal_code, selectedInvoice.billing_client_country].filter(Boolean).join(' - ')}</div>
+                      )}
                       {selectedInvoice.billing_client_tax_id && (
                         <div className="text-xs text-slate-500 mt-1">NIF/CIF: <span className="font-medium">{selectedInvoice.billing_client_tax_id}</span></div>
                       )}
@@ -1870,10 +2103,11 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                 </div>
               </div>
 
-              {/* Descripción / nota legal */}
+              {/* Descripción global de la factura */}
               {selectedInvoice.description && (
-                <div className="text-xs text-slate-500 italic border-l-2 border-slate-200 pl-3 leading-relaxed">
-                  {selectedInvoice.description}
+                <div className="bg-slate-50 border-l-4 border-indigo-400 rounded-r-lg px-4 py-3">
+                  <div className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest mb-1">Descripción</div>
+                  <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">{selectedInvoice.description}</div>
                 </div>
               )}
 
@@ -2025,6 +2259,18 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                 </div>
               )}
 
+              {/* Bloque de firma */}
+              {(selectedInvoice as any).show_signature && selectedInvoice.billing_psychologist_name && (
+                <div className="border border-slate-200 rounded-lg p-4 bg-white mt-2">
+                  <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Firma</div>
+                  <div className="border-b border-slate-400 w-48 mb-2" />
+                  <div className="text-sm font-semibold text-slate-800">{selectedInvoice.billing_psychologist_name}</div>
+                  {psychologistProfile?.specialty && (
+                    <div className="text-xs text-slate-500 mt-0.5">{psychologistProfile.specialty}</div>
+                  )}
+                </div>
+              )}
+
             </div>
 
             <div className="p-6 border-t border-slate-200 flex gap-3 justify-between">
@@ -2063,12 +2309,36 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                   </>
                 )}
               </div>
-              <button
-                onClick={() => setSelectedInvoice(null)}
-                className="px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 rounded-lg transition-colors font-medium"
-              >
-                Cerrar
-              </button>
+              <div className="flex gap-2">
+                {selectedInvoice.status !== 'draft' && selectedInvoice.status !== 'cancelled' && (
+                  <>
+                    <button
+                      onClick={() => handleToggleSignature(selectedInvoice)}
+                      title={(selectedInvoice as any).show_signature ? 'Quitar bloque de firma del PDF' : 'Añadir bloque de firma al PDF'}
+                      className={`px-3 py-2 text-sm rounded-lg transition-colors font-medium flex items-center gap-2 border ${
+                        (selectedInvoice as any).show_signature
+                          ? 'border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
+                          : 'border-slate-200 text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      ✍️ {(selectedInvoice as any).show_signature ? 'Firma activa' : 'Añadir firma'}
+                    </button>
+                    <button
+                      onClick={() => handleDownloadPDF(selectedInvoice.id)}
+                      className="px-3 py-2 text-sm bg-green-600 text-white hover:bg-green-700 rounded-lg transition-colors font-medium flex items-center gap-2"
+                    >
+                      <Download size={16} />
+                      Descargar PDF
+                    </button>
+                  </>
+                )}
+                <button
+                  onClick={() => setSelectedInvoice(null)}
+                  className="px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 rounded-lg transition-colors font-medium"
+                >
+                  Cerrar
+                </button>
+              </div>
             </div>
           </div>
         </div>
