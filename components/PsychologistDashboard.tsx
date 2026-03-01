@@ -206,9 +206,10 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
   
 
 
-  // El máximo siempre es el total mensual más alto (pagado + pendiente) de los últimos 12 meses
-  const revenueValues = Object.keys(monthlyRevenue).map(key => monthlyRevenue[key] + monthlyPending[key]);
-  const maxRevenue = Math.max(...revenueValues, 1); // La barra más alta define la escala al 100%
+  // El máximo se adapta según el modo activo (total o solo cobrado)
+  const maxRevenueTotal = Math.max(...Object.keys(monthlyRevenue).map(key => monthlyRevenue[key] + monthlyPending[key]), 1);
+  const maxRevenuePaid = Math.max(...Object.keys(monthlyRevenue).map(key => monthlyRevenue[key]), 1);
+  const maxRevenue = showTotalBilling ? maxRevenueTotal : maxRevenuePaid;
   
   // Revenue in selected date range - incluye pagadas + pendientes, excluye rectificativas
   const revenueInRange = invoices
@@ -372,12 +373,20 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
         </div>
         
         {/* Vertical Bar Chart */}
-        <div className="relative h-48 sm:h-72 px-2">
-          {/* Grid lines */}
-          <div className="absolute inset-0 flex flex-col justify-between pointer-events-none pb-8">
-            {[0, 1, 2, 3, 4].map(i => (
-              <div key={i} className="border-t border-slate-100" />
-            ))}
+        <div className="relative h-48 sm:h-72 pl-8 sm:pl-10 pr-2">
+          {/* Grid lines with Y-axis labels */}
+          <div className="absolute inset-0 flex flex-col justify-between pointer-events-none pb-8 pl-8 sm:pl-10">
+            {[0, 1, 2, 3, 4].map(i => {
+              const value = Math.round(maxRevenue * (1 - i / 4));
+              const label = value >= 1000 ? `${(value / 1000).toFixed(value % 1000 === 0 ? 0 : 1)}k` : `${value}`;
+              return (
+                <div key={i} className="relative border-t border-slate-100">
+                  <span className="absolute -top-2 right-full pr-1 text-[7px] sm:text-[8px] text-slate-400 font-medium whitespace-nowrap leading-none">
+                    {label}
+                  </span>
+                </div>
+              );
+            })}
           </div>
           
           {/* Bars container */}

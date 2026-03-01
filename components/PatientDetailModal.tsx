@@ -843,7 +843,8 @@ tr:nth-child(even) td{background:#f8fafc}
 
 <div class="meta-box">
 <div class="item"><label>Titular de los datos (Interesado)</label><span>${patient.name}</span></div>
-<div class="item"><label>Responsable del tratamiento</label><span>${psychName}${lopdPsychEmail ? ' — ' + lopdPsychEmail : ''}</span></div>
+<div class="item"><label>Responsable del Tratamiento</label><span>${psychName}${lopdPsychEmail ? ' — ' + lopdPsychEmail : ''}</span></div>
+<div class="item"><label>Encargado del Tratamiento (Art. 28 RGPD)</label><span>dygo — Sistema de Gestión de Consulta Psicológica (actúa bajo las instrucciones del Responsable)</span></div>
 <div class="item"><label>Fecha de generación del informe</label><span>${dateStr}, ${timeStr} h</span></div>
 <div class="item"><label>Inicio de la relación terapéutica</label><span>${relCreatedAt ? relCreatedAt.toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' }) : 'No disponible'}</span></div>
 <div class="item"><label>Sesiones registradas en el sistema</label><span>${lopdSessions.filter((s: any) => s.status !== 'available').length}</span></div>
@@ -853,11 +854,11 @@ tr:nth-child(even) td{background:#f8fafc}
 <h2>1. Identificación del Responsable del Tratamiento</h2>
 <p>De conformidad con el artículo 13 del RGPD y el artículo 11 de la LOPDGDD, se informa al interesado de los siguientes extremos relativos al tratamiento de sus datos personales:</p>
 <ul>
-<li><strong>Responsable del tratamiento:</strong> ${psychName}${lopdPsychEmail ? ' (' + lopdPsychEmail + ')' : ''}</li>
-<li><strong>Encargado del tratamiento / Plataforma tecnológica:</strong> dygo — Sistema de Gestión de Consulta Psicológica (supabase.com como subencargado del tratamiento, con DPA suscrito)</li>
+<li><strong>Responsable del tratamiento (Art. 4.7 RGPD):</strong> ${psychName}${lopdPsychEmail ? ' (' + lopdPsychEmail + ')' : ''}. El profesional es el único Responsable del Tratamiento y quien determina los fines y medios del tratamiento de los datos del paciente. Le corresponde en exclusiva el cumplimiento de las obligaciones derivadas del RGPD y la LOPDGDD.</li>
+<li><strong>Encargado del tratamiento (Art. 4.8 y Art. 28 RGPD):</strong> dygo — Sistema de Gestión de Consulta Psicológica. Actúa en calidad de encargado del tratamiento, únicamente bajo las instrucciones documentadas del Responsable y sin capacidad de utilizar los datos para fines propios. Dispone de contrato de encargo de tratamiento (DPA) suscrito conforme al Art. 28 RGPD. Subencargados del tratamiento: Supabase Inc. (base de datos, DPA en supabase.com/legal/dpa) y Vercel Inc. (infraestructura serverless, DPA suscrito).</li>
 <li><strong>Finalidad principal:</strong> Gestión integral del proceso terapéutico y psicológico, incluyendo documentación clínica, seguimiento de sesiones, comunicación profesional-paciente, facturación de servicios sanitarios y cumplimiento de obligaciones legales propias del ejercicio de la profesión sanitaria.</li>
 <li><strong>Base jurídica del tratamiento de datos de salud:</strong> Art. 9.2.h) RGPD — tratamiento necesario para fines de diagnóstico médico y/o psicológico, prestación de asistencia o tratamiento de tipo sanitario, en el contexto de contrato con un profesional sanitario sujeto a secreto profesional conforme al derecho nacional (Ley 44/2003).</li>
-<li><strong>Base jurídica del tratamiento de datos ordinarios:</strong> Art. 6.1.b) RGPD — ejecución de un contrato en el que el interesado es parte; Art. 6.1.c) — cumplimiento de obligación legal aplicable al responsable.</li>
+<li><strong>Base jurídica del tratamiento de datos ordinarios:</strong> Art. 6.1.b) RGPD — ejecución de un contrato en el que el interesado es parte; Art. 6.1.c) — cumplimiento de obligación legal aplicable al Responsable.</li>
 </ul>
 
 <h2>2. Categorías de Datos Tratados</h2>
@@ -876,7 +877,7 @@ tr:nth-child(even) td{background:#f8fafc}
 <div class="note red"><strong>⚠️ Datos de Categoría Especial — Advertencia legal:</strong> Los datos relativos a la salud mental constituyen datos de categoría especial en virtud del artículo 9.1 del RGPD. Su tratamiento requiere garantías reforzadas de confidencialidad y seguridad, así como el estricto cumplimiento del secreto profesional del psicólogo establecido en la Ley 44/2003 y el Código Deontológico del Consejo General de la Psicología de España.</div>
 
 <h2>3. Medidas de Seguridad Técnicas y Organizativas</h2>
-<p>De conformidad con el artículo 25 (Privacidad por diseño y por defecto) y el artículo 32 del RGPD, así como las recomendaciones de la AEPD y el Esquema Nacional de Seguridad (ENS), la plataforma dygo implementa las siguientes medidas de seguridad técnicas y organizativas:</p>
+<p>De conformidad con el artículo 25 (Privacidad por diseño y por defecto) y el artículo 32 del RGPD, así como las recomendaciones de la AEPD y el Esquema Nacional de Seguridad (ENS), el <strong>Responsable del Tratamiento</strong> — en su condición de profesional sanitario — garantiza la aplicación de las siguientes medidas de seguridad técnicas y organizativas, implementadas a través del encargado del tratamiento dygo:</p>
 <div class="sec-grid">
 <div class="sec-item"><div class="ico">🔐</div><strong>Autenticación y Control de Acceso (RBAC)</strong><p>Credenciales únicas por usuario. Gestión de identidades mediante Supabase Auth (OAuth 2.0 / JWT firmados). Cada psicólogo accede exclusivamente a sus propios pacientes mediante control de acceso basado en roles (RBAC). Sesiones con expiración automática.</p></div>
 <div class="sec-item"><div class="ico">🔒</div><strong>Cifrado en Tránsito y en Reposo</strong><p>Todas las comunicaciones protegidas mediante TLS 1.3 (HTTPS obligatorio). Datos en base de datos cifrados con AES-256 en reposo (Supabase/PostgreSQL). Las credenciales de usuario se almacenan mediante hash bcrypt con salt aleatorio.</p></div>
@@ -912,11 +913,12 @@ tr:nth-child(even) td{background:#f8fafc}
 </ul>
 <p>Para ejercer sus derechos, el interesado puede dirigirse al responsable del tratamiento identificado en el apartado 1. Asimismo, tiene derecho a presentar una reclamación ante la <strong>Agencia Española de Protección de Datos (AEPD)</strong> — www.aepd.es — si considera que el tratamiento no es conforme con la normativa aplicable.</p>
 
-<h2>6. Cesiones y Transferencias de Datos</h2>
-<p>Los datos personales del interesado <strong>no serán cedidos a terceros</strong> salvo en los siguientes supuestos: (i) existencia de obligación legal; (ii) necesidad para la prestación del servicio mediante encargados del tratamiento que actúan bajo las instrucciones del responsable y con contrato de encargo de tratamiento suscrito conforme al artículo 28 del RGPD. Los encargados del tratamiento son:</p>
+<h2>6. Cesiones, Encargados y Transferencias de Datos</h2>
+<p>El <strong>Responsable del Tratamiento</strong> (el profesional identificado en el apartado 1) es el único que determina a quién y bajo qué condiciones se comunican los datos del paciente. Los datos personales <strong>no serán cedidos a terceros</strong> salvo en los siguientes supuestos: (i) existencia de obligación legal; (ii) prestación del servicio mediante encargados del tratamiento que actúan exclusivamente bajo las instrucciones documentadas del Responsable, con contrato de encargo de tratamiento suscrito conforme al artículo 28 del RGPD. La cadena de encargados y subencargados del tratamiento es la siguiente:</p>
 <ul>
-<li><strong>Supabase Inc.</strong> (base de datos PostgreSQL, autenticación OAuth) — Infraestructura en EU West. DPA disponible en supabase.com/legal/dpa.</li>
-<li><strong>Vercel Inc.</strong> (infraestructura de despliegue y funciones serverless) — DPA suscrito; preferencia por región EU.</li>
+<li><strong>dygo</strong> (Encargado principal del tratamiento, Art. 28 RGPD) — Plataforma tecnológica de gestión de consulta psicológica. Actúa bajo instrucciones del Responsable. Sin acceso autónomo a los datos ni uso para fines propios.</li>
+<li><strong>Supabase Inc.</strong> (Subencargado del tratamiento) — Base de datos PostgreSQL y autenticación OAuth. Infraestructura en EU West (Irlanda/Frankfurt). DPA disponible en supabase.com/legal/dpa.</li>
+<li><strong>Vercel Inc.</strong> (Subencargado del tratamiento) — Infraestructura de despliegue y funciones serverless. DPA suscrito; preferencia por región EU.</li>
 </ul>
 <p>En ningún caso se realizarán transferencias de datos a terceros países fuera del Espacio Económico Europeo (EEE) sin las garantías adecuadas previstas en el Capítulo V del RGPD (cláusulas contractuales tipo aprobadas por la Comisión Europea u otro mecanismo de transferencia válido).</p>
 

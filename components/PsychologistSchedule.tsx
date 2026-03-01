@@ -67,7 +67,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
   const [resizingSession, setResizingSession] = useState<{ id: string, edge: 'top' | 'bottom', date: string } | null>(null);
   const [tempSessionTimes, setTempSessionTimes] = useState<{ startTime: string, endTime: string } | null>(null);
   const [creatingSession, setCreatingSession] = useState<{ date: string, startY: number, currentY: number } | null>(null);
-  const [draggingSession, setDraggingSession] = useState<{ id: string, startY: number, originalDate: string, originalStartTime: string, originalEndTime: string } | null>(null);
+  const [draggingSession, setDraggingSession] = useState<{ id: string, startY: number, clickOffsetY: number, originalDate: string, originalStartTime: string, originalEndTime: string } | null>(null);
   const [dragPreview, setDragPreview] = useState<{ date: string, startTime: string, endTime: string } | null>(null);
   const [patientSearchQuery, setPatientSearchQuery] = useState('');
   const [showPatientDropdown, setShowPatientDropdown] = useState(false);
@@ -176,12 +176,22 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
     }
   }, []);
 
+  // Prevent text selection during drag / resize
+  useEffect(() => {
+    if (draggingSession || resizingSession) {
+      document.body.style.userSelect = 'none';
+    } else {
+      document.body.style.userSelect = '';
+    }
+    return () => { document.body.style.userSelect = ''; };
+  }, [draggingSession, resizingSession]);
+
   // Handle resize mouse events
   useEffect(() => {
     if (!resizingSession) return;
 
     const handleMouseMove = (e: MouseEvent) => {
-      const scrollableContainer = document.querySelector('.h-\\[600px\\].overflow-y-auto');
+      const scrollableContainer = scrollContainerRef.current;
       if (!scrollableContainer) return;
 
       const containerRect = scrollableContainer.getBoundingClientRect();
@@ -256,7 +266,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
     if (!creatingSession) return;
 
     const handleMouseMove = (e: MouseEvent) => {
-      const scrollableContainer = document.querySelector('.h-\\[600px\\].overflow-y-auto');
+      const scrollableContainer = scrollContainerRef.current;
       if (!scrollableContainer) return;
 
       const containerRect = scrollableContainer.getBoundingClientRect();
@@ -330,17 +340,24 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
         }
       });
 
-      if (!targetElement) return;
+      // If mouse is outside all columns, keep dragging within the original/last known column
+      if (!targetElement) {
+        if (!dragPreview) return; // Haven't started a preview yet, do nothing
+        targetDate = dragPreview.date; // Stay in current column
+      }
 
-      const scrollableContainer = document.querySelector('.h-\\[600px\\].overflow-y-auto');
+      const scrollableContainer = scrollContainerRef.current;
       if (!scrollableContainer) return;
 
       const containerRect = scrollableContainer.getBoundingClientRect();
       const scrollTop = scrollableContainer.scrollTop;
       const y = e.clientY - containerRect.top + scrollTop;
 
+      // Subtract the click offset so the session doesn't jump when you grab it mid-block
+      const adjustedY = Math.max(0, y - draggingSession.clickOffsetY);
+
       // Convert Y to time (48px per hour)
-      const totalMinutes = Math.floor((y / 48) * 60);
+      const totalMinutes = Math.floor((adjustedY / 48) * 60);
       const hours = Math.floor(totalMinutes / 60);
       const minutes = Math.floor((totalMinutes % 60) / 15) * 15; // Round to 15 min
 
@@ -371,10 +388,11 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
         const newEndTime = dragPreview.endTime;
         
         // Optimistic update: actualizar UI inmediatamente
+        // Limpiar starts_on/ends_on para que convertSessionToTz use los valores locales actualizados
         setSessions(prevSessions => 
           prevSessions.map(s => 
             s.id === sessionId
-              ? { ...s, date: newDate, startTime: newStartTime, endTime: newEndTime }
+              ? { ...s, date: newDate, startTime: newStartTime, endTime: newEndTime, starts_on: undefined, ends_on: undefined }
               : s
           )
         );
@@ -645,10 +663,11 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
     if (!session) return;
 
     // Optimistic update: actualizar UI inmediatamente
+    // Limpiar starts_on/ends_on para que convertSessionToTz use startTime/endTime actualizados
     setSessions(prevSessions => 
       prevSessions.map(s => 
         s.id === sessionId
-          ? { ...s, startTime: newStartTime, endTime: newEndTime }
+          ? { ...s, startTime: newStartTime, endTime: newEndTime, starts_on: undefined, ends_on: undefined }
           : s
       )
     );
@@ -1924,7 +1943,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                         onMouseDown={(e) => {
                           // Only trigger if clicking on the background, not on a session
                           if (e.target === e.currentTarget || (e.target as HTMLElement).classList.contains('hour-slot')) {
-                            const scrollableContainer = document.querySelector('.h-\\[600px\\].overflow-y-auto');
+                            const scrollableContainer = scrollContainerRef.current;
                             if (!scrollableContainer) return;
 
                             const containerRect = scrollableContainer.getBoundingClientRect();
@@ -2071,16 +2090,23 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                                 }
                                 
                                 e.stopPropagation();
-                                const scrollableContainer = document.querySelector('.h-\\[600px\\].overflow-y-auto');
+                                const scrollableContainer = scrollContainerRef.current;
                                 if (!scrollableContainer) return;
 
                                 const containerRect = scrollableContainer.getBoundingClientRect();
                                 const scrollTop = scrollableContainer.scrollTop;
                                 const y = e.clientY - containerRect.top + scrollTop;
+
+                                // Calculate how far from the session's top edge the user clicked
+                                const dispStart = sessionDisplayTimes.get(session.id)?.startTime ?? session.startTime;
+                                const [sh, sm] = dispStart.split(':').map(Number);
+                                const sessionTopPx = ((sh * 60 + sm) / 60) * 48;
+                                const clickOffsetY = y - sessionTopPx;
                                 
                                 setDraggingSession({
                                   id: session.id,
                                   startY: y,
+                                  clickOffsetY,
                                   originalDate: dateStr,
                                   originalStartTime: session.startTime,
                                   originalEndTime: session.endTime

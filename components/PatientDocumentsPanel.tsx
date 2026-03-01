@@ -27,6 +27,19 @@ function markdownToHtml(md: string): string {
   return `<p class="mb-3">${html}</p>`;
 }
 
+// ─── Title extraction (handles both Markdown and HTML content) ───────────────
+function getDocTitle(content: string): string {
+  const clean = content.replace(/<!-- SIGNATURE_DATA:.*?-->$/s, '');
+  if (/^\s*(<(!DOCTYPE|html|head|body|div|section|article)|<!DOCTYPE)/i.test(clean.trim())) {
+    const h1 = clean.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+    if (h1) return h1[1].replace(/<[^>]+>/g, '').trim();
+    const titleTag = clean.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    if (titleTag) return titleTag[1].replace(/<[^>]+>/g, '').trim();
+    return 'Documento';
+  }
+  return clean.split('\n')[0].replace(/^#+\s*/, '').trim() || 'Documento';
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Signature {
   id: number;
@@ -190,8 +203,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ doc, onClose, onSigned,
     }
   };
 
-  const firstLine = doc.content.replace(/<!-- SIGNATURE_DATA:.*?-->$/s, '').split('\n')[0].replace(/^#+\s*/, '').trim();
-  const title = firstLine || 'Documento';
+  const title = getDocTitle(doc.content);
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-stretch md:items-center justify-center p-0 md:p-4">
@@ -358,8 +370,7 @@ const PatientDocumentsPanel: React.FC<PatientDocumentsPanelProps> = ({ patientId
       ) : (
         <div className="space-y-3">
           {filtered.map(doc => {
-            const firstLine = doc.content.replace(/<!-- SIGNATURE_DATA:.*?-->$/s, '').split('\n')[0].replace(/^#+\s*/, '').trim();
-            const title = firstLine || 'Documento';
+            const title = getDocTitle(doc.content);
             const preview = doc.content.replace(/^.+\n/, '').replace(/[#*_`>-]/g, '').trim().slice(0, 100);
 
             return (
