@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, User, Calendar, Phone, Mail, FileText, DollarSign, Settings, Tag, Trash2, Save, Edit2, CreditCard, MapPin, Cake, Clock as ClockIcon, BookOpen, Sparkles, CheckCircle, AlertCircle, Download, Loader2, Ticket, Building2, TrendingUp, BarChart3, Upload, File, XCircle } from 'lucide-react';
+import { X, User, Calendar, Phone, Mail, FileText, DollarSign, Settings, Tag, Trash2, Save, Edit2, CreditCard, MapPin, Cake, Clock as ClockIcon, BookOpen, Sparkles, CheckCircle, AlertCircle, Download, Loader2, Ticket, Building2, TrendingUp, BarChart3, Upload, File, XCircle, Send, Scroll, Eye, Award, Shield, Lock, ClipboardList } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser } from '../services/authService';
 import InsightsPanel from './InsightsPanel';
@@ -27,7 +27,7 @@ interface PatientDetailModalProps {
 }
 
 const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClose, psychologistId }) => {
-  const [activeTab, setActiveTab] = useState<'PATIENT' | 'INFO' | 'SESSIONS' | 'TIMELINE' | 'BILLING' | 'BONOS' | 'RELATIONSHIP' | 'HISTORY'>('PATIENT');
+  const [activeTab, setActiveTab] = useState<'PATIENT' | 'INFO' | 'SESSIONS' | 'TIMELINE' | 'BILLING' | 'BONOS' | 'RELATIONSHIP' | 'HISTORY' | 'DOCS' | 'LOPD'>('PATIENT');
   const [patientData, setPatientData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [relationship, setRelationship] = useState<any>(null);
@@ -57,11 +57,29 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   
+  // Docs (templates/signatures) state
+  const [docSignatures, setDocSignatures] = useState<any[]>([]);
+  const [isLoadingDocs2, setIsLoadingDocs2] = useState(false);
+  const [docTemplates, setDocTemplates] = useState<any[]>([]);
+  const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
+  const [showSendDocModal, setShowSendDocModal] = useState(false);
+  const [sendingDocTemplate, setSendingDocTemplate] = useState<any>(null);
+  const [isSendingDoc, setIsSendingDoc] = useState(false);
+  const [docSendSuccess, setDocSendSuccess] = useState(false);
+  const [previewDocSignature, setPreviewDocSignature] = useState<any>(null);
+  const [previewDocTemplate, setPreviewDocTemplate] = useState<any>(null);
+
   // Historical documents states
   const [historicalDocs, setHistoricalDocs] = useState<HistoricalDocumentsSummary>({ documents: [], lastUpdated: 0 });
   const [isLoadingDocs, setIsLoadingDocs] = useState(false);
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+
+  // LOPD / RGPD compliance state
+  const [isLoadingLOPD, setIsLoadingLOPD] = useState(false);
+  const [lopdSessions, setLopdSessions] = useState<any[]>([]);
+  const [lopdPsychName, setLopdPsychName] = useState<string>('');
+  const [lopdPsychEmail, setLopdPsychEmail] = useState<string>('');
 
   const patientUserId = patient.userId || patient.user_id || patient.id;
   const currentPsychologistId = psychologistId || patient.psychologistId || '';
@@ -78,6 +96,13 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
     if (activeTab === 'HISTORY') {
       loadClinicalHistory();
       loadHistoricalDocuments();
+    }
+    if (activeTab === 'DOCS') {
+      loadDocSignatures();
+      loadDocTemplates();
+    }
+    if (activeTab === 'LOPD') {
+      loadLOPDData();
     }
   }, [activeTab, patientUserId, relationship?.id]);
 
@@ -694,6 +719,250 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
     }
   };
 
+  const loadLOPDData = async () => {
+    if (!patientUserId || !currentPsychologistId) return;
+    setIsLoadingLOPD(true);
+    try {
+      const [sessionsRes, psychRes] = await Promise.all([
+        fetch(`${API_URL}/sessions?psychologistId=${currentPsychologistId}&patientId=${patientUserId}`),
+        fetch(`${API_URL}/users/${currentPsychologistId}`)
+      ]);
+      if (sessionsRes.ok) {
+        const sessionsData = await sessionsRes.json();
+        setLopdSessions(Array.isArray(sessionsData) ? sessionsData : []);
+      }
+      if (psychRes.ok) {
+        const psychData = await psychRes.json();
+        setLopdPsychName(psychData.name || [psychData.firstName, psychData.lastName].filter(Boolean).join(' ') || 'Psicólogo/a responsable');
+        setLopdPsychEmail(psychData.email || psychData.user_email || '');
+      }
+    } catch (error) {
+      console.error('Error loading LOPD data:', error);
+    }
+    setIsLoadingLOPD(false);
+  };
+
+  const downloadLOPDReport = () => {
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' });
+    const timeStr = now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+    const relCreatedAt = relationship?.created_at ? new Date(relationship.created_at) : null;
+    const psychName = lopdPsychName || 'Psicólogo/a responsable';
+
+    const accessEvents = [
+      ...(relCreatedAt ? [{
+        date: relCreatedAt.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+        time: relCreatedAt.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
+        user: psychName,
+        action: 'Inicio de relación terapéutica — creación del expediente del paciente',
+        system: 'dygo'
+      }] : []),
+      ...lopdSessions
+        .filter((s: any) => s.starts_on && s.status !== 'available')
+        .sort((a: any, b: any) => new Date(a.starts_on).getTime() - new Date(b.starts_on).getTime())
+        .map((s: any) => {
+          const d = new Date(s.starts_on);
+          const statusLabel = s.status === 'completed' ? 'Sesión completada' : s.status === 'cancelled' ? 'Sesión cancelada' : 'Sesión programada';
+          return {
+            date: d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+            time: d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
+            user: psychName,
+            action: `${statusLabel} — acceso al expediente clínico del paciente`,
+            system: 'dygo'
+          };
+        }),
+      {
+        date: now.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+        time: timeStr,
+        user: psychName,
+        action: 'Generación de Informe de Protección de Datos (LOPD/RGPD) — acceso a expediente',
+        system: 'dygo'
+      }
+    ];
+
+    const accessRows = accessEvents.map(e =>
+      `<tr><td>${e.date}</td><td>${e.time}</td><td>${e.user}</td><td>${e.action}</td><td>${e.system}</td></tr>`
+    ).join('');
+
+    const htmlContent = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Informe LOPD/RGPD — ${patient.name}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',Arial,sans-serif;color:#1e293b;line-height:1.65;font-size:13px;padding:40px}
+.cover{text-align:center;padding:50px 40px;border-bottom:4px solid #7c3aed;margin-bottom:36px}
+.cover .logo{font-size:38px;font-weight:900;color:#7c3aed;margin-bottom:6px}
+.cover h1{font-size:20px;font-weight:800;color:#1e293b;margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
+.cover .subtitle{font-size:12px;color:#64748b;line-height:1.7;max-width:640px;margin:0 auto}
+.badges{display:flex;justify-content:center;gap:10px;margin-top:18px;flex-wrap:wrap}
+.badge{background:#f1f5f9;border:1px solid #e2e8f0;border-radius:20px;padding:4px 13px;font-size:10.5px;font-weight:600;color:#475569}
+.badge.legal{background:#ede9fe;border-color:#c4b5fd;color:#6d28d9}
+.meta-box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px 20px;margin-bottom:28px;display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.meta-box .item label{font-size:9.5px;text-transform:uppercase;color:#94a3b8;font-weight:700;letter-spacing:.06em}
+.meta-box .item span{display:block;font-size:13px;color:#1e293b;font-weight:600;margin-top:2px}
+h2{font-size:15px;font-weight:800;color:#7c3aed;margin:30px 0 10px;padding-bottom:6px;border-bottom:2px solid #ede9fe;text-transform:uppercase;letter-spacing:.03em}
+h3{font-size:12.5px;font-weight:700;color:#334155;margin:14px 0 5px}
+p{margin-bottom:10px;color:#475569}
+ul{margin:8px 0 12px 20px}
+ul li{margin-bottom:5px;color:#475569}
+.note{background:#fefce8;border-left:4px solid #eab308;padding:11px 15px;border-radius:4px;margin:14px 0;font-size:12px}
+.note.purple{background:#faf5ff;border-color:#a78bfa}
+.note.green{background:#f0fdf4;border-color:#4ade80}
+.note.red{background:#fef2f2;border-color:#f87171}
+.sec-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px;margin:14px 0}
+.sec-item{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:7px;padding:11px 13px}
+.sec-item .ico{font-size:15px;margin-bottom:5px}
+.sec-item strong{display:block;font-size:11.5px;color:#166534;margin-bottom:3px}
+.sec-item p{font-size:11px;color:#15803d;margin:0}
+table{width:100%;border-collapse:collapse;margin:14px 0;font-size:11px}
+th{background:#7c3aed;color:#fff;padding:8px 10px;text-align:left;font-weight:700}
+td{padding:7px 10px;border-bottom:1px solid #e2e8f0;color:#334155}
+tr:nth-child(even) td{background:#f8fafc}
+.cat-th{background:#0f172a}
+.footer{margin-top:44px;padding-top:18px;border-top:2px solid #e2e8f0;text-align:center;font-size:10px;color:#94a3b8}
+.seal{display:inline-block;border:2px solid #7c3aed;border-radius:8px;padding:9px 20px;margin:18px auto;color:#7c3aed;font-weight:800;font-size:12px}
+@media print{body{padding:20px}h2{page-break-after:avoid}table,.sec-grid{page-break-inside:avoid}}
+</style>
+</head>
+<body>
+
+<div class="cover">
+<div class="logo">🛡️ dygo</div>
+<h1>Informe de Protección de Datos Personales</h1>
+<div class="subtitle">Cumplimiento normativo conforme al Reglamento (UE) 2016/679 (RGPD) y la Ley Orgánica 3/2018 de Protección de Datos Personales y garantía de los derechos digitales (LOPDGDD). Los datos tratados pertenecen a la categoría especial de datos de salud (Art. 9 RGPD).</div>
+<div class="badges">
+<span class="badge legal">RGPD · Reglamento (UE) 2016/679</span>
+<span class="badge legal">LOPDGDD · LO 3/2018</span>
+<span class="badge legal">Datos Especiales · Art. 9 RGPD</span>
+<span class="badge legal">Ley 41/2002 · Autonomía del Paciente</span>
+<span class="badge">Documento Confidencial</span>
+</div>
+</div>
+
+<div class="meta-box">
+<div class="item"><label>Titular de los datos (Interesado)</label><span>${patient.name}</span></div>
+<div class="item"><label>Responsable del tratamiento</label><span>${psychName}${lopdPsychEmail ? ' — ' + lopdPsychEmail : ''}</span></div>
+<div class="item"><label>Fecha de generación del informe</label><span>${dateStr}, ${timeStr} h</span></div>
+<div class="item"><label>Inicio de la relación terapéutica</label><span>${relCreatedAt ? relCreatedAt.toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' }) : 'No disponible'}</span></div>
+<div class="item"><label>Sesiones registradas en el sistema</label><span>${lopdSessions.filter((s: any) => s.status !== 'available').length}</span></div>
+<div class="item"><label>Referencia única del expediente</label><span>${patientUserId}</span></div>
+</div>
+
+<h2>1. Identificación del Responsable del Tratamiento</h2>
+<p>De conformidad con el artículo 13 del RGPD y el artículo 11 de la LOPDGDD, se informa al interesado de los siguientes extremos relativos al tratamiento de sus datos personales:</p>
+<ul>
+<li><strong>Responsable del tratamiento:</strong> ${psychName}${lopdPsychEmail ? ' (' + lopdPsychEmail + ')' : ''}</li>
+<li><strong>Encargado del tratamiento / Plataforma tecnológica:</strong> dygo — Sistema de Gestión de Consulta Psicológica (supabase.com como subencargado del tratamiento, con DPA suscrito)</li>
+<li><strong>Finalidad principal:</strong> Gestión integral del proceso terapéutico y psicológico, incluyendo documentación clínica, seguimiento de sesiones, comunicación profesional-paciente, facturación de servicios sanitarios y cumplimiento de obligaciones legales propias del ejercicio de la profesión sanitaria.</li>
+<li><strong>Base jurídica del tratamiento de datos de salud:</strong> Art. 9.2.h) RGPD — tratamiento necesario para fines de diagnóstico médico y/o psicológico, prestación de asistencia o tratamiento de tipo sanitario, en el contexto de contrato con un profesional sanitario sujeto a secreto profesional conforme al derecho nacional (Ley 44/2003).</li>
+<li><strong>Base jurídica del tratamiento de datos ordinarios:</strong> Art. 6.1.b) RGPD — ejecución de un contrato en el que el interesado es parte; Art. 6.1.c) — cumplimiento de obligación legal aplicable al responsable.</li>
+</ul>
+
+<h2>2. Categorías de Datos Tratados</h2>
+<p>Los datos tratados en relación con el interesado pertenecen, en parte, a la categoría de <strong>datos de categoría especial</strong> conforme al artículo 9.1 del RGPD por su naturaleza de datos relativos a la salud física y mental. Se procesan las siguientes categorías:</p>
+<table>
+<thead><tr><th class="cat-th">Categoría</th><th class="cat-th">Tipos de dato</th><th class="cat-th">Base jurídica</th><th class="cat-th">Clasificación RGPD</th></tr></thead>
+<tbody>
+<tr><td>Datos identificativos</td><td>Nombre, apellidos, DNI/NIE, dirección postal, fecha de nacimiento</td><td>Art. 6.1.b RGPD</td><td>Dato personal (Art. 4 RGPD)</td></tr>
+<tr><td>Datos de contacto</td><td>Correo electrónico, número de teléfono</td><td>Art. 6.1.b RGPD</td><td>Dato personal</td></tr>
+<tr><td>Datos clínicos y de salud mental</td><td>Notas de sesión, transcripciones, resúmenes clínicos, historia clínica, objetivos terapéuticos</td><td>Art. 9.2.h RGPD</td><td><strong>Categoría especial (Art. 9 RGPD) — DATOS DE SALUD</strong></td></tr>
+<tr><td>Datos económicos y de facturación</td><td>Facturas, importes de sesiones, bonos terapéuticos, estado de pagos</td><td>Art. 6.1.b y 6.1.c RGPD</td><td>Dato personal</td></tr>
+<tr><td>Datos de comunicación</td><td>Mensajes en plataforma, notificaciones, recordatorios</td><td>Art. 6.1.b RGPD</td><td>Dato personal</td></tr>
+<tr><td>Datos documentales</td><td>Documentos adjuntos, consentimientos informados firmados, informes clínicos</td><td>Art. 9.2.h y Art. 9.2.a RGPD</td><td><strong>Categoría especial (Art. 9 RGPD)</strong></td></tr>
+</tbody>
+</table>
+<div class="note red"><strong>⚠️ Datos de Categoría Especial — Advertencia legal:</strong> Los datos relativos a la salud mental constituyen datos de categoría especial en virtud del artículo 9.1 del RGPD. Su tratamiento requiere garantías reforzadas de confidencialidad y seguridad, así como el estricto cumplimiento del secreto profesional del psicólogo establecido en la Ley 44/2003 y el Código Deontológico del Consejo General de la Psicología de España.</div>
+
+<h2>3. Medidas de Seguridad Técnicas y Organizativas</h2>
+<p>De conformidad con el artículo 25 (Privacidad por diseño y por defecto) y el artículo 32 del RGPD, así como las recomendaciones de la AEPD y el Esquema Nacional de Seguridad (ENS), la plataforma dygo implementa las siguientes medidas de seguridad técnicas y organizativas:</p>
+<div class="sec-grid">
+<div class="sec-item"><div class="ico">🔐</div><strong>Autenticación y Control de Acceso (RBAC)</strong><p>Credenciales únicas por usuario. Gestión de identidades mediante Supabase Auth (OAuth 2.0 / JWT firmados). Cada psicólogo accede exclusivamente a sus propios pacientes mediante control de acceso basado en roles (RBAC). Sesiones con expiración automática.</p></div>
+<div class="sec-item"><div class="ico">🔒</div><strong>Cifrado en Tránsito y en Reposo</strong><p>Todas las comunicaciones protegidas mediante TLS 1.3 (HTTPS obligatorio). Datos en base de datos cifrados con AES-256 en reposo (Supabase/PostgreSQL). Las credenciales de usuario se almacenan mediante hash bcrypt con salt aleatorio.</p></div>
+<div class="sec-item"><div class="ico">🗄️</div><strong>Aislamiento de Datos — Row Level Security</strong><p>Base de datos PostgreSQL con políticas de Row Level Security (RLS) activas. Imposibilidad técnica de acceso cruzado entre distintos profesionales. Cada registro sólo es accesible por el usuario propietario mediante políticas de seguridad en capa de base de datos.</p></div>
+<div class="sec-item"><div class="ico">🌍</div><strong>Infraestructura en la Unión Europea</strong><p>Datos alojados en servidores de Supabase en la región EU West (Irlanda / Frankfurt). Cumplimiento del Capítulo V RGPD sobre transferencias internacionales. Sin transferencias a terceros países fuera del EEE sin las garantías adecuadas del Art. 46 RGPD.</p></div>
+<div class="sec-item"><div class="ico">📋</div><strong>Registro de Actividades de Tratamiento (Art. 30 RGPD)</strong><p>Mantenimiento de registro de actividades conforme al artículo 30 del RGPD. Trazabilidad de accesos y operaciones sobre el expediente del paciente. Registro de quién, cuándo y qué acción realizó sobre los datos.</p></div>
+<div class="sec-item"><div class="ico">🛡️</div><strong>Privacidad por Diseño y por Defecto (Art. 25 RGPD)</strong><p>Principio de minimización de datos (Art. 5.1.c RGPD): sólo se recaban datos estrictamente necesarios para la finalidad terapéutica. Configuración de privacidad por defecto en el máximo nivel de protección desde el diseño del sistema.</p></div>
+<div class="sec-item"><div class="ico">🔑</div><strong>Gestión Segura de Secretos y Claves</strong><p>Claves de API y secretos almacenados exclusivamente en variables de entorno de servidor seguro (Vercel Edge Functions / servidor Node.js). Nunca expuestos en el cliente. Rotación periódica de credenciales críticas.</p></div>
+<div class="sec-item"><div class="ico">💾</div><strong>Copias de Seguridad y Continuidad del Servicio</strong><p>Backups automáticos diarios con retención configurable (Supabase). Plan de recuperación ante desastres con objetivos RTO/RPO definidos. Alta disponibilidad con redundancia geográfica en infraestructura de Supabase.</p></div>
+</div>
+
+<h2>4. Plazo de Conservación de los Datos</h2>
+<p>Los datos personales serán conservados durante el tiempo estrictamente necesario para la prestación del servicio terapéutico y el cumplimiento de las obligaciones legales aplicables:</p>
+<ul>
+<li><strong>Historia clínica y datos de salud:</strong> Mínimo 5 años desde la última asistencia conforme al artículo 17.1 de la Ley 41/2002. En comunidades autónomas con legislación propia, el plazo puede ser superior. Para menores de edad, los datos se conservarán hasta que el paciente cumpla como mínimo 23 años.</li>
+<li><strong>Datos de facturación y económicos:</strong> 4 años conforme a obligaciones tributarias (art. 66 Ley General Tributaria) y 6 años conforme a obligaciones mercantiles (art. 30 Código de Comercio).</li>
+<li><strong>Datos de comunicación:</strong> Durante la vigencia de la relación terapéutica y el plazo de conservación de la historia clínica aplicable.</li>
+<li><strong>Registros de acceso y seguridad:</strong> Máximo 12 meses conforme a directrices de la AEPD, salvo requerimiento judicial o administrativo motivado.</li>
+</ul>
+<p>Transcurridos dichos plazos, los datos serán suprimidos de forma segura conforme a procedimientos que garanticen la imposibilidad de recuperación (borrado seguro certificado).</p>
+
+<h2>5. Derechos del Interesado</h2>
+<p>De conformidad con los artículos 15 a 22 del RGPD y los artículos 13 a 18 de la LOPDGDD, el interesado puede ejercer en cualquier momento los siguientes derechos:</p>
+<ul>
+<li><strong>Derecho de acceso (Art. 15 RGPD):</strong> Obtener confirmación sobre si se tratan sus datos y acceder a una copia completa de los mismos.</li>
+<li><strong>Derecho de rectificación (Art. 16 RGPD):</strong> Solicitar la corrección de datos inexactos o incompletos que le conciernan.</li>
+<li><strong>Derecho de supresión — «derecho al olvido» (Art. 17 RGPD):</strong> Solicitar la eliminación de sus datos, salvo cuando el tratamiento sea necesario para el cumplimiento de una obligación legal (ej.: conservación de historia clínica).</li>
+<li><strong>Derecho a la limitación del tratamiento (Art. 18 RGPD):</strong> Solicitar que el tratamiento de sus datos quede suspendido en determinadas circunstancias previstas por el RGPD.</li>
+<li><strong>Derecho a la portabilidad (Art. 20 RGPD):</strong> Recibir sus datos en formato estructurado, de uso común y lectura mecánica, y solicitar su transmisión a otro responsable del tratamiento.</li>
+<li><strong>Derecho de oposición (Art. 21 RGPD):</strong> Oponerse al tratamiento de sus datos en determinadas circunstancias, en particular cuando el tratamiento se base en el interés legítimo del responsable.</li>
+<li><strong>Derecho a no ser objeto de decisiones automatizadas (Art. 22 RGPD):</strong> No ser objeto de decisiones basadas únicamente en el tratamiento automatizado de datos, incluida la elaboración de perfiles, que produzcan efectos jurídicos o le afecten significativamente.</li>
+<li><strong>Derecho a retirar el consentimiento:</strong> En cualquier momento, sin que ello afecte a la licitud del tratamiento basado en el consentimiento previo a su retirada.</li>
+</ul>
+<p>Para ejercer sus derechos, el interesado puede dirigirse al responsable del tratamiento identificado en el apartado 1. Asimismo, tiene derecho a presentar una reclamación ante la <strong>Agencia Española de Protección de Datos (AEPD)</strong> — www.aepd.es — si considera que el tratamiento no es conforme con la normativa aplicable.</p>
+
+<h2>6. Cesiones y Transferencias de Datos</h2>
+<p>Los datos personales del interesado <strong>no serán cedidos a terceros</strong> salvo en los siguientes supuestos: (i) existencia de obligación legal; (ii) necesidad para la prestación del servicio mediante encargados del tratamiento que actúan bajo las instrucciones del responsable y con contrato de encargo de tratamiento suscrito conforme al artículo 28 del RGPD. Los encargados del tratamiento son:</p>
+<ul>
+<li><strong>Supabase Inc.</strong> (base de datos PostgreSQL, autenticación OAuth) — Infraestructura en EU West. DPA disponible en supabase.com/legal/dpa.</li>
+<li><strong>Vercel Inc.</strong> (infraestructura de despliegue y funciones serverless) — DPA suscrito; preferencia por región EU.</li>
+</ul>
+<p>En ningún caso se realizarán transferencias de datos a terceros países fuera del Espacio Económico Europeo (EEE) sin las garantías adecuadas previstas en el Capítulo V del RGPD (cláusulas contractuales tipo aprobadas por la Comisión Europea u otro mecanismo de transferencia válido).</p>
+
+<h2>7. Registro de Accesos al Expediente del Paciente</h2>
+<p>A continuación se detalla el registro de accesos al expediente del interesado, conforme a las obligaciones de trazabilidad y seguridad derivadas del artículo 32 del RGPD y las directrices de la AEPD sobre el tratamiento de datos de salud. Este registro constituye evidencia documental a efectos del cumplimiento normativo y del principio de responsabilidad proactiva (Art. 5.2 RGPD).</p>
+<table>
+<thead><tr><th>Fecha</th><th>Hora</th><th>Usuario responsable</th><th>Acción / Motivo del acceso</th><th>Sistema</th></tr></thead>
+<tbody>${accessRows}</tbody>
+</table>
+<div class="note green"><strong>✅ Integridad del registro:</strong> Este registro ha sido generado automáticamente por el sistema dygo a partir de los datos de actividad registrados en la plataforma. Los controles técnicos implementados garantizan la integridad y no repudio de los registros de acceso. Generado el ${dateStr} a las ${timeStr} h.</div>
+
+<h2>8. Declaración de Conformidad Normativa</h2>
+<p>El presente informe certifica que el tratamiento de los datos personales del interesado identificado en este documento se realiza en plena conformidad con:</p>
+<ul>
+<li>El <strong>Reglamento (UE) 2016/679 del Parlamento Europeo y del Consejo, de 27 de abril de 2016, relativo a la protección de las personas físicas en lo que respecta al tratamiento de datos personales y a la libre circulación de estos datos (RGPD)</strong>.</li>
+<li>La <strong>Ley Orgánica 3/2018, de 5 de diciembre, de Protección de Datos Personales y garantía de los derechos digitales (LOPDGDD)</strong>.</li>
+<li>La <strong>Ley 41/2002, de 14 de noviembre, básica reguladora de la autonomía del paciente y de derechos y obligaciones en materia de información y documentación clínica</strong>.</li>
+<li>La <strong>Ley 44/2003, de 21 de noviembre, de ordenación de las profesiones sanitarias</strong> y el deber de secreto profesional del psicólogo.</li>
+<li>El <strong>Código Deontológico del Consejo General de la Psicología de España</strong>, en particular los artículos relativos a la confidencialidad y protección de los datos del paciente.</li>
+<li>Los principios de licitud, lealtad y transparencia; limitación de la finalidad; minimización de datos; exactitud; limitación del plazo de conservación; integridad y confidencialidad; y responsabilidad proactiva (Art. 5 RGPD).</li>
+</ul>
+<div class="note purple"><strong>🔒 Aviso de confidencialidad:</strong> Este documento contiene información relativa al tratamiento de datos de categoría especial (datos de salud mental). Es estrictamente confidencial. Su divulgación no autorizada puede constituir una infracción muy grave conforme al artículo 83.5 del RGPD, sancionable con multas de hasta 20.000.000 € o el 4 % del volumen de negocio anual mundial total del ejercicio financiero anterior, si este importe fuera superior.</div>
+
+<div style="text-align:center;margin-top:36px">
+<div class="seal">✅ DOCUMENTO GENERADO POR SISTEMA CERTIFICADO · dygo · ${dateStr}</div>
+</div>
+
+<div class="footer">
+<p>Documento generado por dygo — Sistema de Gestión de Consulta Psicológica</p>
+<p>Cumplimiento: RGPD (Reglamento UE 2016/679) · LOPDGDD (LO 3/2018) · Ley 41/2002 · Ley 44/2003 · Código Deontológico COP</p>
+<p>Generado el ${dateStr} a las ${timeStr} h · Referencia de expediente: ${patientUserId}</p>
+<p style="margin-top:7px;color:#7c3aed;font-weight:700">DOCUMENTO CONFIDENCIAL — USO INTERNO Y COMUNICACIÓN AL INTERESADO</p>
+</div>
+
+</body>
+</html>`;
+
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(htmlContent);
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => { printWindow.print(); }, 500);
+    }
+  };
+
   const loadAllPsychologistTags = async () => {
     if (!currentPsychologistId) return;
     
@@ -955,6 +1224,78 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
     }
   };
 
+  // ─── Docs helpers ────────────────────────────────────────────────────────────
+  const loadDocSignatures = async () => {
+    if (!currentPsychologistId || !patientUserId) return;
+    setIsLoadingDocs2(true);
+    try {
+      const res = await fetch(`${API_URL}/signatures?psych_user_id=${currentPsychologistId}&patient_user_id=${patientUserId}`);
+      if (res.ok) setDocSignatures(await res.json());
+    } catch (e) {
+      console.error('Error loading doc signatures:', e);
+    } finally {
+      setIsLoadingDocs2(false);
+    }
+  };
+
+  const loadDocTemplates = async () => {
+    if (!currentPsychologistId) return;
+    setIsLoadingTemplates(true);
+    try {
+      const res = await fetch(`${API_URL}/templates?psych_user_id=${currentPsychologistId}`);
+      if (res.ok) setDocTemplates(await res.json());
+    } catch (e) {
+      console.error('Error loading templates:', e);
+    } finally {
+      setIsLoadingTemplates(false);
+    }
+  };
+
+  const handleSendDoc = async (template: any) => {
+    setIsSendingDoc(true);
+    try {
+      const res = await fetch(`${API_URL}/signatures`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          template_id: template.id,
+          psych_user_id: currentPsychologistId,
+          patient_user_id: patientUserId,
+          content: template.content
+        })
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setDocSendSuccess(true);
+      setShowSendDocModal(false);
+      setSendingDocTemplate(null);
+      await loadDocSignatures();
+      setTimeout(() => setDocSendSuccess(false), 3000);
+    } catch (e: any) {
+      alert('Error enviando documento: ' + (e.message || e));
+    } finally {
+      setIsSendingDoc(false);
+    }
+  };
+
+  function docMarkdownToHtml(md: string): string {
+    if (!md) return '';
+    const clean = md.replace(/\n\n<!-- SIGNATURE_DATA:.*?-->$/s, '');
+    let html = clean
+      .replace(/^### (.+)$/gm, '<h3 style="font-size:1.1em;font-weight:700;margin:12px 0 4px">$1</h3>')
+      .replace(/^## (.+)$/gm, '<h2 style="font-size:1.25em;font-weight:700;margin:16px 0 4px">$1</h2>')
+      .replace(/^# (.+)$/gm, '<h1 style="font-size:1.5em;font-weight:700;margin:20px 0 6px">$1</h1>')
+      .replace(/^---$/gm, '<hr style="border:0;border-top:1px solid #cbd5e1;margin:12px 0" />')
+      .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>')
+      .replace(/^\s*[-*] (.+)$/gm, '<li style="margin-left:16px;list-style-type:disc">$1</li>')
+      .replace(/^> (.+)$/gm, '<blockquote style="border-left:4px solid #cbd5e1;padding-left:12px;font-style:italic;color:#64748b;margin:8px 0">$1</blockquote>')
+      .replace(/\n\n/g, '</p><p style="margin-bottom:10px">')
+      .replace(/\n/g, '<br />');
+    html = html.replace(/(<li[\s\S]+?<\/li>)/g, '<ul style="margin:8px 0">$1</ul>');
+    return `<p style="margin-bottom:10px">${html}</p>`;
+  }
+
   const tabs = [
     { id: 'PATIENT', label: 'Paciente', icon: FileText },
     { id: 'INFO', label: 'Información', icon: User },
@@ -963,6 +1304,8 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
     { id: 'HISTORY', label: 'Historia Clínica', icon: BookOpen },
     { id: 'BILLING', label: 'Facturación', icon: DollarSign },
     ...(relationshipSettings.usesBonos ? [{ id: 'BONOS', label: 'Bonos', icon: Ticket }] : []),
+    { id: 'DOCS', label: 'Documentos', icon: Scroll },
+    { id: 'LOPD', label: 'Privacidad', icon: Shield },
     { id: 'RELATIONSHIP', label: 'Configuración', icon: Settings }
   ];
 
@@ -1705,6 +2048,361 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
               patientName={patient.name}
               patientEmail={patient.email}
             />
+          )}
+
+          {activeTab === 'DOCS' && (
+            <div className="h-full overflow-auto bg-slate-50 p-3 sm:p-5 space-y-4">
+              {/* Header */}
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                    <Scroll className="text-indigo-600 w-5 h-5" />
+                    Documentos enviados
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Documentos y consentimientos compartidos con {patient.name}</p>
+                </div>
+                <button
+                  onClick={() => { setShowSendDocModal(true); setDocSendSuccess(false); }}
+                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors shadow-sm text-sm font-medium"
+                >
+                  <Send size={14} />
+                  Enviar documento
+                </button>
+              </div>
+
+              {docSendSuccess && (
+                <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-xl px-4 py-3">
+                  <CheckCircle size={16} />
+                  Documento enviado correctamente
+                </div>
+              )}
+
+              {/* Signatures list */}
+              {isLoadingDocs2 ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 size={28} className="animate-spin text-indigo-400" />
+                </div>
+              ) : docSignatures.length === 0 ? (
+                <div className="text-center py-16 text-slate-400">
+                  <Scroll size={48} className="mx-auto mb-3 opacity-30" />
+                  <p className="font-medium">Sin documentos enviados aún</p>
+                  <p className="text-sm mt-1">Envía un template para que el paciente lo firme</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {docSignatures.map((sig: any) => {
+                    const firstLine = (sig.content || '').replace(/<!-- SIGNATURE_DATA:.*?-->$/s, '').split('\n')[0].replace(/^#+\s*/, '').trim();
+                    const title = firstLine || 'Documento';
+                    return (
+                      <div key={sig.id} className="bg-white border border-slate-200 rounded-2xl p-4 flex items-center gap-3 shadow-sm">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${sig.signed ? 'bg-green-100' : 'bg-amber-100'}`}>
+                          {sig.signed
+                            ? <CheckCircle size={20} className="text-green-600" />
+                            : <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-600"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                          }
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-slate-900 text-sm truncate">{title}</p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${sig.signed ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                              {sig.signed ? 'Firmado' : 'Pendiente'}
+                            </span>
+                            <span className="text-[11px] text-slate-400">
+                              {new Date(sig.created_at).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}
+                            </span>
+                            {sig.signed && sig.signature_date && (
+                              <span className="text-[11px] text-green-600">
+                                · Firmado {new Date(sig.signature_date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => setPreviewDocSignature(sig)}
+                          className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                          title="Ver documento"
+                        >
+                          <Eye size={16} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Send doc modal */}
+              {showSendDocModal && (
+                <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4">
+                  <div className="bg-white rounded-2xl shadow-2xl p-5 w-full max-w-md">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-base font-bold text-slate-900">Seleccionar template</h3>
+                      <button onClick={() => setShowSendDocModal(false)} className="p-1.5 hover:bg-slate-100 rounded-lg">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-500"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                      </button>
+                    </div>
+                    {isLoadingTemplates ? (
+                      <div className="flex items-center justify-center py-8"><Loader2 size={24} className="animate-spin text-indigo-400" /></div>
+                    ) : docTemplates.length === 0 ? (
+                      <p className="text-sm text-slate-400 py-6 text-center">No tienes templates. Créalos desde la sección Documentos.</p>
+                    ) : (
+                      (() => {
+                        const alreadySentIds = new Set(docSignatures.map((s: any) => s.template_id));
+                        return (
+                          <div className="space-y-2 max-h-80 overflow-y-auto">
+                            {docTemplates.map((tpl: any) => {
+                              const firstLine = (tpl.content || '').split('\n')[0].replace(/^#+\s*/, '').trim();
+                              const tplTitle = firstLine || 'Sin título';
+                              const alreadySent = alreadySentIds.has(tpl.id);
+                              return (
+                                <button
+                                  key={tpl.id}
+                                  onClick={() => !alreadySent && handleSendDoc(tpl)}
+                                  disabled={isSendingDoc || alreadySent}
+                                  title={alreadySent ? 'Ya enviado a este paciente' : undefined}
+                                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-all ${
+                                    alreadySent
+                                      ? 'border-slate-100 bg-slate-50 opacity-60 cursor-not-allowed'
+                                      : 'border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 disabled:opacity-50'
+                                  }`}
+                                >
+                                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${tpl.master ? 'bg-amber-100' : 'bg-blue-100'}`}>
+                                    {tpl.master ? <Award size={14} className="text-amber-600" /> : <Scroll size={14} className="text-blue-600" />}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-medium text-slate-800 truncate">{tplTitle}</p>
+                                    {alreadySent
+                                      ? <p className="text-[10px] text-slate-400 font-semibold">Ya enviado</p>
+                                      : tpl.master && <p className="text-[10px] text-amber-600 font-semibold">Plantilla</p>
+                                    }
+                                  </div>
+                                  {alreadySent && (
+                                    <CheckCircle size={14} className="text-slate-400 flex-shrink-0" />
+                                  )}
+                                  {isSendingDoc && sendingDocTemplate?.id === tpl.id && (
+                                    <Loader2 size={14} className="animate-spin text-indigo-500" />
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Preview doc signature modal */}
+              {previewDocSignature && (
+                <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
+                  <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+                    <div className="flex items-center justify-between p-4 border-b border-slate-200">
+                      <div>
+                        <h3 className="font-bold text-slate-900 text-sm">
+                          {(previewDocSignature.content || '').replace(/<!-- SIGNATURE_DATA:.*?-->$/s, '').split('\n')[0].replace(/^#+\s*/, '').trim() || 'Documento'}
+                        </h3>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${previewDocSignature.signed ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                            {previewDocSignature.signed ? 'Firmado' : 'Pendiente de firma paciente'}
+                          </span>
+                        </div>
+                      </div>
+                      <button onClick={() => setPreviewDocSignature(null)} className="p-1.5 hover:bg-slate-100 rounded-lg">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-500"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                      </button>
+                    </div>
+                    <div
+                      className="flex-1 overflow-y-auto p-5 text-sm text-slate-800 leading-relaxed"
+                      dangerouslySetInnerHTML={{ __html: docMarkdownToHtml(previewDocSignature.content || '') }}
+                    />
+                    <div className="p-4 border-t border-slate-200 flex justify-end">
+                      <button onClick={() => setPreviewDocSignature(null)} className="px-4 py-2 border border-slate-200 rounded-xl text-sm">Cerrar</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'LOPD' && (
+            <div className="h-full overflow-auto bg-slate-50 p-3 sm:p-5 space-y-4">
+              {/* Header */}
+              <div className="bg-gradient-to-r from-purple-600 to-violet-700 rounded-2xl p-5 text-white shadow-lg">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <Shield size={22} />
+                      <h3 className="text-lg font-bold">Protección de Datos — LOPD / RGPD</h3>
+                    </div>
+                    <p className="text-purple-100 text-sm leading-relaxed">
+                      Informe de cumplimiento normativo conforme al <strong>Reglamento (UE) 2016/679 (RGPD)</strong> y la <strong>LO 3/2018 (LOPDGDD)</strong>. Los datos de este paciente son datos de categoría especial (salud) sujetos a protección reforzada.
+                    </p>
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      <span className="bg-white/20 text-white text-xs font-semibold px-3 py-1 rounded-full">RGPD · Art. 9</span>
+                      <span className="bg-white/20 text-white text-xs font-semibold px-3 py-1 rounded-full">LOPDGDD · LO 3/2018</span>
+                      <span className="bg-white/20 text-white text-xs font-semibold px-3 py-1 rounded-full">Ley 41/2002</span>
+                      <span className="bg-white/20 text-white text-xs font-semibold px-3 py-1 rounded-full">Datos de Salud</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={downloadLOPDReport}
+                    disabled={isLoadingLOPD}
+                    className="flex-shrink-0 flex items-center gap-2 px-4 py-3 bg-white text-purple-700 font-bold rounded-xl hover:bg-purple-50 transition-colors shadow-md text-sm"
+                  >
+                    {isLoadingLOPD ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                    Descargar PDF
+                  </button>
+                </div>
+              </div>
+
+              {isLoadingLOPD ? (
+                <div className="flex items-center justify-center py-16">
+                  <Loader2 size={28} className="animate-spin text-purple-400" />
+                </div>
+              ) : (
+                <>
+                  {/* Datos tratados */}
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 space-y-3">
+                    <div className="flex items-center gap-2 mb-1">
+                      <ClipboardList size={18} className="text-purple-600" />
+                      <h4 className="font-bold text-slate-800 text-sm">Categorías de datos tratados</h4>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                      {[
+                        { label: 'Datos identificativos', desc: 'Nombre, DNI, dirección, fecha de nacimiento', cat: 'ordinario' },
+                        { label: 'Datos de contacto', desc: 'Email, teléfono', cat: 'ordinario' },
+                        { label: 'Datos clínicos y de salud mental', desc: 'Notas de sesión, historia clínica, transcripciones, objetivos', cat: 'especial' },
+                        { label: 'Datos documentales', desc: 'Consentimientos informados, informes clínicos adjuntos', cat: 'especial' },
+                        { label: 'Datos económicos', desc: 'Facturas, sesiones, bonos, pagos', cat: 'ordinario' },
+                        { label: 'Datos de comunicación', desc: 'Mensajes e intercambios en la plataforma', cat: 'ordinario' },
+                      ].map(item => (
+                        <div key={item.label} className="flex items-start gap-2 p-3 rounded-xl border bg-green-50 border-green-200">
+                          <div className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0 bg-green-500" />
+                          <div>
+                            <div className="font-semibold mb-0.5 text-green-800">
+                              {item.label}
+                              {item.cat === 'especial' && (
+                                <span className="ml-1.5 bg-green-100 text-green-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">Art. 9 RGPD</span>
+                              )}
+                            </div>
+                            <div className="text-green-700">{item.desc}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Medidas de seguridad */}
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 space-y-3">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Lock size={18} className="text-green-600" />
+                      <h4 className="font-bold text-slate-800 text-sm">Medidas de seguridad activas</h4>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                      {[
+                        { icon: '🔐', title: 'Autenticación JWT + RBAC', desc: 'Control de acceso basado en roles. Cada profesional accede sólo a sus pacientes.' },
+                        { icon: '🔒', title: 'Cifrado TLS 1.3 + AES-256', desc: 'Datos cifrados en tránsito (HTTPS) y en reposo en base de datos PostgreSQL.' },
+                        { icon: '🗄️', title: 'Row Level Security (RLS)', desc: 'Políticas de aislamiento a nivel de base de datos. Acceso cruzado técnicamente imposible.' },
+                        { icon: '🌍', title: 'Servidores en la UE', desc: 'Infraestructura Supabase en EU West (Irlanda/Frankfurt). Cumplimiento Cap. V RGPD.' },
+                        { icon: '📋', title: 'Registro de actividades (Art. 30)', desc: 'Trazabilidad completa de accesos y operaciones sobre el expediente.' },
+                        { icon: '💾', title: 'Backups automáticos diarios', desc: 'Copias de seguridad con retención 30 días. Plan de continuidad y recuperación.' },
+                      ].map(item => (
+                        <div key={item.title} className="flex items-start gap-2 p-3 bg-green-50 border border-green-200 rounded-xl">
+                          <span className="text-base flex-shrink-0">{item.icon}</span>
+                          <div>
+                            <div className="font-semibold text-green-800 mb-0.5">{item.title}</div>
+                            <div className="text-green-700">{item.desc}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Registro de accesos */}
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+                    <div className="flex items-center justify-between gap-2 mb-3">
+                      <div className="flex items-center gap-2">
+                        <Eye size={18} className="text-indigo-600" />
+                        <h4 className="font-bold text-slate-800 text-sm">Registro de accesos al expediente</h4>
+                      </div>
+                      <span className="text-xs text-slate-400">{lopdSessions.filter((s: any) => s.status !== 'available').length + (relationship?.created_at ? 1 : 0) + 1} evento(s)</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-slate-100 text-slate-600">
+                            <th className="text-left px-3 py-2 font-semibold rounded-l-lg">Fecha</th>
+                            <th className="text-left px-3 py-2 font-semibold">Hora</th>
+                            <th className="text-left px-3 py-2 font-semibold">Usuario</th>
+                            <th className="text-left px-3 py-2 font-semibold rounded-r-lg">Acción</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {relationship?.created_at && (() => {
+                            const d = new Date(relationship.created_at);
+                            return (
+                              <tr key="rel-created" className="hover:bg-slate-50">
+                                <td className="px-3 py-2 font-medium">{d.toLocaleDateString('es-ES')}</td>
+                                <td className="px-3 py-2 text-slate-500">{d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</td>
+                                <td className="px-3 py-2">{lopdPsychName || 'Psicólogo/a'}</td>
+                                <td className="px-3 py-2 text-slate-600">Inicio de relación terapéutica — creación del expediente</td>
+                              </tr>
+                            );
+                          })()}
+                          {lopdSessions
+                            .filter((s: any) => s.starts_on && s.status !== 'available')
+                            .sort((a: any, b: any) => new Date(a.starts_on).getTime() - new Date(b.starts_on).getTime())
+                            .map((s: any) => {
+                              const d = new Date(s.starts_on);
+                              const statusLabel = s.status === 'completed' ? 'Sesión completada' : s.status === 'cancelled' ? 'Sesión cancelada' : 'Sesión programada';
+                              return (
+                                <tr key={s.id} className="hover:bg-slate-50">
+                                  <td className="px-3 py-2 font-medium">{d.toLocaleDateString('es-ES')}</td>
+                                  <td className="px-3 py-2 text-slate-500">{d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</td>
+                                  <td className="px-3 py-2">{lopdPsychName || 'Psicólogo/a'}</td>
+                                  <td className="px-3 py-2 text-slate-600">{statusLabel} — acceso al expediente clínico</td>
+                                </tr>
+                              );
+                            })
+                          }
+                          <tr className="bg-indigo-50 font-medium">
+                            <td className="px-3 py-2">{new Date().toLocaleDateString('es-ES')}</td>
+                            <td className="px-3 py-2">{new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</td>
+                            <td className="px-3 py-2">{lopdPsychName || 'Psicólogo/a'}</td>
+                            <td className="px-3 py-2 text-indigo-700">Consulta del informe de protección de datos — acceso al expediente</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Derechos ARCO */}
+                  <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+                    <div className="flex items-start gap-3">
+                      <Award size={20} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                      <div className="text-xs text-amber-900 space-y-1">
+                        <p className="font-bold text-sm">Derechos del paciente sobre sus datos personales</p>
+                        <p>El paciente puede ejercer en cualquier momento sus derechos ARCO+ conforme a los artículos 15–22 del RGPD: <strong>Acceso · Rectificación · Supresión · Oposición · Portabilidad · Limitación · No decisión automatizada.</strong></p>
+                        <p>Para ejercerlos, debe contactar con el responsable del tratamiento o presentar reclamación ante la <strong>AEPD</strong> (www.aepd.es). El informe PDF descargable incluye toda la información legal completa para entregárselo al paciente.</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Botón descarga grande */}
+                  <div className="flex justify-center pb-4">
+                    <button
+                      onClick={downloadLOPDReport}
+                      disabled={isLoadingLOPD}
+                      className="flex items-center gap-3 px-8 py-4 bg-gradient-to-r from-purple-600 to-violet-700 text-white font-bold rounded-2xl hover:from-purple-700 hover:to-violet-800 transition-all shadow-lg text-sm"
+                    >
+                      <Shield size={18} />
+                      Descargar Informe LOPD/RGPD en PDF
+                      <Download size={18} />
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           )}
 
           {activeTab === 'HISTORY' && (

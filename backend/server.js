@@ -10727,6 +10727,270 @@ app.get('/api/center/:centerId/unbilled', async (req, res) => {
   }
 });
 
+// ============================================================
+// TEMPLATES & SIGNATURES
+// ============================================================
+
+// GET /api/templates?psych_user_id=xxx
+// Returns: own templates (master=false) + all master templates (master=true)
+app.get('/api/templates', async (req, res) => {
+  try {
+    const { psych_user_id } = req.query;
+    if (!psych_user_id) return res.status(400).json({ error: 'Se requiere psych_user_id' });
+
+    if (supabaseAdmin) {
+      // Fetch own templates
+      const { data: ownTemplates, error: ownErr } = await supabaseAdmin
+        .from('templates')
+        .select('*')
+        .eq('psych_user_id', psych_user_id)
+        .eq('master', false)
+        .order('created_at', { ascending: false });
+
+      if (ownErr) throw ownErr;
+
+      // Fetch master templates
+      const { data: masterTemplates, error: masterErr } = await supabaseAdmin
+        .from('templates')
+        .select('*')
+        .eq('master', true)
+        .order('created_at', { ascending: false });
+
+      if (masterErr) throw masterErr;
+
+      const all = [...(masterTemplates || []), ...(ownTemplates || [])];
+      return res.json(all);
+    }
+
+    return res.json([]);
+  } catch (error) {
+    console.error('[GET /api/templates] Error:', error);
+    res.status(500).json({ error: 'Error al obtener templates' });
+  }
+});
+
+// POST /api/templates  — always creates with master=false
+app.post('/api/templates', async (req, res) => {
+  try {
+    const { psych_user_id, content, template_name } = req.body;
+    if (!psych_user_id || !content) {
+      return res.status(400).json({ error: 'Se requiere psych_user_id y content' });
+    }
+
+    if (supabaseAdmin) {
+      const { data, error } = await supabaseAdmin
+        .from('templates')
+        .insert({ psych_user_id, content, master: false, template_name: template_name || null })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return res.status(201).json(data);
+    }
+
+    return res.status(501).json({ error: 'Solo disponible con Supabase' });
+  } catch (error) {
+    console.error('[POST /api/templates] Error:', error);
+    res.status(500).json({ error: 'Error al crear template' });
+  }
+});
+
+// PUT /api/templates/:id  — can only update own (non-master) templates
+app.put('/api/templates/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { psych_user_id, content, template_name } = req.body;
+
+    if (!psych_user_id || !content) {
+      return res.status(400).json({ error: 'Se requiere psych_user_id y content' });
+    }
+
+    if (supabaseAdmin) {
+      // Verify ownership and that it's not a master template
+      const { data: existing, error: fetchErr } = await supabaseAdmin
+        .from('templates')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+      if (fetchErr || !existing) return res.status(404).json({ error: 'Template no encontrado' });
+      if (existing.master) return res.status(403).json({ error: 'No se pueden editar templates master' });
+      if (existing.psych_user_id !== psych_user_id) return res.status(403).json({ error: 'Sin permiso para editar este template' });
+
+      const updatePayload: any = { content };
+      if (template_name !== undefined) updatePayload.template_name = template_name;
+
+      const { data, error } = await supabaseAdmin
+        .from('templates')
+        .update(updatePayload)
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return res.json(data);
+    }
+
+    return res.status(501).json({ error: 'Solo disponible con Supabase' });
+  } catch (error) {
+    console.error('[PUT /api/templates/:id] Error:', error);
+    res.status(500).json({ error: 'Error al actualizar template' });
+  }
+});
+
+// DELETE /api/templates/:id  — can only delete own (non-master) templates
+app.delete('/api/templates/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { psych_user_id } = req.query;
+
+    if (!psych_user_id) return res.status(400).json({ error: 'Se requiere psych_user_id' });
+
+    if (supabaseAdmin) {
+      const { data: existing, error: fetchErr } = await supabaseAdmin
+        .from('templates')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+      if (fetchErr || !existing) return res.status(404).json({ error: 'Template no encontrado' });
+      if (existing.master) return res.status(403).json({ error: 'No se pueden eliminar templates master' });
+      if (existing.psych_user_id !== psych_user_id) return res.status(403).json({ error: 'Sin permiso para eliminar este template' });
+
+      const { error } = await supabaseAdmin.from('templates').delete().eq('id', id);
+      if (error) throw error;
+      return res.json({ success: true });
+    }
+
+    return res.status(501).json({ error: 'Solo disponible con Supabase' });
+  } catch (error) {
+    console.error('[DELETE /api/templates/:id] Error:', error);
+    res.status(500).json({ error: 'Error al eliminar template' });
+  }
+});
+
+// GET /api/signatures?psych_user_id=xxx&patient_user_id=yyy
+app.get('/api/signatures', async (req, res) => {
+  try {
+    const { psych_user_id, patient_user_id } = req.query;
+    if (!psych_user_id && !patient_user_id) {
+      return res.status(400).json({ error: 'Se requiere psych_user_id o patient_user_id' });
+    }
+
+    if (supabaseAdmin) {
+      let query = supabaseAdmin
+        .from('signatures')
+        .select('*, template:templates(id, content)')
+        .order('created_at', { ascending: false });
+
+      if (psych_user_id) query = query.eq('psych_user_id', psych_user_id);
+      if (patient_user_id) query = query.eq('patient_user_id', patient_user_id);
+
+      const { data, error } = await query;
+      if (error) throw error;
+      return res.json(data || []);
+    }
+
+    return res.json([]);
+  } catch (error) {
+    console.error('[GET /api/signatures] Error:', error);
+    res.status(500).json({ error: 'Error al obtener firmas' });
+  }
+});
+
+// POST /api/signatures  — psychologist sends a template to a patient
+app.post('/api/signatures', async (req, res) => {
+  try {
+    const { template_id, psych_user_id, patient_user_id, content } = req.body;
+    if (!template_id || !psych_user_id || !patient_user_id || !content) {
+      return res.status(400).json({ error: 'Se requieren template_id, psych_user_id, patient_user_id y content' });
+    }
+
+    if (supabaseAdmin) {
+      // Prevent duplicate: check if this template was already sent to this patient by this psychologist
+      const { data: existing, error: checkErr } = await supabaseAdmin
+        .from('signatures')
+        .select('id')
+        .eq('template_id', parseInt(template_id))
+        .eq('psych_user_id', psych_user_id)
+        .eq('patient_user_id', patient_user_id)
+        .limit(1);
+
+      if (checkErr) throw checkErr;
+
+      if (existing && existing.length > 0) {
+        return res.status(409).json({ error: 'Este documento ya fue enviado a este paciente' });
+      }
+
+      const { data, error } = await supabaseAdmin
+        .from('signatures')
+        .insert({
+          template_id: parseInt(template_id),
+          psych_user_id,
+          patient_user_id,
+          content,
+          signed: false,
+          signature_date: null
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return res.status(201).json(data);
+    }
+
+    return res.status(501).json({ error: 'Solo disponible con Supabase' });
+  } catch (error) {
+    console.error('[POST /api/signatures] Error:', error);
+    res.status(500).json({ error: 'Error al enviar documento' });
+  }
+});
+
+// PUT /api/signatures/:id  — patient signs a document with a base64 signature image
+app.put('/api/signatures/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { signature_data, patient_user_id } = req.body;
+
+    if (!patient_user_id) return res.status(400).json({ error: 'Se requiere patient_user_id' });
+
+    if (supabaseAdmin) {
+      const { data: existing, error: fetchErr } = await supabaseAdmin
+        .from('signatures')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+      if (fetchErr || !existing) return res.status(404).json({ error: 'Documento no encontrado' });
+      if (existing.patient_user_id !== patient_user_id) return res.status(403).json({ error: 'Sin permiso para firmar este documento' });
+
+      const updatePayload = {
+        signed: true,
+        signature_date: new Date().toISOString()
+      };
+      // Store the signature drawing in content field appended as JSON metadata
+      if (signature_data) {
+        updatePayload.content = existing.content + `\n\n<!-- SIGNATURE_DATA:${signature_data} -->`;
+      }
+
+      const { data, error } = await supabaseAdmin
+        .from('signatures')
+        .update(updatePayload)
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return res.json(data);
+    }
+
+    return res.status(501).json({ error: 'Solo disponible con Supabase' });
+  } catch (error) {
+    console.error('[PUT /api/signatures/:id] Error:', error);
+    res.status(500).json({ error: 'Error al firmar documento' });
+  }
+});
+
 app.get('/', (_req, res) => {
   res.send('DYGO API OK ✅ Usa /api/users, /api/entries, etc.');
 });

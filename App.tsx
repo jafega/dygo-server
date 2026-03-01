@@ -25,6 +25,8 @@ import PsychologistDashboard from './components/PsychologistDashboard';
 import SessionsList from './components/SessionsList';
 import CentrosPanel, { CentrosPanelRef } from './components/CentrosPanel';
 import ConnectionsPanel from './components/ConnectionsPanel';
+import TemplatesPanel from './components/TemplatesPanel';
+import PatientDocumentsPanel from './components/PatientDocumentsPanel';
 import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock, AlertCircle, Smile, Shield, Building2, LogOut } from 'lucide-react';
 
 // Custom Dygo Logo Component
@@ -41,7 +43,7 @@ const App: React.FC = () => {
   const [pendingRole, setPendingRole] = useState<'PATIENT' | 'PSYCHOLOGIST' | null>(null);
   
   const [psychViewMode, setPsychViewMode] = useState<'DASHBOARD' | 'PERSONAL'>('DASHBOARD');
-  const [psychPanelView, setPsychPanelView] = useState<'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule' | 'centros'>('schedule');
+  const [psychPanelView, setPsychPanelView] = useState<'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule' | 'centros' | 'templates'>('schedule');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   
   // State for draggable menu button position (unified across personal/professional)
@@ -80,7 +82,7 @@ const App: React.FC = () => {
   const [sessionDate, setSessionDate] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
-  const [activeTab, setActiveTab] = useState<'insights' | 'sessions' | 'appointments' | 'calendar' | 'billing' | 'profile' | 'admin'>('calendar');
+  const [activeTab, setActiveTab] = useState<'insights' | 'sessions' | 'appointments' | 'calendar' | 'billing' | 'profile' | 'admin' | 'documents'>('calendar');
   const [showSettings, setShowSettings] = useState(false);
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReport | null>(null);
   const [hasPendingInvites, setHasPendingInvites] = useState(false);
@@ -895,6 +897,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                         {psychPanelView === 'connections' && <Link2 className="w-6 h-6 text-indigo-600" />}
                         {psychPanelView === 'sessions' && <FileText className="w-6 h-6 text-indigo-600" />}
                         {psychPanelView === 'centros' && <Building2 className="w-6 h-6 text-indigo-600" />}
+                        {psychPanelView === 'templates' && <FileText className="w-6 h-6 text-indigo-600" />}
                         <h1 className="text-2xl font-bold text-slate-900">
                           {psychPanelView === 'dashboard' && 'Métricas'}
                           {psychPanelView === 'patients' && 'Pacientes'}
@@ -904,6 +907,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                           {psychPanelView === 'connections' && 'Conexiones'}
                           {psychPanelView === 'sessions' && 'Sesiones'}
                           {psychPanelView === 'centros' && 'Centros'}
+                          {psychPanelView === 'templates' && 'Documentos'}
                         </h1>
                       </div>
                       <p className="text-sm text-slate-500">
@@ -915,6 +919,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                         {psychPanelView === 'connections' && 'Gestiona quién puede verte y a quién acompañas'}
                         {psychPanelView === 'sessions' && 'Gestión de sesiones'}
                         {psychPanelView === 'centros' && 'Gestiona tus centros de trabajo'}
+                        {psychPanelView === 'templates' && 'Crea y envía documentos y consentimientos a pacientes'}
                       </p>
                     </header>
 
@@ -930,6 +935,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                           {psychPanelView === 'connections' && 'Conexiones'}
                           {psychPanelView === 'sessions' && 'Sesiones'}
                           {psychPanelView === 'centros' && 'Centros'}
+                          {psychPanelView === 'templates' && 'Documentos'}
                         </h1>
                         <p className="text-slate-500 mt-1">
                           {psychPanelView === 'dashboard' && 'Resumen completo de tu actividad profesional'}
@@ -940,6 +946,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                           {psychPanelView === 'connections' && 'Gestiona quién puede verte y a quién acompañas'}
                           {psychPanelView === 'sessions' && 'Gestión completa de sesiones con métricas'}
                           {psychPanelView === 'centros' && 'Gestiona los centros donde ofreces tus servicios'}
+                          {psychPanelView === 'templates' && 'Crea templates, consentimientos y envíalos a pacientes para su firma'}
                         </p>
                       </div>
                       {/* Action Buttons */}
@@ -990,6 +997,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                     {psychPanelView === 'profile' && <PsychologistProfilePanel userId={currentUser.id} userEmail={currentUser.email} />}
                     {psychPanelView === 'schedule' && <PsychologistSchedule psychologistId={currentUser.id} />}
                     {psychPanelView === 'connections' && <ConnectionsPanel currentUser={currentUser} />}
+                    {psychPanelView === 'templates' && <TemplatesPanel psychologistId={currentUser.id} />}
 
                     {showSettings && (
                          <SettingsModal 
@@ -1229,6 +1237,18 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
             </button>
 
             <button
+              onClick={() => { setActiveTab('documents'); if (window.innerWidth < 768) setSidebarOpen(false); }}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium ${
+                activeTab === 'documents'
+                  ? 'bg-indigo-50 text-indigo-700 shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+              }`}
+            >
+              <BookOpen size={18} />
+              <span className={`${sidebarOpen ? 'inline' : 'hidden'} md:inline`}>Documentos</span>
+            </button>
+
+            <button
               onClick={() => { setActiveTab('profile'); if (window.innerWidth < 768) setSidebarOpen(false); }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium relative ${
                 activeTab === 'profile'
@@ -1323,6 +1343,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                 {activeTab === 'connections' && <Link2 className="w-6 h-6 text-indigo-600" />}
                 {activeTab === 'profile' && <UserIcon className="w-6 h-6 text-indigo-600" />}
                 {activeTab === 'admin' && <Shield className="w-6 h-6 text-red-600" />}
+                {activeTab === 'documents' && <BookOpen className="w-6 h-6 text-indigo-600" />}
                 <h1 className="text-2xl font-bold text-slate-900">
                   {activeTab === 'insights' && 'Resumen'}
                   {activeTab === 'calendar' && 'Historia'}
@@ -1331,6 +1352,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   {activeTab === 'billing' && 'Facturación'}
                   {activeTab === 'profile' && 'Mi Perfil'}
                   {activeTab === 'admin' && 'Administración'}
+                  {activeTab === 'documents' && 'Documentos'}
                 </h1>
               </div>
               <p className="text-sm text-slate-500">
@@ -1341,6 +1363,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                 {activeTab === 'billing' && 'Consulta y descarga tus facturas'}
                 {activeTab === 'profile' && 'Información personal y preferencias'}
                 {activeTab === 'admin' && 'Panel de administración del sistema'}
+                {activeTab === 'documents' && 'Documentos enviados por tu psicólogo'}
               </p>
             </header>
 
@@ -1355,6 +1378,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   {activeTab === 'billing' && 'Facturación'}
                   {activeTab === 'profile' && 'Mi Perfil'}
                   {activeTab === 'admin' && 'Administración del Sistema'}
+                  {activeTab === 'documents' && 'Mis Documentos'}
                 </h1>
                 <p className="text-slate-500 mt-1">
                   {activeTab === 'insights' && 'Vista general de tu progreso'}
@@ -1364,6 +1388,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   {activeTab === 'billing' && 'Consulta y descarga tus facturas'}
                   {activeTab === 'profile' && 'Información personal y configuración de tu cuenta'}
                   {activeTab === 'admin' && 'Gestión de usuarios del sistema'}
+                  {activeTab === 'documents' && 'Lee y firma los documentos enviados por tu psicólogo'}
                 </p>
               </div>
               {activeTab === 'calendar' && (
@@ -1595,6 +1620,12 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
             {activeTab === 'profile' && currentUser && (
               <div className="animate-in fade-in">
                 <PatientProfilePanel userId={currentUser.id} />
+              </div>
+            )}
+
+            {activeTab === 'documents' && currentUser && (
+              <div className="animate-in fade-in">
+                <PatientDocumentsPanel patientId={currentUser.id} />
               </div>
             )}
 
