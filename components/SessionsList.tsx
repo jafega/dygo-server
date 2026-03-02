@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Calendar, CheckCircle, XCircle, Clock, DollarSign, User, Filter, Edit2, Save, X as XIcon, FileText, Trash2, Receipt, Ticket, Copy, Send, ExternalLink, Globe, ChevronDown } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser } from '../services/authService';
@@ -52,6 +52,8 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
   const [patients, setPatients] = useState<Map<string, Patient>>(new Map());
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const isFirstLoad = useRef(true);
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [editedSession, setEditedSession] = useState<Session | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -330,7 +332,11 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
   };
 
   const loadData = async () => {
-    setIsLoading(true);
+    if (isFirstLoad.current) {
+      setIsLoading(true);
+    } else {
+      setIsRefreshing(true);
+    }
     try {
       // Load sessions
       const params = new URLSearchParams({
@@ -396,7 +402,12 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
     } catch (error) {
       console.error('Error loading sessions:', error);
     }
-    setIsLoading(false);
+    if (isFirstLoad.current) {
+      isFirstLoad.current = false;
+      setIsLoading(false);
+    } else {
+      setIsRefreshing(false);
+    }
   };
 
   const getStatusBadge = (status: string) => {
@@ -866,7 +877,10 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                   </div>
                 )}
               </div>
-              <div className="text-xs sm:text-sm md:text-sm text-slate-500">
+              <div className="flex items-center gap-2 text-xs sm:text-sm md:text-sm text-slate-500">
+                {isRefreshing && (
+                  <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-purple-500"></div>
+                )}
                 Total: <span className="font-bold text-slate-800">{sessions.length}</span>
               </div>
             </div>

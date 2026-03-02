@@ -19,10 +19,7 @@ const getDefaultApiUrl = () => {
 		return `http://${host}:3001/api`;
 	}
 
-	// If frontend is on Vercel without API proxy, default to the known backend.
-	if (host.endsWith('.vercel.app') && !host.includes('dygo-server')) {
-		return 'https://dygo-server.vercel.app/api';
-	}
+	// En Vercel, la API está en el mismo proyecto bajo /api
 	return '/api';
 };
 export const API_URL = ENV_API_URL || getDefaultApiUrl();
