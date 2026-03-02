@@ -1083,11 +1083,12 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
     return matchesSearch && matchesStatus;
   });
 
-  // Ordenar facturas filtradas
+  // Ordenar facturas filtradas por número de factura (serie) de forma numérica
   const sortedFilteredInvoices = [...filteredInvoices].sort((a, b) => {
-    const dateA = new Date(a.invoice_date || a.date).getTime();
-    const dateB = new Date(b.invoice_date || b.date).getTime();
-    return sortOrder === 'desc' ? dateB - dateA : dateA - dateB;
+    const numA = a.invoiceNumber || '';
+    const numB = b.invoiceNumber || '';
+    const cmp = numA.localeCompare(numB, undefined, { numeric: true, sensitivity: 'base' });
+    return sortOrder === 'desc' ? -cmp : cmp;
   });
 
   // Calcular estadísticas (sin filtros de fecha, todas las facturas)
@@ -1259,10 +1260,10 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
         <button
           onClick={() => setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')}
           className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
-          title={sortOrder === 'desc' ? 'Más recientes primero' : 'Más antiguas primero'}
+          title={sortOrder === 'desc' ? 'Mayor número primero' : 'Menor número primero'}
         >
           <ArrowUpDown size={15} />
-          {sortOrder === 'desc' ? '↓ Más recientes primero' : '↑ Más antiguas primero'}
+          {sortOrder === 'desc' ? '↓ Mayor número primero' : '↑ Menor número primero'}
         </button>
       </div>
 

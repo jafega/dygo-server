@@ -25,6 +25,7 @@ interface Session {
   bonus_id?: string;
   starts_on?: string;
   ends_on?: string;
+  schedule_timezone?: string; // Zona horaria del psicólogo cuando se creó la sesión
 }
 
 interface Bono {
@@ -74,11 +75,12 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
   const [assignPatientSearchQuery, setAssignPatientSearchQuery] = useState('');
   const [showAssignPatientDropdown, setShowAssignPatientDropdown] = useState(false);
 
-  // Timezone
-  const [selectedTimezone, setSelectedTimezone] = useState(() =>
-    Intl.DateTimeFormat().resolvedOptions().timeZone
-  );
+  // Zona horaria del navegador – detectada una sola vez al montar, representa la ubicación real del psicólogo
+  const browserTimezone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
+  // Zona horaria seleccionada: por defecto = ubicación del navegador; se puede cambiar con el dropdown
+  const [selectedTimezone, setSelectedTimezone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
   const [showTimezoneDropdown, setShowTimezoneDropdown] = useState(false);
+  const [timezoneLoadedFromProfile, setTimezoneLoadedFromProfile] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   
@@ -137,6 +139,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
     loadSessions();
     loadPatients();
     loadCareRelationships();
+    loadScheduleTimezone();
   }, [psychologistId]);
   
   // Recargar sesiones cuando cambia el rango de fechas
@@ -145,6 +148,12 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
       loadSessions();
     }
   }, [currentDate]);
+
+  // Auto-guardar la zona horaria en el perfil cuando cambia (pero no en la carga inicial)
+  useEffect(() => {
+    if (!timezoneLoadedFromProfile) return; // aún no terminó de cargar
+    saveScheduleTimezone(selectedTimezone);
+  }, [selectedTimezone]);
 
   // Cerrar dropdowns al hacer clic fuera
   useEffect(() => {
@@ -453,6 +462,41 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
     };
   }, [draggingSession, dragPreview]);
 
+  const loadScheduleTimezone = async () => {
+    if (!psychologistId) return;
+    try {
+      const response = await fetch(`${API_URL}/psychologist/${psychologistId}/profile`);
+      if (response.ok) {
+        const profile = await response.json();
+        // Si el perfil no tiene TZ guardada, guardamos la TZ detectada del navegador
+        // para que el backend la use al normalizar sesiones.
+        // NUNCA sobreescribimos selectedTimezone: el default siempre es la ubicación real del navegador.
+        if (!profile?.schedule_timezone) {
+          await saveScheduleTimezone(browserTimezone);
+        }
+      }
+    } catch (err) {
+      console.warn('Could not load schedule timezone from profile:', err);
+    } finally {
+      setTimezoneLoadedFromProfile(true);
+    }
+  };
+
+  const saveScheduleTimezone = async (tz: string) => {
+    if (!psychologistId) return;
+    try {
+      const profileResponse = await fetch(`${API_URL}/psychologist/${psychologistId}/profile`);
+      const currentProfile = profileResponse.ok ? await profileResponse.json() : {};
+      await fetch(`${API_URL}/psychologist/${psychologistId}/profile`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...currentProfile, schedule_timezone: tz })
+      });
+    } catch (err) {
+      console.warn('Could not save schedule timezone to profile:', err);
+    }
+  };
+
   const loadSessions = async () => {
     setIsLoading(true);
     try {
@@ -615,6 +659,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
         paymentMethod: newSession.paymentMethod || undefined,
         starts_on,
         ends_on,
+        schedule_timezone: selectedTimezone,
       };
 
       try {
@@ -1173,15 +1218,25 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
         meetLink: editedSession.meetLink
       };
 
-      // Solo incluir fecha y hora si fueron modificadas
-      if (editedSession.date !== selectedSession.date) {
-        updatePayload.date = editedSession.date;
+      // Siempre incluir la zona horaria (del psicólogo actual)
+      updatePayload.schedule_timezone = selectedTimezone;
+
+      // Solo incluir fecha y hora si fueron modificadas; si cambia algo, recalcular starts_on/ends_on
+      const dateChanged = editedSession.date !== selectedSession.date;
+      const startChanged = editedSession.startTime !== selectedSession.startTime;
+      const endChanged = editedSession.endTime !== selectedSession.endTime;
+      if (dateChanged) updatePayload.date = editedSession.date;
+      if (startChanged) updatePayload.startTime = editedSession.startTime;
+      if (endChanged) updatePayload.endTime = editedSession.endTime;
+      if (dateChanged || startChanged) {
+        updatePayload.starts_on = localTzToUTCISO(
+          editedSession.date, editedSession.startTime, selectedTimezone
+        );
       }
-      if (editedSession.startTime !== selectedSession.startTime) {
-        updatePayload.startTime = editedSession.startTime;
-      }
-      if (editedSession.endTime !== selectedSession.endTime) {
-        updatePayload.endTime = editedSession.endTime;
+      if (dateChanged || endChanged) {
+        updatePayload.ends_on = localTzToUTCISO(
+          editedSession.date, editedSession.endTime, selectedTimezone
+        );
       }
 
       const response = await fetch(`${API_URL}/sessions/${editedSession.id}`, {
@@ -1438,29 +1493,36 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
     }
   };
 
-  const commonTimezones = [
-    { label: 'Madrid', value: 'Europe/Madrid' },
-    { label: 'London', value: 'Europe/London' },
-    { label: 'París', value: 'Europe/Paris' },
-    { label: 'Berlín', value: 'Europe/Berlin' },
-    { label: 'Roma', value: 'Europe/Rome' },
-    { label: 'Lisboa', value: 'Europe/Lisbon' },
-    { label: 'Helsinki', value: 'Europe/Helsinki' },
-    { label: 'Moscú', value: 'Europe/Moscow' },
-    { label: 'Nueva York', value: 'America/New_York' },
-    { label: 'Chicago', value: 'America/Chicago' },
-    { label: 'Denver', value: 'America/Denver' },
-    { label: 'Los Ángeles', value: 'America/Los_Angeles' },
-    { label: 'México', value: 'America/Mexico_City' },
-    { label: 'Bogotá', value: 'America/Bogota' },
-    { label: 'Lima', value: 'America/Lima' },
-    { label: 'Buenos Aires', value: 'America/Argentina/Buenos_Aires' },
-    { label: 'Santiago', value: 'America/Santiago' },
-    { label: 'São Paulo', value: 'America/Sao_Paulo' },
-    { label: 'Dubai', value: 'Asia/Dubai' },
-    { label: 'Tokio', value: 'Asia/Tokyo' },
-    { label: 'Sídney', value: 'Australia/Sydney' },
-  ];
+  const commonTimezones = useMemo(() => {
+    const base = [
+      { label: 'Madrid', value: 'Europe/Madrid' },
+      { label: 'London', value: 'Europe/London' },
+      { label: 'París', value: 'Europe/Paris' },
+      { label: 'Berlín', value: 'Europe/Berlin' },
+      { label: 'Roma', value: 'Europe/Rome' },
+      { label: 'Lisboa', value: 'Europe/Lisbon' },
+      { label: 'Helsinki', value: 'Europe/Helsinki' },
+      { label: 'Moscú', value: 'Europe/Moscow' },
+      { label: 'Nueva York', value: 'America/New_York' },
+      { label: 'Chicago', value: 'America/Chicago' },
+      { label: 'Denver', value: 'America/Denver' },
+      { label: 'Los Ángeles', value: 'America/Los_Angeles' },
+      { label: 'México', value: 'America/Mexico_City' },
+      { label: 'Bogotá', value: 'America/Bogota' },
+      { label: 'Lima', value: 'America/Lima' },
+      { label: 'Buenos Aires', value: 'America/Argentina/Buenos_Aires' },
+      { label: 'Santiago', value: 'America/Santiago' },
+      { label: 'São Paulo', value: 'America/Sao_Paulo' },
+      { label: 'Dubai', value: 'Asia/Dubai' },
+      { label: 'Tokio', value: 'Asia/Tokyo' },
+      { label: 'Sídney', value: 'Australia/Sydney' },
+    ];
+    // Si la TZ del navegador no está en la lista, añadirla al principio para que siempre esté disponible y seleccionada
+    const inList = base.some(t => t.value === browserTimezone);
+    if (inList) return base;
+    const label = browserTimezone.split('/').pop()?.replace(/_/g, ' ') ?? browserTimezone;
+    return [{ label: `📍 ${label}`, value: browserTimezone }, ...base];
+  }, [browserTimezone]);
 
   // Fecha de hoy en la zona horaria seleccionada, en formato YYYY-MM-DD
   const getTodayInTimezone = (): string => {
@@ -1714,13 +1776,27 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors text-xs text-slate-600 shadow-sm"
               >
                 <Globe size={12} className="text-indigo-500" />
+                {selectedTimezone === browserTimezone && <span className="text-[10px]">📍</span>}
                 <span className="font-semibold">{getTimezoneLabel(selectedTimezone)}</span>
                 <span className="text-slate-400 hidden sm:inline">{getTimezoneShortName(selectedTimezone)}</span>
                 <ChevronDown size={11} className={`transition-transform duration-200 ${showTimezoneDropdown ? 'rotate-180' : ''}`} />
               </button>
               {showTimezoneDropdown && (
-                <div className="absolute top-full right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-50 min-w-[210px] max-h-72 overflow-y-auto">
+                <div className="absolute top-full right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-50 min-w-[220px] max-h-72 overflow-y-auto">
                   <div className="p-1">
+                    {/* Entrada especial: ubicación detectada del navegador */}
+                    <button
+                      onClick={() => { setSelectedTimezone(browserTimezone); setShowTimezoneDropdown(false); }}
+                      className={`w-full text-left flex items-center justify-between px-3 py-1.5 rounded-lg text-xs transition-colors ${
+                        selectedTimezone === browserTimezone
+                          ? 'bg-indigo-50 text-indigo-700 font-bold'
+                          : 'text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span>📍 Mi ubicación actual</span>
+                      <span className="text-slate-400 ml-2">{getTimezoneShortName(browserTimezone)}</span>
+                    </button>
+                    <div className="border-t border-slate-100 my-1" />
                     {commonTimezones.map(tz => (
                       <button
                         key={tz.value}
@@ -2369,10 +2445,28 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                 />
               </div>
 
+              {/* Zona horaria de la sesión */}
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-2">Zona horaria</label>
+                <div className="px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-700 text-sm flex items-center gap-2">
+                  <Globe size={15} className="flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <span className="font-semibold">{editedSession.schedule_timezone || selectedTimezone}</span>
+                    <span className="ml-2 text-blue-500 text-xs">{getTimezoneShortName(editedSession.schedule_timezone || selectedTimezone)}</span>
+                  </div>
+                  {editedSession.schedule_timezone && editedSession.schedule_timezone !== selectedTimezone && (
+                    <span className="text-[10px] bg-amber-100 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5 flex-shrink-0">
+                      Tu TZ actual: {getTimezoneShortName(selectedTimezone)}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-400 mt-1">Las horas se muestran e interpretan en esta zona horaria</p>
+              </div>
+
               {/* Time Range */}
               <div className="grid grid-cols-2 gap-3 sm:gap-4">
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Hora inicio</label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Hora inicio <span className="text-xs font-normal text-blue-500">({getTimezoneShortName(editedSession.schedule_timezone || selectedTimezone)})</span></label>
                   <input
                     type="time"
                     value={editedSession.startTime}
@@ -2381,7 +2475,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Hora fin</label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Hora fin <span className="text-xs font-normal text-blue-500">({getTimezoneShortName(editedSession.schedule_timezone || selectedTimezone)})</span></label>
                   <input
                     type="time"
                     value={editedSession.endTime}

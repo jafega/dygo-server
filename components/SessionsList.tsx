@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, CheckCircle, XCircle, Clock, DollarSign, User, Filter, Edit2, Save, X as XIcon, FileText, Trash2, Receipt, Ticket, Copy, Send, ExternalLink } from 'lucide-react';
+import { Calendar, CheckCircle, XCircle, Clock, DollarSign, User, Filter, Edit2, Save, X as XIcon, FileText, Trash2, Receipt, Ticket, Copy, Send, ExternalLink, Globe } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser } from '../services/authService';
 import SessionDetailsModal from './SessionDetailsModal';
@@ -25,6 +25,9 @@ interface Session {
   session_entry_id?: string;
   invoice_id?: string;
   bonus_id?: string;
+  starts_on?: string; // ISO timestamp UTC almacenado en Supabase
+  ends_on?: string;   // ISO timestamp UTC almacenado en Supabase
+  timezone?: string;  // Zona horaria de visualización (normalmente 'Europe/Madrid')
 }
 
 interface Invoice {
@@ -105,6 +108,33 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
     'bg-stone-100 text-stone-700 border-stone-200',
     'bg-zinc-100 text-zinc-700 border-zinc-200'
   ];
+
+  // Devuelve la etiqueta corta de zona horaria (ej. CET, CEST, GMT+1)
+  const getTZLabel = (tz: string, dateStr?: string): string => {
+    try {
+      const date = dateStr ? new Date(dateStr) : new Date();
+      const parts = new Intl.DateTimeFormat('es-ES', { timeZone: tz, timeZoneName: 'short' }).formatToParts(date);
+      const tzName = parts.find(p => p.type === 'timeZoneName')?.value;
+      if (tzName) return tzName;
+      return tz.split('/').pop()?.replace(/_/g, ' ') ?? tz;
+    } catch {
+      return 'Madrid';
+    }
+  };
+
+  // Obtiene la hora de visualización en la zona horaria de la sesión, con fallback a ISO timestamp
+  const getDisplayTime = (time: string | undefined, isoTimestamp?: string, tz = 'Europe/Madrid'): string => {
+    if (time) return time;
+    if (isoTimestamp) {
+      return new Date(isoTimestamp).toLocaleTimeString('es-ES', {
+        timeZone: tz,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      });
+    }
+    return '--:--';
+  };
 
   const getTagColor = (tag: string, index: number) => {
     // Usar el índice global de todas las tags del psicólogo para colores consistentes
@@ -965,9 +995,13 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                           {patient?.name || 'Paciente no disponible'}
                         </span>
                       </div>
-                      <div className="text-xs sm:text-sm md:text-sm text-slate-500 flex items-center gap-1 sm:gap-1.5 mb-1 sm:mb-2">
+                      <div className="text-xs sm:text-sm md:text-sm text-slate-500 flex items-center gap-1 sm:gap-1.5 mb-1 sm:mb-2 flex-wrap">
                         <Clock size={10} className="flex-shrink-0" />
-                        {session.startTime} - {session.endTime}
+                        <span className="font-medium text-slate-700">{getDisplayTime(session.startTime, session.starts_on, session.timezone)} - {getDisplayTime(session.endTime, session.ends_on, session.timezone)}</span>
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-medium px-1 py-0.5 bg-blue-50 text-blue-600 rounded border border-blue-200">
+                          <Globe size={8} />
+                          {getTZLabel(session.timezone || 'Europe/Madrid', session.starts_on || session.date)}
+                        </span>
                       </div>
                       <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 flex-wrap">
                         {getStatusBadge(session.status)}
@@ -1102,10 +1136,22 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                 />
               </div>
 
+              {/* Zona horaria */}
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-2">Zona horaria</label>
+                <div className="px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-700 text-sm flex items-center gap-2">
+                  <Globe size={16} className="flex-shrink-0" />
+                  <div>
+                    <span className="font-semibold">{editedSession.timezone || 'Europe/Madrid'}</span>
+                    <span className="ml-2 text-blue-500 text-xs">{getTZLabel(editedSession.timezone || 'Europe/Madrid', editedSession.starts_on || editedSession.date)}</span>
+                  </div>
+                </div>
+              </div>
+
               {/* Time Range */}
               <div className="grid grid-cols-2 gap-3 sm:gap-4">
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Hora inicio</label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Hora inicio <span className="text-xs font-normal text-blue-500">({getTZLabel(editedSession.timezone || 'Europe/Madrid', editedSession.starts_on || editedSession.date)})</span></label>
                   <input
                     type="time"
                     value={editedSession.startTime}
@@ -1114,7 +1160,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Hora fin</label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Hora fin <span className="text-xs font-normal text-blue-500">({getTZLabel(editedSession.timezone || 'Europe/Madrid', editedSession.starts_on || editedSession.date)})</span></label>
                   <input
                     type="time"
                     value={editedSession.endTime}

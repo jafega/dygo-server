@@ -1127,15 +1127,28 @@ async function loadSupabaseCache() {
       normalized.status = row.status;
     }
     // Convertir starts_on/ends_on a date/startTime/endTime para compatibilidad con frontend
+    // Usar la zona horaria guardada en la sesión (schedule_timezone), con fallback a Europe/Madrid
+    const sessionTz = normalized.schedule_timezone || 'Europe/Madrid';
     if (row.starts_on) {
       const startsDate = new Date(row.starts_on);
-      normalized.date = startsDate.toISOString().split('T')[0];
-      normalized.startTime = startsDate.toTimeString().substring(0, 5);
+      normalized.date = startsDate.toLocaleDateString('sv-SE', { timeZone: sessionTz }); // 'sv-SE' devuelve formato YYYY-MM-DD
+      normalized.startTime = startsDate.toLocaleTimeString('es-ES', {
+        timeZone: sessionTz,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      });
       normalized.starts_on = row.starts_on;
+      normalized.timezone = sessionTz; // exponer al frontend
     }
     if (row.ends_on) {
       const endsDate = new Date(row.ends_on);
-      normalized.endTime = endsDate.toTimeString().substring(0, 5);
+      normalized.endTime = endsDate.toLocaleTimeString('es-ES', {
+        timeZone: sessionTz,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      });
       normalized.ends_on = row.ends_on;
     }
     return normalized;
@@ -6352,6 +6365,21 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+
+  // Helper para formatear fechas en DD/MM/YYYY sin desplazamiento de zona horaria
+  const formatDateES = (dateStr) => {
+    if (!dateStr) return '';
+    // Si viene como YYYY-MM-DD o YYYY-MM-DDTHH:mm…, tomar solo la parte de fecha
+    const datePart = String(dateStr).split('T')[0];
+    const parts = datePart.split('-');
+    if (parts.length === 3) {
+      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    }
+    // Fallback: intentar parsear normalmente
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('es-ES', { year: 'numeric', month: '2-digit', day: '2-digit' });
+  };
   
   // Generate professional PDF HTML
   const html = `
@@ -6660,12 +6688,12 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
         <h3>Datos de Facturación</h3>
         <div class="info-row">
           <span class="info-label">Fecha:</span>
-          <span class="info-value">${new Date(invoice.date).toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+          <span class="info-value">${formatDateES(invoice.invoice_date || invoice.date)}</span>
         </div>
         ${invoice.dueDate && !isNaN(new Date(invoice.dueDate).getTime()) ? `
         <div class="info-row">
           <span class="info-label">Vencimiento:</span>
-          <span class="info-value">${new Date(invoice.dueDate).toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+          <span class="info-value">${formatDateES(invoice.dueDate)}</span>
         </div>
         ` : ''}
         <div class="info-row">
