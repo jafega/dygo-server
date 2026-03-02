@@ -281,12 +281,46 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
       return;
     }
 
+    // If session is still pending, offer to delete all future recurring sessions at same time
+    let deleteFuture = false;
+    if (editedSession.status === 'scheduled' && editedSession.startTime) {
+      deleteFuture = confirm(
+        `¿Deseas también eliminar todas las sesiones futuras programadas de ${editedSession.patientName} a las ${editedSession.startTime} (misma hora, mismo día de la semana)?\n\n` +
+        `• Pulsa "Aceptar" para eliminar esta sesión y las siguientes semanas a esa hora.\n` +
+        `• Pulsa "Cancelar" para eliminar solo esta sesión.`
+      );
+    }
+
     setIsSaving(true);
     try {
       const currentUser = await getCurrentUser();
       if (!currentUser) {
         alert('Error: Usuario no autenticado');
         return;
+      }
+
+      // Delete all future recurring sessions at same time if requested
+      if (deleteFuture) {
+        const patientUserId = (editedSession as any).patient_user_id || editedSession.patientId;
+        const sessionWeekday = editedSession.date ? new Date(editedSession.date + 'T12:00:00').getDay() : undefined;
+        try {
+          await fetch(`${API_URL}/sessions/future-pending`, {
+            method: 'DELETE',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-user-id': currentUser.id
+            },
+            body: JSON.stringify({
+              patient_user_id: patientUserId,
+              fromDate: editedSession.date,
+              excludeId: editedSession.id,
+              startTime: editedSession.startTime,
+              weekday: sessionWeekday
+            })
+          });
+        } catch (err) {
+          console.error('Error deleting future sessions:', err);
+        }
       }
 
       const response = await fetch(`${API_URL}/sessions/${editedSession.id}`, {
@@ -300,7 +334,6 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
       if (response.ok) {
         await loadSessions();
         handleCloseModal();
-        alert('Sesión eliminada correctamente');
       } else {
         const error = await response.json();
         alert('Error al eliminar la sesión: ' + (error.error || 'Error desconocido'));

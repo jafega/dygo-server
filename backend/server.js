@@ -1313,6 +1313,36 @@ function dateTimeToISO(date, time) {
   return `${date}T${time}:00`;
 }
 
+// Convierte date+time en el timezone `tz` a un ISO UTC string (equivalente al frontend localTzToUTCISO)
+function dateTimeToUTCISO(date, time, tz) {
+  if (!date || !time) return null;
+  try {
+    // Punto de partida: tratar el input como si fuera UTC
+    const guess = new Date(`${date}T${time}:00Z`);
+    // Ver qué hora muestra ese timestamp UTC en el timezone objetivo
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false,
+    }).formatToParts(guess);
+    const h = parts.find(p => p.type === 'hour')?.value ?? '00';
+    const tzYear  = parseInt(parts.find(p => p.type === 'year')?.value  ?? '2000');
+    const tzMonth = parseInt(parts.find(p => p.type === 'month')?.value ?? '1') - 1;
+    const tzDay   = parseInt(parts.find(p => p.type === 'day')?.value   ?? '1');
+    const tzHour  = h === '24' ? 0 : parseInt(h);
+    const tzMin   = parseInt(parts.find(p => p.type === 'minute')?.value ?? '0');
+    // offset = lo que TZ muestra como UTC - el UTC original
+    const tzDisplayedAsUTC = Date.UTC(tzYear, tzMonth, tzDay, tzHour, tzMin, 0);
+    const offsetMs = tzDisplayedAsUTC - guess.getTime();
+    // UTC correcto = guess - offset
+    return new Date(guess.getTime() - offsetMs).toISOString();
+  } catch (e) {
+    console.warn(`dateTimeToUTCISO error for tz=${tz}:`, e.message);
+    return `${date}T${time}:00Z`; // fallback sin offset
+  }
+}
+
 // Función para autocompletar sesiones pasadas que están pendientes
 async function autoCompletePassedSessions() {
   try {
@@ -6329,15 +6359,13 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
             ? bonoRawPrice * bonoPercentPsych / 100
             : bonoRawPrice;
           const totalSessions = bono.total_sessions_amount || bonoData.total_sessions_amount || 0;
-          const patientStr = bonoData.patientName || invoice.patientName || '';
-          const patientPart = patientStr ? ` — ${patientStr}` : '';
           const pricePerSession = totalSessions > 0 ? (bonoPrice / totalSessions).toFixed(2) : '0.00';
           const createdAt = bono.created_at
             ? new Date(bono.created_at).toLocaleDateString('es-ES', { year: 'numeric', month: 'short', day: 'numeric' })
             : '';
           const createdPart = createdAt ? ` (creado ${createdAt})` : '';
           detailedItems.push({
-            description: `Bono de psicología${patientPart} — ${totalSessions} sesiones${createdPart} · ${pricePerSession} €/sesión`,
+            description: `Bono de psicología — ${totalSessions} sesiones${createdPart} · ${pricePerSession} €/sesión`,
             quantity: invoice.is_rectificativa ? -1 : 1,
             unitPrice: bonoPrice
           });
@@ -9308,7 +9336,8 @@ app.patch('/api/sessions/:id', async (req, res) => {
         const date = updatedSession.date;
         const startTime = updatedSession.startTime;
         if (date && startTime) {
-          updatedSession.starts_on = dateTimeToISO(date, startTime);
+          const tz = updatedSession.schedule_timezone || 'Europe/Madrid';
+          updatedSession.starts_on = dateTimeToUTCISO(date, startTime, tz);
         }
       }
       if (req.body.ends_on) {
@@ -9317,7 +9346,8 @@ app.patch('/api/sessions/:id', async (req, res) => {
         const date = updatedSession.date;
         const endTime = updatedSession.endTime;
         if (date && endTime) {
-          updatedSession.ends_on = dateTimeToISO(date, endTime);
+          const tz = updatedSession.schedule_timezone || 'Europe/Madrid';
+          updatedSession.ends_on = dateTimeToUTCISO(date, endTime, tz);
         }
       }
     }
@@ -9519,11 +9549,18 @@ app.put('/api/sessions/:id', async (req, res) => {
     };
     
     // Calcular starts_on/ends_on si se proporcionan date/startTime/endTime
-    if (updatedSession.date && updatedSession.startTime) {
-      updatedSession.starts_on = dateTimeToISO(updatedSession.date, updatedSession.startTime);
+    // Priorizar los que ya vienen del cliente (calculados con timezone correcto)
+    if (!req.body.starts_on && updatedSession.date && updatedSession.startTime) {
+      const tz = updatedSession.schedule_timezone || 'Europe/Madrid';
+      updatedSession.starts_on = dateTimeToUTCISO(updatedSession.date, updatedSession.startTime, tz);
+    } else if (req.body.starts_on) {
+      updatedSession.starts_on = req.body.starts_on;
     }
-    if (updatedSession.date && updatedSession.endTime) {
-      updatedSession.ends_on = dateTimeToISO(updatedSession.date, updatedSession.endTime);
+    if (!req.body.ends_on && updatedSession.date && updatedSession.endTime) {
+      const tz = updatedSession.schedule_timezone || 'Europe/Madrid';
+      updatedSession.ends_on = dateTimeToUTCISO(updatedSession.date, updatedSession.endTime, tz);
+    } else if (req.body.ends_on) {
+      updatedSession.ends_on = req.body.ends_on;
     }
 
     db.sessions[idx] = updatedSession;
@@ -9592,41 +9629,62 @@ app.put('/api/sessions/:id', async (req, res) => {
 // Must be registered BEFORE /api/sessions/:id to avoid route conflict
 app.delete('/api/sessions/future-pending', async (req, res) => {
   try {
-    const { patient_user_id, fromDate, excludeId, psychologistId: bodyPsychologistId } = req.body;
+    const { patient_user_id, fromDate, excludeId, psychologistId: bodyPsychologistId, startTime, weekday } = req.body;
     const psychologistUserId = req.headers['x-user-id'] || req.headers['x-userid'] || bodyPsychologistId;
 
     if (!patient_user_id || !fromDate) {
       return res.status(400).json({ error: 'Se requieren patient_user_id y fromDate' });
     }
 
-    console.log(`🗑️ [DELETE /future-pending] patient=${patient_user_id} from=${fromDate} psychologist=${psychologistUserId} exclude=${excludeId}`);
+    console.log(`🗑️ [DELETE /future-pending] patient=${patient_user_id} from=${fromDate} psychologist=${psychologistUserId} exclude=${excludeId} startTime=${startTime} weekday=${weekday}`);
 
     let deletedCount = 0;
 
     // Delete from Supabase
     if (supabaseAdmin) {
+      // Fetch candidates first so we can apply JS-side filters (startTime in JSONB, weekday)
       let query = supabaseAdmin
         .from('sessions')
-        .delete()
+        .select('id, data, starts_on')
         .eq('patient_user_id', patient_user_id)
         .eq('status', 'scheduled')
-        .gte('date', fromDate);
+        .gte('starts_on', fromDate + 'T00:00:00.000Z');
 
       if (psychologistUserId) {
         query = query.eq('psychologist_user_id', psychologistUserId);
       }
-
-      // Exclude the session that the caller will delete separately
       if (excludeId) {
         query = query.neq('id', excludeId);
       }
 
-      const { data: deleted, error } = await query.select('id');
-      if (error) {
-        console.error('❌ Error deleting future sessions from Supabase:', error);
+      const { data: candidates, error: fetchError } = await query;
+      if (fetchError) {
+        console.error('❌ Error fetching future sessions from Supabase:', fetchError);
         return res.status(500).json({ error: 'Error al eliminar sesiones futuras' });
       }
-      deletedCount = deleted?.length || 0;
+
+      const matchingIds = (candidates || []).filter(s => {
+        // Filter by same UTC start time (extracted from starts_on)
+        // This is sufficient to identify a recurring series: same patient+psychologist+time+status
+        if (startTime) {
+          const candidateTime = s.starts_on ? s.starts_on.substring(11, 16) : null;
+          if (candidateTime !== startTime) return false;
+        }
+        return true;
+      }).map(s => s.id);
+
+      if (matchingIds.length > 0) {
+        const { data: deleted, error: delError } = await supabaseAdmin
+          .from('sessions')
+          .delete()
+          .in('id', matchingIds)
+          .select('id');
+        if (delError) {
+          console.error('❌ Error deleting future sessions from Supabase:', delError);
+          return res.status(500).json({ error: 'Error al eliminar sesiones futuras' });
+        }
+        deletedCount = deleted?.length || 0;
+      }
       console.log(`✅ [DELETE /future-pending] Eliminadas ${deletedCount} sesiones de Supabase`);
     }
 
@@ -9638,8 +9696,13 @@ app.delete('/api/sessions/future-pending', async (req, res) => {
       if (s.patient_user_id !== patient_user_id) return true;
       if (psychologistUserId && s.psychologist_user_id !== psychologistUserId) return true;
       if (s.status !== 'scheduled') return true;
-      if (s.date < fromDate) return true;
+      if ((s.date || (s.starts_on ? s.starts_on.substring(0, 10) : '')) < fromDate) return true;
       if (excludeId && s.id === excludeId) return true;
+      // Filter by same UTC start time (extracted from starts_on)
+      if (startTime) {
+        const candidateTime = s.starts_on ? s.starts_on.substring(11, 16) : s.startTime;
+        if (candidateTime !== startTime) return true;
+      }
       return false;
     });
     const localDeleted = before - db.sessions.length;
@@ -10845,7 +10908,7 @@ app.put('/api/templates/:id', async (req, res) => {
       if (existing.master) return res.status(403).json({ error: 'No se pueden editar templates master' });
       if (existing.psych_user_id !== psych_user_id) return res.status(403).json({ error: 'Sin permiso para editar este template' });
 
-      const updatePayload: any = { content };
+      const updatePayload = { content };
       if (template_name !== undefined) updatePayload.template_name = template_name;
 
       const { data, error } = await supabaseAdmin

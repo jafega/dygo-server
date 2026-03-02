@@ -220,16 +220,22 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
       const currentSession = sessions.find(s => s.id === resizingSession.id);
       if (!currentSession) return;
       
-      let newStartTime = currentSession.startTime;
-      let newEndTime = currentSession.endTime;
+      // Usar los tiempos mostrados (en timezone seleccionado) para el borde fijo,
+      // no los tiempos crudos almacenados (que pueden estar en UTC y diferir 1h)
+      const displayTimes = sessionDisplayTimes.get(currentSession.id);
+      const displayStartTime = displayTimes?.startTime ?? currentSession.startTime;
+      const displayEndTime = displayTimes?.endTime ?? currentSession.endTime;
+
+      let newStartTime = displayStartTime;
+      let newEndTime = displayEndTime;
       
       if (resizingSession.edge === 'top') {
         // Al mover el borde superior, el endTime se mantiene fijo
         newStartTime = newTime;
-        newEndTime = currentSession.endTime;
+        newEndTime = displayEndTime;
       } else {
         // Al mover el borde inferior, el startTime se mantiene fijo
-        newStartTime = currentSession.startTime;
+        newStartTime = displayStartTime;
         newEndTime = newTime;
       }
       
@@ -919,8 +925,13 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
   };
 
   const handleOpenSession = async (session: Session) => {
-    setSelectedSession(session);
-    setEditedSession({ ...session });
+    // Convertir los tiempos al timezone seleccionado del psicólogo para evitar
+    // que cada apertura+guardado desplace la hora (el backend extrae date/startTime
+    // directamente del ISO UTC, no en hora local).
+    const tzTimes = convertSessionToTz(session, selectedTimezone);
+    const sessionWithTzTimes = { ...session, ...tzTimes, schedule_timezone: selectedTimezone };
+    setSelectedSession(sessionWithTzTimes);
+    setEditedSession(sessionWithTzTimes);
     loadAvailableBonos(session.patient_user_id || session.patientId);
     
     // Cargar información del bono asignado si existe
@@ -1122,12 +1133,12 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
       return;
     }
 
-    // If session is still pending, offer to delete all future pending sessions for this patient
+    // If session is still pending, offer to delete all future recurring sessions at same time
     let deleteFuture = false;
-    if (editedSession.status === 'scheduled') {
+    if (editedSession.status === 'scheduled' && editedSession.startTime) {
       deleteFuture = confirm(
-        `¿Deseas también eliminar todas las sesiones futuras pendientes de ${editedSession.patientName} desde esta fecha?\n\n` +
-        `• Pulsa "Aceptar" para eliminar esta sesión y todas las futuras pendientes.\n` +
+        `¿Deseas también eliminar todas las sesiones futuras programadas de ${editedSession.patientName} a las ${editedSession.startTime} (misma hora, mismo día de la semana)?\n\n` +
+        `• Pulsa "Aceptar" para eliminar esta sesión y las siguientes semanas a esa hora.\n` +
         `• Pulsa "Cancelar" para eliminar solo esta sesión.`
       );
     }
@@ -1140,9 +1151,10 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
         return;
       }
 
-      // First, delete all future pending sessions if requested
+      // First, delete all future recurring sessions at same time if requested
       if (deleteFuture) {
         const patientUserId = editedSession.patient_user_id || editedSession.patientId;
+        const sessionWeekday = editedSession.date ? new Date(editedSession.date + 'T12:00:00').getDay() : undefined;
         try {
           await fetch(`${API_URL}/sessions/future-pending`, {
             method: 'DELETE',
@@ -1154,7 +1166,9 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
               patient_user_id: patientUserId,
               fromDate: editedSession.date,
               excludeId: editedSession.id,
-              psychologistId
+              psychologistId,
+              startTime: editedSession.startTime,
+              weekday: sessionWeekday
             })
           });
         } catch (err) {
@@ -1221,23 +1235,16 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
       // Siempre incluir la zona horaria (del psicólogo actual)
       updatePayload.schedule_timezone = selectedTimezone;
 
-      // Solo incluir fecha y hora si fueron modificadas; si cambia algo, recalcular starts_on/ends_on
-      const dateChanged = editedSession.date !== selectedSession.date;
-      const startChanged = editedSession.startTime !== selectedSession.startTime;
-      const endChanged = editedSession.endTime !== selectedSession.endTime;
-      if (dateChanged) updatePayload.date = editedSession.date;
-      if (startChanged) updatePayload.startTime = editedSession.startTime;
-      if (endChanged) updatePayload.endTime = editedSession.endTime;
-      if (dateChanged || startChanged) {
-        updatePayload.starts_on = localTzToUTCISO(
-          editedSession.date, editedSession.startTime, selectedTimezone
-        );
-      }
-      if (dateChanged || endChanged) {
-        updatePayload.ends_on = localTzToUTCISO(
-          editedSession.date, editedSession.endTime, selectedTimezone
-        );
-      }
+      // Siempre recalcular starts_on/ends_on con la zona horaria activa.
+      // Esto corrige timestamps incorrectos de sesiones antiguas cuando el psicólogo guarda.
+      updatePayload.starts_on = localTzToUTCISO(editedSession.date, editedSession.startTime, selectedTimezone);
+      updatePayload.ends_on   = localTzToUTCISO(editedSession.date, editedSession.endTime,   selectedTimezone);
+
+      // Siempre incluir date/startTime/endTime para mantener el JSONB sincronizado
+      // con starts_on/ends_on (los valores aquí ya están en selectedTimezone por handleOpenSession)
+      updatePayload.date      = editedSession.date;
+      updatePayload.startTime = editedSession.startTime;
+      updatePayload.endTime   = editedSession.endTime;
 
       const response = await fetch(`${API_URL}/sessions/${editedSession.id}`, {
         method: 'PATCH',
@@ -1599,17 +1606,22 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
       }).formatToParts(d);
       const h = parts.find(p => p.type === 'hour')?.value ?? '00';
       const m = parts.find(p => p.type === 'minute')?.value ?? '00';
-      // '24' aparece en algunas implementaciones como medianoche — normalizamos
       return `${h === '24' ? '00' : h}:${m}`;
     };
-    const startDate = session.starts_on
-      ? new Date(session.starts_on)
-      : new Date(`${session.date}T${session.startTime}`);
-    const endDate = session.ends_on
-      ? new Date(session.ends_on)
-      : new Date(`${session.date}T${session.endTime}`);
-    const date = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(startDate);
-    return { date, startTime: toTimeParts(startDate), endTime: toTimeParts(endDate) };
+    // Si tenemos el timestamp UTC exacto, usarlo directamente
+    if (session.starts_on) {
+      const startDate = new Date(session.starts_on);
+      const endDate   = session.ends_on ? new Date(session.ends_on) : new Date(session.starts_on);
+      const date = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(startDate);
+      return { date, startTime: toTimeParts(startDate), endTime: toTimeParts(endDate) };
+    }
+    // Fallback: interpretar date+startTime en el timezone de la sesión (schedule_timezone),
+    // o en el timezone activo si no hay info almacenada. NUNCA usar hora local del navegador.
+    const sessionTz = session.schedule_timezone || tz;
+    const startUTC = new Date(localTzToUTCISO(session.date, session.startTime || '00:00', sessionTz));
+    const endUTC   = new Date(localTzToUTCISO(session.date, session.endTime   || '01:00', sessionTz));
+    const date = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(startUTC);
+    return { date, startTime: toTimeParts(startUTC), endTime: toTimeParts(endUTC) };
   };
 
   // Mapa id → {date, startTime, endTime} en el timezone activo
@@ -2212,7 +2224,8 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                                   onMouseDown={(e) => {
                                     e.stopPropagation();
                                     setResizingSession({ id: session.id, edge: 'top', date: dateStr });
-                                    setTempSessionTimes({ startTime: session.startTime, endTime: session.endTime });
+                                    const dt = sessionDisplayTimes.get(session.id);
+                                    setTempSessionTimes({ startTime: dt?.startTime ?? session.startTime, endTime: dt?.endTime ?? session.endTime });
                                   }}
                                   onMouseEnter={(e) => {
                                     (e.target as HTMLElement).style.backgroundColor = 'rgba(59, 130, 246, 0.5)';
@@ -2287,7 +2300,8 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                                   onMouseDown={(e) => {
                                     e.stopPropagation();
                                     setResizingSession({ id: session.id, edge: 'bottom', date: dateStr });
-                                    setTempSessionTimes({ startTime: session.startTime, endTime: session.endTime });
+                                    const dt = sessionDisplayTimes.get(session.id);
+                                    setTempSessionTimes({ startTime: dt?.startTime ?? session.startTime, endTime: dt?.endTime ?? session.endTime });
                                   }}
                                   onMouseEnter={(e) => {
                                     (e.target as HTMLElement).style.backgroundColor = 'rgba(59, 130, 246, 0.5)';

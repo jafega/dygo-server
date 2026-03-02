@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Calendar, CheckCircle, XCircle, Clock, DollarSign, User, Filter, Edit2, Save, X as XIcon, FileText, Trash2, Receipt, Ticket, Copy, Send, ExternalLink, Globe } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Calendar, CheckCircle, XCircle, Clock, DollarSign, User, Filter, Edit2, Save, X as XIcon, FileText, Trash2, Receipt, Ticket, Copy, Send, ExternalLink, Globe, ChevronDown } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser } from '../services/authService';
 import SessionDetailsModal from './SessionDetailsModal';
@@ -59,6 +59,13 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
   const [sessionDetailsModalOpen, setSessionDetailsModalOpen] = useState(false);
   const [selectedSessionForDetails, setSelectedSessionForDetails] = useState<Session | null>(null);
   const [sessionEntries, setSessionEntries] = useState<Map<string, { status: 'pending' | 'done' }>>(new Map());
+
+  // Zona horaria del navegador – detectada una sola vez al montar
+  const browserTimezone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
+  // Zona horaria seleccionada: por defecto = ubicación del navegador
+  const [selectedTimezone, setSelectedTimezone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const [showTimezoneDropdown, setShowTimezoneDropdown] = useState(false);
+  const [timezoneLoadedFromProfile, setTimezoneLoadedFromProfile] = useState(false);
   
   // Estados para bonos
   const [availableBonos, setAvailableBonos] = useState<any[]>([]);
@@ -73,6 +80,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
   const [filterPayment, setFilterPayment] = useState<string>('all'); // 'all', 'paid', 'unpaid'
   const [filterEntry, setFilterEntry] = useState<string[]>(['with-entry', 'without-entry']);
   const [filterTags, setFilterTags] = useState<string[]>([]);
+  const [filterBilling, setFilterBilling] = useState<string[]>(['invoiced', 'bono', 'uninvoiced']);
   
   // Date range state - default to current month
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>(() => {
@@ -122,19 +130,122 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
     }
   };
 
-  // Obtiene la hora de visualización en la zona horaria de la sesión, con fallback a ISO timestamp
-  const getDisplayTime = (time: string | undefined, isoTimestamp?: string, tz = 'Europe/Madrid'): string => {
-    if (time) return time;
+  // Nombre corto de la zona horaria (ej: "CET", "GMT+1")
+  const getTimezoneShortName = (tz: string): string => {
+    try {
+      const parts = new Intl.DateTimeFormat('es-ES', { timeZone: tz, timeZoneName: 'short' }).formatToParts(new Date());
+      return parts.find(p => p.type === 'timeZoneName')?.value ?? tz;
+    } catch {
+      return tz;
+    }
+  };
+
+  // Lista de zonas horarias comunes
+  const commonTimezones = useMemo(() => {
+    const base = [
+      { label: 'Madrid', value: 'Europe/Madrid' },
+      { label: 'London', value: 'Europe/London' },
+      { label: 'París', value: 'Europe/Paris' },
+      { label: 'Berlín', value: 'Europe/Berlin' },
+      { label: 'Roma', value: 'Europe/Rome' },
+      { label: 'Lisboa', value: 'Europe/Lisbon' },
+      { label: 'Helsinki', value: 'Europe/Helsinki' },
+      { label: 'Moscú', value: 'Europe/Moscow' },
+      { label: 'Nueva York', value: 'America/New_York' },
+      { label: 'Chicago', value: 'America/Chicago' },
+      { label: 'Denver', value: 'America/Denver' },
+      { label: 'Los Ángeles', value: 'America/Los_Angeles' },
+      { label: 'México', value: 'America/Mexico_City' },
+      { label: 'Bogotá', value: 'America/Bogota' },
+      { label: 'Lima', value: 'America/Lima' },
+      { label: 'Buenos Aires', value: 'America/Argentina/Buenos_Aires' },
+      { label: 'Santiago', value: 'America/Santiago' },
+      { label: 'São Paulo', value: 'America/Sao_Paulo' },
+      { label: 'Dubai', value: 'Asia/Dubai' },
+      { label: 'Tokio', value: 'Asia/Tokyo' },
+      { label: 'Sídney', value: 'Australia/Sydney' },
+    ];
+    const inList = base.some(t => t.value === browserTimezone);
+    if (inList) return base;
+    const label = browserTimezone.split('/').pop()?.replace(/_/g, ' ') ?? browserTimezone;
+    return [{ label: `📍 ${label}`, value: browserTimezone }, ...base];
+  }, [browserTimezone]);
+
+  // Etiqueta amigable para la zona horaria
+  const getTimezoneLabel = (tz: string): string => {
+    const found = commonTimezones.find(t => t.value === tz);
+    if (found) return found.label;
+    return tz.split('/').pop()?.replace(/_/g, ' ') ?? tz;
+  };
+
+  // Convierte date+time en el timezone `tz` a un ISO UTC string
+  const localTzToUTCISO = (dateStr: string, timeStr: string, tz: string): string => {
+    const guess = new Date(`${dateStr}T${timeStr}:00Z`);
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false,
+    }).formatToParts(guess);
+    const h = parts.find(p => p.type === 'hour')?.value ?? '00';
+    const tzYear  = parseInt(parts.find(p => p.type === 'year')?.value  ?? '2000');
+    const tzMonth = parseInt(parts.find(p => p.type === 'month')?.value ?? '1') - 1;
+    const tzDay   = parseInt(parts.find(p => p.type === 'day')?.value   ?? '1');
+    const tzHour  = h === '24' ? 0 : parseInt(h);
+    const tzMin   = parseInt(parts.find(p => p.type === 'minute')?.value ?? '0');
+    const tzDisplayedAsUTC = Date.UTC(tzYear, tzMonth, tzDay, tzHour, tzMin, 0);
+    const offsetMs = tzDisplayedAsUTC - guess.getTime();
+    return new Date(guess.getTime() - offsetMs).toISOString();
+  };
+
+  // Convierte una sesión al timezone seleccionado usando starts_on/ends_on (UTC)
+  const convertSessionToTz = (session: Session, tz: string): { date: string; startTime: string; endTime: string } => {
+    const toTimeParts = (d: Date) => {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).formatToParts(d);
+      const h = parts.find(p => p.type === 'hour')?.value ?? '00';
+      const m = parts.find(p => p.type === 'minute')?.value ?? '00';
+      return `${h === '24' ? '00' : h}:${m}`;
+    };
+    if (session.starts_on) {
+      const startDate = new Date(session.starts_on);
+      const endDate   = session.ends_on ? new Date(session.ends_on) : new Date(session.starts_on);
+      const date = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(startDate);
+      return { date, startTime: toTimeParts(startDate), endTime: toTimeParts(endDate) };
+    }
+    // Fallback: si no hay starts_on, usar startTime/endTime como hora local en el tz guardado
+    const sessionTz = session.timezone || tz;
+    const startUTC = new Date(localTzToUTCISO(session.date, session.startTime || '00:00', sessionTz));
+    const endUTC   = new Date(localTzToUTCISO(session.date, session.endTime   || '01:00', sessionTz));
+    const date = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(startUTC);
+    return { date, startTime: toTimeParts(startUTC), endTime: toTimeParts(endUTC) };
+  };
+
+  // Obtiene la hora de visualización en la zona horaria del psicólogo
+  // SIEMPRE usa starts_on (UTC) como fuente de verdad, no el campo startTime (que es UTC raw)
+  const getDisplayTime = (isoTimestamp?: string, fallbackTime?: string): string => {
     if (isoTimestamp) {
       return new Date(isoTimestamp).toLocaleTimeString('es-ES', {
-        timeZone: tz,
+        timeZone: selectedTimezone,
         hour: '2-digit',
         minute: '2-digit',
         hour12: false
       });
     }
-    return '--:--';
+    return fallbackTime || '--:--';
   };
+
+  // Mapa id → {date, startTime, endTime} en el timezone seleccionado
+  const sessionDisplayTimes = useMemo(() => {
+    const map = new Map<string, { date: string; startTime: string; endTime: string }>();
+    sessions.forEach(s => map.set(s.id, convertSessionToTz(s, selectedTimezone)));
+    return map;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessions, selectedTimezone]);
 
   const getTagColor = (tag: string, index: number) => {
     // Usar el índice global de todas las tags del psicólogo para colores consistentes
@@ -145,7 +256,58 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
   useEffect(() => {
     loadData();
     loadAllPsychologistTags();
+    loadScheduleTimezone();
   }, [psychologistId, dateRange]);
+
+  // Auto-guardar la zona horaria en el perfil cuando cambia (pero no en la carga inicial)
+  useEffect(() => {
+    if (!timezoneLoadedFromProfile) return;
+    saveScheduleTimezone(selectedTimezone);
+  }, [selectedTimezone]);
+
+  // Cerrar dropdown de TZ al hacer clic fuera
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.tz-dropdown-container')) {
+        setShowTimezoneDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const loadScheduleTimezone = async () => {
+    if (!psychologistId) return;
+    try {
+      const response = await fetch(`${API_URL}/psychologist/${psychologistId}/profile`);
+      if (response.ok) {
+        const profile = await response.json();
+        if (profile?.schedule_timezone) {
+          setSelectedTimezone(profile.schedule_timezone);
+        }
+      }
+    } catch (err) {
+      console.warn('Could not load schedule timezone from profile:', err);
+    } finally {
+      setTimezoneLoadedFromProfile(true);
+    }
+  };
+
+  const saveScheduleTimezone = async (tz: string) => {
+    if (!psychologistId) return;
+    try {
+      const profileResponse = await fetch(`${API_URL}/psychologist/${psychologistId}/profile`);
+      const currentProfile = profileResponse.ok ? await profileResponse.json() : {};
+      await fetch(`${API_URL}/psychologist/${psychologistId}/profile`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...currentProfile, schedule_timezone: tz })
+      });
+    } catch (err) {
+      console.warn('Could not save schedule timezone to profile:', err);
+    }
+  };
 
   const loadAllPsychologistTags = async () => {
     if (!psychologistId) return;
@@ -293,8 +455,11 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
   };
 
   const handleOpenSession = (session: Session) => {
+    // Convertir los tiempos al timezone seleccionado del psicólogo para evitar
+    // que cada apertura+guardado desplace la hora
+    const tzTimes = convertSessionToTz(session, selectedTimezone);
     setSelectedSession(session);
-    setEditedSession({ ...session });
+    setEditedSession({ ...session, ...tzTimes, timezone: selectedTimezone });
     loadAvailableBonos(session.patient_user_id || session.patientId);
   };
   
@@ -391,12 +556,46 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
       return;
     }
 
+    // If session is still pending, offer to delete all future recurring sessions at same time
+    let deleteFuture = false;
+    if (editedSession.status === 'scheduled' && editedSession.startTime) {
+      deleteFuture = confirm(
+        `¿Deseas también eliminar todas las sesiones futuras programadas de ${editedSession.patientName} a las ${editedSession.startTime} (misma hora, mismo día de la semana)?\n\n` +
+        `• Pulsa "Aceptar" para eliminar esta sesión y las siguientes semanas a esa hora.\n` +
+        `• Pulsa "Cancelar" para eliminar solo esta sesión.`
+      );
+    }
+
     setIsSaving(true);
     try {
       const currentUser = await getCurrentUser();
       if (!currentUser) {
         alert('Error: Usuario no autenticado');
         return;
+      }
+
+      // Delete all future recurring sessions at same time if requested
+      if (deleteFuture) {
+        const patientUserId = (editedSession as any).patient_user_id || editedSession.patientId;
+        const sessionWeekday = editedSession.date ? new Date(editedSession.date + 'T12:00:00').getDay() : undefined;
+        try {
+          await fetch(`${API_URL}/sessions/future-pending`, {
+            method: 'DELETE',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-user-id': currentUser.id
+            },
+            body: JSON.stringify({
+              patient_user_id: patientUserId,
+              fromDate: editedSession.date,
+              excludeId: editedSession.id,
+              startTime: editedSession.startTime,
+              weekday: sessionWeekday
+            })
+          });
+        } catch (err) {
+          console.error('Error deleting future sessions:', err);
+        }
       }
 
       const response = await fetch(`${API_URL}/sessions/${editedSession.id}`, {
@@ -436,6 +635,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
 
       // Solo enviar los campos que pueden ser actualizados
       // NO enviar patient_user_id ni psychologist_user_id para evitar triggers en care_relationships
+      // Los tiempos en editedSession ya están en selectedTimezone (por handleOpenSession)
       const updatePayload = {
         date: editedSession.date,
         startTime: editedSession.startTime,
@@ -447,7 +647,15 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
         paymentMethod: editedSession.paymentMethod || '',
         percent_psych: editedSession.percent_psych ?? 70,
         notes: editedSession.notes,
-        meetLink: editedSession.meetLink
+        meetLink: editedSession.meetLink,
+        // Recalcular starts_on/ends_on correctamente desde la zona horaria del psicólogo
+        schedule_timezone: selectedTimezone,
+        starts_on: editedSession.date && editedSession.startTime
+          ? localTzToUTCISO(editedSession.date, editedSession.startTime, selectedTimezone)
+          : undefined,
+        ends_on: editedSession.date && editedSession.endTime
+          ? localTzToUTCISO(editedSession.date, editedSession.endTime, selectedTimezone)
+          : undefined,
       };
 
       const response = await fetch(`${API_URL}/sessions/${editedSession.id}`, {
@@ -564,7 +772,22 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
         return !hasEntry || hasIncompleteEntry;
       }
     }
-    
+
+    // Filtro de facturación
+    if (filterBilling.length > 0 && filterBilling.length < 3) {
+      const hasInvoice = !!session.invoice_id;
+      const hasBono = !!session.bonus_id;
+      const isUninvoiced = !hasInvoice && !hasBono;
+
+      const showInvoiced = filterBilling.includes('invoiced');
+      const showBono = filterBilling.includes('bono');
+      const showUninvoiced = filterBilling.includes('uninvoiced');
+
+      if (hasInvoice && !showInvoiced) return false;
+      if (hasBono && !showBono) return false;
+      if (isUninvoiced && !showUninvoiced) return false;
+    }
+
     return true;
   });
 
@@ -599,8 +822,53 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
               <Calendar className="text-purple-600 flex-shrink-0" size={18} />
               <h2 className="text-base sm:text-lg md:text-xl font-bold text-slate-800">Sesiones</h2>
             </div>
-            <div className="text-xs sm:text-sm md:text-sm text-slate-500">
-              Total: <span className="font-bold text-slate-800">{sessions.length}</span>
+            <div className="flex items-center gap-2">
+              {/* Selector de zona horaria */}
+              <div className="relative tz-dropdown-container">
+                <button
+                  onClick={() => setShowTimezoneDropdown(v => !v)}
+                  className="flex items-center gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors text-xs text-slate-600 shadow-sm"
+                >
+                  <Globe size={12} className="text-indigo-500" />
+                  {selectedTimezone === browserTimezone && <span className="text-[10px] hidden sm:inline">📍</span>}
+                  <span className="font-semibold hidden sm:inline">{getTimezoneLabel(selectedTimezone)}</span>
+                  <span className="text-slate-500">{getTimezoneShortName(selectedTimezone)}</span>
+                  <ChevronDown size={11} className={`transition-transform duration-200 ${showTimezoneDropdown ? 'rotate-180' : ''}`} />
+                </button>
+                {showTimezoneDropdown && (
+                  <div className="absolute top-full right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-50 min-w-[220px] max-h-72 overflow-y-auto">
+                    <div className="p-1">
+                      <button
+                        onClick={() => { setSelectedTimezone(browserTimezone); setShowTimezoneDropdown(false); }}
+                        className={`w-full text-left flex items-center justify-between px-3 py-1.5 rounded-lg text-xs transition-colors ${
+                          selectedTimezone === browserTimezone
+                            ? 'bg-indigo-50 text-indigo-700 font-bold'
+                            : 'text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        <span>📍 Mi ubicación actual</span>
+                        <span className="text-slate-400 ml-2">{getTimezoneShortName(browserTimezone)}</span>
+                      </button>
+                      <div className="border-t border-slate-100 my-1" />
+                      {commonTimezones.map(tz => (
+                        <button
+                          key={tz.value}
+                          onClick={() => { setSelectedTimezone(tz.value); setShowTimezoneDropdown(false); }}
+                          className={`w-full text-left flex items-center justify-between px-3 py-1.5 rounded-lg text-xs hover:bg-slate-50 transition-colors ${
+                            selectedTimezone === tz.value ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-slate-700'
+                          }`}
+                        >
+                          <span>{tz.label}</span>
+                          <span className="text-slate-400 ml-2">{getTimezoneShortName(tz.value)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="text-xs sm:text-sm md:text-sm text-slate-500">
+                Total: <span className="font-bold text-slate-800">{sessions.length}</span>
+              </div>
             </div>
           </div>
           
@@ -835,8 +1103,53 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
               </div>
             )}
 
+            {/* Filtro por Facturación */}
+            <div className="flex-1">
+              <label className="block text-[10px] sm:text-xs md:text-xs font-semibold text-slate-600 mb-1 sm:mb-1.5">
+                <span className="flex items-center gap-1">
+                  <Receipt size={12} className="text-amber-600 flex-shrink-0" />
+                  Facturación
+                </span>
+              </label>
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                {[{value: 'invoiced', label: 'Facturada', icon: '🧾'},
+                  {value: 'bono', label: 'En bono', icon: '🎟️'},
+                  {value: 'uninvoiced', label: 'Sin facturar', icon: '⏳'}].map(opt => {
+                  const isSelected = filterBilling.includes(opt.value);
+                  return (
+                    <button
+                      key={opt.value}
+                      onClick={() => {
+                        if (isSelected) {
+                          setFilterBilling(filterBilling.filter(b => b !== opt.value));
+                        } else {
+                          setFilterBilling([...filterBilling, opt.value]);
+                        }
+                      }}
+                      className={`inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 md:px-3 py-1 sm:py-1.5 rounded-full text-[10px] sm:text-xs md:text-xs font-medium transition-all ${
+                        isSelected
+                          ? 'bg-amber-500 text-white shadow-md hover:bg-amber-600 hover:shadow-lg'
+                          : 'bg-slate-100 text-slate-700 border border-slate-300 hover:bg-slate-200 hover:border-slate-400'
+                      }`}
+                    >
+                      <span className={isSelected ? 'text-amber-100' : 'text-slate-500'}>{opt.icon}</span>
+                      <span className="hidden sm:inline">{opt.label}</span>
+                      {isSelected && (
+                        <XIcon size={10} className="ml-0.5" />
+                      )}
+                    </button>
+                  );
+                })}
+                {filterBilling.length > 0 && filterBilling.length < 3 && (
+                  <span className="text-[10px] sm:text-xs md:text-xs font-medium text-amber-700 bg-amber-50 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full border border-amber-200">
+                    {filterBilling.length}
+                  </span>
+                )}
+              </div>
+            </div>
+
             {/* Botón para limpiar filtros */}
-            {(filterPatient !== 'all' || filterStatus.length !== 2 || filterPayment !== 'all' || filterEntry.length !== 2 || filterTags.length > 0) && (
+            {(filterPatient !== 'all' || filterStatus.length !== 2 || filterPayment !== 'all' || filterEntry.length !== 2 || filterTags.length > 0 || filterBilling.length !== 3) && (
               <div className="flex justify-end pt-1.5 sm:pt-2">
                 <button
                   onClick={() => {
@@ -846,6 +1159,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                     setFilterPayment('all');
                     setFilterEntry(['with-entry', 'without-entry']);
                     setFilterTags([]);
+                    setFilterBilling(['invoiced', 'bono', 'uninvoiced']);
                   }}
                   className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 md:px-4 py-1.5 sm:py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg text-xs sm:text-sm md:text-sm font-medium hover:bg-red-100 hover:border-red-300 transition-colors"
                 >
@@ -928,6 +1242,8 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
             const earnings = getPsychologistEarnings(session);
             const isPaid = isSessionPaid(session.id);
             const isCompleted = session.status === 'completed';
+            const dispTimes = sessionDisplayTimes.get(session.id) ?? { date: session.date, startTime: session.startTime, endTime: session.endTime };
+            const dispDate = dispTimes.date ? new Date(`${dispTimes.date}T12:00:00`) : new Date(session.date);
             
             return (
               <div
@@ -940,10 +1256,10 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                   <div className="flex items-start justify-between gap-2 sm:hidden">
                     <div className="bg-purple-100 rounded p-1.5 text-center min-w-[40px]">
                       <div className="text-[9px] font-semibold text-purple-600 uppercase">
-                        {new Date(session.date).toLocaleDateString('es-ES', { month: 'short' })}
+                        {dispDate.toLocaleDateString('es-ES', { month: 'short' })}
                       </div>
                       <div className="text-base font-bold text-purple-900">
-                        {new Date(session.date).getDate()}
+                        {dispDate.getDate()}
                       </div>
                     </div>
                     
@@ -981,10 +1297,10 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                   <div className="flex items-start gap-2 sm:gap-3">
                     <div className="hidden sm:block bg-purple-100 rounded-lg p-2 md:p-3 text-center min-w-[55px] md:min-w-[60px]">
                       <div className="text-[10px] md:text-xs font-semibold text-purple-600 uppercase">
-                        {new Date(session.date).toLocaleDateString('es-ES', { month: 'short' })}
+                        {dispDate.toLocaleDateString('es-ES', { month: 'short' })}
                       </div>
                       <div className="text-xl md:text-2xl font-bold text-purple-900">
-                        {new Date(session.date).getDate()}
+                        {dispDate.getDate()}
                       </div>
                     </div>
                     
@@ -997,10 +1313,10 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                       </div>
                       <div className="text-xs sm:text-sm md:text-sm text-slate-500 flex items-center gap-1 sm:gap-1.5 mb-1 sm:mb-2 flex-wrap">
                         <Clock size={10} className="flex-shrink-0" />
-                        <span className="font-medium text-slate-700">{getDisplayTime(session.startTime, session.starts_on, session.timezone)} - {getDisplayTime(session.endTime, session.ends_on, session.timezone)}</span>
+                        <span className="font-medium text-slate-700">{dispTimes.startTime} - {dispTimes.endTime}</span>
                         <span className="inline-flex items-center gap-0.5 text-[9px] font-medium px-1 py-0.5 bg-blue-50 text-blue-600 rounded border border-blue-200">
                           <Globe size={8} />
-                          {getTZLabel(session.timezone || 'Europe/Madrid', session.starts_on || session.date)}
+                          {getTimezoneShortName(selectedTimezone)}
                         </span>
                       </div>
                       <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 flex-wrap">
@@ -1142,8 +1458,8 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                 <div className="px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-700 text-sm flex items-center gap-2">
                   <Globe size={16} className="flex-shrink-0" />
                   <div>
-                    <span className="font-semibold">{editedSession.timezone || 'Europe/Madrid'}</span>
-                    <span className="ml-2 text-blue-500 text-xs">{getTZLabel(editedSession.timezone || 'Europe/Madrid', editedSession.starts_on || editedSession.date)}</span>
+                    <span className="font-semibold">{selectedTimezone}</span>
+                    <span className="ml-2 text-blue-500 text-xs">{getTimezoneShortName(selectedTimezone)}</span>
                   </div>
                 </div>
               </div>
@@ -1151,7 +1467,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
               {/* Time Range */}
               <div className="grid grid-cols-2 gap-3 sm:gap-4">
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Hora inicio <span className="text-xs font-normal text-blue-500">({getTZLabel(editedSession.timezone || 'Europe/Madrid', editedSession.starts_on || editedSession.date)})</span></label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Hora inicio <span className="text-xs font-normal text-blue-500">({getTimezoneShortName(selectedTimezone)})</span></label>
                   <input
                     type="time"
                     value={editedSession.startTime}
@@ -1160,7 +1476,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Hora fin <span className="text-xs font-normal text-blue-500">({getTZLabel(editedSession.timezone || 'Europe/Madrid', editedSession.starts_on || editedSession.date)})</span></label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Hora fin <span className="text-xs font-normal text-blue-500">({getTimezoneShortName(selectedTimezone)})</span></label>
                   <input
                     type="time"
                     value={editedSession.endTime}

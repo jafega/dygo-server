@@ -132,6 +132,10 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
   const [invoiceStartNumber, setInvoiceStartNumber] = useState<string>('');
   const [invoiceSeriesInput, setInvoiceSeriesInput] = useState<string>('');
   const [pendingInvoiceData, setPendingInvoiceData] = useState<any>(null);
+
+  // Estado para advertencia de fecha retroactiva
+  const [showBackdateWarning, setShowBackdateWarning] = useState(false);
+  const [backdateWarningInfo, setBackdateWarningInfo] = useState<{ isDraft: boolean; lastInvoiceDate: string; lastInvoiceNumber: string } | null>(null);
   
   // Filtros
   const [searchTerm, setSearchTerm] = useState('');
@@ -594,7 +598,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
     return null;
   };
 
-  const handleSaveInvoice = async (isDraft: boolean) => {
+  const handleSaveInvoice = async (isDraft: boolean, backdateConfirmed: boolean = false) => {
     if (isSubmitting) return;
     
     // Validar según el tipo de factura
@@ -617,6 +621,48 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       if (selectedSessionIds.size === 0) {
         alert('Debes seleccionar al menos una sesión del centro');
         return;
+      }
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+    // Al convertir un borrador en factura real, usar siempre la fecha de hoy
+    const isDraftConversion = !isDraft && editingInvoice?.status === 'draft';
+    const effectiveDate = isDraftConversion ? today : formData.date;
+
+    // No permitir fechas futuras
+    if (!isDraft && effectiveDate > today) {
+      alert('No se puede emitir una factura con fecha futura. La fecha se ha ajustado a hoy.');
+      setFormData(prev => ({ ...prev, date: today }));
+      return;
+    }
+
+    // Comprobar cronología respecto a la última factura emitida (solo para facturas reales, no borradores)
+    if (!isDraft && !backdateConfirmed) {
+      const lastInvoice = invoices
+        .filter(inv =>
+          inv.status !== 'draft' &&
+          !inv.is_rectificativa &&
+          inv.invoiceNumber &&
+          // Excluir la factura que estamos editando (en caso de edición)
+          (!editingInvoice || inv.id !== editingInvoice.id)
+        )
+        .sort((a, b) => {
+          const dateA = a.invoice_date || a.date || '';
+          const dateB = b.invoice_date || b.date || '';
+          return dateA > dateB ? -1 : dateA < dateB ? 1 : 0;
+        })[0];
+
+      if (lastInvoice) {
+        const lastDate = (lastInvoice.invoice_date || lastInvoice.date || '').split('T')[0];
+        if (effectiveDate < lastDate) {
+          setBackdateWarningInfo({
+            isDraft,
+            lastInvoiceDate: lastDate,
+            lastInvoiceNumber: lastInvoice.invoiceNumber
+          });
+          setShowBackdateWarning(true);
+          return;
+        }
       }
     }
 
@@ -655,8 +701,8 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
         id: editingInvoice?.id || Date.now().toString(),
         invoiceNumber: editingInvoice?.invoiceNumber || invoiceNumber,
         amount: totals.subtotal,
-        date: formData.date,
-        invoice_date: formData.date,
+        date: effectiveDate,
+        invoice_date: effectiveDate,
         dueDate: formData.dueDate,
         status: isDraft ? 'draft' : 'pending',
         description: formData.description,
@@ -1775,9 +1821,15 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                   <input
                     type="date"
                     value={formData.date}
+                    max={new Date().toISOString().split('T')[0]}
                     onChange={(e) => setFormData({ ...formData, date: e.target.value })}
                     className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                   />
+                  {editingInvoice?.status === 'draft' && (
+                    <p className="mt-1 text-xs text-indigo-500">
+                      Al emitir el borrador como factura real, la fecha se actualizará automáticamente a hoy.
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">Fecha de Vencimiento</label>
@@ -2429,6 +2481,59 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
               >
                 Confirmar
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de advertencia de fecha retroactiva */}
+      {showBackdateWarning && backdateWarningInfo && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[70]" onClick={() => { setShowBackdateWarning(false); setBackdateWarningInfo(null); }}>
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 border border-amber-200" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6">
+              <div className="flex items-start gap-3 mb-4">
+                <div className="flex-shrink-0 w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center">
+                  <svg className="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-slate-900">Advertencia de cronología</h3>
+                  <p className="text-sm text-slate-500 mt-0.5">Posible incumplimiento de la normativa fiscal</p>
+                </div>
+              </div>
+
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-5 text-sm text-amber-800 space-y-1">
+                <p>Estás intentando emitir una factura con una fecha anterior a la última registrada en la serie:</p>
+                <ul className="mt-2 space-y-1 pl-2">
+                  <li>• Última factura: <strong>{backdateWarningInfo.lastInvoiceNumber}</strong> ({new Date(backdateWarningInfo.lastInvoiceDate + 'T12:00:00').toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })})</li>
+                  <li>• Fecha solicitada: <strong>{new Date((backdateWarningInfo.isDraft ? formData.date : formData.date) + 'T12:00:00').toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}</strong></li>
+                </ul>
+                <p className="mt-2 text-xs text-amber-700">En España, la numeración de facturas debe ser correlativa y cronológica. Emitir una factura con fecha retroactiva puede generar problemas ante una inspección de Hacienda.</p>
+              </div>
+
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={() => {
+                    setShowBackdateWarning(false);
+                    setBackdateWarningInfo(null);
+                  }}
+                  className="px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 rounded-lg transition-colors font-medium"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => {
+                    setShowBackdateWarning(false);
+                    const info = backdateWarningInfo;
+                    setBackdateWarningInfo(null);
+                    handleSaveInvoice(info.isDraft, true);
+                  }}
+                  className="px-4 py-2 text-sm bg-amber-600 text-white hover:bg-amber-700 rounded-lg transition-colors font-medium"
+                >
+                  Entiendo, crear igualmente
+                </button>
+              </div>
             </div>
           </div>
         </div>
