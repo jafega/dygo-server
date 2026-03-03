@@ -6328,10 +6328,23 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
           const startTime = session.starts_on ? session.starts_on.substring(11, 16) : '';
           const endTime = session.ends_on ? session.ends_on.substring(11, 16) : '';
           const timeStr = startTime && endTime ? ` (${startTime}–${endTime})` : '';
-          const patientStr = sessionData.patientName || invoice.patientName || '';
-          const patientPart = patientStr ? ` — ${patientStr}` : '';
+          let itemDescription;
+          if (invoice.invoice_type === 'center') {
+            // Para facturas de centros: mostrar duración y fecha, sin nombre del paciente
+            let durationStr = '';
+            if (session.starts_on && session.ends_on) {
+              const durationMs = new Date(session.ends_on) - new Date(session.starts_on);
+              const durationH = durationMs / 3600000;
+              durationStr = ` — ${Number.isInteger(durationH) ? durationH : durationH.toFixed(2)} h`;
+            }
+            itemDescription = `Sesión de psicología${durationStr} — ${startDate}${timeStr}`;
+          } else {
+            const patientStr = sessionData.patientName || invoice.patientName || '';
+            const patientPart = patientStr ? ` — ${patientStr}` : '';
+            itemDescription = `Sesión de psicología${patientPart} — ${startDate}${timeStr}`;
+          }
           detailedItems.push({
-            description: `Sesión de psicología${patientPart} — ${startDate}${timeStr}`,
+            description: itemDescription,
             quantity: invoice.is_rectificativa ? -1 : 1,
             unitPrice: sessionPrice
           });
@@ -6724,15 +6737,6 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
           <span class="info-value">${formatDateES(invoice.dueDate)}</span>
         </div>
         ` : ''}
-        <div class="info-row">
-          <span class="info-label">Estado:</span>
-          <span class="status-badge status-${invoice.status}">${
-            invoice.status === 'paid' ? 'Pagada' : 
-            invoice.status === 'pending' ? 'Pendiente' : 
-            invoice.status === 'overdue' ? 'Vencida' : 
-            'Cancelada'
-          }</span>
-        </div>
       </div>
       
       <div class="info-box">
@@ -8751,11 +8755,18 @@ app.get('/api/sessions', async (req, res) => {
       }
       
       // Aplicar filtros de fecha
+      // Expandimos 1 día en cada extremo para cubrir desfases horarios (ej. Europe/Madrid UTC+1/+2)
+      // ya que starts_on se almacena en UTC y el cliente envía fechas locales.
+      // La vista del calendario ya filtra por fecha de visualización, y SessionsList filtrará igualmente.
       if (startDate) {
-        query = query.gte('starts_on', `${startDate}T00:00:00`);
+        const startExpanded = new Date(`${startDate}T00:00:00.000Z`);
+        startExpanded.setUTCDate(startExpanded.getUTCDate() - 1);
+        query = query.gte('starts_on', startExpanded.toISOString());
       }
       if (endDate) {
-        query = query.lte('starts_on', `${endDate}T23:59:59`);
+        const endExpanded = new Date(`${endDate}T23:59:59.999Z`);
+        endExpanded.setUTCDate(endExpanded.getUTCDate() + 1);
+        query = query.lte('starts_on', endExpanded.toISOString());
       }
       if (futureOnly === 'true') {
         const now = new Date().toISOString();
@@ -8828,21 +8839,29 @@ app.get('/api/sessions', async (req, res) => {
           .eq('psychologist_user_id', psychologistId);
         
         if (!dispoError && dispoData) {
-          const dispoSlots = dispoData.map(d => ({
-            id: d.id,
-            psychologistId: psychologistId,
-            psychologist_user_id: d.psychologist_user_id,
-            patientId: '',
-            patient_user_id: '',
-            patientName: 'Disponible',
-            patientPhone: '',
-            date: d.data?.date || '',
-            startTime: d.data?.startTime || '',
-            endTime: d.data?.endTime || '',
-            type: d.data?.type || 'online',
-            status: 'available',
-            isFromDispo: true
-          }));
+          const dispoSlots = dispoData
+            .filter(d => {
+              const dDate = d.data?.date || '';
+              if (!dDate) return true; // incluir si no tiene fecha (por compatibilidad)
+              if (startDate && dDate < startDate) return false;
+              if (endDate && dDate > endDate) return false;
+              return true;
+            })
+            .map(d => ({
+              id: d.id,
+              psychologistId: psychologistId,
+              psychologist_user_id: d.psychologist_user_id,
+              patientId: '',
+              patient_user_id: '',
+              patientName: 'Disponible',
+              patientPhone: '',
+              date: d.data?.date || '',
+              startTime: d.data?.startTime || '',
+              endTime: d.data?.endTime || '',
+              type: d.data?.type || 'online',
+              status: 'available',
+              isFromDispo: true
+            }));
           sessions = [...sessions, ...dispoSlots];
         }
       }
@@ -8987,11 +9006,17 @@ app.post('/api/sessions', async (req, res) => {
     const newEnds   = sessionData.ends_on   || dateTimeToISO(sessionData.date, sessionData.endTime);
     
     if (newStarts && newEnds) {
+      // Solo bloquear solapamiento si es el MISMO paciente (diferente paciente está permitido)
+      const newPatientId = sessionData.patient_user_id || sessionData.patientId || null;
+
       const overlappingSession = db.sessions.find(s => {
-        // Ignorar sesiones canceladas o del mismo paciente
+        // Ignorar sesiones canceladas o disponibilidades
         if (s.status === 'cancelled' || s.status === 'available') return false;
         // Solo verificar sesiones del mismo psicólogo
         if (s.psychologist_user_id !== psychologistUserId) return false;
+        // Permitir solapamiento si es un paciente diferente
+        const existingPatientId = s.patient_user_id || s.patientId || null;
+        if (newPatientId && existingPatientId && newPatientId !== existingPatientId) return false;
         
         const existingStarts = s.starts_on || dateTimeToISO(s.date, s.startTime);
         const existingEnds = s.ends_on || dateTimeToISO(s.date, s.endTime);
@@ -9003,9 +9028,9 @@ app.post('/api/sessions', async (req, res) => {
       });
       
       if (overlappingSession) {
-        console.error('❌ Session overlap detected with session:', overlappingSession.id);
+        console.error('❌ Session overlap detected (same patient) with session:', overlappingSession.id);
         return res.status(409).json({ 
-          error: `Ya existe una sesión programada para este horario (${overlappingSession.date} ${overlappingSession.startTime}-${overlappingSession.endTime} con ${overlappingSession.patientName || 'paciente'}). Por favor elige otro horario.` 
+          error: `Ya existe una sesión programada para este paciente en este horario (${overlappingSession.date} ${overlappingSession.startTime}-${overlappingSession.endTime}). Por favor elige otro horario.` 
         });
       }
 
@@ -9015,26 +9040,31 @@ app.post('/api/sessions', async (req, res) => {
         try {
           let dupQuery = supabaseAdmin
             .from('sessions')
-            .select('id, starts_on, ends_on, data')
+            .select('id, starts_on, ends_on, patient_user_id, data')
             .eq('psychologist_user_id', psychologistUserId)
             .neq('status', 'cancelled')
             .neq('status', 'available')
             .lt('starts_on', newEnds)
             .gt('ends_on', newStarts)
-            .limit(1);
+            .limit(10);
 
           const { data: supaOverlap, error: overlapErr } = await dupQuery;
 
           if (!overlapErr && supaOverlap && supaOverlap.length > 0) {
-            const dup = supaOverlap[0];
-            const dupDate   = (dup.starts_on || '').split('T')[0] || '';
-            const dupStart  = (dup.starts_on || '').substring(11, 16);
-            const dupEnd    = (dup.ends_on   || '').substring(11, 16);
-            const dupName   = dup.data?.patientName || '';
-            console.error('❌ [POST /api/sessions] Sesión duplicada detectada en Supabase:', dup.id);
-            return res.status(409).json({
-              error: `Ya existe una sesión programada para este horario (${dupDate} ${dupStart}-${dupEnd}${dupName ? ' con ' + dupName : ''}). Por favor elige otro horario.`
-            });
+            // Solo bloquear si alguna sesión solapada tiene el mismo paciente
+            const samePatientOverlap = newPatientId
+              ? supaOverlap.find(s => (s.patient_user_id || s.data?.patientId) === newPatientId)
+              : supaOverlap[0];
+            if (samePatientOverlap) {
+              const dup = samePatientOverlap;
+              const dupDate   = (dup.starts_on || '').split('T')[0] || '';
+              const dupStart  = (dup.starts_on || '').substring(11, 16);
+              const dupEnd    = (dup.ends_on   || '').substring(11, 16);
+              console.error('❌ [POST /api/sessions] Sesión duplicada (mismo paciente) detectada en Supabase:', dup.id);
+              return res.status(409).json({
+                error: `Ya existe una sesión programada para este paciente en este horario (${dupDate} ${dupStart}-${dupEnd}). Por favor elige otro horario.`
+              });
+            }
           }
         } catch (dupCheckErr) {
           // No bloquear la creación si el check falla, solo loguear
@@ -9664,11 +9694,16 @@ app.delete('/api/sessions/future-pending', async (req, res) => {
       }
 
       const matchingIds = (candidates || []).filter(s => {
-        // Filter by same UTC start time (extracted from starts_on)
-        // This is sufficient to identify a recurring series: same patient+psychologist+time+status
+        // Filter by same LOCAL start time — compare against frontend's local startTime
         if (startTime) {
-          const candidateTime = s.starts_on ? s.starts_on.substring(11, 16) : null;
-          if (candidateTime !== startTime) return false;
+          const sessionTz = (s.data && s.data.schedule_timezone) || 'Europe/Madrid';
+          const candidateLocalTime = s.starts_on ? new Date(s.starts_on).toLocaleTimeString('es-ES', {
+            timeZone: sessionTz,
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+          }) : null;
+          if (candidateLocalTime !== startTime) return false;
         }
         return true;
       }).map(s => s.id);
@@ -9698,10 +9733,16 @@ app.delete('/api/sessions/future-pending', async (req, res) => {
       if (s.status !== 'scheduled') return true;
       if ((s.date || (s.starts_on ? s.starts_on.substring(0, 10) : '')) < fromDate) return true;
       if (excludeId && s.id === excludeId) return true;
-      // Filter by same UTC start time (extracted from starts_on)
+      // Filter by same LOCAL start time — convert starts_on UTC to local before comparing
       if (startTime) {
-        const candidateTime = s.starts_on ? s.starts_on.substring(11, 16) : s.startTime;
-        if (candidateTime !== startTime) return true;
+        const sessionTz = s.schedule_timezone || (s.data && s.data.schedule_timezone) || 'Europe/Madrid';
+        const candidateLocalTime = s.starts_on ? new Date(s.starts_on).toLocaleTimeString('es-ES', {
+          timeZone: sessionTz,
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false
+        }) : s.startTime;
+        if (candidateLocalTime !== startTime) return true;
       }
       return false;
     });
@@ -10957,6 +10998,70 @@ app.delete('/api/templates/:id', async (req, res) => {
   } catch (error) {
     console.error('[DELETE /api/templates/:id] Error:', error);
     res.status(500).json({ error: 'Error al eliminar template' });
+  }
+});
+
+// POST /api/signatures/external — psychologist uploads an already-signed external document for a patient
+app.post('/api/signatures/external', async (req, res) => {
+  try {
+    const { title, psych_user_id, patient_user_id, base64File, fileType, fileName } = req.body;
+    if (!title || !psych_user_id || !patient_user_id || !base64File || !fileType || !fileName) {
+      return res.status(400).json({ error: 'Se requieren title, psych_user_id, patient_user_id, base64File, fileType y fileName' });
+    }
+
+    if (!supabaseAdmin) {
+      return res.status(501).json({ error: 'Solo disponible con Supabase' });
+    }
+
+    // Parse base64 data
+    const matches = base64File.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
+    if (!matches || matches.length !== 3) {
+      return res.status(400).json({ error: 'Formato de archivo base64 inválido' });
+    }
+
+    const contentType = matches[1];
+    const base64Data = matches[2];
+    const buffer = Buffer.from(base64Data, 'base64');
+
+    // Upload to Supabase Storage bucket 'external-documents'
+    const safeFileName = `${psych_user_id}/${patient_user_id}/${Date.now()}_${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+
+    const { error: uploadError } = await supabaseAdmin.storage
+      .from('external-documents')
+      .upload(safeFileName, buffer, {
+        contentType: contentType || fileType,
+        upsert: false
+      });
+
+    if (uploadError) {
+      console.error('[POST /api/signatures/external] Storage error:', uploadError);
+      return res.status(500).json({ error: 'Error subiendo el archivo: ' + uploadError.message });
+    }
+
+    // Get public URL
+    const { data: { publicUrl } } = supabaseAdmin.storage
+      .from('external-documents')
+      .getPublicUrl(safeFileName);
+
+    // Insert into signatures (template_id = null for external docs)
+    const { data, error } = await supabaseAdmin
+      .from('signatures')
+      .insert({
+        psych_user_id,
+        patient_user_id,
+        content: title,
+        signed: true,
+        signature_date: new Date().toISOString(),
+        external_document_url: publicUrl
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return res.status(201).json(data);
+  } catch (error) {
+    console.error('[POST /api/signatures/external] Error:', error);
+    res.status(500).json({ error: 'Error al subir documento externo' });
   }
 });
 
