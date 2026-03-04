@@ -65,6 +65,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
   const [meetLink, setMeetLink] = useState('');
   const [statusFilter, setStatusFilter] = useState<string[]>(['scheduled', 'completed']);
   const [paymentFilter, setPaymentFilter] = useState<string>('all'); // 'all', 'paid', 'unpaid'
+  const [filterTags, setFilterTags] = useState<string[]>([]); // tags seleccionadas para filtrar
   const [resizingSession, setResizingSession] = useState<{ id: string, edge: 'top' | 'bottom', date: string } | null>(null);
   const [tempSessionTimes, setTempSessionTimes] = useState<{ startTime: string, endTime: string } | null>(null);
   const [creatingSession, setCreatingSession] = useState<{ date: string, startY: number, currentY: number } | null>(null);
@@ -293,27 +294,39 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
 
     const handleMouseUp = () => {
       if (creatingSession) {
-        const startY = Math.min(creatingSession.startY, creatingSession.currentY);
-        const endY = Math.max(creatingSession.startY, creatingSession.currentY);
+        const dragDistance = Math.abs(creatingSession.currentY - creatingSession.startY);
+        const isClick = dragDistance < 10;
+
+        const startY = isClick ? creatingSession.startY : Math.min(creatingSession.startY, creatingSession.currentY);
+        const endY = isClick ? creatingSession.startY : Math.max(creatingSession.startY, creatingSession.currentY);
         
         // Convert Y positions to times (48px per hour)
         const startMinutes = Math.floor((startY / 48) * 60);
-        const endMinutes = Math.floor((endY / 48) * 60);
-        
         const startHours = Math.floor(startMinutes / 60);
         const startMins = Math.floor((startMinutes % 60) / 15) * 15;
-        const endHours = Math.floor(endMinutes / 60);
-        const endMins = Math.floor((endMinutes % 60) / 15) * 15;
         
         const startTime = `${startHours.toString().padStart(2, '0')}:${startMins.toString().padStart(2, '0')}`;
-        let endTime = `${endHours.toString().padStart(2, '0')}:${endMins.toString().padStart(2, '0')}`;
-        
-        // Ensure minimum 15 minutes duration
-        if (endMinutes - startMinutes < 15) {
-          const minEndMinutes = startMinutes + 15;
-          const minEndHours = Math.floor(minEndMinutes / 60);
-          const minEndMins = minEndMinutes % 60;
-          endTime = `${minEndHours.toString().padStart(2, '0')}:${minEndMins.toString().padStart(2, '0')}`;
+        let endTime: string;
+
+        if (isClick) {
+          // Click sin arrastrar → sesión de 1 hora por defecto
+          const endTotalMinutes = startHours * 60 + startMins + 60;
+          const endH = Math.floor(endTotalMinutes / 60);
+          const endM = endTotalMinutes % 60;
+          endTime = `${endH.toString().padStart(2, '0')}:${endM.toString().padStart(2, '0')}`;
+        } else {
+          const endMinutes = Math.floor((endY / 48) * 60);
+          const endHours = Math.floor(endMinutes / 60);
+          const endMins = Math.floor((endMinutes % 60) / 15) * 15;
+          endTime = `${endHours.toString().padStart(2, '0')}:${endMins.toString().padStart(2, '0')}`;
+
+          // Ensure minimum 15 minutes duration
+          if (endMinutes - startMinutes < 15) {
+            const minEndMinutes = startMinutes + 15;
+            const minEndHours = Math.floor(minEndMinutes / 60);
+            const minEndMins = minEndMinutes % 60;
+            endTime = `${minEndHours.toString().padStart(2, '0')}:${minEndMins.toString().padStart(2, '0')}`;
+          }
         }
         
         // Open modal with pre-filled times
@@ -1649,7 +1662,17 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
     return days;
   };
 
-  // Filtrar sesiones por estado y pago
+  // Tags únicas de todas las relaciones del psicólogo
+  const allPsychologistTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    careRelationships.forEach((rel: any) => {
+      const tags = rel.tags || rel.data?.tags || [];
+      if (Array.isArray(tags)) tags.forEach((t: string) => tagSet.add(t));
+    });
+    return Array.from(tagSet).sort();
+  }, [careRelationships]);
+
+  // Filtrar sesiones por estado, pago y tags
   const getFilteredSessionsByStatus = (sessionsToFilter: Session[]) => {
     return sessionsToFilter.filter(session => {
       // Filtro por estado
@@ -1660,8 +1683,12 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
       const matchesPayment = paymentFilter === 'all' || 
         (paymentFilter === 'paid' && isPaid) || 
         (paymentFilter === 'unpaid' && !isPaid);
+
+      // Filtro por tags (la sesión debe tener al menos una de las tags seleccionadas)
+      const matchesTags = filterTags.length === 0 ||
+        filterTags.some(tag => (session.tags || []).includes(tag));
       
-      return matchesStatus && matchesPayment;
+      return matchesStatus && matchesPayment && matchesTags;
     });
   };
 
@@ -1681,6 +1708,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
   const resetFilters = () => {
     setStatusFilter(['scheduled', 'completed']);
     setPaymentFilter('all');
+    setFilterTags([]);
   };
 
   return (
@@ -1709,8 +1737,86 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
       </div>
 
       {/* Filtro de estado y pago */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4">
-        <div className="flex flex-col gap-4">
+      <div className="bg-white rounded-xl border border-slate-200 px-4 py-2.5">
+        {/* Desktop: single compact row */}
+        <div className="hidden lg:flex items-center gap-4 flex-wrap">
+          <span className="text-xs font-semibold text-slate-500 uppercase shrink-0">Estado:</span>
+          <div className="flex flex-wrap gap-1.5">
+            {statusFilterOptions.map(option => (
+              <button
+                key={option.value}
+                onClick={() => {
+                  if (statusFilter.includes(option.value)) {
+                    setStatusFilter(statusFilter.filter(s => s !== option.value));
+                  } else {
+                    setStatusFilter([...statusFilter, option.value]);
+                  }
+                }}
+                className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
+                  statusFilter.includes(option.value)
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <div className="w-px h-4 bg-slate-200 shrink-0" />
+          <span className="text-xs font-semibold text-slate-500 uppercase shrink-0">Pago:</span>
+          <div className="flex flex-wrap gap-1.5">
+            {paymentFilterOptions.map(option => (
+              <button
+                key={option.value}
+                onClick={() => setPaymentFilter(option.value)}
+                className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
+                  paymentFilter === option.value
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          {allPsychologistTags.length > 0 && (
+            <>
+              <div className="w-px h-4 bg-slate-200 shrink-0" />
+              <span className="text-xs font-semibold text-slate-500 uppercase shrink-0">Etiquetas:</span>
+              <div className="flex flex-wrap gap-1.5">
+                {allPsychologistTags.map(tag => (
+                  <button
+                    key={tag}
+                    onClick={() => {
+                      if (filterTags.includes(tag)) {
+                        setFilterTags(filterTags.filter(t => t !== tag));
+                      } else {
+                        setFilterTags([...filterTags, tag]);
+                      }
+                    }}
+                    className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
+                      filterTags.includes(tag)
+                        ? 'bg-purple-600 text-white shadow-sm'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    🏷️ {tag}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={resetFilters}
+            className="ml-auto text-xs font-semibold text-slate-500 hover:text-slate-900 shrink-0"
+          >
+            Limpiar
+          </button>
+        </div>
+
+        {/* Mobile: stacked layout */}
+        <div className="flex flex-col gap-4 lg:hidden">
           <div className="flex flex-col">
             <label className="text-xs font-semibold text-slate-500 uppercase mb-2">Filtrar por Estado</label>
             <div className="flex flex-wrap gap-2">
@@ -1735,7 +1841,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
               ))}
             </div>
           </div>
-          
+
           <div className="flex flex-col">
             <label className="text-xs font-semibold text-slate-500 uppercase mb-2">Estado de Pago</label>
             <div className="flex flex-wrap gap-2">
@@ -1754,7 +1860,34 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
               ))}
             </div>
           </div>
-          
+
+          {allPsychologistTags.length > 0 && (
+            <div className="flex flex-col">
+              <label className="text-xs font-semibold text-slate-500 uppercase mb-2">Etiquetas</label>
+              <div className="flex flex-wrap gap-2">
+                {allPsychologistTags.map(tag => (
+                  <button
+                    key={tag}
+                    onClick={() => {
+                      if (filterTags.includes(tag)) {
+                        setFilterTags(filterTags.filter(t => t !== tag));
+                      } else {
+                        setFilterTags([...filterTags, tag]);
+                      }
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                      filterTags.includes(tag)
+                        ? 'bg-purple-600 text-white shadow-md'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    🏷️ {tag}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex justify-end">
             <button
               type="button"
@@ -1778,7 +1911,19 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
             <ChevronLeft size={20} />
           </button>
           <h3 className="text-lg font-semibold text-slate-900 capitalize">
-            Semana del {getWeekDays()[0].getDate()} al {getWeekDays()[6].getDate()} de {currentDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}
+            {(() => {
+              const days = getWeekDays();
+              const first = days[0];
+              const last = days[6];
+              const sameMonth = first.getMonth() === last.getMonth() && first.getFullYear() === last.getFullYear();
+              if (sameMonth) {
+                return `Semana del ${first.getDate()} al ${last.getDate()} de ${first.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}`;
+              }
+              const sameYear = first.getFullYear() === last.getFullYear();
+              const firstStr = first.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', ...(sameYear ? {} : { year: 'numeric' }) });
+              const lastStr = last.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
+              return `Semana del ${firstStr} al ${lastStr}`;
+            })()}
           </h3>
           <div className="flex items-center gap-2">
             {/* Selector de zona horaria */}
@@ -1949,6 +2094,16 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                             {session.patientName && (
                               <div className="text-xs text-slate-700 mt-1 font-medium">{session.patientName}</div>
                             )}
+                            {session.tags && session.tags.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {session.tags.slice(0, 2).map((tag, idx) => (
+                                  <span key={idx} className="text-[9px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">🏷️ {tag}</span>
+                                ))}
+                                {session.tags.length > 2 && (
+                                  <span className="text-[9px] text-slate-400">+{session.tags.length - 2}</span>
+                                )}
+                              </div>
+                            )}
                             {session.notes && (
                               <div className="text-xs text-slate-500 mt-1 line-clamp-1">{session.notes}</div>
                             )}
@@ -1995,7 +2150,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
             </div>
             
             {/* Scrollable content area */}
-            <div ref={scrollContainerRef} className="h-[600px] overflow-y-auto mt-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+            <div ref={scrollContainerRef} className="h-[600px] lg:h-[calc(100vh-290px)] overflow-y-auto mt-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
               <div className="flex gap-2">
                 {/* Time labels column */}
                 <div className="w-14 flex-shrink-0">
@@ -2126,7 +2281,52 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                         })()}
                         
                         {/* Sessions positioned absolutely */}
-                        {daySessions.map(session => {
+                        {(() => {
+                          // Compute overlap layout for sessions in this day column
+                          const overlapLayout = new Map<string, { col: number; totalCols: number; isOverlapping: boolean }>();
+                          const sorted = [...daySessions].sort((a, b) => {
+                            const aS = timeToMinutes(sessionDisplayTimes.get(a.id)?.startTime ?? a.startTime);
+                            const bS = timeToMinutes(sessionDisplayTimes.get(b.id)?.startTime ?? b.startTime);
+                            return aS - bS;
+                          });
+                          // Build overlap clusters
+                          const clusters: (typeof sorted)[] = [];
+                          for (const s of sorted) {
+                            const sStart = timeToMinutes(sessionDisplayTimes.get(s.id)?.startTime ?? s.startTime);
+                            let sEnd = timeToMinutes(sessionDisplayTimes.get(s.id)?.endTime ?? s.endTime);
+                            if (sEnd <= sStart) sEnd = 24 * 60;
+                            let placed = false;
+                            for (const cluster of clusters) {
+                              const clMaxEnd = Math.max(...cluster.map(c => {
+                                let cEnd = timeToMinutes(sessionDisplayTimes.get(c.id)?.endTime ?? c.endTime);
+                                const cStart = timeToMinutes(sessionDisplayTimes.get(c.id)?.startTime ?? c.startTime);
+                                if (cEnd <= cStart) cEnd = 24 * 60;
+                                return cEnd;
+                              }));
+                              if (sStart < clMaxEnd) { cluster.push(s); placed = true; break; }
+                            }
+                            if (!placed) clusters.push([s]);
+                          }
+                          // Assign columns within each cluster
+                          for (const cluster of clusters) {
+                            const isOverlapping = cluster.length > 1;
+                            const colEnds: number[] = [];
+                            for (const s of cluster) {
+                              const sStart = timeToMinutes(sessionDisplayTimes.get(s.id)?.startTime ?? s.startTime);
+                              let sEnd = timeToMinutes(sessionDisplayTimes.get(s.id)?.endTime ?? s.endTime);
+                              if (sEnd <= sStart) sEnd = 24 * 60;
+                              let col = 0;
+                              while (col < colEnds.length && colEnds[col] > sStart) col++;
+                              colEnds[col] = sEnd;
+                              overlapLayout.set(s.id, { col, totalCols: cluster.length, isOverlapping });
+                            }
+                            const maxCols = colEnds.length;
+                            for (const s of cluster) {
+                              const ex = overlapLayout.get(s.id)!;
+                              overlapLayout.set(s.id, { ...ex, totalCols: maxCols });
+                            }
+                          }
+                          return daySessions.map(session => {
                           const tzTimes = sessionDisplayTimes.get(session.id);
                           const dispStart = tzTimes?.startTime ?? session.startTime;
                           const dispEnd = tzTimes?.endTime ?? session.endTime;
@@ -2144,14 +2344,22 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                           // Calculate position and height (48px per hour = 0.8px per minute)
                           const topPx = (startMinutes / 60) * 48;
                           const heightPx = (durationMinutes / 60) * 48;
+
+                          // Overlap layout positioning
+                          const layout = overlapLayout.get(session.id) ?? { col: 0, totalCols: 1, isOverlapping: false };
+                          const GAP = 2; // px gap between overlapping sessions
+                          const colWidthPct = 100 / layout.totalCols;
+                          const leftPct = layout.col * colWidthPct;
                           
                           return (
                             <div
                               key={session.id}
-                              className={`group absolute left-1 right-1 rounded-md cursor-${session.status === 'scheduled' ? 'move' : 'pointer'} transition-all hover:shadow-lg border hover:z-10 overflow-visible ${
+                              className={`group absolute rounded-md cursor-${session.status === 'scheduled' ? 'move' : 'pointer'} transition-all hover:shadow-lg border hover:z-10 overflow-visible ${
                                 draggingSession?.id === session.id ? 'opacity-30' : ''
                               } ${
                                 resizingSession?.id === session.id ? 'opacity-40' : ''
+                              } ${
+                                layout.isOverlapping ? 'ring-1 ring-orange-400 ring-offset-0' : ''
                               } ${
                                 session.status === 'available'
                                   ? 'bg-purple-100 border-purple-300 hover:bg-purple-200'
@@ -2165,7 +2373,9 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                               }`}
                               style={{
                                 top: `${topPx}px`,
-                                height: `${Math.max(heightPx, 24)}px`
+                                height: `${Math.max(heightPx, 24)}px`,
+                                left: `calc(${leftPct}% + ${layout.col > 0 ? GAP : 4}px)`,
+                                width: `calc(${colWidthPct}% - ${layout.totalCols > 1 ? GAP * 2 : 8}px)`,
                               }}
                               onMouseDown={(e) => {
                                 // Only allow dragging for scheduled sessions
@@ -2270,10 +2480,23 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                                       {session.paid && (
                                         <span className="text-[9px]">💵</span>
                                       )}
+                                      {layout.isOverlapping && (
+                                        <span title="Sesión solapada" className="text-orange-500 font-bold text-[9px]">⚡</span>
+                                      )}
                                     </div>
                                   </div>
                                   {session.patientName && (
                                     <div className="text-[9px] text-slate-800 font-semibold line-clamp-2 leading-tight">{session.patientName}</div>
+                                  )}
+                                  {session.tags && session.tags.length > 0 && (
+                                    <div className="flex flex-wrap gap-0.5 mt-0.5">
+                                      {session.tags.slice(0, 1).map((tag, idx) => (
+                                        <span key={idx} className="text-[7px] px-1 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium leading-none truncate max-w-[50px]">{tag}</span>
+                                      ))}
+                                      {session.tags.length > 1 && (
+                                        <span className="text-[7px] text-slate-400">+{session.tags.length - 1}</span>
+                                      )}
+                                    </div>
                                   )}
                                 </div>
                                 {session.status === 'available' && (
@@ -2315,7 +2538,8 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                               )}
                             </div>
                           );
-                        })}
+                        });
+                        })()}
                       </div>
                     );
                   })}

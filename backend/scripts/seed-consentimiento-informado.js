@@ -318,23 +318,9 @@ Elaborado conforme a la Ley 41/2002 de Autonomía del Paciente, el Reglamento (U
 <p>Si su situación económica se viese comprometida durante el proceso terapéutico, le invitamos a comunicarlo al profesional. En la medida de lo posible, se explorarán opciones como la reducción temporal de frecuencia, acuerdos de pago diferido o derivación a recursos públicos o entidades sin ánimo de lucro que puedan ofrecer atención psicológica a un coste reducido o gratuito.</p>
 
 <!-- ═══════════════════════════════════════════════════════════════════════ -->
-<h2>SECCIÓN 9. COMUNICACIÓN Y CONTACTO FUERA DE SESIÓN</h2>
+<h2>SECCIÓN 9. DERECHOS DEL PACIENTE</h2>
 
-<h3>9.1. Comunicación entre sesiones</h3>
-<p>La relación terapéutica tiene lugar fundamentalmente en el contexto de las sesiones programadas. Sin embargo, el psicólogo puede establecer mecanismos de comunicación entre sesiones según los siguientes criterios:</p>
-<ul>
-  <li><strong>Urgencias:</strong> En caso de crisis emocional aguda o situación de emergencia, debe contactar preferentemente con los servicios de urgencias (112) o con los servicios de salud mental de urgencias de su zona. Si el psicólogo ha facilitado un número de contacto de urgencia, podrá utilizarlo en tales situaciones.</li>
-  <li><strong>Consultas breves:</strong> Las consultas por mensaje de texto, WhatsApp o correo electrónico deben limitarse a cuestiones logísticas (cambios de cita, etc.). Las consultas clínicas se abordarán en sesión.</li>
-  <li><strong>Respuesta:</strong> El psicólogo responderá a los mensajes en un tiempo razonable durante su horario habitual de atención. No está disponible las 24 horas del día.</li>
-</ul>
-
-<h3>9.2. Relaciones fuera del contexto terapéutico</h3>
-<p>El Código Deontológico del Psicólogo establece la prohibición de mantener relaciones duales que puedan comprometer la objetividad profesional o generar conflictos de interés. En consecuencia, el psicólogo no mantendrá relaciones de naturaleza personal, social, comercial, romántica o sexual con sus pacientes, ni durante el proceso terapéutico ni en un período razonable posterior a la finalización del mismo. En caso de que surja un conflicto de interés o cualquier circunstancia que pueda afectar a la neutralidad terapéutica, el psicólogo lo comunicará y gestionará de manera transparente, incluida la derivación si fuera necesaria.</p>
-
-<!-- ═══════════════════════════════════════════════════════════════════════ -->
-<h2>SECCIÓN 10. DERECHOS DEL PACIENTE</h2>
-
-<h3>10.1. Derechos recogidos en la Ley 41/2002 de Autonomía del Paciente</h3>
+<h3>9.1. Derechos recogidos en la Ley 41/2002 de Autonomía del Paciente</h3>
 <p>Como paciente de servicios de atención psicológica en España, usted tiene los siguientes derechos, recogidos en la Ley 41/2002, de 14 de noviembre, básica reguladora de la autonomía del paciente y de derechos y obligaciones en materia de información y documentación clínica:</p>
 <ul>
   <li><strong>Derecho a la información asistencial:</strong> Tiene derecho a recibir información sobre su estado de salud psicológica, el proceso de evaluación, el diagnóstico, el tratamiento propuesto, sus alternativas y los riesgos e incertidumbres que conlleva. Esta información debe ser comprensible, adecuada a sus características personales y suficiente para que pueda tomar decisiones informadas.</li>
@@ -344,7 +330,7 @@ Elaborado conforme a la Ley 41/2002 de Autonomía del Paciente, el Reglamento (U
   <li><strong>Derecho a solicitar el alta voluntaria:</strong> Tiene derecho a abandonar el tratamiento en cualquier momento, sin necesidad de justificación, asumiendo la responsabilidad de su decisión.</li>
 </ul>
 
-<h3>10.2. Derechos específicos del proceso terapéutico</h3>
+<h3>9.2. Derechos específicos del proceso terapéutico</h3>
 <ul>
   <li>Ser tratado con respeto, dignidad y sin discriminación por razón de sexo, orientación sexual, identidad de género, etnia, religión, discapacidad, situación socioeconómica u otras circunstancias personales.</li>
   <li>Recibir una atención psicológica de calidad, basada en la evidencia científica y guiada por los principios del Código Deontológico del Psicólogo.</li>
@@ -355,20 +341,20 @@ Elaborado conforme a la Ley 41/2002 de Autonomía del Paciente, el Reglamento (U
 </ul>
 
 <!-- ═══════════════════════════════════════════════════════════════════════ -->
-<h2>SECCIÓN 11. MENORES DE EDAD Y PERSONAS CON CAPACIDAD LEGALMENTE MODIFICADA</h2>
+<h2>SECCIÓN 10. MENORES DE EDAD Y PERSONAS CON CAPACIDAD LEGALMENTE MODIFICADA</h2>
 
-<h3>11.1. Atención a menores</h3>
+<h3>10.1. Atención a menores</h3>
 <p>Cuando el paciente sea menor de 16 años, el consentimiento deberá ser otorgado por sus representantes legales (padres o tutores legales). Si el paciente es mayor de 16 años y menor de 18, se considerará su capacidad para consentir según lo establecido en la Ley 41/2002 y la legislación autonómica aplicable: los menores de 16 o más años que puedan comprender el alcance y las consecuencias de la intervención podrán otorgar su consentimiento, aunque se procurará implicar a los representantes legales siempre que sea posible y beneficioso para el menor.</p>
 
 <p>En cualquier caso, el interés superior del menor prevalecerá sobre cualquier otra consideración. Si en el transcurso del tratamiento de un menor se detecta una situación de riesgo o desprotección, el profesional actuará conforme a los protocolos de protección de la infancia vigentes.</p>
 
-<h3>11.2. Divorcios, separaciones y custodia compartida</h3>
+<h3>10.2. Divorcios, separaciones y custodia compartida</h3>
 <p>Cuando los progenitores de un menor paciente estén separados o divorciados, la atención psicológica del menor es una decisión que corresponde al ejercicio conjunto de la patria potestad (salvo que medie resolución judicial en contrario). El psicólogo requerirá, en caso de discrepancia entre los progenitores respecto al tratamiento, la correspondiente resolución judicial. En caso de conflicto de lealtades o utilización del menor como instrumento en disputas entre progenitores, el psicólogo tomará las medidas necesarias para proteger el bienestar del menor, incluida la suspensión cautelar del tratamiento.</p>
 
 <!-- ═══════════════════════════════════════════════════════════════════════ -->
-<h2>SECCIÓN 12. SITUACIONES DE CRISIS Y CONDUCTAS DE RIESGO</h2>
+<h2>SECCIÓN 11. SITUACIONES DE CRISIS Y CONDUCTAS DE RIESGO</h2>
 
-<h3>12.1. Ideación suicida o de autolesión</h3>
+<h3>11.1. Ideación suicida o de autolesión</h3>
 <p>Si en algún momento del proceso terapéutico usted experimenta pensamientos de hacerse daño o de quitarse la vida, es muy importante que lo comunique a su psicólogo/a sin demora. El psicólogo realizará una evaluación del riesgo y trabajará con usted para establecer un plan de seguridad que incluya estrategias de afrontamiento, personas de confianza a contactar y recursos de emergencia disponibles.</p>
 
 <p>En caso de riesgo inmediato y grave, el psicólogo podrá contactar con los servicios de emergencias (112) o con los familiares del paciente para garantizar su seguridad. Le informará de esta posibilidad con anterioridad para que pueda planificarse conjuntamente.</p>
@@ -381,25 +367,25 @@ Elaborado conforme a la Ley 41/2002 de Autonomía del Paciente, el Reglamento (U
   <li><strong>Urgencias hospitalarias de salud mental:</strong> Acudir al hospital de referencia de su zona.</li>
 </ul>
 
-<h3>12.2. Consumo de sustancias</h3>
+<h3>11.2. Consumo de sustancias</h3>
 <p>Si el motivo de consulta incluye o está relacionado con el consumo de alcohol u otras sustancias, el psicólogo podrá establecer coordinación con Unidades de Conductas Adictivas (UCA) u otros recursos especializados, siempre con su conocimiento y consentimiento. El consumo activo de sustancias en el momento de la sesión puede comprometer la eficacia del trabajo terapéutico; en tales situaciones el psicólogo se reserva el derecho de suspender la sesión.</p>
 
 <!-- ═══════════════════════════════════════════════════════════════════════ -->
-<h2>SECCIÓN 13. FINALIZACIÓN DEL TRATAMIENTO</h2>
+<h2>SECCIÓN 12. FINALIZACIÓN DEL TRATAMIENTO</h2>
 
-<h3>13.1. Alta terapéutica</h3>
+<h3>12.1. Alta terapéutica</h3>
 <p>El tratamiento finalizará cuando se hayan alcanzado los objetivos terapéuticos establecidos, cuando el paciente decida interrumpirlo o cuando el psicólogo considere que ha llegado a los límites de su competencia o de lo que puede ofrecer al paciente en ese momento. Idealmente, la finalización del tratamiento es un proceso planificado que incluye una revisión de los avances conseguidos, una consolidación de los cambios, y el establecimiento de un plan de seguimiento o autoayuda.</p>
 
-<h3>13.2. Derecho a interrumpir el tratamiento</h3>
+<h3>12.2. Derecho a interrumpir el tratamiento</h3>
 <p>Usted puede interrumpir el tratamiento en cualquier momento sin necesidad de justificación y sin consecuencias negativas. El psicólogo le informará de las implicaciones clínicas de la interrupción desde su punto de vista profesional, pero respetará en todo caso su autonomía. Le pedirá únicamente que, si decide interrumpir, lo comunique antes de la siguiente sesión programada, para poder hacer una última sesión de cierre si usted lo desea.</p>
 
-<h3>13.3. Derivación a otros profesionales</h3>
+<h3>12.3. Derivación a otros profesionales</h3>
 <p>Si en algún momento el psicólogo considera que su situación requiere atención de otro profesional (psiquiatra, médico de familia, trabajador social, neurólogo, logopeda, neuropsicólogo, etc.) o que usted se beneficiaría de recursos adicionales, le informará de ello y le facilitará la derivación o coordinación necesaria, siempre con su consentimiento.</p>
 
 <!-- ═══════════════════════════════════════════════════════════════════════ -->
-<h2>SECCIÓN 14. MARCO NORMATIVO Y DEONTOLÓGICO</h2>
+<h2>SECCIÓN 13. MARCO NORMATIVO Y DEONTOLÓGICO</h2>
 
-<h3>14.1. Normativa aplicable</h3>
+<h3>13.1. Normativa aplicable</h3>
 <p>El ejercicio de la psicología como profesión sanitaria está regulado en España por el siguiente marco normativo, entre otras disposiciones:</p>
 <ul>
   <li>Ley 44/2003, de 21 de noviembre, de Ordenación de las Profesiones Sanitarias.</li>
@@ -413,11 +399,11 @@ Elaborado conforme a la Ley 41/2002 de Autonomía del Paciente, el Reglamento (U
   <li>Ley 33/2011, de 4 de octubre, General de Salud Pública.</li>
 </ul>
 
-<h3>14.2. Colegiación obligatoria</h3>
+<h3>13.2. Colegiación obligatoria</h3>
 <p>El ejercicio de la psicología como profesión sanitaria en España requiere la colegiación en el Colegio Oficial de Psicólogos de la demarcación correspondiente. El psicólogo que le atiende está colegiado y somete su ejercicio profesional a los principios del Código Deontológico y a la supervisión deontológica del Colegio. Cualquier queja o denuncia relacionada con el ejercicio profesional deberá dirigirse al Colegio Oficial de Psicólogos correspondiente.</p>
 
 <!-- ═══════════════════════════════════════════════════════════════════════ -->
-<h2>SECCIÓN 15. PREGUNTAS FRECUENTES</h2>
+<h2>SECCIÓN 14. PREGUNTAS FRECUENTES</h2>
 
 <h3>¿La información que comparta en sesión puede usarse en mi contra en un juicio?</h3>
 <p>En general, no. El psicólogo está sujeto al secreto profesional y no puede revelar el contenido de las sesiones sin su consentimiento, salvo en las excepciones indicadas en la Sección 7.2. Si un juez emite una orden de comparecencia, el psicólogo solo revelará la información estrictamente necesaria y puede alegar su deber de secreto profesional.</p>
@@ -438,7 +424,7 @@ Elaborado conforme a la Ley 41/2002 de Autonomía del Paciente, el Reglamento (U
 <p>La calidad de la relación terapéutica (alianza terapéutica) es uno de los predictores más potentes del resultado del tratamiento. Si no se siente cómodo/a, tiene derecho a comunicárselo a su terapeuta (quien trabajará con ello en el contexto terapéutico) o a buscar otro profesional. No hay obligación de continuar con un terapeuta con quien no se establezca una buena conexión.</p>
 
 <!-- ═══════════════════════════════════════════════════════════════════════ -->
-<h2>SECCIÓN 16. DECLARACIONES Y CONSENTIMIENTO</h2>
+<h2>SECCIÓN 15. DECLARACIONES Y CONSENTIMIENTO</h2>
 
 <p>Antes de firmar este documento, le rogamos que confirme los siguientes extremos marcando cada casilla:</p>
 

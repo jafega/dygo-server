@@ -203,12 +203,6 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
       setInvoiceItems(null);
       return;
     }
-    const hasItems = (selectedInvoice.sessionIds && selectedInvoice.sessionIds.length > 0) ||
-                     (selectedInvoice.bonoIds && selectedInvoice.bonoIds.length > 0);
-    if (!hasItems) {
-      setInvoiceItems({ sessions: [], bonos: [] });
-      return;
-    }
     setIsLoadingItems(true);
     fetch(`${API_URL}/invoices/${selectedInvoice.id}/items`)
       .then(r => r.ok ? r.json() : { sessions: [], bonos: [] })
@@ -618,8 +612,8 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
         return;
       }
       
-      if (selectedSessionIds.size === 0) {
-        alert('Debes seleccionar al menos una sesión del centro');
+      if (selectedSessionIds.size === 0 && selectedBonoIds.size === 0) {
+        alert('Debes seleccionar al menos una sesión o un bono del centro');
         return;
       }
     }
@@ -747,6 +741,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
         newInvoice.centerId = selectedCenterId;
         newInvoice.patientName = center.center_name; // Usar el nombre del centro
         newInvoice.sessionIds = Array.from(selectedSessionIds); // Incluir sesiones del centro
+        newInvoice.bonoIds = Array.from(selectedBonoIds); // Incluir bonos del centro
       }
 
       const method = editingInvoice ? 'PATCH' : 'POST';
@@ -1932,7 +1927,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
               </div>
 
               {((invoiceType === 'patient' && (selectedSessionIds.size > 0 || selectedBonoIds.size > 0)) || 
-                (invoiceType === 'center' && selectedSessionIds.size > 0)) && (
+                (invoiceType === 'center' && (selectedSessionIds.size > 0 || selectedBonoIds.size > 0))) && (
                 <div className="pt-4 border-t border-slate-200 space-y-3">
                   <h4 className="text-sm font-semibold text-slate-700 mb-2">Vista Previa de la Factura</h4>
                   
@@ -2198,7 +2193,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                             const ivaAmt   = showIva  ? price * taxRate  / 100 : 0;
                             const irpfAmt  = showIrpf ? price * irpfRate / 100 : 0;
                             const lineTotal = price + ivaAmt - irpfAmt;
-                            const showPatient = selectedInvoice.invoice_type === 'center' && s.patientName;
+                            const showPatient = selectedInvoice.invoice_type !== 'center' && s.patientName;
                             return (
                               <tr key={s.id || i} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
                                 <td className="px-4 py-2.5">
@@ -2242,7 +2237,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId }
                               const ivaAmt   = showIva  ? price * taxRate  / 100 : 0;
                               const irpfAmt  = showIrpf ? price * irpfRate / 100 : 0;
                               const lineTotal = price + ivaAmt - irpfAmt;
-                              const showPatient = selectedInvoice.invoice_type === 'center' && b.patientName;
+                              const showPatient = selectedInvoice.invoice_type !== 'center' && b.patientName;
                               return (
                                 <tr key={b.id || i} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
                                   <td className="px-4 py-2.5">

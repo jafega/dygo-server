@@ -235,20 +235,9 @@ Elaborado conforme a la Ley 41/2002 de Autonomía del Paciente, el Reglamento (U
 <h3>8.4. Precariedad económica</h3>
 <p>Si la situación económica del/la paciente se viese comprometida durante el proceso, se invita a comunicarlo al/la profesional para explorar opciones como la reducción temporal de frecuencia, acuerdos de pago diferido o derivación a recursos públicos o entidades sin ánimo de lucro.</p>
 
-<h2>SECCIÓN 9. COMUNICACIÓN FUERA DE SESIÓN</h2>
+<h2>SECCIÓN 9. DERECHOS DEL/LA PACIENTE</h2>
 
-<h3>9.1. Comunicación entre sesiones</h3>
-<ul>
-  <li><strong>Urgencias:</strong> Ante crisis emocional aguda o situación de emergencia, el/la paciente debe contactar con los servicios de urgencias (112) o con los servicios de salud mental de urgencias de su zona.</li>
-  <li><strong>Consultas breves:</strong> Las consultas por mensaje o correo deben limitarse a cuestiones logísticas. Las consultas clínicas se abordarán en sesión.</li>
-</ul>
-
-<h3>9.2. Relaciones fuera del contexto terapéutico</h3>
-<p>El Código Deontológico prohíbe mantener relaciones duales que comprometan la objetividad profesional. El/la profesional no mantendrá relaciones de naturaleza personal, social, comercial, romántica o sexual con sus pacientes durante el proceso terapéutico ni en un período razonable posterior a su finalización.</p>
-
-<h2>SECCIÓN 10. DERECHOS DEL/LA PACIENTE</h2>
-
-<h3>10.1. Derechos recogidos en la Ley 41/2002</h3>
+<h3>9.1. Derechos recogidos en la Ley 41/2002</h3>
 <ul>
   <li><strong>Derecho a la información asistencial:</strong> Conocer su estado de salud psicológica, el diagnóstico, el tratamiento propuesto, sus alternativas y los riesgos que conlleva.</li>
   <li><strong>Derecho a la toma de decisiones:</strong> Participar activamente en todas las decisiones relativas a su tratamiento y rechazar las intervenciones propuestas.</li>
@@ -257,7 +246,7 @@ Elaborado conforme a la Ley 41/2002 de Autonomía del Paciente, el Reglamento (U
   <li><strong>Derecho al alta voluntaria:</strong> Abandonar el tratamiento en cualquier momento, sin necesidad de justificación.</li>
 </ul>
 
-<h3>10.2. Derechos específicos del proceso terapéutico</h3>
+<h3>9.2. Derechos específicos del proceso terapéutico</h3>
 <ul>
   <li>Ser tratado/a con respeto, dignidad y sin discriminación.</li>
   <li>Recibir atención psicológica de calidad, basada en la evidencia científica.</li>
@@ -266,13 +255,13 @@ Elaborado conforme a la Ley 41/2002 de Autonomía del Paciente, el Reglamento (U
   <li>Presentar una queja o reclamación ante el Colegio Oficial de Psicólogos de su comunidad autónoma.</li>
 </ul>
 
-<h2>SECCIÓN 11. MENORES DE EDAD Y PERSONAS CON CAPACIDAD LEGALMENTE MODIFICADA</h2>
+<h2>SECCIÓN 10. MENORES DE EDAD Y PERSONAS CON CAPACIDAD LEGALMENTE MODIFICADA</h2>
 
 <p>Cuando el/la paciente sea menor de 16 años, el consentimiento deberá ser otorgado por sus representantes legales. Si tiene 16 o más años, se considerará su capacidad para consentir según lo establecido en la Ley 41/2002. En todo caso, el interés superior del/la menor prevalecerá sobre cualquier otra consideración. La atención psicológica de un menor de edad cuyos progenitores estén separados o divorciados corresponde al ejercicio conjunto de la patria potestad, salvo resolución judicial en contrario.</p>
 
-<h2>SECCIÓN 12. SITUACIONES DE CRISIS Y CONDUCTAS DE RIESGO</h2>
+<h2>SECCIÓN 11. SITUACIONES DE CRISIS Y CONDUCTAS DE RIESGO</h2>
 
-<h3>12.1. Ideación suicida o de autolesión</h3>
+<h3>11.1. Ideación suicida o de autolesión</h3>
 <p>Si el/la paciente experimenta pensamientos de hacerse daño o de quitarse la vida, es fundamental que lo comunique al/la profesional sin demora. El/la profesional realizará una evaluación del riesgo y trabajará con el/la paciente para establecer un plan de seguridad.</p>
 
 <p><strong>Recursos de crisis disponibles en España:</strong></p>
@@ -283,16 +272,16 @@ Elaborado conforme a la Ley 41/2002 de Autonomía del Paciente, el Reglamento (U
   <li><strong>Urgencias hospitalarias de salud mental:</strong> Hospital de referencia de la zona.</li>
 </ul>
 
-<h3>12.2. Consumo de sustancias</h3>
+<h3>11.2. Consumo de sustancias</h3>
 <p>Si el motivo de consulta incluye o está relacionado con el consumo de alcohol u otras sustancias, el/la profesional podrá establecer coordinación con Unidades de Conductas Adictivas (UCA) u otros recursos especializados. El consumo activo de sustancias en el momento de la sesión puede comprometer la eficacia del trabajo terapéutico.</p>
 
-<h2>SECCIÓN 13. FINALIZACIÓN DEL TRATAMIENTO</h2>
+<h2>SECCIÓN 12. FINALIZACIÓN DEL TRATAMIENTO</h2>
 
 <p>El tratamiento finalizará cuando se hayan alcanzado los objetivos terapéuticos, cuando el/la paciente decida interrumpirlo o cuando el/la profesional considere que ha llegado a los límites de lo que puede ofrecer. El/la paciente puede interrumpir el tratamiento en cualquier momento sin necesidad de justificación. Se recomienda comunicarlo antes de la siguiente sesión para poder realizar una sesión de cierre si así se desea.</p>
 
 <p>Si en algún momento el/la profesional considera que la situación del/la paciente requiere atención de otro especialista, le informará de ello y facilitará la derivación o coordinación necesaria, siempre con el consentimiento del/la paciente.</p>
 
-<h2>SECCIÓN 14. MARCO NORMATIVO Y DEONTOLÓGICO</h2>
+<h2>SECCIÓN 13. MARCO NORMATIVO Y DEONTOLÓGICO</h2>
 
 <p>El ejercicio de la psicología como profesión sanitaria en España está regulado, entre otras, por las siguientes disposiciones:</p>
 <ul>
@@ -306,7 +295,7 @@ Elaborado conforme a la Ley 41/2002 de Autonomía del Paciente, el Reglamento (U
 
 <p>El/la profesional está colegiado/a y somete su ejercicio a los principios del Código Deontológico y a la supervisión del Colegio Oficial de Psicólogos correspondiente.</p>
 
-<h2>SECCIÓN 15. PREGUNTAS FRECUENTES</h2>
+<h2>SECCIÓN 14. PREGUNTAS FRECUENTES</h2>
 
 <h3>¿La información compartida en sesión puede usarse en un juicio?</h3>
 <p>En general, no. El/la profesional está sujeto/a al secreto profesional y no puede revelar el contenido de las sesiones sin el consentimiento del/la paciente, salvo las excepciones indicadas en la Sección 7.2.</p>
@@ -323,7 +312,7 @@ Elaborado conforme a la Ley 41/2002 de Autonomía del Paciente, el Reglamento (U
 <h3>¿La psicoterapia es adecuada si el/la paciente toma medicación?</h3>
 <p>Sí. La psicoterapia y el tratamiento farmacológico son complementarios. La combinación de ambos ha demostrado ser más eficaz que cada uno por separado en múltiples trastornos. El/la profesional coordinará con el médico o psiquiatra cuando sea necesario.</p>
 
-<h2>SECCIÓN 16. DECLARACIONES Y CONSENTIMIENTO</h2>
+<h2>SECCIÓN 15. DECLARACIONES Y CONSENTIMIENTO</h2>
 
 <p>Antes de firmar este documento, el/la paciente confirma los siguientes extremos:</p>
 

@@ -6095,12 +6095,22 @@ app.get('/api/invoices/:id/items', async (req, res) => {
       }
     }
 
-    // Obtener bonos
-    if (invoice.bonoIds && invoice.bonoIds.length > 0) {
+    // Obtener bonos — si bonoIds está vacío, buscar por invoice_id como fallback
+    let bonoIdsForItems = invoice.bonoIds && invoice.bonoIds.length > 0 ? invoice.bonoIds : null;
+    if (!bonoIdsForItems) {
+      const { data: bonosByInv } = await supabaseAdmin
+        .from('bono')
+        .select('id')
+        .eq('invoice_id', id);
+      if (bonosByInv && bonosByInv.length > 0) {
+        bonoIdsForItems = bonosByInv.map(b => b.id);
+      }
+    }
+    if (bonoIdsForItems && bonoIdsForItems.length > 0) {
       const { data: bonos, error: bonoErr } = await supabaseAdmin
         .from('bono')
         .select('*')
-        .in('id', invoice.bonoIds);
+        .in('id', bonoIdsForItems);
 
       if (!bonoErr && bonos) {
         result.bonos = bonos.map(b => {
@@ -6355,13 +6365,30 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
     }
   }
   
-  if (invoice.bonoIds && invoice.bonoIds.length > 0) {
+  // Para bonos: intentar por bonoIds primero; si está vacío, buscar bonos con invoice_id
+  let bonoIdsToQuery = invoice.bonoIds && invoice.bonoIds.length > 0 ? invoice.bonoIds : null;
+  if (!bonoIdsToQuery && invoice.id) {
+    try {
+      const { data: bonosByInvId } = await supabaseAdmin
+        .from('bono')
+        .select('id')
+        .eq('invoice_id', invoice.id);
+      if (bonosByInvId && bonosByInvId.length > 0) {
+        bonoIdsToQuery = bonosByInvId.map(b => b.id);
+        console.log('📋 [PDF] bonoIds recuperados por invoice_id:', bonoIdsToQuery);
+      }
+    } catch (e) {
+      console.warn('⚠️ [PDF] No se pudo recuperar bonoIds por invoice_id:', e.message);
+    }
+  }
+
+  if (bonoIdsToQuery && bonoIdsToQuery.length > 0) {
     // Obtener bonos desde Supabase
     try {
       const { data: bonos, error: bonosError } = await supabaseAdmin
         .from('bono')
         .select('*')
-        .in('id', invoice.bonoIds);
+        .in('id', bonoIdsToQuery);
       
       if (!bonosError && bonos) {
         bonos.forEach(bono => {

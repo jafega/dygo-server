@@ -265,27 +265,39 @@ const PsychologistCalendar: React.FC<PsychologistCalendarProps> = ({ psychologis
 
     const handleMouseUp = () => {
       if (creatingSession) {
-        const startY = Math.min(creatingSession.startY, creatingSession.currentY);
-        const endY = Math.max(creatingSession.startY, creatingSession.currentY);
+        const dragDistance = Math.abs(creatingSession.currentY - creatingSession.startY);
+        const isClick = dragDistance < 10;
+
+        const startY = isClick ? creatingSession.startY : Math.min(creatingSession.startY, creatingSession.currentY);
+        const endY = isClick ? creatingSession.startY : Math.max(creatingSession.startY, creatingSession.currentY);
         
         // Convert Y positions to times (48px per hour)
         const startMinutes = Math.floor((startY / 48) * 60);
-        const endMinutes = Math.floor((endY / 48) * 60);
-        
         const startHours = Math.floor(startMinutes / 60);
         const startMins = Math.floor((startMinutes % 60) / 15) * 15;
-        const endHours = Math.floor(endMinutes / 60);
-        const endMins = Math.floor((endMinutes % 60) / 15) * 15;
         
         const startTime = `${startHours.toString().padStart(2, '0')}:${startMins.toString().padStart(2, '0')}`;
-        let endTime = `${endHours.toString().padStart(2, '0')}:${endMins.toString().padStart(2, '0')}`;
-        
-        // Ensure minimum 15 minutes duration
-        if (endMinutes - startMinutes < 15) {
-          const minEndMinutes = startMinutes + 15;
-          const minEndHours = Math.floor(minEndMinutes / 60);
-          const minEndMins = minEndMinutes % 60;
-          endTime = `${minEndHours.toString().padStart(2, '0')}:${minEndMins.toString().padStart(2, '0')}`;
+        let endTime: string;
+
+        if (isClick) {
+          // Click sin arrastrar → sesión de 1 hora por defecto
+          const endTotalMinutes = startHours * 60 + startMins + 60;
+          const endH = Math.floor(endTotalMinutes / 60);
+          const endM = endTotalMinutes % 60;
+          endTime = `${endH.toString().padStart(2, '0')}:${endM.toString().padStart(2, '0')}`;
+        } else {
+          const endMinutes = Math.floor((endY / 48) * 60);
+          const endHours = Math.floor(endMinutes / 60);
+          const endMins = Math.floor((endMinutes % 60) / 15) * 15;
+          endTime = `${endHours.toString().padStart(2, '0')}:${endMins.toString().padStart(2, '0')}`;
+
+          // Ensure minimum 15 minutes duration
+          if (endMinutes - startMinutes < 15) {
+            const minEndMinutes = startMinutes + 15;
+            const minEndHours = Math.floor(minEndMinutes / 60);
+            const minEndMins = minEndMinutes % 60;
+            endTime = `${minEndHours.toString().padStart(2, '0')}:${minEndMins.toString().padStart(2, '0')}`;
+          }
         }
         
         // Open modal with pre-filled times

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { X, User, Calendar, Phone, Mail, FileText, DollarSign, Settings, Tag, Trash2, Save, Edit2, CreditCard, MapPin, Cake, Clock as ClockIcon, BookOpen, Sparkles, CheckCircle, AlertCircle, Download, Loader2, Ticket, Building2, TrendingUp, BarChart3, Upload, File, XCircle, Send, Scroll, Eye, Award, Shield, Lock, ClipboardList } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, User, Calendar, Phone, Mail, FileText, DollarSign, Settings, Tag, Trash2, Save, Edit2, CreditCard, MapPin, Cake, Clock as ClockIcon, BookOpen, Sparkles, CheckCircle, AlertCircle, Download, Loader2, Ticket, Building2, TrendingUp, BarChart3, Upload, File, XCircle, Send, Scroll, Eye, Award, Shield, Lock, ClipboardList, Link, ExternalLink } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser } from '../services/authService';
 import InsightsPanel from './InsightsPanel';
@@ -68,6 +68,14 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   const [docSendSuccess, setDocSendSuccess] = useState(false);
   const [previewDocSignature, setPreviewDocSignature] = useState<any>(null);
   const [previewDocTemplate, setPreviewDocTemplate] = useState<any>(null);
+
+  // External doc upload state
+  const [showUploadExternalDoc, setShowUploadExternalDoc] = useState(false);
+  const [externalDocTitle, setExternalDocTitle] = useState('');
+  const [externalDocFile, setExternalDocFile] = useState<File | null>(null);
+  const [isUploadingExternalDoc, setIsUploadingExternalDoc] = useState(false);
+  const [uploadExternalDocError, setUploadExternalDocError] = useState('');
+  const externalDocFileRef = useRef<HTMLInputElement>(null);
 
   // Historical documents states
   const [historicalDocs, setHistoricalDocs] = useState<HistoricalDocumentsSummary>({ documents: [], lastUpdated: 0 });
@@ -1253,6 +1261,44 @@ tr:nth-child(even) td{background:#f8fafc}
     }
   };
 
+  const handleUploadExternalDoc = async () => {
+    if (!externalDocTitle.trim() || !externalDocFile) return;
+    setIsUploadingExternalDoc(true);
+    setUploadExternalDocError('');
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(externalDocFile);
+      });
+      const res = await fetch(`${API_URL}/signatures/external`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: externalDocTitle.trim(),
+          psych_user_id: currentPsychologistId,
+          patient_user_id: patientUserId,
+          base64File: base64,
+          fileType: externalDocFile.type,
+          fileName: externalDocFile.name
+        })
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Error desconocido');
+      }
+      setShowUploadExternalDoc(false);
+      setExternalDocTitle('');
+      setExternalDocFile(null);
+      await loadDocSignatures();
+    } catch (e: any) {
+      setUploadExternalDocError('Error: ' + (e.message || e));
+    } finally {
+      setIsUploadingExternalDoc(false);
+    }
+  };
+
   const handleSendDoc = async (template: any) => {
     setIsSendingDoc(true);
     try {
@@ -2063,13 +2109,22 @@ tr:nth-child(even) td{background:#f8fafc}
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">Documentos y consentimientos compartidos con {patient.name}</p>
                 </div>
-                <button
-                  onClick={() => { setShowSendDocModal(true); setDocSendSuccess(false); }}
-                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors shadow-sm text-sm font-medium"
-                >
-                  <Send size={14} />
-                  Enviar documento
-                </button>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    onClick={() => { setShowUploadExternalDoc(true); setUploadExternalDocError(''); setExternalDocTitle(''); setExternalDocFile(null); }}
+                    className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-xl hover:bg-teal-700 transition-colors shadow-sm text-sm font-medium"
+                  >
+                    <Upload size={14} />
+                    Subir doc. externo
+                  </button>
+                  <button
+                    onClick={() => { setShowSendDocModal(true); setDocSendSuccess(false); }}
+                    className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors shadow-sm text-sm font-medium"
+                  >
+                    <Send size={14} />
+                    Enviar documento
+                  </button>
+                </div>
               </div>
 
               {docSendSuccess && (
@@ -2093,42 +2148,162 @@ tr:nth-child(even) td{background:#f8fafc}
               ) : (
                 <div className="space-y-3">
                   {docSignatures.map((sig: any) => {
+                    const isExternal = !!sig.external_document_url;
                     const firstLine = (sig.content || '').replace(/<!-- SIGNATURE_DATA:.*?-->$/s, '').split('\n')[0].replace(/^#+\s*/, '').trim();
                     const title = firstLine || 'Documento';
                     return (
                       <div key={sig.id} className="bg-white border border-slate-200 rounded-2xl p-4 flex items-center gap-3 shadow-sm">
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${sig.signed ? 'bg-green-100' : 'bg-amber-100'}`}>
-                          {sig.signed
-                            ? <CheckCircle size={20} className="text-green-600" />
-                            : <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-600"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${isExternal ? 'bg-teal-100' : sig.signed ? 'bg-green-100' : 'bg-amber-100'}`}>
+                          {isExternal
+                            ? <Link size={20} className="text-teal-600" />
+                            : sig.signed
+                              ? <CheckCircle size={20} className="text-green-600" />
+                              : <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-600"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                           }
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="font-semibold text-slate-900 text-sm truncate">{title}</p>
                           <div className="flex items-center gap-2 mt-0.5">
-                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${sig.signed ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-                              {sig.signed ? 'Firmado' : 'Pendiente'}
-                            </span>
+                            {isExternal ? (
+                              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-teal-100 text-teal-700">
+                                Doc. externo firmado
+                              </span>
+                            ) : (
+                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${sig.signed ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                                {sig.signed ? 'Firmado' : 'Pendiente'}
+                              </span>
+                            )}
                             <span className="text-[11px] text-slate-400">
                               {new Date(sig.created_at).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}
                             </span>
-                            {sig.signed && sig.signature_date && (
+                            {!isExternal && sig.signed && sig.signature_date && (
                               <span className="text-[11px] text-green-600">
                                 · Firmado {new Date(sig.signature_date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
                               </span>
                             )}
                           </div>
                         </div>
-                        <button
-                          onClick={() => setPreviewDocSignature(sig)}
-                          className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                          title="Ver documento"
-                        >
-                          <Eye size={16} />
-                        </button>
+                        {isExternal ? (
+                          <a
+                            href={sig.external_document_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-2 text-teal-500 hover:text-teal-700 hover:bg-teal-50 rounded-lg transition-colors"
+                            title="Abrir documento"
+                          >
+                            <ExternalLink size={16} />
+                          </a>
+                        ) : (
+                          <button
+                            onClick={() => setPreviewDocSignature(sig)}
+                            className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                            title="Ver documento"
+                          >
+                            <Eye size={16} />
+                          </button>
+                        )}
                       </div>
                     );
                   })}
+                </div>
+              )}
+
+              {/* Upload external doc modal */}
+              {showUploadExternalDoc && (
+                <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4">
+                  <div className="bg-white rounded-2xl shadow-2xl p-5 w-full max-w-md space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                        <Link size={16} className="text-teal-600" />
+                        Subir documento externo
+                      </h3>
+                      <button onClick={() => setShowUploadExternalDoc(false)} className="p-1.5 hover:bg-slate-100 rounded-lg">
+                        <X size={18} className="text-slate-500" />
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-500">Sube un documento ya firmado fuera de la plataforma. Quedará guardado en el expediente del paciente.</p>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="text-xs font-semibold text-slate-600 mb-1 block">Título del documento *</label>
+                        <input
+                          type="text"
+                          value={externalDocTitle}
+                          onChange={e => setExternalDocTitle(e.target.value)}
+                          placeholder="Ej: Consentimiento Informado firmado"
+                          className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-teal-500 focus:border-transparent outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-600 mb-1 block">Archivo *</label>
+                        <div
+                          className="border-2 border-dashed border-slate-300 rounded-xl p-4 text-center cursor-pointer hover:border-teal-400 hover:bg-teal-50 transition-colors"
+                          onClick={() => externalDocFileRef.current?.click()}
+                        >
+                          {externalDocFile ? (
+                            <div className="flex items-center justify-center gap-2 text-sm text-slate-700">
+                              <File size={16} className="text-teal-600" />
+                              <span className="truncate max-w-[200px]">{externalDocFile.name}</span>
+                              <button
+                                type="button"
+                                onClick={e => { e.stopPropagation(); setExternalDocFile(null); }}
+                                className="text-slate-400 hover:text-red-500 transition-colors"
+                              >
+                                <X size={14} />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="text-slate-400 text-xs space-y-1">
+                              <Upload size={24} className="mx-auto mb-1 text-slate-300" />
+                              <p>Haz clic para seleccionar un archivo</p>
+                              <p className="text-[11px]">PDF, imágenes, Word… (máx. 10 MB)</p>
+                            </div>
+                          )}
+                        </div>
+                        <input
+                          ref={externalDocFileRef}
+                          type="file"
+                          accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.gif,.webp,.txt"
+                          className="hidden"
+                          onChange={e => {
+                            const f = e.target.files?.[0];
+                            if (f) {
+                              if (f.size > 10 * 1024 * 1024) {
+                                setUploadExternalDocError('El archivo supera el límite de 10 MB');
+                                return;
+                              }
+                              setExternalDocFile(f);
+                              setUploadExternalDocError('');
+                            }
+                          }}
+                        />
+                      </div>
+                    </div>
+                    {uploadExternalDocError && (
+                      <p className="text-xs text-red-600 flex items-center gap-1.5">
+                        <AlertCircle size={13} /> {uploadExternalDocError}
+                      </p>
+                    )}
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        onClick={() => setShowUploadExternalDoc(false)}
+                        disabled={isUploadingExternalDoc}
+                        className="flex-1 px-4 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        onClick={handleUploadExternalDoc}
+                        disabled={isUploadingExternalDoc || !externalDocTitle.trim() || !externalDocFile}
+                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-teal-600 text-white rounded-xl text-sm font-medium hover:bg-teal-700 transition-colors disabled:opacity-50"
+                      >
+                        {isUploadingExternalDoc ? (
+                          <><Loader2 size={14} className="animate-spin" /> Subiendo...</>
+                        ) : (
+                          <><Upload size={14} /> Subir documento</>
+                        )}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
 

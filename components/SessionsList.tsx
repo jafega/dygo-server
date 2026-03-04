@@ -87,13 +87,24 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
   // Date range state - default to current month
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>(() => {
     const now = new Date();
-    const start = new Date(now.getFullYear(), now.getMonth(), 1);
-    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    const y = now.getFullYear();
+    const m = now.getMonth() + 1; // 1-based
+    const lastDay = new Date(y, m, 0).getDate();
     return {
-      start: start.toISOString().split('T')[0],
-      end: end.toISOString().split('T')[0]
+      start: `${y}-${String(m).padStart(2, '0')}-01`,
+      end: `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
     };
   });
+
+  // ── Helpers para el rango de fechas ──────────────────────────────────
+  const buildMonthStart = (year: number, month: number): string =>
+    `${year}-${String(month).padStart(2, '0')}-01`;
+
+  const buildMonthEnd = (year: number, month: number): string => {
+    const last = new Date(year, month, 0).getDate();
+    return `${year}-${String(month).padStart(2, '0')}-${String(last).padStart(2, '0')}`;
+  };
+  // ────────────────────────────────────────────────────────────────────
 
   // Colores predefinidos para las etiquetas (20 colores diferentes)
   const tagColors = [
@@ -734,6 +745,10 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
 
   // Aplicar filtros múltiples
   const displayedSessions = sortedSessions.filter(session => {
+    // Filtro por rango de fechas (usando la fecha en la zona horaria seleccionada)
+    const displayDate = (sessionDisplayTimes.get(session.id)?.date ?? session.date);
+    if (displayDate < dateRange.start || displayDate > dateRange.end) return false;
+
     // Filtro por paciente
     if (filterPatient !== 'all') {
       const patientId = session.patient_user_id || session.patientId;
@@ -892,28 +907,38 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
               <span className="hidden sm:inline">Rango de fechas:</span>
               <span className="sm:hidden">Fechas:</span>
             </div>
-            <div className="flex items-center gap-1 sm:gap-2">
-              <input
-                type="date"
-                value={dateRange.start}
-                onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-                className="flex-1 px-1.5 sm:px-3 py-1 sm:py-2 border border-slate-300 rounded text-[11px] sm:text-sm md:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent min-w-0"
-              />
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+              {/* ── Fecha inicio ── */}
+              <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1">
+                <span className="text-[10px] sm:text-xs text-slate-500 font-medium whitespace-nowrap">Desde</span>
+                <input
+                  type="date"
+                  value={dateRange.start}
+                  onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
+                  className="bg-transparent text-[11px] sm:text-sm font-medium text-slate-700 focus:outline-none cursor-pointer"
+                />
+              </div>
+
               <span className="text-slate-400 text-[10px] flex-shrink-0">—</span>
-              <input
-                type="date"
-                value={dateRange.end}
-                onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-                className="flex-1 px-1.5 sm:px-3 py-1 sm:py-2 border border-slate-300 rounded text-[11px] sm:text-sm md:text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent min-w-0"
-              />
+
+              {/* ── Fecha fin ── */}
+              <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1">
+                <span className="text-[10px] sm:text-xs text-slate-500 font-medium whitespace-nowrap">Hasta</span>
+                <input
+                  type="date"
+                  value={dateRange.end}
+                  onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
+                  className="bg-transparent text-[11px] sm:text-sm font-medium text-slate-700 focus:outline-none cursor-pointer"
+                />
+              </div>
+
               <button
+                type="button"
                 onClick={() => {
                   const now = new Date();
-                  const start = new Date(now.getFullYear(), now.getMonth(), 1);
-                  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
                   setDateRange({
-                    start: start.toISOString().split('T')[0],
-                    end: end.toISOString().split('T')[0]
+                    start: buildMonthStart(now.getFullYear(), now.getMonth() + 1),
+                    end: buildMonthEnd(now.getFullYear(), now.getMonth() + 1)
                   });
                 }}
                 className="px-1.5 sm:px-3 md:px-4 py-1 sm:py-2 bg-purple-100 text-purple-700 rounded text-[10px] sm:text-sm md:text-sm font-medium hover:bg-purple-200 transition-colors flex-shrink-0 whitespace-nowrap"
