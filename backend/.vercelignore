@@ -1,0 +1,9 @@
+# Ignore extra API route folders (keep api/[...path].js)
+api/admin/**
+api/auth/**
+api/entries/**
+api/goals/**
+api/settings/**
+api/stripe/**
+api/supabase/**
+api/users/**

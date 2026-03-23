@@ -1,0 +1,7 @@
+{
+  "name": "mainds",
+  "description": "Tu compañero de bienestar emocional. Un diario inteligente que conversa contigo, aprende de ti y te ayuda a crecer.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

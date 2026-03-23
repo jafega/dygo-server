@@ -1,0 +1,31 @@
+{
+  "users": [],
+  "entries": [],
+  "goals": [],
+  "invitations": [],
+  "settings": {},
+  "sessions": [],
+  "careRelationships": [],
+  "invoices": [],
+  "psychologistProfiles": {
+    "be26ba5d-aa25-4861-a15a-585a3ce331e6": {
+      "name": "",
+      "professionalId": "",
+      "specialty": "",
+      "phone": "",
+      "email": "",
+      "address": "",
+      "city": "",
+      "postalCode": "",
+      "country": "España",
+      "businessName": "",
+      "taxId": "",
+      "iban": "",
+      "sessionPrice": 0,
+      "currency": "EUR",
+      "schedule_timezone": "Europe/Madrid"
+    }
+  },
+  "sessionEntries": [],
+  "subscriptions": []
+}

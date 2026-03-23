@@ -1,0 +1,714 @@
+import { User } from '../types';
+import { API_URL, USE_BACKEND, ALLOW_LOCAL_FALLBACK } from './config';
+import { fetchWithRetry } from './retryUtils';
+
+const USERS_KEY = 'ai_diary_users_v1';
+const CURRENT_USER_KEY = 'ai_diary_current_user_id';
+const USER_CACHE_KEY = 'ai_diary_user_cache';
+const SESSION_TOKEN_KEY = 'ai_diary_session_token';
+
+// --- Session Token Management ---
+export const getSessionToken = (): string | null => {
+  return sessionStorage.getItem(SESSION_TOKEN_KEY);
+};
+
+const setSessionToken = (token: string) => {
+  sessionStorage.setItem(SESSION_TOKEN_KEY, token);
+};
+
+const clearSessionToken = () => {
+  sessionStorage.removeItem(SESSION_TOKEN_KEY);
+};
+
+// Helper: get auth headers for API calls
+export const getAuthHeaders = (): Record<string, string> => {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = getSessionToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  const userId = localStorage.getItem(CURRENT_USER_KEY);
+  if (userId) {
+    headers['X-User-Id'] = userId;
+  }
+  return headers;
+};
+
+// Authenticated fetch — auto-injects auth headers. Use instead of raw fetch() for all API calls.
+export const apiFetch = (url: string, options: RequestInit = {}): Promise<Response> => {
+  const authHeaders = getAuthHeaders();
+  const existingHeaders = (options.headers as Record<string, string>) || {};
+  // Don't override Content-Type for FormData — browser needs to set multipart boundary
+  if (options.body instanceof FormData) {
+    const { 'Content-Type': _ct, ...headersWithoutContentType } = authHeaders;
+    return fetch(url, { ...options, headers: { ...headersWithoutContentType, ...existingHeaders } });
+  }
+  return fetch(url, { ...options, headers: { ...authHeaders, ...existingHeaders } });
+};
+
+// --- Helper for LocalStorage Fallback ---
+const getLocalUsers = (): User[] => {
+  const stored = localStorage.getItem(USERS_KEY);
+  return stored ? JSON.parse(stored) : [];
+};
+const saveLocalUsers = (users: User[]) => {
+  localStorage.setItem(USERS_KEY, JSON.stringify(users));
+};
+
+// --- Client-side password hashing for localStorage fallback (dev-only paths) ---
+const hashPasswordClient = async (password: string): Promise<string> => {
+  const msgBuffer = new TextEncoder().encode(password);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return 'sha256:' + hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+};
+
+const verifyPasswordClient = async (password: string, stored: string): Promise<boolean> => {
+  if (!stored) return false;
+  if (stored.startsWith('sha256:')) {
+    return (await hashPasswordClient(password)) === stored;
+  }
+  // Legacy plaintext comparison for pre-existing localStorage data
+  return password === stored;
+};
+
+// --- Async API Methods ---
+
+export const getUsers = async (): Promise<User[]> => {
+  if (USE_BACKEND) {
+    try {
+      const res = await fetch(`${API_URL}/users`, { headers: getAuthHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        return Array.isArray(data) ? data : [];
+      }
+      throw new Error(`Server error: ${res.status}`);
+    } catch (e) {
+      // If explicit fallback is allowed we use local users, otherwise surface an error
+      if (ALLOW_LOCAL_FALLBACK) {
+        console.warn("Backend offline, falling back to local (ALLOW_LOCAL_FALLBACK=true).", e);
+        return getLocalUsers();
+      }
+      const serverErr = e instanceof Error ? e.message : String(e);
+      throw new Error(`Error del servidor: ${serverErr}`);
+    }
+  }
+  return getLocalUsers();
+};
+
+export const initializeDemoData = async () => {
+    const users = await getUsers();
+    const hasPsych = users.some(u => u.is_psychologist === true);
+    
+    if (!hasPsych && !USE_BACKEND) {
+        const hashedDemoPass = await hashPasswordClient('123');
+        const demoPsychs: User[] = [
+            { id: 'psych-demo-1', name: 'Dra. Elena Foster', email: 'elena@dygo.health', password: hashedDemoPass, is_psychologist: true, isPsychologist: true },
+            { id: 'psych-demo-2', name: 'Dr. Marc Spector', email: 'marc@dygo.health', password: hashedDemoPass, is_psychologist: true, isPsychologist: true }
+        ];
+        const updated = [...users, ...demoPsychs];
+        saveLocalUsers(updated);
+    }
+};
+
+export const register = async (name: string, email: string, password: string, isPsychologist: boolean = false): Promise<User> => {
+  const normalizedEmail = email.trim().toLowerCase();
+
+  if (USE_BACKEND) {
+      try {
+          const res = await fetch(`${API_URL}/auth/register`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name, email: normalizedEmail, password, is_psychologist: isPsychologist, isPsychologist })
+          });
+          
+          if (!res.ok) {
+              let errMsg = 'Error al registrar';
+              try {
+                  const err = await res.json();
+                  errMsg = err.error || errMsg;
+              } catch {
+                  errMsg = `Error del servidor (${res.status}). Asegúrate de que 'node server.js' esté corriendo sin errores.`;
+              }
+              throw new Error(errMsg);
+          }
+          
+          const user = await res.json();
+          localStorage.setItem(CURRENT_USER_KEY, user.id);
+          return user;
+      } catch (e) {
+          console.error(e);
+          // If allowed, fall back to local registration (development)
+          if (ALLOW_LOCAL_FALLBACK) {
+              const users = getLocalUsers();
+              if (users.find(u => u.email === normalizedEmail)) throw new Error("El email ya está registrado (Local fallback).");
+              const newUser: User = { id: crypto.randomUUID(), name, email: normalizedEmail, password: await hashPasswordClient(password), is_psychologist: isPsychologist, isPsychologist };
+              users.push(newUser); saveLocalUsers(users); localStorage.setItem(CURRENT_USER_KEY, newUser.id); return newUser;
+          }
+          if (e instanceof Error && (e.message.includes('Failed to fetch') || e.message.includes('NetworkError'))) {
+             throw new Error("No se puede conectar con el servidor. ¿Has ejecutado 'node server.js'?");
+          }
+          throw e;
+      }
+  }
+
+  // Local Fallback when backend usage is disabled entirely
+  const users = getLocalUsers();
+  if (users.find(u => u.email === normalizedEmail)) throw new Error("El email ya está registrado (Local).");
+  
+  const newUser: User = {
+        id: crypto.randomUUID(),
+        name, email: normalizedEmail, password: await hashPasswordClient(password), is_psychologist: isPsychologist, isPsychologist
+  };
+  users.push(newUser);
+  saveLocalUsers(users);
+  localStorage.setItem(CURRENT_USER_KEY, newUser.id);
+  return newUser;
+};
+
+export const login = async (email: string, password: string): Promise<User> => {
+  const normalizedEmail = email.trim().toLowerCase();
+
+  if (USE_BACKEND) {
+      try {
+          const res = await fetch(`${API_URL}/auth/login`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: normalizedEmail, password })
+          });
+          if (!res.ok) {
+               if (res.status === 401) throw new Error("Credenciales inválidas");
+               throw new Error(`Error del servidor (${res.status})`);
+          }
+          const user = await res.json();
+          // Store session token if provided by server
+          if (user.sessionToken) {
+            setSessionToken(user.sessionToken);
+          }
+          localStorage.setItem(CURRENT_USER_KEY, user.id);
+          return user;
+      } catch (e) {
+          // If allowed, try a local login fallback (development only)
+          if (ALLOW_LOCAL_FALLBACK) {
+              const users = getLocalUsers();
+              let user: User | undefined;
+              for (const u of users) {
+                if (u.email === normalizedEmail && await verifyPasswordClient(password, u.password || '')) { user = u; break; }
+              }
+              if (!user) throw new Error("Credenciales inválidas (Local fallback).");
+              localStorage.setItem(CURRENT_USER_KEY, user.id);
+              return user;
+          }
+          if (e instanceof Error && (e.message.includes('Failed to fetch') || e.message.includes('NetworkError'))) {
+             throw new Error("No se puede conectar con el servidor. ¿Has ejecutado 'node server.js'?");
+          }
+          throw e;
+      }
+  }
+
+  const users = getLocalUsers();
+  let user: User | undefined;
+  for (const u of users) {
+    if (u.email === normalizedEmail && await verifyPasswordClient(password, u.password || '')) { user = u; break; }
+  }
+  if (!user) throw new Error("Credenciales inválidas (Local).");
+  
+  localStorage.setItem(CURRENT_USER_KEY, user.id);
+  return user;
+};
+
+// Sign in with Supabase (exchange Supabase access token with backend)
+export const signInWithSupabase = async (accessToken: string): Promise<User> => {
+    if (USE_BACKEND) {
+        try {
+            const res = await fetch(`${API_URL}/supabase-auth`, {
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' }, 
+                body: JSON.stringify({ access_token: accessToken })
+            });
+            
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({ error: 'Error desconocido del servidor' }));
+                console.error('❌ Supabase auth failed:', err);
+                
+                // Propagar el error con detalles específicos
+                throw new Error(err.error || err.details || `Error del servidor (${res.status})`);
+            }
+            
+            const user = await res.json();
+            
+            // Validar que recibimos un usuario válido
+            if (!user || !user.id) {
+                console.error('❌ Respuesta inválida del servidor:', user);
+                throw new Error('El servidor no devolvió un usuario válido');
+            }
+            
+            console.log('✅ Usuario autenticado con Supabase:', {
+                email: user.email,
+                id: user.id,
+                is_psychologist: user.is_psychologist,
+                isPsychologist: user.isPsychologist
+            });
+            // Store session token if provided
+            if (user.sessionToken) {
+              setSessionToken(user.sessionToken);
+            }
+            
+            // Guardar ID del usuario en localStorage
+            localStorage.setItem(CURRENT_USER_KEY, user.id);
+            
+            return user;
+        } catch (error) {
+            // Si el error ya es un Error, propagarlo directamente
+            if (error instanceof Error) {
+                throw error;
+            }
+            // Error de red u otro tipo de error
+            if (String(error).includes('Failed to fetch') || String(error).includes('NetworkError')) {
+                throw new Error('No se puede conectar con el servidor. Verifica tu conexión.');
+            }
+            throw new Error('Error inesperado durante la autenticación');
+        }
+    }
+
+    throw new Error('La autenticación con Supabase requiere que el backend esté habilitado');
+};
+
+export const logout = () => {
+  localStorage.removeItem(CURRENT_USER_KEY);
+  localStorage.removeItem(USER_CACHE_KEY);
+  clearSessionToken();
+};
+
+export const getCurrentUser = async (): Promise<User | null> => {
+  const id = localStorage.getItem(CURRENT_USER_KEY);
+  if (!id) return null;
+  
+  // Removed aggressive connection check that was forcing logout on temporary network issues
+  // Now we try to get user data and handle errors gracefully
+  
+  try {
+    // Siempre obtener datos frescos del backend/Supabase
+    const user = await getUserById(id);
+    
+    // Si el usuario no existe (fue eliminado), limpiar localStorage
+    if (!user) {
+      // Check cache before giving up
+      const cached = localStorage.getItem(USER_CACHE_KEY);
+      if (cached) {
+        try {
+          const cachedUser = JSON.parse(cached);
+          if (cachedUser.id === id) {
+            console.log('⚠️ Using cached user data due to connection issue');
+            return cachedUser;
+          }
+        } catch (e) {
+          console.warn('Failed to parse cached user', e);
+        }
+      }
+      localStorage.removeItem(CURRENT_USER_KEY);
+      return null;
+    }
+  
+    // Cache the user data for offline access
+    localStorage.setItem(USER_CACHE_KEY, JSON.stringify(user));
+    
+    console.log('🔄 Usuario obtenido desde servidor:', {
+      email: user.email,
+      is_psychologist: user.is_psychologist,
+      isPsychologist: user.isPsychologist
+    });
+    
+    return user;
+  } catch (error) {
+    console.warn('⚠️ Error obteniendo usuario (probablemente temporal):', error);
+    // Try to use cached data
+    const cached = localStorage.getItem(USER_CACHE_KEY);
+    if (cached) {
+      try {
+        const cachedUser = JSON.parse(cached);
+        if (cachedUser.id === id) {
+          console.log('⚠️ Using cached user data due to connection issue');
+          return cachedUser;
+        }
+      } catch (e) {
+        console.warn('Failed to parse cached user', e);
+      }
+    }
+    // Don't clear session on temporary errors - return null and let the app retry
+    return null;
+  }
+};
+
+export const getUserById = async (id: string): Promise<User | undefined> => {
+  if (USE_BACKEND) {
+      try {
+          // Use retry mechanism for critical user data fetch
+          const res = await fetchWithRetry(`${API_URL}/users?id=${id}`, { headers: getAuthHeaders() }, {
+            maxRetries: 2,
+            initialDelay: 500,
+            maxDelay: 2000
+          });
+          
+          if (res.ok) {
+              const user = await res.json();
+              
+              // BUGFIX: Asegurar que is_psychologist siempre tenga un valor booleano
+              if (user && (user.is_psychologist === undefined || user.is_psychologist === null)) {
+                  user.is_psychologist = false;
+                  user.isPsychologist = false;
+              }
+              
+              return user;
+          }
+          if (res.status === 404) {
+              // Usuario no encontrado - fue eliminado
+              return undefined;
+          }
+          throw new Error(`Server error: ${res.status}`);
+      } catch(e) {
+          console.warn('⚠️ Error in getUserById (could be temporary network issue):', e);
+          if (ALLOW_LOCAL_FALLBACK) { 
+              console.warn("Fetch error, using local fallback.", e); 
+              const localUser = getLocalUsers().find(u => u.id === id);
+              if (localUser && (localUser.is_psychologist === undefined || localUser.is_psychologist === null)) {
+                  localUser.is_psychologist = false;
+                  localUser.isPsychologist = false;
+              }
+              return localUser;
+          }
+          // Don't throw - return undefined to allow app to continue with cached data
+          return undefined;
+      }
+  }
+  const localUser = getLocalUsers().find(u => u.id === id);
+  if (localUser && (localUser.is_psychologist === undefined || localUser.is_psychologist === null)) {
+      localUser.is_psychologist = false;
+      localUser.isPsychologist = false;
+  }
+  return localUser;
+};
+
+export const getUserByEmail = async (email: string): Promise<User | undefined> => {
+    const normalized = email.trim().toLowerCase();
+    const users = await getUsers();
+    return users.find(u => u.email && u.email.trim().toLowerCase() === normalized);
+};
+
+export const updateUser = async (updatedUser: User) => {
+    if (USE_BACKEND) {
+        try {
+            const res = await fetch(`${API_URL}/users?id=${updatedUser.id}`, {
+                method: 'PUT',
+                headers: getAuthHeaders(),
+                body: JSON.stringify(updatedUser)
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || `Error updating user (${res.status})`);
+            }
+            return;
+        } catch (e) {
+            if (ALLOW_LOCAL_FALLBACK) {
+                console.warn('Update user failed, using local fallback.', e);
+            } else {
+                throw e instanceof Error ? e : new Error('Error updating user and no local fallback allowed.');
+            }
+        }
+    }
+
+    const users = getLocalUsers();
+    const index = users.findIndex(u => u.id === updatedUser.id);
+    if(index !== -1) {
+        users[index] = updatedUser;
+        saveLocalUsers(users);
+    }
+};
+
+// Change password for the current user — calls dedicated backend endpoint (bcrypt server-side).
+export const changePassword = async (currentPassword: string, newPassword: string) => {
+    if (USE_BACKEND) {
+        const res = await fetch(`${API_URL}/auth/change-password`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ currentPassword, newPassword })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Error al cambiar contraseña');
+        }
+        return;
+    }
+
+    // Local fallback (dev only)
+    const current = await getCurrentUser();
+    if (!current) throw new Error('No hay usuario autenticado.');
+    const users = getLocalUsers();
+    const idx = users.findIndex(u => u.id === current.id);
+    if (idx === -1) throw new Error('Usuario no encontrado.');
+    const stored = users[idx];
+    if (stored.password) {
+        const match = await verifyPasswordClient(currentPassword, stored.password);
+        if (!match) throw new Error('Contraseña actual incorrecta.');
+    }
+    users[idx] = { ...stored, password: await hashPasswordClient(newPassword) };
+    saveLocalUsers(users);
+};
+
+// Demo reset endpoint (for forgot password button): calls backend /auth/reset-password-demo
+export const resetPasswordDemo = async (email: string, newPassword: string, secret?: string) => {
+    if (USE_BACKEND) {
+        const res = await fetch(`${API_URL}/reset-password-demo`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, newPassword, secret })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Error resetting password');
+        }
+        return;
+    }
+
+    // Local fallback: update user directly
+    const users = getLocalUsers();
+    const idx = users.findIndex(u => u.email && u.email.trim().toLowerCase() === email.trim().toLowerCase());
+    if (idx === -1) throw new Error('Usuario no encontrado (Local).');
+    users[idx] = { ...users[idx], password: newPassword } as User;
+    saveLocalUsers(users);
+};
+
+// Superadmin reset for any user
+export const adminResetUserPassword = async (targetEmail: string, newPassword: string) => {
+    if (USE_BACKEND) {
+        const res = await fetch(`${API_URL}/admin-reset-user-password`, {
+            method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ targetEmail, newPassword })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Error resetting user password');
+        }
+        return;
+    }
+
+    // Local fallback: only allow if current user is a configured superadmin
+    const _localAdminEmails = ((import.meta as any).env?.VITE_SUPERADMIN_EMAILS || '').split(',').map((e: string) => e.trim().toLowerCase()).filter(Boolean);
+    const current = await getCurrentUser();
+    if (!current || !_localAdminEmails.includes(String(current.email).toLowerCase())) throw new Error('Forbidden (local)');
+    const users = getLocalUsers();
+    const idx = users.findIndex(u => u.email && u.email.trim().toLowerCase() === targetEmail.trim().toLowerCase());
+    if (idx === -1) throw new Error('Usuario no encontrado (Local).');
+    users[idx] = { ...users[idx], password: await hashPasswordClient(newPassword) } as User;
+    saveLocalUsers(users);
+};
+
+// Delete a user and all their local data (or call backend admin delete endpoint)
+export const adminDeleteUser = async (targetEmail: string) => {
+    if (USE_BACKEND) {
+        const res = await fetch(`${API_URL}/admin-delete-user`, {
+            method: 'DELETE', headers: getAuthHeaders(), body: JSON.stringify({ targetEmail })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Error deleting user');
+        }
+        return;
+    }
+
+    // Local fallback: only allow if current user is a configured superadmin
+    const _localAdminEmails2 = ((import.meta as any).env?.VITE_SUPERADMIN_EMAILS || '').split(',').map((e: string) => e.trim().toLowerCase()).filter(Boolean);
+    const current = await getCurrentUser();
+    if (!current || !_localAdminEmails2.includes(String(current.email).toLowerCase())) throw new Error('Forbidden (local)');
+
+    // Remove user from local users
+    const users = getLocalUsers();
+    const idx = users.findIndex(u => u.email && u.email.trim().toLowerCase() === targetEmail.trim().toLowerCase());
+    if (idx === -1) throw new Error('Usuario no encontrado (Local).');
+    const user = users[idx];
+    users.splice(idx, 1);
+
+    // Remove entries
+    const entriesKey = 'ai_diary_entries_v2';
+    const entries = JSON.parse(localStorage.getItem(entriesKey) || '[]');
+    const filteredEntries = entries.filter((e:any) => String(e.userId) !== String(user.id));
+    localStorage.setItem(entriesKey, JSON.stringify(filteredEntries));
+
+    // Remove goals
+    const goalsKey = 'ai_diary_goals_v2';
+    const goals = JSON.parse(localStorage.getItem(goalsKey) || '[]');
+    const filteredGoals = goals.filter((g:any) => String(g.userId) !== String(user.id));
+    localStorage.setItem(goalsKey, JSON.stringify(filteredGoals));
+
+    // Remove invitations
+    const invKey = 'ai_diary_invitations_v1';
+    const invs = JSON.parse(localStorage.getItem(invKey) || '[]');
+    const filteredInvs = invs.filter((i:any) => {
+        const fromMatch = i.fromPsychologistId && String(i.fromPsychologistId) === String(user.id);
+        const toMatch = i.toUserEmail && String(i.toUserEmail).toLowerCase() === String(user.email).toLowerCase();
+        return !(fromMatch || toMatch);
+    });
+    localStorage.setItem(invKey, JSON.stringify(filteredInvs));
+
+    // Remove settings
+    const settingsKey = 'ai_diary_settings_v3';
+    const allSettings = JSON.parse(localStorage.getItem(settingsKey) || '{}');
+    if (allSettings[user.id]) { delete allSettings[user.id]; localStorage.setItem(settingsKey, JSON.stringify(allSettings)); }
+
+    // Clean up any other user metadata referencing this user (handled by relationship store)
+
+    saveLocalUsers(users);
+};
+
+// Stripe: create a Checkout session (redirect to Stripe hosted checkout)
+export const createCheckoutSession = async () => {
+    if (!USE_BACKEND) {
+        // Local demo: just toggle premium for 14 days
+        const current = await getCurrentUser();
+        if (!current) throw new Error('No authenticated user');
+        const users = getLocalUsers();
+        const idx = users.findIndex(u => u.id === current.id);
+        if (idx === -1) throw new Error('Usuario no encontrado (Local).');
+        users[idx].isPremium = true;
+        users[idx].premiumUntil = Date.now() + 14 * 24 * 60 * 60 * 1000;
+        saveLocalUsers(users);
+        // Also note: support opening Settings to refresh the UI; return current url
+        return { url: window.location.href };
+    }
+
+    const current = await getCurrentUser();
+    if (!current) throw new Error('No authenticated user');
+    const res = await fetch(`${API_URL}/stripe-create-checkout-session`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({}) });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Error creating checkout session');
+    }
+    return await res.json();
+};
+
+export const createBillingPortalSession = async () => {
+    if (!USE_BACKEND) {
+        const current = await getCurrentUser();
+        if (!current) throw new Error('No authenticated user');
+        // Local demo: just return same page
+        return { url: window.location.href };
+    }
+
+    const current = await getCurrentUser();
+    if (!current) throw new Error('No authenticated user');
+    const res = await fetch(`${API_URL}/stripe-create-portal-session`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({}) });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Error creating portal session');
+    }
+    return await res.json();
+};
+
+export const uploadAvatar = async (userId: string, base64Image: string): Promise<string> => {
+    if (USE_BACKEND) {
+        try {
+            const res = await fetch(`${API_URL}/upload-avatar`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId, base64Image })
+            });
+            
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || 'Error subiendo avatar');
+            }
+            
+            const data = await res.json();
+            return data.url;
+        } catch (e) {
+            console.error('Error uploading avatar:', e);
+            if (ALLOW_LOCAL_FALLBACK) {
+                console.warn('Upload failed, using base64 directly');
+                return base64Image;
+            }
+            throw e;
+        }
+    }
+    
+    // Sin backend, devolver el base64 directamente
+    return base64Image;
+};
+
+export const uploadSessionFile = async (file: File, userId: string): Promise<string> => {
+    if (USE_BACKEND) {
+        try {
+            // Convert file to base64
+            const base64 = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+
+            const res = await fetch(`${API_URL}/upload-session-file`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    userId, 
+                    base64File: base64,
+                    fileName: file.name,
+                    fileType: file.type
+                })
+            });
+            
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || 'Error subiendo archivo');
+            }
+            
+            const data = await res.json();
+            return data.url;
+        } catch (e) {
+            console.error('Error uploading session file:', e);
+            throw e;
+        }
+    }
+    
+    // Sin backend, convertir a base64 y devolver
+    return new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+};
+
+// Verificar conexión con Supabase (ahora con timeout más largo y manejo mejorado)
+export const checkSupabaseConnection = async (): Promise<boolean> => {
+  if (!USE_BACKEND) {
+    // Sin backend, asumimos que está "conectado" (modo local)
+    return true;
+  }
+
+  try {
+    // Usar AbortController manual para compatibilidad iOS (AbortSignal.timeout no soportado en iOS < 15.4)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    
+    try {
+      const res = await fetch(`${API_URL}/health/supabase`, {
+        method: 'GET',
+        headers: getAuthHeaders(),
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        console.warn('⚠️ Supabase health check falló:', res.status);
+        return false;
+      }
+
+      const data = await res.json();
+      return data.connected === true;
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      throw fetchError;
+    }
+  } catch (error) {
+    console.warn('⚠️ Error verificando conexión a Supabase:', error);
+    return false;
+  }
+};
