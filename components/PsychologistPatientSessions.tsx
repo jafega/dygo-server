@@ -714,12 +714,12 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
                     {isCompleted && (
                       <button
                         onClick={(e) => handleOpenSessionDetails(session, e)}
-                        className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full border-2 transition-all flex items-center justify-center group ${
+                        className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full border-2 transition-all group text-[11px] sm:text-xs font-semibold ${
                           !session.session_entry_id
-                            ? 'border-red-300 bg-red-50 hover:border-red-500 hover:bg-red-100'
+                            ? 'border-red-300 bg-red-50 hover:border-red-500 hover:bg-red-100 text-red-600'
                             : sessionEntries.get(session.session_entry_id)?.status === 'done'
-                            ? 'border-green-500 bg-green-50 hover:bg-green-100'
-                            : 'border-orange-400 bg-orange-50 hover:border-orange-500 hover:bg-orange-100'
+                            ? 'border-green-500 bg-green-50 hover:bg-green-100 text-green-700'
+                            : 'border-orange-400 bg-orange-50 hover:border-orange-500 hover:bg-orange-100 text-orange-600'
                         }`}
                         title={
                           !session.session_entry_id
@@ -730,11 +730,11 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
                         }
                       >
                         {!session.session_entry_id ? (
-                          <FileText size={16} className="text-red-500 group-hover:text-red-600" />
+                          <><FileText size={13} className="text-red-500 group-hover:text-red-600 flex-shrink-0" /><span>Completar sesión</span></>
                         ) : sessionEntries.get(session.session_entry_id)?.status === 'done' ? (
-                          <CheckCircle size={16} className="text-green-600" />
+                          <><CheckCircle size={13} className="text-green-600 flex-shrink-0" /><span>Sesión completada</span></>
                         ) : (
-                          <FileText size={16} className="text-orange-500 group-hover:text-orange-600" />
+                          <><FileText size={13} className="text-orange-500 group-hover:text-orange-600 flex-shrink-0" /><span>Completar sesión</span></>
                         )}
                       </button>
                     )}

@@ -11010,8 +11010,26 @@ app.post('/api/sessions', authenticateRequest, async (req, res) => {
     if (supabaseAdmin) {
       try {
         console.log(`🔄 [POST /api/sessions] Insertando sesión en Supabase...`);
+
+        // Idempotency guard: if this session already has a Google Calendar event (e.g. retried
+        // request), carry the existing event ID and meetLink forward so the upsert preserves them
+        // and we skip creating a duplicate calendar event below.
+        try {
+          const { data: existingRow } = await supabaseAdmin
+            .from('sessions')
+            .select('data')
+            .eq('id', session.id)
+            .maybeSingle();
+          if (existingRow?.data?.google_calendar_event_id) {
+            session.google_calendar_event_id = existingRow.data.google_calendar_event_id;
+            if (existingRow.data.meetLink && !session.meetLink) {
+              session.meetLink = existingRow.data.meetLink;
+            }
+            console.log(`🔁 [POST /api/sessions] Sesión ya tiene evento de Calendar: ${session.google_calendar_event_id} — omitiendo creación duplicada`);
+          }
+        } catch (_) { /* non-critical, proceed normally */ }
         
-        // Preparar row para Supabase
+        // Preparar row para Supabase (incluye google_calendar_event_id si ya existía)
         const supabaseRow = {
           id: session.id,
           data: cleanSessionDataForStorage(session),
@@ -11058,7 +11076,9 @@ app.post('/api/sessions', authenticateRequest, async (req, res) => {
 
     // --- Google Calendar: crear evento para la sesión si el psicólogo tiene Calendar conectado ---
     // Se crea automáticamente si hay tokens. online => con Meet; otros tipos => sin Meet.
-    try {
+    // Guard: skip if the session already has a calendar event (idempotency — prevents duplicates
+    // when the same POST is retried due to timeout, double-click, or concurrent requests).
+    if (!session.google_calendar_event_id) try {
       const withMeet = session.type === 'online';
       const calResult = await createCalendarEventForSession(psychologistUserId, session, withMeet);
       if (calResult) {

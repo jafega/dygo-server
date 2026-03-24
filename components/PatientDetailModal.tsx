@@ -2419,14 +2419,14 @@ tr:nth-child(even) td{background:#f8fafc}
           {activeTab === 'LOPD' && (
             <div className="h-full overflow-auto bg-slate-50 p-3 sm:p-5 space-y-4">
               {/* Header */}
-              <div className="bg-gradient-to-r from-purple-600 to-violet-700 rounded-2xl p-5 text-white shadow-lg">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
+              <div className="bg-gradient-to-r from-purple-600 to-violet-700 rounded-2xl p-4 sm:p-5 text-white shadow-lg">
+                <div className="flex flex-col sm:flex-row items-start sm:justify-between gap-4">
+                  <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <Shield size={22} />
-                      <h3 className="text-lg font-bold">Protección de Datos — LOPD / RGPD</h3>
+                      <h3 className="text-base sm:text-lg font-bold">Protección de Datos — LOPD / RGPD</h3>
                     </div>
-                    <p className="text-purple-100 text-sm leading-relaxed">
+                    <p className="text-purple-100 text-xs sm:text-sm leading-relaxed">
                       Informe de cumplimiento normativo conforme al <strong>Reglamento (UE) 2016/679 (RGPD)</strong> y la <strong>LO 3/2018 (LOPDGDD)</strong>. Los datos de este paciente son datos de categoría especial (salud) sujetos a protección reforzada.
                     </p>
                     <div className="flex flex-wrap gap-2 mt-3">
@@ -2439,7 +2439,7 @@ tr:nth-child(even) td{background:#f8fafc}
                   <button
                     onClick={downloadLOPDReport}
                     disabled={isLoadingLOPD}
-                    className="flex-shrink-0 flex items-center gap-2 px-4 py-3 bg-white text-purple-700 font-bold rounded-xl hover:bg-purple-50 transition-colors shadow-md text-sm"
+                    className="w-full sm:w-auto flex-shrink-0 flex items-center justify-center gap-2 px-4 py-3 bg-white text-purple-700 font-bold rounded-xl hover:bg-purple-50 transition-colors shadow-md text-sm"
                   >
                     {isLoadingLOPD ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
                     Descargar PDF
@@ -2519,13 +2519,13 @@ tr:nth-child(even) td{background:#f8fafc}
                       </div>
                       <span className="text-xs text-slate-400">{lopdSessions.filter((s: any) => s.status !== 'available').length + (relationship?.created_at ? 1 : 0) + 1} evento(s)</span>
                     </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-xs">
+                    <div className="overflow-x-auto -mx-4 px-4">
+                      <table className="w-full text-xs min-w-[480px]">
                         <thead>
                           <tr className="bg-slate-100 text-slate-600">
-                            <th className="text-left px-3 py-2 font-semibold rounded-l-lg">Fecha</th>
-                            <th className="text-left px-3 py-2 font-semibold">Hora</th>
-                            <th className="text-left px-3 py-2 font-semibold">Usuario</th>
+                            <th className="text-left px-3 py-2 font-semibold rounded-l-lg whitespace-nowrap">Fecha</th>
+                            <th className="text-left px-3 py-2 font-semibold whitespace-nowrap">Hora</th>
+                            <th className="text-left px-3 py-2 font-semibold whitespace-nowrap">Usuario</th>
                             <th className="text-left px-3 py-2 font-semibold rounded-r-lg">Acción</th>
                           </tr>
                         </thead>
@@ -2943,8 +2943,8 @@ tr:nth-child(even) td{background:#f8fafc}
           )}
 
           {activeTab === 'RELATIONSHIP' && (
-            <div className="p-6 space-y-6">
-              <div className="bg-slate-50 rounded-xl p-6 space-y-6">
+            <div className="p-3 sm:p-6 space-y-4 sm:space-y-6">
+              <div className="bg-slate-50 rounded-xl p-3 sm:p-6 space-y-4 sm:space-y-6">
                 <h3 className="text-lg font-bold text-slate-900">Configuración de la Relación</h3>
                 
                 {relationship ? (
@@ -3115,13 +3115,13 @@ tr:nth-child(even) td{background:#f8fafc}
                             onBlur={() => setTimeout(() => setShowTagSuggestions(false), 200)}
                             onKeyPress={(e) => e.key === 'Enter' && addTag()}
                             placeholder="Agregar etiqueta..."
-                            className="flex-1 px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                            className="flex-1 px-3 sm:px-4 py-2.5 sm:py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
                           />
                           <button
                             onClick={addTag}
-                            className="px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                            className="px-3 sm:px-4 py-2.5 sm:py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex-shrink-0"
                           >
-                            <Tag size={20} />
+                            <Tag size={18} />
                           </button>
                         </div>
                         
@@ -3173,8 +3173,8 @@ tr:nth-child(even) td{background:#f8fafc}
                       )}
                     </div>
 
-                    <div className="bg-white border border-slate-200 rounded-lg p-4">
-                      <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div className="bg-white border border-slate-200 rounded-lg p-3 sm:p-4">
+                      <div className="grid grid-cols-2 gap-3 sm:gap-4 text-sm">
                         <div>
                           <span className="text-slate-600">Fecha de inicio:</span>
                           <p className="font-semibold text-slate-900">

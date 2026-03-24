@@ -64,6 +64,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
   const [editedSession, setEditedSession] = useState<Session | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
+  const isCreatingSessionRef = useRef(false); // ref-based guard: updated synchronously, not subject to React batching
   const [isLoading, setIsLoading] = useState(false);
   const [showAssignPatient, setShowAssignPatient] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<Session | null>(null);
@@ -621,6 +622,8 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
   };
 
   const handleCreateSession = async () => {
+    if (isCreatingSessionRef.current) return; // ref guard is synchronous — no race window
+    isCreatingSessionRef.current = true;
     if (isCreatingSession) return; // Prevent double submission
     if (!newSession.patientId || !newSession.date || !newSession.startTime || !newSession.endTime || newSession.price <= 0) {
       alert('Por favor completa todos los campos requeridos (incluido el precio)');
@@ -731,6 +734,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
     }
 
     } finally {
+      isCreatingSessionRef.current = false;
       setIsCreatingSession(false);
     }
 
@@ -1930,31 +1934,32 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
       {/* Calendar */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         {/* Navigation */}
-        <div className="flex items-center justify-between p-4 border-b border-slate-200 bg-slate-50">
-          <button
-            onClick={handlePreviousWeek}
-            className="p-2 hover:bg-slate-200 rounded-lg transition-colors"
-          >
-            <ChevronLeft size={20} />
-          </button>
-          <h3 className="text-lg font-semibold text-slate-900 capitalize">
-            {(() => {
-              const days = getWeekDays();
-              const first = days[0];
-              const last = days[6];
-              const sameMonth = first.getMonth() === last.getMonth() && first.getFullYear() === last.getFullYear();
-              if (sameMonth) {
-                return `Semana del ${first.getDate()} al ${last.getDate()} de ${first.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}`;
-              }
-              const sameYear = first.getFullYear() === last.getFullYear();
-              const firstStr = first.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', ...(sameYear ? {} : { year: 'numeric' }) });
-              const lastStr = last.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
-              return `Semana del ${firstStr} al ${lastStr}`;
-            })()}
-          </h3>
-          <div className="flex items-center gap-2">
-            {/* Selector de zona horaria */}
-            <div className="relative timezone-dropdown-container">
+        <div className="p-4 border-b border-slate-200 bg-slate-50 space-y-2">
+          <div className="flex items-center justify-between">
+            <button
+              onClick={handlePreviousWeek}
+              className="p-2 hover:bg-slate-200 rounded-lg transition-colors flex-shrink-0"
+            >
+              <ChevronLeft size={20} />
+            </button>
+            <h3 className="text-sm sm:text-base md:text-lg font-semibold text-slate-900 capitalize text-center mx-2 min-w-0">
+              {(() => {
+                const days = getWeekDays();
+                const first = days[0];
+                const last = days[6];
+                const sameMonth = first.getMonth() === last.getMonth() && first.getFullYear() === last.getFullYear();
+                if (sameMonth) {
+                  return `Semana del ${first.getDate()} al ${last.getDate()} de ${first.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}`;
+                }
+                const sameYear = first.getFullYear() === last.getFullYear();
+                const firstStr = first.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', ...(sameYear ? {} : { year: 'numeric' }) });
+                const lastStr = last.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
+                return `Semana del ${firstStr} al ${lastStr}`;
+              })()}
+            </h3>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {/* Selector de zona horaria — solo desktop */}
+              <div className="hidden sm:block relative timezone-dropdown-container">
               <button
                 onClick={() => setShowTimezoneDropdown(v => !v)}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors text-xs text-slate-600 shadow-sm"
@@ -2003,6 +2008,51 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
             >
               <ChevronRight size={20} />
             </button>
+          </div>
+        </div>
+          {/* Selector de zona horaria — solo móvil */}
+          <div className="sm:hidden flex justify-center">
+            <div className="relative timezone-dropdown-container">
+              <button
+                onClick={() => setShowTimezoneDropdown(v => !v)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors text-xs text-slate-600 shadow-sm"
+              >
+                <Globe size={12} className="text-indigo-500" />
+                {selectedTimezone === browserTimezone && <span className="text-[10px]">📍</span>}
+                <span className="font-semibold">{getTimezoneLabel(selectedTimezone)}</span>
+                <ChevronDown size={11} className={`transition-transform duration-200 ${showTimezoneDropdown ? 'rotate-180' : ''}`} />
+              </button>
+              {showTimezoneDropdown && (
+                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-50 min-w-[220px] max-h-72 overflow-y-auto">
+                  <div className="p-1">
+                    <button
+                      onClick={() => { setSelectedTimezone(browserTimezone); setShowTimezoneDropdown(false); }}
+                      className={`w-full text-left flex items-center justify-between px-3 py-1.5 rounded-lg text-xs transition-colors ${
+                        selectedTimezone === browserTimezone
+                          ? 'bg-indigo-50 text-indigo-700 font-bold'
+                          : 'text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span>📍 Mi ubicación actual</span>
+                      <span className="text-slate-400 ml-2">{getTimezoneShortName(browserTimezone)}</span>
+                    </button>
+                    <div className="border-t border-slate-100 my-1" />
+                    {commonTimezones.map(tz => (
+                      <button
+                        key={tz.value}
+                        onClick={() => { setSelectedTimezone(tz.value); setShowTimezoneDropdown(false); }}
+                        className={`w-full text-left flex items-center justify-between px-3 py-1.5 rounded-lg text-xs hover:bg-slate-50 transition-colors ${
+                          selectedTimezone === tz.value ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-slate-700'
+                        }`}
+                      >
+                        <span>{tz.label}</span>
+                        <span className="text-slate-400 ml-2">{getTimezoneShortName(tz.value)}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -2864,13 +2914,13 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
               {editedSession.type === 'online' && (
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">Enlace de reunión</label>
-                  <div className="flex gap-2">
+                  <div className="flex flex-col sm:flex-row gap-2">
                     <input
                       type="url"
                       value={editedSession.meetLink || ''}
                       onChange={(e) => handleFieldChange('meetLink', e.target.value)}
                       placeholder="https://meet.google.com/..."
-                      className="flex-1 px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-base bg-white"
+                      className="flex-1 px-3 sm:px-4 py-2.5 sm:py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm sm:text-base bg-white"
                     />
                     {googleCalendarConnected && !editedSession.meetLink && (
                       <button
@@ -2895,7 +2945,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                             alert('Error al conectar con el servidor');
                           }
                         }}
-                        className="px-3 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors text-sm font-medium whitespace-nowrap flex items-center gap-1.5"
+                        className="w-full sm:w-auto px-4 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors text-sm font-medium flex items-center justify-center gap-1.5"
                       >
                         <Video size={16} />
                         Crear Meet

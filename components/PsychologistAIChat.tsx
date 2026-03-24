@@ -81,6 +81,7 @@ const PsychologistAIChat: React.FC<PsychologistAIChatProps> = ({ psychologistId,
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [dataLoaded, setDataLoaded] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -615,7 +616,9 @@ ASISTENTE:`;
               e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
             }}
             onKeyDown={handleKeyDown}
-            placeholder={webSearchEnabled
+            placeholder={isMobile
+              ? 'Pregúntale a la IA'
+              : webSearchEnabled
               ? 'Pregunta sobre técnicas, normativa, formación... (búsqueda web activa)'
               : 'Pregunta sobre tus pacientes, sesiones, facturación... (Enter para enviar)'}
             disabled={isLoading}

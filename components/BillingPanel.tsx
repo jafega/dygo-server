@@ -1160,7 +1160,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
   console.log('[BillingPanel] Invoices:', invoices.length, 'Filtered:', filteredInvoices.length);
 
   return (
-    <div className={patientId ? "px-8 pt-6 space-y-4" : "space-y-4"}>
+    <div className={patientId ? "px-3 sm:px-6 md:px-8 pt-4 sm:pt-6 space-y-4" : "space-y-4"}>
       {/* Mensaje contextual cuando se está viendo desde el detalle del paciente */}
       {patientId && (
         <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
@@ -1339,23 +1339,23 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
           </div>
         ) : (
           sortedFilteredInvoices.map(invoice => (
-            <div key={invoice.id} className="bg-white rounded-lg shadow p-6 border border-slate-200">
-              <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
+        <div key={invoice.id} className="bg-white rounded-lg shadow p-4 sm:p-6 border border-slate-200">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="font-semibold text-slate-900">{invoice.invoiceNumber}</h3>
                     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(invoice.status)}`}>
                       {getStatusLabel(invoice.status)}
                     </span>
                   </div>
-                  <p className="text-sm text-slate-600">{invoice.patientName}</p>
+                  <p className="text-sm text-slate-600 mt-0.5">{invoice.patientName}</p>
                   <p className="text-sm text-slate-500">
                     {new Date(invoice.invoice_date || invoice.date).toLocaleDateString()}
                   </p>
                 </div>
-                <div className="text-right">
+                <div className="flex items-center justify-between sm:flex-col sm:items-end gap-2">
                   <div className="text-xl font-bold text-indigo-600">€{(invoice.total || invoice.amount * 1.21).toFixed(2)}</div>
-                  <div className="flex gap-2 mt-2">
+                  <div className="flex gap-2">
                     {invoice.status === 'draft' && (
                       <>
                         <button

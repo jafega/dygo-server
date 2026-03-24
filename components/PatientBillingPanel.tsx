@@ -110,7 +110,7 @@ export default function PatientBillingPanel() {
   }
 
   return (
-    <div className="px-12 py-6">
+    <div className="px-3 sm:px-6 md:px-12 py-4 sm:py-6">
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
         {/* Desktop Table View */}
         <div className="hidden md:block overflow-x-auto">
