@@ -1210,16 +1210,16 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
       </div>
 
       {/* Toggles Facturas/Borradores/Rectificativas y Botón Nueva Factura */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="flex gap-2">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="flex w-full sm:w-auto">
           <button
             onClick={() => {
               setShowDrafts(false);
               setShowRectificativas(false);
               setStatusFilter('all');
             }}
-            className={`px-4 py-2 rounded-lg transition-colors font-medium ${
-              !showDrafts && !showRectificativas ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            className={`flex-1 sm:flex-none px-3 py-2 rounded-l-lg text-sm transition-colors font-medium border border-r-0 border-slate-200 ${
+              !showDrafts && !showRectificativas ? 'bg-indigo-600 text-white shadow-sm border-indigo-600' : 'bg-white text-slate-700 hover:bg-slate-50'
             }`}
           >
             Facturas
@@ -1230,8 +1230,8 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
               setShowRectificativas(false);
               setStatusFilter('all');
             }}
-            className={`px-4 py-2 rounded-lg transition-colors font-medium ${
-              showDrafts ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            className={`flex-1 sm:flex-none px-3 py-2 text-sm transition-colors font-medium border border-r-0 border-slate-200 ${
+              showDrafts ? 'bg-indigo-600 text-white shadow-sm border-indigo-600' : 'bg-white text-slate-700 hover:bg-slate-50'
             }`}
           >
             Borradores
@@ -1242,8 +1242,8 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
               setShowRectificativas(true);
               setStatusFilter('all');
             }}
-            className={`px-4 py-2 rounded-lg transition-colors font-medium ${
-              showRectificativas ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            className={`flex-1 sm:flex-none px-3 py-2 rounded-r-lg text-sm transition-colors font-medium border border-slate-200 ${
+              showRectificativas ? 'bg-indigo-600 text-white shadow-sm border-indigo-600' : 'bg-white text-slate-700 hover:bg-slate-50'
             }`}
           >
             Rectificativas
@@ -1254,9 +1254,9 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
             if (!canCreate) { onNeedUpgrade?.(); return; }
             handleOpenNewInvoice();
           }}
-          className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2 shadow-md font-medium"
+          className="w-full sm:w-auto px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2 shadow-md font-medium text-sm"
         >
-          <Plus size={20} />
+          <Plus size={18} />
           Nueva Factura
         </button>
       </div>

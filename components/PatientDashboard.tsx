@@ -254,7 +254,7 @@ const PatientDashboard = forwardRef<PatientDashboardHandle, PatientDashboardProp
            {onImportClick && (
              <button
                onClick={onImportClick}
-               className="inline-flex items-center gap-2 px-3 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-medium shadow-lg hover:shadow-purple-500/30 transition-all"
+               className="hidden sm:inline-flex items-center gap-2 px-3 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-medium shadow-lg hover:shadow-purple-500/30 transition-all"
                title="Importar pacientes"
              >
                <Upload size={18} />
@@ -274,9 +274,9 @@ const PatientDashboard = forwardRef<PatientDashboardHandle, PatientDashboardProp
                if (!canCreate) { onNeedUpgrade?.(); return; }
                setShowCreateModal(true);
              }}
-             className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium shadow-lg hover:shadow-indigo-500/30 transition-all"
+             className="inline-flex items-center gap-2 px-3 sm:px-4 py-2 sm:py-2.5 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium shadow-lg hover:shadow-indigo-500/30 transition-all"
            >
-             <UserPlus size={18} />
+             <UserPlus size={16} />
              Crear Paciente
            </button>
          </div>

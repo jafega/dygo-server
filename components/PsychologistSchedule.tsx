@@ -622,8 +622,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
   };
 
   const handleCreateSession = async () => {
-    if (isCreatingSessionRef.current) return; // ref guard is synchronous — no race window
-    isCreatingSessionRef.current = true;
+    if (isCreatingSessionRef.current) return; // ref guard is synchronous — no race window between click and React state update
     if (isCreatingSession) return; // Prevent double submission
     if (!newSession.patientId || !newSession.date || !newSession.startTime || !newSession.endTime || newSession.price <= 0) {
       alert('Por favor completa todos los campos requeridos (incluido el precio)');
@@ -670,6 +669,8 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
       }
     }
 
+    // Lock here — all validation has passed and we are about to start API calls
+    isCreatingSessionRef.current = true;
     setIsCreatingSession(true);
     let successCount = 0;
     let firstError = '';

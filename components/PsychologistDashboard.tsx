@@ -374,7 +374,8 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
         </div>
         
         {/* Vertical Bar Chart */}
-        <div className="relative h-48 sm:h-72 pl-8 sm:pl-10 pr-2">
+        <div className="overflow-x-auto -mx-2 sm:mx-0 pb-1">
+        <div className="relative h-48 sm:h-72 pl-8 sm:pl-10 pr-2 min-w-[420px] sm:min-w-0">
           {/* Grid lines with Y-axis labels */}
           <div className="absolute inset-0 flex flex-col justify-between pointer-events-none pb-8 pl-8 sm:pl-10">
             {[0, 1, 2, 3, 4].map(i => {
@@ -459,6 +460,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
           <div className="absolute left-0 bottom-8 top-0 border-l-2 border-slate-200" />
           {/* X-axis line */}
           <div className="absolute left-0 right-0 bottom-8 border-b-2 border-slate-200" />
+        </div>
         </div>
         
         {/* Legend/Summary */}
