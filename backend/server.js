@@ -3775,7 +3775,7 @@ app.post('/api/admin/cleanup-user-data', authenticateRequest, async (req, res) =
 // --- PURGE PSYCHOLOGIST DATA (self-service, only for specific accounts) ---
 // Allowed only for daniel.m.mendezv@gmail.com and garryjavi@gmail.com acting on their own data.
 const PURGE_ALLOWED_EMAILS = ['daniel.m.mendezv@gmail.com', 'garryjavi@gmail.com'];
-const PURGE_PROTECTED_EMAIL = 'garryjavi@gmail.com';
+const PURGE_PROTECTED_EMAILS = ['garryjavi@gmail.com', 'daniel.m.mendezv@gmail.com'];
 
 app.post('/api/admin/purge-psychologist-data', authenticateRequest, async (req, res) => {
   try {
@@ -3799,23 +3799,23 @@ app.post('/api/admin/purge-psychologist-data', authenticateRequest, async (req, 
 
     const psychId = requester.id;
 
-    // Get protected user ID (never deleted)
-    const { data: protectedUser } = await supabaseAdmin
+    // Get protected user IDs (never deleted)
+    const { data: protectedUsers } = await supabaseAdmin
       .from('users')
       .select('id')
-      .eq('user_email', PURGE_PROTECTED_EMAIL)
-      .maybeSingle();
-    const protectedId = protectedUser?.id || null;
+      .in('user_email', PURGE_PROTECTED_EMAILS);
+    const protectedIds = new Set((protectedUsers || []).map(u => u.id).filter(Boolean));
+    // Also protect the psychologist's own account
+    protectedIds.add(psychId);
 
     // Collect patient IDs from care_relationships BEFORE deleting anything
-    let careQuery = supabaseAdmin
+    const { data: careRels } = await supabaseAdmin
       .from('care_relationships')
       .select('patient_user_id')
-      .eq('psychologist_user_id', psychId)
-      .neq('patient_user_id', psychId);
-    if (protectedId) careQuery = careQuery.neq('patient_user_id', protectedId);
-    const { data: careRels } = await careQuery;
-    let patientIds = [...new Set((careRels || []).map(r => r.patient_user_id).filter(Boolean))];
+      .eq('psychologist_user_id', psychId);
+    let patientIds = [...new Set(
+      (careRels || []).map(r => r.patient_user_id).filter(id => id && !protectedIds.has(id))
+    )];
 
     console.log(`[purge-psychologist-data] 🗑 Psicólogo: ${psychId} (${requesterEmail}), pacientes a eliminar: ${patientIds.length}`);
 
@@ -3863,11 +3863,11 @@ app.post('/api/admin/purge-psychologist-data', authenticateRequest, async (req, 
         log.invitations = count; }
     }
 
-    // 9. Care relationships of this psychologist (except protected user)
+    // 9. Care relationships of this psychologist (except protected users)
     {
       let q = supabaseAdmin.from('care_relationships').delete({ count: 'exact' })
         .eq('psychologist_user_id', psychId);
-      if (protectedId) q = q.neq('patient_user_id', protectedId);
+      for (const pid of protectedIds) q = q.neq('patient_user_id', pid);
       const { count } = await q;
       log.care_relationships = count;
     }

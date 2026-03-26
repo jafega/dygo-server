@@ -479,14 +479,15 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                         })()}
 
                         {/* PURGE TOOL — only for specific internal accounts */}
-                        {['daniel.m.mendezv@gmail.com', 'garryjavi@gmail.com'].includes(
-                            (currentUser?.user_email || currentUser?.email || '').toLowerCase()
-                        ) && (
+                        {(() => {
+                            const ue = (currentUser?.user_email || (currentUser as any)?.data?.email || currentUser?.email || '').toLowerCase();
+                            return ['daniel.m.mendezv@gmail.com', 'garryjavi@gmail.com'].includes(ue);
+                        })() && (
                             <div className="bg-white border border-red-200 rounded-2xl p-4">
                                 <h4 className="text-sm font-bold text-red-700">🗑 Limpiar datos del psicólogo</h4>
                                 <p className="text-xs text-slate-500 mt-1">
                                     Elimina todos los pacientes, sesiones y relaciones vinculadas a tu cuenta como psicólogo.<br />
-                                    <strong>No se eliminará</strong> tu propio usuario ni el usuario garryjavi@gmail.com.
+                                    <strong>No se eliminarán</strong> tu propio usuario, garryjavi@gmail.com ni daniel.m.mendezv@gmail.com.
                                 </p>
                                 {purgeResult && (
                                     <div className={`mt-2 text-xs p-2 rounded-lg ${
