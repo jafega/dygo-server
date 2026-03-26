@@ -25,6 +25,7 @@ interface PsychologistProfile {
   // Session Info
   sessionPrice: number;
   currency: string;
+  email_reminders_enabled?: boolean;
 }
 
 interface PsychologistProfileProps {
@@ -47,7 +48,8 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
     taxId: '',
     iban: '',
     sessionPrice: 0,
-    currency: 'EUR'
+    currency: 'EUR',
+    email_reminders_enabled: false
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -524,6 +526,25 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
                     </div>
                   </div>
                 </div>
+              </div>
+
+              {/* Email reminders toggle */}
+              <div className="mt-4">
+                <label className="flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg cursor-pointer hover:bg-blue-100 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={profile.email_reminders_enabled ?? false}
+                    onChange={(e) => handleChange('email_reminders_enabled' as any, e.target.checked as any)}
+                    className="w-5 h-5 rounded border-blue-300 text-blue-600 focus:ring-2 focus:ring-blue-500"
+                  />
+                  <div>
+                    <div className="font-semibold text-blue-700">Recordatorios automáticos por email</div>
+                    <div className="text-xs text-blue-600">
+                      Envía un email a tus pacientes 24h y 1h antes de cada sesión que tenga el recordatorio activado.
+                      Al activar esta opción, las nuevas sesiones tendrán el recordatorio activado por defecto.
+                    </div>
+                  </div>
+                </label>
               </div>
             </div>
           </div>

@@ -29,6 +29,7 @@ interface Session {
   schedule_timezone?: string; // Zona horaria del psicólogo cuando se creó la sesión
   generateMeetLink?: boolean;
   google_calendar_event_id?: string;
+  reminder_enabled?: boolean;
 }
 
 interface Bono {
@@ -106,6 +107,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
   const [selectedTimezone, setSelectedTimezone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
   const [showTimezoneDropdown, setShowTimezoneDropdown] = useState(false);
   const [timezoneLoadedFromProfile, setTimezoneLoadedFromProfile] = useState(false);
+  const [psychEmailRemindersEnabled, setPsychEmailRemindersEnabled] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   
@@ -134,7 +136,8 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
     bonus_id: undefined as string | undefined,
     paymentMethod: '' as string,
     recurrence: 'none' as 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly',
-    recurrenceEndDate: ''
+    recurrenceEndDate: '',
+    reminder_enabled: false
   });
 
   const [newAvailability, setNewAvailability] = useState({
@@ -519,6 +522,10 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
         if (!profile?.schedule_timezone) {
           await saveScheduleTimezone(browserTimezone);
         }
+        // Cargar preferencia de recordatorios email del psicólogo
+        const remindersEnabled = profile?.email_reminders_enabled ?? false;
+        setPsychEmailRemindersEnabled(remindersEnabled);
+        setNewSession(prev => ({ ...prev, reminder_enabled: remindersEnabled }));
       }
     } catch (err) {
       console.warn('Could not load schedule timezone from profile:', err);
@@ -708,6 +715,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
         starts_on,
         ends_on,
         schedule_timezone: selectedTimezone,
+        reminder_enabled: newSession.reminder_enabled ?? false,
       };
 
       try {
@@ -1272,7 +1280,8 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
         paymentMethod: editedSession.paymentMethod || '',
         percent_psych: editedSession.percent_psych ?? 70,
         notes: editedSession.notes,
-        meetLink: editedSession.meetLink
+        meetLink: editedSession.meetLink,
+        reminder_enabled: editedSession.reminder_enabled ?? false
       };
 
       // Siempre incluir la zona horaria (del psicólogo actual)
@@ -1421,7 +1430,8 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
       bonus_id: undefined,
       paymentMethod: '',
       recurrence: 'none',
-      recurrenceEndDate: ''
+      recurrenceEndDate: '',
+      reminder_enabled: psychEmailRemindersEnabled
     });
     setNewSessionBonos([]);
     setPatientSearchQuery('');
@@ -2854,6 +2864,31 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                 </label>
               </div>
 
+              {/* Reminder toggle */}
+              <div>
+                <label className={`flex items-center gap-3 px-4 py-3 border rounded-lg transition-colors ${
+                  editedSession.patientEmail
+                    ? 'bg-blue-50 border-blue-200 cursor-pointer hover:bg-blue-100'
+                    : 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed'
+                }`}>
+                  <input
+                    type="checkbox"
+                    checked={editedSession.patientEmail ? (editedSession.reminder_enabled ?? false) : false}
+                    onChange={(e) => handleFieldChange('reminder_enabled', e.target.checked)}
+                    disabled={!editedSession.patientEmail}
+                    className="w-5 h-5 rounded border-blue-300 text-blue-600 focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed"
+                  />
+                  <div>
+                    <div className={`font-semibold ${editedSession.patientEmail ? 'text-blue-700' : 'text-slate-500'}`}>Recordatorio por email</div>
+                    <div className={`text-xs ${editedSession.patientEmail ? 'text-blue-600' : 'text-slate-400'}`}>
+                      {editedSession.patientEmail
+                        ? 'Enviar email al paciente 24h y 1h antes de la sesión'
+                        : 'El paciente no tiene email registrado'}
+                    </div>
+                  </div>
+                </label>
+              </div>
+
               {/* Payment Method */}
               {editedSession.paid && (
                 <div>
@@ -3628,6 +3663,30 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                     </span>
                   </label>
                 </div>
+
+                {/* Reminder toggle for new session */}
+                {(() => {
+                  const selectedPatient = patients.find(p => p.id === newSession.patientId);
+                  const hasEmail = !!selectedPatient?.email;
+                  return (
+                    <div className="flex items-center col-span-2">
+                      <label className={`flex items-center gap-2 touch-manipulation ${hasEmail ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
+                        <input
+                          type="checkbox"
+                          checked={hasEmail ? (newSession.reminder_enabled ?? false) : false}
+                          onChange={(e) => setNewSession({ ...newSession, reminder_enabled: e.target.checked })}
+                          disabled={!hasEmail}
+                          className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed"
+                        />
+                        <span className="text-xs sm:text-sm font-medium text-slate-700">
+                          {hasEmail
+                            ? 'Enviar recordatorio por email al paciente'
+                            : 'Recordatorio no disponible (paciente sin email)'}
+                        </span>
+                      </label>
+                    </div>
+                  );
+                })()}
                 
                 {/* Método de pago */}
                 {newSession.paid && !newSession.bonus_id && (

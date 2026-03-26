@@ -449,10 +449,37 @@ async function isAuthorizedForUser(requesterId, targetUserId, db) {
   // Check care relationship in cache first, then local db
   const relationships = (supabaseDbCache?.careRelationships?.length ? supabaseDbCache.careRelationships : null)
     || db?.careRelationships || [];
-  return relationships.some(rel =>
+  const cachedFound = relationships.some(rel =>
     (rel.psychologist_user_id === String(requesterId) && rel.patient_user_id === String(targetUserId)) ||
     (rel.psychologist_user_id === String(targetUserId) && rel.patient_user_id === String(requesterId))
   );
+  if (cachedFound) return true;
+  // Fallback: query Supabase directly in case the cache is stale or failed to load.
+  // This prevents false 403s when a psychologist tries to update their patient's email.
+  if (supabaseAdmin) {
+    try {
+      const [res1, res2] = await Promise.all([
+        supabaseAdmin
+          .from('care_relationships')
+          .select('id')
+          .eq('psychologist_user_id', String(requesterId))
+          .eq('patient_user_id', String(targetUserId))
+          .limit(1)
+          .maybeSingle(),
+        supabaseAdmin
+          .from('care_relationships')
+          .select('id')
+          .eq('psychologist_user_id', String(targetUserId))
+          .eq('patient_user_id', String(requesterId))
+          .limit(1)
+          .maybeSingle()
+      ]);
+      if (res1.data || res2.data) return true;
+    } catch (e) {
+      console.warn('⚠️ isAuthorizedForUser Supabase fallback failed:', e?.message);
+    }
+  }
+  return false;
 }
 
 // --- AUDIT LOG (LOPD/GDPR Art. 30 - Registro de actividades) ---
@@ -5229,10 +5256,38 @@ app.patch('/api/users/:id', authenticateRequest, async (req, res) => {
           await saveDb(db, { awaitPersistence: true });
         }
         
+        // Actualizar caché en memoria para reflejar la consolidación
+        if (supabaseDbCache) {
+          if (supabaseDbCache.careRelationships) {
+            // Remap patient_user_id en las relaciones cacheadas
+            const seen = new Set();
+            supabaseDbCache.careRelationships = supabaseDbCache.careRelationships
+              .map(rel => {
+                if (rel.patient_user_id === userId) {
+                  return { ...rel, patient_user_id: existingUserWithEmail.id };
+                }
+                return rel;
+              })
+              .filter(rel => {
+                const key = `${rel.psychologist_user_id}|${rel.patient_user_id}`;
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+              });
+          }
+          if (supabaseDbCache.users) {
+            supabaseDbCache.users = supabaseDbCache.users.filter(u => u.id !== userId);
+          }
+        }
+
+        // Obtener datos completos del usuario real para la respuesta
+        const realUser = await readSupabaseRowById('users', existingUserWithEmail.id) || existingUserWithEmail;
+
         // Retornar el usuario existente
         return res.json({
-          ...existingUserWithEmail,
+          ...realUser,
           consolidated: true,
+          consolidatedId: existingUserWithEmail.id,
           message: `Usuario consolidado con ${existingUserWithEmail.id}`
         });
       }

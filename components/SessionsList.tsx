@@ -28,6 +28,7 @@ interface Session {
   starts_on?: string; // ISO timestamp UTC almacenado en Supabase
   ends_on?: string;   // ISO timestamp UTC almacenado en Supabase
   timezone?: string;  // Zona horaria de visualización (normalmente 'Europe/Madrid')
+  reminder_enabled?: boolean;
 }
 
 interface Invoice {
@@ -670,6 +671,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
         percent_psych: editedSession.percent_psych ?? 70,
         notes: editedSession.notes,
         meetLink: editedSession.meetLink,
+        reminder_enabled: (editedSession as any).reminder_enabled ?? false,
         // Recalcular starts_on/ends_on correctamente desde la zona horaria del psicólogo
         schedule_timezone: selectedTimezone,
         starts_on: editedSession.date && editedSession.startTime
@@ -1574,6 +1576,8 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                   </div>
                 </label>
               </div>
+
+              {/* Reminder toggle */}\n              <div>\n                <label className={`flex items-center gap-3 px-4 py-3 border rounded-lg transition-colors ${\n                  editedSession.patientEmail\n                    ? 'bg-blue-50 border-blue-200 cursor-pointer hover:bg-blue-100'\n                    : 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed'\n                }`}>\n                  <input\n                    type=\"checkbox\"\n                    checked={editedSession.patientEmail ? ((editedSession as any).reminder_enabled ?? false) : false}\n                    onChange={(e) => handleFieldChange('reminder_enabled' as any, e.target.checked)}\n                    disabled={!editedSession.patientEmail}\n                    className=\"w-5 h-5 rounded border-blue-300 text-blue-600 focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed\"\n                  />\n                  <div>\n                    <div className={`font-semibold ${editedSession.patientEmail ? 'text-blue-700' : 'text-slate-500'}`}>Recordatorio por email</div>\n                    <div className={`text-xs ${editedSession.patientEmail ? 'text-blue-600' : 'text-slate-400'}`}>\n                      {editedSession.patientEmail\n                        ? 'Enviar email al paciente 24h y 1h antes de la sesi\u00f3n'\n                        : 'El paciente no tiene email registrado'}\n                    </div>\n                  </div>\n                </label>\n              </div>
 
               {/* Payment Method */}
               {editedSession.paid && (

@@ -1235,11 +1235,20 @@ tr:nth-child(even) td{background:#f8fafc}
       });
 
       if (response.ok) {
+        const json = await response.json().catch(() => null);
+        if (json?.consolidated) {
+          // El usuario temporal fue consolidado con el usuario real que tiene ese email.
+          // Cerrar el modal para que el padre recargue la lista con el nuevo patient_user_id.
+          alert('Email vinculado correctamente. El perfil del paciente ha sido actualizado.');
+          onClose();
+          return;
+        }
         await loadPatientData();
         setIsEditingInfo(false);
         alert('Información actualizada correctamente');
       } else {
-        alert('Error al actualizar la información');
+        const errJson = await response.json().catch(() => null);
+        alert(errJson?.error || 'Error al actualizar la información');
       }
     } catch (error) {
       console.error('Error saving patient data:', error);
