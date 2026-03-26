@@ -73,8 +73,11 @@ export default async function handler(req, res) {
   };
 
   for (const session of sessions ?? []) {
-    // Session must have reminder toggle enabled
-    if (!session.data?.reminder_enabled) continue;
+    const emailReminderEnabled    = !!session.data?.reminder_enabled;
+    const whatsappReminderEnabled = !!session.data?.whatsapp_reminder_enabled;
+
+    // Skip session if neither channel is enabled
+    if (!emailReminderEnabled && !whatsappReminderEnabled) continue;
 
     const sessionTime = new Date(session.starts_on).getTime();
     const is1hWindow  = Math.abs(sessionTime - target1h)  <= WINDOW_MS;
@@ -82,15 +85,11 @@ export default async function handler(req, res) {
 
     if (!is1hWindow && !is24hWindow) continue;
 
-    // Avoid duplicate sends (idempotency)
-    if (is1hWindow  && session.data?.reminder_1h_sent_at)  continue;
-    if (is24hWindow && session.data?.reminder_24h_sent_at) continue;
-
-    // Check psychologist has email reminders enabled at account level
+    // Check psychologist profile settings for both channels
     const profile = await getProfile(session.psychologist_user_id);
-    if (!profile?.data?.email_reminders_enabled) continue;
 
-    const whatsappEnabled = !!profile?.data?.whatsapp_reminders_enabled;
+    const psychEmailEnabled    = !!profile?.data?.email_reminders_enabled;
+    const whatsappEnabled      = !!profile?.data?.whatsapp_reminders_enabled;
 
     const psychName  = profile?.data?.name  || null;
     const psychEmail = profile?.data?.email || null;
@@ -105,7 +104,8 @@ export default async function handler(req, res) {
 
     const patientEmail = patient?.user_email;
     const patientPhone  = patient?.data?.phone || null;
-    if (!patientEmail || patientEmail.includes('@noemail.dygo.local')) continue;
+    // Skip if there's nothing to send to
+    if ((!patientEmail || patientEmail.includes('@noemail.dygo.local')) && !patientPhone) continue;
 
     const tz = session.data?.schedule_timezone || 'Europe/Madrid';
     const sessionDateStr = new Date(session.starts_on).toLocaleDateString('es-ES', {
@@ -122,33 +122,15 @@ export default async function handler(req, res) {
       '';
 
     try {
-      await resend.emails.send({
-        from: 'mainds <no-reply@mainds.app>',
-        to: patientEmail,
-        ...(psychEmail ? { reply_to: psychEmail } : {}),
-        subject: `Recordatorio: tienes una sesión ${label}`,
-        html: buildReminderEmail({
-          patientFirstName,
-          sessionDateStr,
-          sessionTimeStr,
-          label,
-          is1hWindow,
-          meetLink: session.data?.meetLink || null,
-          sessionType: session.data?.type || null,
-          psychName,
-          psychEmail,
-          psychPhone
-        })
-      });
-
-      // WhatsApp via Twilio (fire-and-forget alongside email)
-      const waSentKey = is1hWindow ? 'reminder_1h_whatsapp_sent_at' : 'reminder_24h_whatsapp_sent_at';
-      if (twilioClient && whatsappEnabled && patientPhone && !session.data?.[waSentKey]) {
-        try {
-          const toNumber = patientPhone.startsWith('+')
-            ? `whatsapp:${patientPhone}`
-            : `whatsapp:+${patientPhone.replace(/[^0-9]/g, '')}`;
-          const waBody = buildWhatsAppMessage({
+      // --- EMAIL CHANNEL ---
+      const emailSentKey = is1hWindow ? 'reminder_1h_sent_at' : 'reminder_24h_sent_at';
+      if (emailReminderEnabled && psychEmailEnabled && patientEmail && !patientEmail.includes('@noemail.dygo.local') && !session.data?.[emailSentKey]) {
+        await resend.emails.send({
+          from: 'mainds <no-reply@mainds.app>',
+          to: patientEmail,
+          ...(psychEmail ? { reply_to: psychEmail } : {}),
+          subject: `Recordatorio: tienes una sesión ${label}`,
+          html: buildReminderEmail({
             patientFirstName,
             sessionDateStr,
             sessionTimeStr,
@@ -156,32 +138,52 @@ export default async function handler(req, res) {
             is1hWindow,
             meetLink: session.data?.meetLink || null,
             sessionType: session.data?.type || null,
-            psychName
-          });
+            psychName,
+            psychEmail,
+            psychPhone
+          })
+        });
+        session.data = { ...session.data, [emailSentKey]: new Date().toISOString() };
+        console.log(`[send-reminders] ✉️  Sent ${is1hWindow ? '1h' : '24h'} email reminder to ${patientEmail} for session ${session.id}`);
+        sent++;
+      }
+
+      // --- WHATSAPP CHANNEL ---
+      const waSentKey = is1hWindow ? 'reminder_1h_whatsapp_sent_at' : 'reminder_24h_whatsapp_sent_at';
+      if (whatsappReminderEnabled && whatsappEnabled && twilioClient && patientPhone && !session.data?.[waSentKey]) {
+        try {
+          const toNumber = patientPhone.startsWith('+')
+            ? `whatsapp:${patientPhone}`
+            : `whatsapp:+${patientPhone.replace(/[^0-9]/g, '')}`;
           await twilioClient.messages.create({
             from: twilioFrom,
             to: toNumber,
-            body: waBody
+            body: buildWhatsAppMessage({
+              patientFirstName,
+              sessionDateStr,
+              sessionTimeStr,
+              label,
+              is1hWindow,
+              meetLink: session.data?.meetLink || null,
+              sessionType: session.data?.type || null,
+              psychName
+            })
           });
-          console.log(`[send-reminders] 💬 WhatsApp ${is1hWindow ? '1h' : '24h'} reminder sent to ${toNumber} for session ${session.id}`);
-          // Persist whatsapp sent flag (merged into the email update below)
           session.data = { ...session.data, [waSentKey]: new Date().toISOString() };
+          console.log(`[send-reminders] 💬 WhatsApp ${is1hWindow ? '1h' : '24h'} reminder sent to ${toNumber} for session ${session.id}`);
+          sent++;
         } catch (waErr) {
-          // Non-fatal: log and continue so email still counts
           console.error(`[send-reminders] WhatsApp failed for session ${session.id}:`, waErr.message);
           errors.push({ sessionId: session.id, channel: 'whatsapp', error: waErr.message });
         }
       }
 
-      // Mark as sent to prevent duplicates on next cron run
-      const sentKey = is1hWindow ? 'reminder_1h_sent_at' : 'reminder_24h_sent_at';
+      // Persist all updated sent-flags back to the session
       await supabase
         .from('sessions')
-        .update({ data: { ...session.data, [sentKey]: new Date().toISOString() } })
+        .update({ data: session.data })
         .eq('id', session.id);
 
-      console.log(`[send-reminders] ✉️  Sent ${is1hWindow ? '1h' : '24h'} reminder to ${patientEmail} for session ${session.id}`);
-      sent++;
     } catch (err) {
       console.error(`[send-reminders] Failed for session ${session.id}:`, err.message);
       errors.push({ sessionId: session.id, error: err.message });

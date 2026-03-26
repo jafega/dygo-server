@@ -26,6 +26,7 @@ interface PsychologistProfile {
   sessionPrice: number;
   currency: string;
   email_reminders_enabled?: boolean;
+  whatsapp_reminders_enabled?: boolean;
 }
 
 interface PsychologistProfileProps {
@@ -49,7 +50,8 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
     iban: '',
     sessionPrice: 0,
     currency: 'EUR',
-    email_reminders_enabled: false
+    email_reminders_enabled: false,
+    whatsapp_reminders_enabled: false
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -209,7 +211,9 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
           taxId: data.taxId || '',
           iban: data.iban || '',
           sessionPrice: data.sessionPrice || 0,
-          currency: data.currency || 'EUR'
+          currency: data.currency || 'EUR',
+          email_reminders_enabled: data.email_reminders_enabled ?? false,
+          whatsapp_reminders_enabled: data.whatsapp_reminders_enabled ?? false
         });
       }
     } catch (error) {
@@ -528,8 +532,8 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
                 </div>
               </div>
 
-              {/* Email reminders toggle */}
-              <div className="mt-4">
+              {/* Recordatorios automáticos */}
+              <div className="mt-4 space-y-2">
                 <label className="flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg cursor-pointer hover:bg-blue-100 transition-colors">
                   <input
                     type="checkbox"
@@ -542,6 +546,20 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
                     <div className="text-xs text-blue-600">
                       Envía un email a tus pacientes 24h y 1h antes de cada sesión que tenga el recordatorio activado.
                       Al activar esta opción, las nuevas sesiones tendrán el recordatorio activado por defecto.
+                    </div>
+                  </div>
+                </label>
+                <label className="flex items-center gap-3 px-4 py-3 bg-green-50 border border-green-200 rounded-lg cursor-pointer hover:bg-green-100 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={profile.whatsapp_reminders_enabled ?? false}
+                    onChange={(e) => handleChange('whatsapp_reminders_enabled' as any, e.target.checked as any)}
+                    className="w-5 h-5 rounded border-green-300 text-green-600 focus:ring-2 focus:ring-green-500"
+                  />
+                  <div>
+                    <div className="font-semibold text-green-700">Recordatorios automáticos por WhatsApp</div>
+                    <div className="text-xs text-green-600">
+                      Envía un WhatsApp a tus pacientes 24h y 1h antes de la sesión (requiere Twilio configurado y que el paciente tenga teléfono registrado).
                     </div>
                   </div>
                 </label>

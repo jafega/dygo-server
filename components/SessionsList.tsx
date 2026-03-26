@@ -29,6 +29,7 @@ interface Session {
   ends_on?: string;   // ISO timestamp UTC almacenado en Supabase
   timezone?: string;  // Zona horaria de visualización (normalmente 'Europe/Madrid')
   reminder_enabled?: boolean;
+  whatsapp_reminder_enabled?: boolean;
 }
 
 interface Invoice {
@@ -673,6 +674,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
         notes: editedSession.notes,
         meetLink: editedSession.meetLink,
         reminder_enabled: (editedSession as any).reminder_enabled ?? false,
+        whatsapp_reminder_enabled: (editedSession as any).whatsapp_reminder_enabled ?? false,
         // Recalcular starts_on/ends_on correctamente desde la zona horaria del psicólogo
         schedule_timezone: selectedTimezone,
         starts_on: editedSession.date && editedSession.startTime
@@ -1753,6 +1755,31 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                         </div>
                       </div>
                     </label>
+                    {(() => {
+                      const rawPhone = (editedSession.patientPhone || '').replace(/\s/g, '');
+                      const hasPhone = rawPhone.length > 0;
+                      return (
+                        <label className={`flex items-center gap-3 px-4 py-3 border rounded-lg transition-colors mt-2 ${
+                          hasPhone
+                            ? 'bg-green-50 border-green-200 cursor-pointer hover:bg-green-100'
+                            : 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed'
+                        }`}>
+                          <input
+                            type="checkbox"
+                            checked={hasPhone ? ((editedSession as any).whatsapp_reminder_enabled ?? false) : false}
+                            onChange={(e) => handleFieldChange('whatsapp_reminder_enabled' as any, e.target.checked)}
+                            disabled={!hasPhone}
+                            className="w-5 h-5 rounded border-green-300 text-green-600 focus:ring-2 focus:ring-green-500 disabled:cursor-not-allowed"
+                          />
+                          <div>
+                            <div className={`font-semibold text-sm ${hasPhone ? 'text-green-700' : 'text-slate-500'}`}>Recordatorio automático por WhatsApp</div>
+                            <div className={`text-xs ${hasPhone ? 'text-green-600' : 'text-slate-400'}`}>
+                              {hasPhone ? 'Enviar WhatsApp 24h y 1h antes de la sesión' : 'El paciente no tiene teléfono registrado'}
+                            </div>
+                          </div>
+                        </label>
+                      );
+                    })()}
                   </div>
                 );
               })()}

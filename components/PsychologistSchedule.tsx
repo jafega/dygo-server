@@ -30,6 +30,7 @@ interface Session {
   generateMeetLink?: boolean;
   google_calendar_event_id?: string;
   reminder_enabled?: boolean;
+  whatsapp_reminder_enabled?: boolean;
 }
 
 interface Bono {
@@ -109,6 +110,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
   const [showTimezoneDropdown, setShowTimezoneDropdown] = useState(false);
   const [timezoneLoadedFromProfile, setTimezoneLoadedFromProfile] = useState(false);
   const [psychEmailRemindersEnabled, setPsychEmailRemindersEnabled] = useState(false);
+  const [psychWhatsappRemindersEnabled, setPsychWhatsappRemindersEnabled] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   
@@ -138,7 +140,8 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
     paymentMethod: '' as string,
     recurrence: 'none' as 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly',
     recurrenceEndDate: '',
-    reminder_enabled: false
+    reminder_enabled: false,
+    whatsapp_reminder_enabled: false
   });
 
   const [newAvailability, setNewAvailability] = useState({
@@ -527,6 +530,9 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
         const remindersEnabled = profile?.email_reminders_enabled ?? false;
         setPsychEmailRemindersEnabled(remindersEnabled);
         setNewSession(prev => ({ ...prev, reminder_enabled: remindersEnabled }));
+        const waRemindersEnabled = profile?.whatsapp_reminders_enabled ?? false;
+        setPsychWhatsappRemindersEnabled(waRemindersEnabled);
+        setNewSession(prev => ({ ...prev, whatsapp_reminder_enabled: waRemindersEnabled }));
       }
     } catch (err) {
       console.warn('Could not load schedule timezone from profile:', err);
@@ -717,6 +723,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
         ends_on,
         schedule_timezone: selectedTimezone,
         reminder_enabled: newSession.reminder_enabled ?? false,
+        whatsapp_reminder_enabled: newSession.whatsapp_reminder_enabled ?? false,
       };
 
       try {
@@ -1282,7 +1289,8 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
         percent_psych: editedSession.percent_psych ?? 70,
         notes: editedSession.notes,
         meetLink: editedSession.meetLink,
-        reminder_enabled: editedSession.reminder_enabled ?? false
+        reminder_enabled: editedSession.reminder_enabled ?? false,
+        whatsapp_reminder_enabled: (editedSession as any).whatsapp_reminder_enabled ?? false
       };
 
       // Siempre incluir la zona horaria (del psicólogo actual)
@@ -1432,9 +1440,10 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
       paymentMethod: '',
       recurrence: 'none',
       recurrenceEndDate: '',
-      reminder_enabled: psychEmailRemindersEnabled
+      reminder_enabled: psychEmailRemindersEnabled,
+      whatsapp_reminder_enabled: psychWhatsappRemindersEnabled
     });
-    setNewSessionBonos([]);
+    setNewSessionBonos([])
     setPatientSearchQuery('');
   };
 
@@ -3225,7 +3234,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                         </button>
                         </div>
 
-                        {/* Reminder toggle */}
+                        {/* Reminder toggles */}
                         <label className={`mt-3 flex items-center gap-3 px-4 py-3 border rounded-lg transition-colors ${
                           hasRealEmail
                             ? 'bg-blue-50 border-blue-200 cursor-pointer hover:bg-blue-100'
@@ -3245,6 +3254,32 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                             </div>
                           </div>
                         </label>
+                        {(() => {
+                          const patientRecord = patients.find(p => p.id === (editedSession.patient_user_id || editedSession.patientId));
+                          const rawPhone = (patientRecord?.phone || '').replace(/\s/g, '');
+                          const hasPhone = rawPhone.length > 0;
+                          return (
+                            <label className={`mt-2 flex items-center gap-3 px-4 py-3 border rounded-lg transition-colors ${
+                              hasPhone
+                                ? 'bg-green-50 border-green-200 cursor-pointer hover:bg-green-100'
+                                : 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed'
+                            }`}>
+                              <input
+                                type="checkbox"
+                                checked={hasPhone ? ((editedSession as any).whatsapp_reminder_enabled ?? false) : false}
+                                onChange={(e) => handleFieldChange('whatsapp_reminder_enabled' as any, e.target.checked)}
+                                disabled={!hasPhone}
+                                className="w-5 h-5 rounded border-green-300 text-green-600 focus:ring-2 focus:ring-green-500 disabled:cursor-not-allowed"
+                              />
+                              <div>
+                                <div className={`font-semibold text-sm ${hasPhone ? 'text-green-700' : 'text-slate-500'}`}>Recordatorio automático por WhatsApp</div>
+                                <div className={`text-xs ${hasPhone ? 'text-green-600' : 'text-slate-400'}`}>
+                                  {hasPhone ? 'Enviar WhatsApp 24h y 1h antes de la sesión' : 'El paciente no tiene teléfono registrado'}
+                                </div>
+                              </div>
+                            </label>
+                          );
+                        })()}
                       </>
                     );
                   })()}
@@ -3689,20 +3724,43 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                   const hasRealEmail = email.length > 0 && !email.includes('@noemail.dygo.local');
                   return (
                     <div className="flex items-center col-span-2">
-                      <label className={`flex items-center gap-2 touch-manipulation ${hasRealEmail ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
-                        <input
-                          type="checkbox"
-                          checked={hasRealEmail ? (newSession.reminder_enabled ?? false) : false}
-                          onChange={(e) => setNewSession({ ...newSession, reminder_enabled: e.target.checked })}
-                          disabled={!hasRealEmail}
-                          className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed"
-                        />
-                        <span className="text-xs sm:text-sm font-medium text-slate-700">
-                          {hasRealEmail
-                            ? 'Enviar recordatorio por email al paciente'
-                            : (email.length > 0 ? 'Recordatorio no disponible (email no válido)' : 'Recordatorio no disponible (paciente sin email)')}
-                        </span>
-                      </label>
+                      <div className="flex flex-col gap-2 w-full">
+                        <label className={`flex items-center gap-2 touch-manipulation ${hasRealEmail ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
+                          <input
+                            type="checkbox"
+                            checked={hasRealEmail ? (newSession.reminder_enabled ?? false) : false}
+                            onChange={(e) => setNewSession({ ...newSession, reminder_enabled: e.target.checked })}
+                            disabled={!hasRealEmail}
+                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed"
+                          />
+                          <span className="text-xs sm:text-sm font-medium text-slate-700">
+                            {hasRealEmail
+                              ? 'Enviar recordatorio por email al paciente'
+                              : (email.length > 0 ? 'Recordatorio no disponible (email no válido)' : 'Recordatorio no disponible (paciente sin email)')}
+                          </span>
+                        </label>
+                        {(() => {
+                          const selPat = patients.find(p => p.id === newSession.patientId);
+                          const phone = (selPat?.phone || '').replace(/\s/g, '');
+                          const hasPhone = phone.length > 0;
+                          return (
+                            <label className={`flex items-center gap-2 touch-manipulation ${hasPhone ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
+                              <input
+                                type="checkbox"
+                                checked={hasPhone ? (newSession.whatsapp_reminder_enabled ?? false) : false}
+                                onChange={(e) => setNewSession({ ...newSession, whatsapp_reminder_enabled: e.target.checked })}
+                                disabled={!hasPhone}
+                                className="w-4 h-4 rounded border-green-300 text-green-600 focus:ring-green-500 disabled:cursor-not-allowed"
+                              />
+                              <span className="text-xs sm:text-sm font-medium text-slate-700">
+                                {hasPhone
+                                  ? 'Enviar recordatorio por WhatsApp al paciente'
+                                  : 'Recordatorio WhatsApp no disponible (paciente sin teléfono)'}
+                              </span>
+                            </label>
+                          );
+                        })()}
+                      </div>
                     </div>
                   );
                 })()}
