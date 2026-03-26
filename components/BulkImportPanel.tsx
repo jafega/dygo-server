@@ -1157,6 +1157,10 @@ REGLAS CRÍTICAS — LEE ESTO CON ATENCIÓN ANTES DE RESPONDER:
                 </>
               )}
               {onImportComplete && rows.filter(r => r._status === 'error').length === 0 && (
+                <p className="text-sm text-indigo-700 font-medium text-center">Todos los pacientes han sido importados correctamente.</p>
+              )}
+            </div>
+          )}
 
           {/* Warning */}
           {!importDone && (
