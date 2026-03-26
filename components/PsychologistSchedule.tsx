@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Calendar as CalendarIcon, Clock, Plus, X, Users, Video, MapPin, ChevronLeft, ChevronRight, MessageCircle, Trash2, Save, Copy, Send, ExternalLink, CheckCircle, XCircle, Ticket, Receipt, Globe, ChevronDown, Mail } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, Plus, X, Users, Video, MapPin, ChevronLeft, ChevronRight, MessageCircle, Trash2, Save, Copy, Send, ExternalLink, CheckCircle, XCircle, Ticket, Receipt, Globe, ChevronDown, Mail, AlertTriangle } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser, apiFetch } from '../services/authService';
 
@@ -47,11 +47,12 @@ interface PsychologistScheduleProps {
   psychologistId: string;
   canCreate?: boolean;
   onNeedUpgrade?: () => void;
+  onOpenSettings?: () => void;
 }
 
 type SessionStatusFilter = Session['status'] | 'ALL';
 
-const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologistId, canCreate = true, onNeedUpgrade }) => {
+const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologistId, canCreate = true, onNeedUpgrade, onOpenSettings }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [sessions, setSessions] = useState<Session[]>([]);
   const [patients, setPatients] = useState<any[]>([]);
@@ -3660,21 +3661,42 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
               )}
 
               {!googleCalendarConnected && newSession.type === 'online' && (
-                <div className="p-2.5 sm:p-3 bg-slate-50 border border-slate-200 rounded-lg">
-                  <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1.5">
-                    <Video size={14} className="inline-block mr-1 flex-shrink-0" />
-                    Enlace de videollamada (opcional)
-                  </label>
-                  <input
-                    type="url"
-                    value={newSession.manualMeetLink}
-                    onChange={(e) => setNewSession({ ...newSession, manualMeetLink: e.target.value })}
-                    placeholder="Pega aquí un enlace de Meet, Zoom, etc."
-                    className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent touch-manipulation"
-                  />
-                  <p className="text-[10px] sm:text-xs text-slate-500 mt-1">
-                    Conecta Google Calendar en Ajustes para crear Meet automáticamente
-                  </p>
+                <div className="space-y-2.5">
+                  <div className="flex items-start gap-2.5 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                    <AlertTriangle size={16} className="text-amber-500 flex-shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs sm:text-sm font-medium text-amber-800">
+                        No tienes Google Calendar conectado
+                      </p>
+                      <p className="text-[10px] sm:text-xs text-amber-700 mt-0.5">
+                        No se generará automáticamente el enlace de la videollamada.{' '}
+                        {onOpenSettings ? (
+                          <button
+                            type="button"
+                            onClick={() => { setShowNewSession(false); resetNewSession(); onOpenSettings(); }}
+                            className="font-semibold underline hover:text-amber-900 transition-colors"
+                          >
+                            Haz click aquí para activar Google Calendar
+                          </button>
+                        ) : (
+                          <span className="font-semibold">Actívalo en Ajustes.</span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="p-2.5 sm:p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                    <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1.5">
+                      <Video size={14} className="inline-block mr-1 flex-shrink-0" />
+                      Enlace de videollamada (opcional)
+                    </label>
+                    <input
+                      type="url"
+                      value={newSession.manualMeetLink}
+                      onChange={(e) => setNewSession({ ...newSession, manualMeetLink: e.target.value })}
+                      placeholder="Pega aquí un enlace de Meet, Zoom, etc."
+                      className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent touch-manipulation"
+                    />
+                  </div>
                 </div>
               )}
 

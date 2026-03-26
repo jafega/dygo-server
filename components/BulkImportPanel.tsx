@@ -127,6 +127,7 @@ const BulkImportPanel: React.FC<BulkImportPanelProps> = ({ psychologistId, curre
   const [parseStep, setParseStep] = useState<string>('');
   const [parseProgress, setParseProgress] = useState(0);
   const [elapsedTime, setElapsedTime] = useState(0);
+  const [expectedRowCount, setExpectedRowCount] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const parseStartRef = useRef<number>(0);
 
@@ -160,6 +161,7 @@ const BulkImportPanel: React.FC<BulkImportPanelProps> = ({ psychologistId, curre
     setFileName(file.name);
     setParseStep('Leyendo archivo…');
     setParseProgress(10);
+    setExpectedRowCount(null);
 
     try {
       const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
@@ -172,6 +174,9 @@ const BulkImportPanel: React.FC<BulkImportPanelProps> = ({ psychologistId, curre
         setParseStep('Procesando archivo CSV…');
         setParseProgress(20);
         const text = await file.text();
+        // Count data rows (skip header and empty lines)
+        const csvLines = text.split('\n').filter(l => l.trim().length > 0);
+        if (csvLines.length > 1) setExpectedRowCount(csvLines.length - 1);
         contentParts = [
           { text: `Contenido del archivo (CSV):\n\`\`\`\n${text.substring(0, 60000)}\n\`\`\`` },
         ];
@@ -181,10 +186,18 @@ const BulkImportPanel: React.FC<BulkImportPanelProps> = ({ psychologistId, curre
         const buffer = await file.arrayBuffer();
         const workbook = XLSX.read(buffer, { type: 'array' });
         const csvParts: string[] = [];
+        let totalDataRows = 0;
         for (const sheetName of workbook.SheetNames) {
-          const csv = XLSX.utils.sheet_to_csv(workbook.Sheets[sheetName]);
-          if (csv.trim()) csvParts.push(`Hoja "${sheetName}":\n${csv}`);
+          const sheet = workbook.Sheets[sheetName];
+          const csv = XLSX.utils.sheet_to_csv(sheet);
+          if (csv.trim()) {
+            csvParts.push(`Hoja "${sheetName}":\n${csv}`);
+            // Count data rows in this sheet (skip header and empty lines)
+            const sheetRows = csv.split('\n').filter(l => l.trim().replace(/,/g, '').trim().length > 0);
+            if (sheetRows.length > 1) totalDataRows += sheetRows.length - 1;
+          }
         }
+        if (totalDataRows > 0) setExpectedRowCount(totalDataRows);
         const csvText = csvParts.join('\n\n').substring(0, 60000);
         contentParts = [
           { text: `Contenido del archivo (${ext.toUpperCase()} convertido a CSV):\n\`\`\`\n${csvText}\n\`\`\`` },
@@ -216,23 +229,32 @@ Para cada paciente, extrae:
 - dni: DNI, NIF, NIE o documento de identidad (null si no aparece)
 - address: Dirección completa del paciente (null si no aparece)
 - date_of_birth: Fecha de nacimiento en formato YYYY-MM-DD (null si no aparece)
-- file_number: Número de ficha o expediente del paciente (null si no aparece)
+- file_number: Número de paciente, número de ficha, número de historial o número de expediente (null si no aparece). CRÍTICO: lee el valor EXACTO de la columna — no lo inventes, no autogeneres números secuenciales. Si el paciente 15 tiene el número 15, extrae 15; si el paciente 27 tiene el número 27, extrae 27.
 - default_session_price: Precio de la sesión en euros como número (null si no aparece)
 - default_psych_percent: Porcentaje que retiene el psicólogo, entre 0 y 100 (null si no aparece)
 - tags: Lista de etiquetas, categorías o diagnósticos mencionados (array vacío si no hay)
 
-IMPORTANTE:
-- Si el archivo contiene cabeceras de columna, úsalas para identificar los campos.
-- Si hay una sola columna de "Nombre" o "Nombre completo", separa el nombre de pila (firstName) de los apellidos (lastName). La primera palabra suele ser el nombre y el resto los apellidos. Ejemplo: "María García López" → firstName: "María", lastName: "García López".
-- Si hay columnas separadas de "Nombre" y "Apellidos", úsalas directamente.
-- Si hay columnas con nombres similares (p.ej. "Tarifa", "Precio", "Fee"), mapéalas a default_session_price.
-- Si hay columnas como "DNI", "NIF", "NIE", "Documento", mapéalas a dni.
-- Si hay columnas como "Dirección", "Domicilio", "Address", mapéalas a address.
-- Si hay columnas como "Fecha nacimiento", "F. Nac.", "Nacimiento", "Date of birth", mapéalas a date_of_birth.
-- Si hay columnas como "Nº Ficha", "Expediente", "Número", "File number", mapéalas a file_number.
-- Extrae TODOS los pacientes del documento, no solo algunos. El número de pacientes en tu respuesta DEBE coincidir exactamente con el número de filas/registros del documento original. Cuenta las filas antes de responder y verifica que no falte ninguna.
-- Los números de teléfono deben incluir el prefijo internacional +34. Si un teléfono no tiene prefijo (por ejemplo "612345678" o "612 345 678"), añade "+34 " delante. Si ya tiene un prefijo como "+34", déjalo tal cual.
-- Responde ÚNICAMENTE con el JSON, sin explicaciones adicionales.`,
+REGLAS CRÍTICAS — LEE ESTO CON ATENCIÓN ANTES DE RESPONDER:
+
+1. CUENTA PRIMERO: Antes de generar el JSON, cuenta explícitamente cuántas filas de datos (excluyendo cabeceras) existen en el documento. Ese número es N. Tu array "patients" DEBE tener exactamente N elementos. Si N=30, debes devolver 30 pacientes. Si N=15, debes devolver 15. NO puedes devolver más ni menos.
+
+2. SIN OMISIONES: No saltes ni omitas ningún paciente por ningún motivo. No importa si una fila tiene datos incompletos, si parece un duplicado, si el nombre es poco común o si algún campo está vacío — inclúyela siempre. Es preferible incluir una fila con firstName vacío a omitir a un paciente.
+
+3. NÚMERO DE PACIENTE EXACTO (file_number): Si en el documento hay una columna con el número de paciente, número de historia, número de derecho, número de ficha, código de paciente, o similar (sea cual sea el nombre exacto de esa columna), extrae el valor tal cual aparece para cada paciente. NO generes números secuenciales automáticos. El paciente cuyo número en el documento es 15 debe tener file_number: 15; el que tiene 27 debe tener file_number: 27. No confundas el número de fila con el número de paciente.
+
+4. MAPEO DE COLUMNAS: 
+   - Columnas de nombre de paciente: "Nº Paciente", "Nº Historia", "Nº Historial", "Nº Derecho", "Número de paciente", "Código", "ID Paciente", "Número" → file_number
+   - Columnas de precio: "Tarifa", "Precio", "Fee", "Coste" → default_session_price
+   - Columnas de identidad: "DNI", "NIF", "NIE", "Documento" → dni
+   - Dirección: "Dirección", "Domicilio", "Address" → address
+   - Fecha nacimiento: "Fecha nacimiento", "F. Nac.", "Nacimiento", "Date of birth", "F.Nacimiento" → date_of_birth
+   - Expediente: "Nº Ficha", "Expediente", "Ficha", "File number" → file_number
+
+5. Si el archivo contiene cabeceras de columna, úsalas para identificar los campos. Si hay una sola columna de nombre completo, separa firstName (primera palabra) de lastName (el resto).
+
+6. Los números de teléfono deben incluir el prefijo +34 si no lo tienen ya.
+
+7. Responde ÚNICAMENTE con el JSON, sin texto adicional.`,
       });
 
       setParseStep('Esperando respuesta de la IA… esto puede tardar unos segundos');
@@ -301,6 +323,16 @@ IMPORTANTE:
         setParseStep(`¡Listo! Se encontraron ${extracted.length} pacientes`);
         setParseProgress(100);
         setRows(extracted);
+        // Warn if AI returned fewer patients than the file actually contained
+        setExpectedRowCount(prev => {
+          if (prev !== null && extracted.length < prev) {
+            setParseError(
+              `⚠️ Atención: el archivo contiene ${prev} pacientes pero la IA solo extrajo ${extracted.length}. ` +
+              `Pueden faltar ${prev - extracted.length} paciente(s). Revisa la lista y añade los que falten manualmente antes de importar.`
+            );
+          }
+          return prev;
+        });
       }
     } catch (err: any) {
       console.error('[BulkImportPanel] Error parsing file:', err);
@@ -361,9 +393,14 @@ IMPORTANTE:
     setImportDone(false);
     setShowImportModal(true);
     setImportCurrent(0);
-    const total = rows.filter(r => r._status !== 'success' && r._status !== 'skipped').length;
+    const total = rows.filter(r =>
+      r._status !== 'success' &&
+      r._status !== 'skipped' &&
+      Object.keys(validateRow(r)).length === 0
+    ).length;
     setImportTotal(total);
     let processed = 0;
+    let errorCountLocal = 0;
 
     for (const row of rows) {
       if (row._status === 'success' || row._status === 'skipped') continue;
@@ -377,6 +414,7 @@ IMPORTANTE:
               : r
           )
         );
+        errorCountLocal++;
         continue;
       }
 
@@ -432,6 +470,7 @@ IMPORTANTE:
                 : r
             )
           );
+          if (!isDuplicate) errorCountLocal++;
           continue;
         }
 
@@ -446,17 +485,23 @@ IMPORTANTE:
             patch.tags = row.tags.split(',').map(t => t.trim()).filter(Boolean);
           }
           if (row.file_number) patch.patientnumber = parseInt(row.file_number, 10);
-          await apiFetch(`${API_URL}/relationships/${relId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(patch),
-          });
+          try {
+            await apiFetch(`${API_URL}/relationships/${relId}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(patch),
+            });
+          } catch {
+            // Fields update failed but patient was created — still mark as success
+            console.warn('[BulkImportPanel] Failed to update relationship extra fields for:', relId);
+          }
         }
 
         setRows(prev =>
           prev.map(r => r._id === row._id ? { ...r, _status: 'success', _error: undefined } : r)
         );
       } catch (err: any) {
+        errorCountLocal++;
         setRows(prev =>
           prev.map(r =>
             r._id === row._id
@@ -471,8 +516,8 @@ IMPORTANTE:
     setImportDone(true);
     setImportStep('¡Importación completada!');
 
-    // Auto-redirect to patients after 3 seconds
-    if (onImportComplete) {
+    // Auto-redirect only when all imports succeeded (no errors)
+    if (onImportComplete && errorCountLocal === 0) {
       setTimeout(() => {
         setShowImportModal(false);
         onImportComplete();
@@ -495,13 +540,13 @@ IMPORTANTE:
   const duplicateCount = rows.filter(r => r._status === 'duplicate').length;
   const pendingCount   = rows.filter(r => r._status === 'pending').length;
 
-  const allRowsValid = rows.every(r => {
-    if (r._status === 'success' || r._status === 'skipped') return true;
-    return Object.keys(validateRow(r)).length === 0;
-  });
+  // Rows that are valid AND not yet successfully imported
+  const importableCount = rows.filter(r =>
+    (r._status === 'pending' || r._status === 'error') &&
+    Object.keys(validateRow(r)).length === 0
+  ).length;
 
-  const hasPendingRows = rows.some(r => r._status === 'pending' || r._status === 'error');
-  const canImport = hasPendingRows && allRowsValid && !isImporting;
+  const canImport = importableCount > 0 && !isImporting;
 
   // ── Render helpers ────────────────────────────────────────────────────────
 
@@ -586,9 +631,8 @@ IMPORTANTE:
                 style={{ width: `${parseProgress}%` }}
               />
             </div>
-            <div className="flex justify-between mt-1.5">
+            <div className="flex justify-center mt-1.5">
               <span className="text-xs text-indigo-500 font-medium">{parseProgress}%</span>
-              <span className="text-xs text-indigo-400">{elapsedTime}s</span>
             </div>
           </div>
 
@@ -1025,8 +1069,8 @@ IMPORTANTE:
               ) : (
                 <>
                   <Users className="w-4 h-4" />
-                  Importar {pendingCount > 0 ? `${pendingCount} ` : ''}
-                  {pendingCount === 1 ? 'paciente' : 'pacientes'}
+                  Importar {importableCount > 0 ? `${importableCount} ` : ''}
+                  {importableCount === 1 ? 'paciente' : 'pacientes'}
                 </>
               )}
             </button>
@@ -1058,7 +1102,9 @@ IMPORTANTE:
           {/* Header */}
           <div className="text-center">
             {importDone ? (
-              <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto mb-3" />
+              errorCount > 0
+                ? <AlertCircle className="w-12 h-12 text-amber-500 mx-auto mb-3" />
+                : <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto mb-3" />
             ) : (
               <Loader2 className="w-12 h-12 text-indigo-500 animate-spin mx-auto mb-3" />
             )}
@@ -1092,18 +1138,25 @@ IMPORTANTE:
                 <p className="text-emerald-700">✓ {rows.filter(r => r._status === 'success').length} creados correctamente</p>
               )}
               {rows.filter(r => r._status === 'duplicate').length > 0 && (
-                <p className="text-amber-700">⚠ {rows.filter(r => r._status === 'duplicate').length} ya existían</p>
+                <p className="text-amber-700">⚠ {rows.filter(r => r._status === 'duplicate').length} ya tenían relación activa (omitidos)</p>
               )}
               {rows.filter(r => r._status === 'error').length > 0 && (
-                <p className="text-red-700">✗ {rows.filter(r => r._status === 'error').length} con errores</p>
+                <>
+                  <p className="text-red-700 font-semibold">✗ {rows.filter(r => r._status === 'error').length} con errores — detalle:</p>
+                  <div className="max-h-40 overflow-y-auto space-y-1 bg-red-50 rounded-lg p-2 border border-red-200">
+                    {rows.filter(r => r._status === 'error').map((r, i) => (
+                      <div key={r._id} className="text-xs text-red-700">
+                        <span className="font-medium">
+                          {[r.firstName, r.lastName].filter(Boolean).join(' ') || `Fila ${rows.indexOf(r) + 1}`}:
+                        </span>{' '}
+                        <span>{r._error || 'Error desconocido'}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-slate-500 text-center">Cierra esta ventana, corrige los errores en la tabla y vuelve a importar.</p>
+                </>
               )}
-              {onImportComplete && (
-                <p className="text-xs text-slate-400 text-center mt-2">
-                  Redirigiendo a pacientes en unos segundos…
-                </p>
-              )}
-            </div>
-          )}
+              {onImportComplete && rows.filter(r => r._status === 'error').length === 0 && (
 
           {/* Warning */}
           {!importDone && (

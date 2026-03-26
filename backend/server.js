@@ -3098,7 +3098,7 @@ const handleAdminCreatePatient = async (req, res) => {
         const { data: existingInSupabase } = await supabaseAdmin
           .from('users')
           .select('id, data')
-          .eq('user_email', normalizedEmail)
+          .ilike('user_email', normalizedEmail)
           .maybeSingle();
         
         if (existingInSupabase) {
@@ -3212,6 +3212,43 @@ const handleAdminCreatePatient = async (req, res) => {
       db.careRelationships.push(relationship);
       await saveDb(db, { awaitPersistence: false });
 
+      // Rellenar campos vacíos del usuario existente con los datos que el psicólogo proporcionó
+      const existingFirstName = existingPatient?.firstName || '';
+      const existingLastName = existingPatient?.lastName || '';
+      const needsNameUpdate = (!existingFirstName && (firstName || lastName)) || (!existingLastName && lastName);
+      const existingPhone = existingPatient?.phone || '';
+      const needsPhoneUpdate = !existingPhone && phone;
+
+      if (needsNameUpdate || needsPhoneUpdate) {
+        const mergedFirstName = existingFirstName || (firstName ? firstName.trim() : '');
+        const mergedLastName = existingLastName || (lastName ? lastName.trim() : '');
+        const mergedName = `${mergedFirstName} ${mergedLastName}`.trim() || existingPatient?.name || name?.trim() || '';
+        const mergedPhone = existingPhone || (phone ? phone.trim() : '');
+
+        const updatedData = {
+          ...existingPatient,
+          firstName: mergedFirstName,
+          lastName: mergedLastName,
+          name: mergedName,
+          phone: mergedPhone,
+        };
+
+        if (supabaseAdmin) {
+          await supabaseAdmin
+            .from('users')
+            .update({ data: cleanUserDataForStorage(updatedData) })
+            .eq('id', existingPatientId);
+          console.log(`[handleAdminCreatePatient] ✅ Campos vacíos actualizados para usuario ${existingPatientId}`);
+        } else {
+          const localIdx = db.users.findIndex(u => u.id === existingPatientId);
+          if (localIdx !== -1) {
+            db.users[localIdx] = { ...db.users[localIdx], ...updatedData };
+            await saveDb(db, { awaitPersistence: false });
+          }
+        }
+        existingPatient = { ...existingPatient, firstName: mergedFirstName, lastName: mergedLastName, name: mergedName, phone: mergedPhone };
+      }
+
       console.log(`✅ Relación creada con paciente existente: ${existingPatient.name} por psicólogo ${psychologist.name}`);
       
       return res.json({
@@ -3304,6 +3341,61 @@ const handleAdminCreatePatient = async (req, res) => {
 
         if (userError) {
           console.error('[handleAdminCreatePatient] ❌ Error insertando usuario:', userError);
+
+          // If unique constraint on user_email: user already exists (possibly different case).
+          // Find them and create the care relationship instead.
+          if (userError.code === '23505') {
+            console.log('[handleAdminCreatePatient] Unique constraint on user_email — looking up existing user (ilike)...');
+            const { data: existingByEmail } = await supabaseAdmin
+              .from('users')
+              .select('id, data')
+              .ilike('user_email', newPatient.email)
+              .maybeSingle();
+
+            if (existingByEmail) {
+              const { data: existingRel2 } = await supabaseAdmin
+                .from('care_relationships')
+                .select('id')
+                .eq('psychologist_user_id', psychologistId)
+                .eq('patient_user_id', existingByEmail.id)
+                .maybeSingle();
+
+              if (existingRel2) {
+                return res.status(400).json({ error: 'Ya existe una relación con este paciente' });
+              }
+
+              // Create relationship for the existing user
+              const { error: relError2 } = await supabaseAdmin
+                .from('care_relationships')
+                .insert({
+                  id: relationship.id,
+                  data: { ...relationship.data, patientId: existingByEmail.id },
+                  psychologist_user_id: psychologistId,
+                  patient_user_id: existingByEmail.id,
+                  default_session_price: 0,
+                  default_psych_percent: 80,
+                  active: true,
+                  patientnumber: nextPatientNumber
+                });
+
+              if (relError2) {
+                throw new Error(`Error al crear relación: ${relError2.message}`);
+              }
+
+              if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
+              db.careRelationships.push({ ...relationship, patient_user_id: existingByEmail.id });
+              await saveDb(db, { awaitPersistence: false });
+
+              console.log(`[handleAdminCreatePatient] ✅ Relación creada para usuario existente (unique fallback): ${existingByEmail.id}`);
+              return res.json({
+                success: true,
+                message: 'Relación creada con paciente existente',
+                patient: existingByEmail.data,
+                relationship: { ...relationship, patient_user_id: existingByEmail.id }
+              });
+            }
+          }
+
           throw new Error(`Error al crear usuario: ${userError.message}`);
         }
         console.log('[handleAdminCreatePatient] ✅ Usuario insertado en Supabase');
@@ -3360,7 +3452,94 @@ const handleAdminCreatePatient = async (req, res) => {
 
 app.post('/api/admin/create-patient', authenticateRequest, handleAdminCreatePatient);
 
-// --- ADMIN: Delete a user and all associated data (restricted to superadmin)
+// --- ADMIN: Migrate names — split users with only `name` into `firstName` + `lastName`
+app.post('/api/admin/migrate-names', authenticateRequest, async (req, res) => {
+  try {
+    const requesterId = req.authenticatedUserId;
+    if (!requesterId) return res.status(401).json({ error: 'Autenticación requerida' });
+
+    // Only psychologists or superadmins can trigger this
+    let requesterEmail = null;
+    if (supabaseAdmin) {
+      const { data: reqUser } = await supabaseAdmin.from('users').select('data, user_email').eq('id', requesterId).maybeSingle();
+      requesterEmail = reqUser?.user_email || reqUser?.data?.email || '';
+    } else {
+      const db = getDb();
+      const reqUser = db.users.find(u => u.id === String(requesterId));
+      requesterEmail = reqUser?.email || '';
+    }
+
+    let updated = 0;
+    let skipped = 0;
+    const errors = [];
+
+    if (supabaseAdmin) {
+      // Obtener todos los usuarios cuyo data.firstName esté vacío
+      const { data: allUsers, error: fetchError } = await supabaseAdmin
+        .from('users')
+        .select('id, data, user_email');
+
+      if (fetchError) throw new Error(`Error leyendo usuarios: ${fetchError.message}`);
+
+      for (const row of allUsers || []) {
+        const d = row.data || {};
+        const hasFirst = d.firstName && d.firstName.trim();
+        const hasLast = d.lastName && d.lastName.trim();
+        const fullName = (d.name || '').trim();
+
+        // Nada que hacer si ya tiene nombre+apellido o si no tiene nombre completo
+        if ((hasFirst && hasLast) || !fullName) { skipped++; continue; }
+
+        // Dividir por el primer espacio: todo lo de antes = firstName, el resto = lastName
+        const spaceIdx = fullName.indexOf(' ');
+        const firstName = spaceIdx !== -1 ? fullName.substring(0, spaceIdx).trim() : fullName;
+        const lastName  = spaceIdx !== -1 ? fullName.substring(spaceIdx + 1).trim() : '';
+
+        const updatedData = {
+          ...d,
+          firstName: d.firstName && d.firstName.trim() ? d.firstName : firstName,
+          lastName:  d.lastName  && d.lastName.trim()  ? d.lastName  : lastName,
+        };
+
+        const { error: updateError } = await supabaseAdmin
+          .from('users')
+          .update({ data: cleanUserDataForStorage(updatedData) })
+          .eq('id', row.id);
+
+        if (updateError) {
+          errors.push({ id: row.id, error: updateError.message });
+        } else {
+          updated++;
+        }
+      }
+    } else {
+      // Fallback: db.json
+      const db = getDb();
+      let changed = false;
+      for (const user of db.users || []) {
+        const hasFirst = user.firstName && user.firstName.trim();
+        const hasLast  = user.lastName  && user.lastName.trim();
+        const fullName = (user.name || '').trim();
+        if ((hasFirst && hasLast) || !fullName) { skipped++; continue; }
+
+        const spaceIdx = fullName.indexOf(' ');
+        user.firstName = hasFirst ? user.firstName : (spaceIdx !== -1 ? fullName.substring(0, spaceIdx) : fullName);
+        user.lastName  = hasLast  ? user.lastName  : (spaceIdx !== -1 ? fullName.substring(spaceIdx + 1) : '');
+        updated++;
+        changed = true;
+      }
+      if (changed) await saveDb(db, { awaitPersistence: true });
+    }
+
+    console.log(`[migrate-names] ✅ ${updated} usuarios actualizados, ${skipped} omitidos, ${errors.length} errores`);
+    return res.json({ success: true, updated, skipped, errors });
+  } catch (err) {
+    console.error('[migrate-names] ❌ Error:', err);
+    return res.status(500).json({ error: err?.message || 'Error en migración de nombres' });
+  }
+});
+
+
 const handleAdminDeleteUser = (req, res) => {
   try {
     const requesterId = req.authenticatedUserId;
@@ -3589,6 +3768,131 @@ app.post('/api/admin/cleanup-user-data', authenticateRequest, async (req, res) =
     return res.json(result);
   } catch (err) {
     console.error('Error in cleanup-user-data:', err);
+    return res.status(500).json({ error: err?.message || 'Error interno' });
+  }
+});
+
+// --- PURGE PSYCHOLOGIST DATA (self-service, only for specific accounts) ---
+// Allowed only for daniel.m.mendezv@gmail.com and garryjavi@gmail.com acting on their own data.
+const PURGE_ALLOWED_EMAILS = ['daniel.m.mendezv@gmail.com', 'garryjavi@gmail.com'];
+const PURGE_PROTECTED_EMAIL = 'garryjavi@gmail.com';
+
+app.post('/api/admin/purge-psychologist-data', authenticateRequest, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+
+    const requesterId = req.authenticatedUserId;
+
+    // Identify the requester
+    const { data: requester, error: reqErr } = await supabaseAdmin
+      .from('users')
+      .select('id, user_email')
+      .eq('id', String(requesterId))
+      .single();
+
+    if (reqErr || !requester) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    const requesterEmail = (requester.user_email || '').toLowerCase();
+    if (!PURGE_ALLOWED_EMAILS.includes(requesterEmail)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const psychId = requester.id;
+
+    // Get protected user ID (never deleted)
+    const { data: protectedUser } = await supabaseAdmin
+      .from('users')
+      .select('id')
+      .eq('user_email', PURGE_PROTECTED_EMAIL)
+      .maybeSingle();
+    const protectedId = protectedUser?.id || null;
+
+    // Collect patient IDs from care_relationships BEFORE deleting anything
+    let careQuery = supabaseAdmin
+      .from('care_relationships')
+      .select('patient_user_id')
+      .eq('psychologist_user_id', psychId)
+      .neq('patient_user_id', psychId);
+    if (protectedId) careQuery = careQuery.neq('patient_user_id', protectedId);
+    const { data: careRels } = await careQuery;
+    let patientIds = [...new Set((careRels || []).map(r => r.patient_user_id).filter(Boolean))];
+
+    console.log(`[purge-psychologist-data] 🗑 Psicólogo: ${psychId} (${requesterEmail}), pacientes a eliminar: ${patientIds.length}`);
+
+    const log = {};
+
+    if (patientIds.length > 0) {
+      // 1. Sessions
+      { const { count } = await supabaseAdmin.from('sessions').delete({ count: 'exact' })
+          .eq('psychologist_user_id', psychId).in('patient_user_id', patientIds);
+        log.sessions = count; }
+
+      // 2. Session entries
+      { const { count } = await supabaseAdmin.from('session_entry').delete({ count: 'exact' })
+          .in('target_user_id', patientIds);
+        log.session_entries = count; }
+
+      // 3. Bonos
+      { const { count } = await supabaseAdmin.from('bono').delete({ count: 'exact' })
+          .eq('psychologist_user_id', psychId).in('pacient_user_id', patientIds);
+        log.bonos = count; }
+
+      // 4. Invoices
+      { const { count } = await supabaseAdmin.from('invoices').delete({ count: 'exact' })
+          .eq('psychologist_user_id', psychId).in('patient_user_id', patientIds);
+        log.invoices = count; }
+
+      // 5. Entries
+      { const { count } = await supabaseAdmin.from('entries').delete({ count: 'exact' })
+          .in('target_user_id', patientIds);
+        log.entries = count; }
+
+      // 6. Goals
+      { const { count } = await supabaseAdmin.from('goals').delete({ count: 'exact' })
+          .in('patient_user_id', patientIds);
+        log.goals = count; }
+
+      // 7. Settings
+      { const { count } = await supabaseAdmin.from('settings').delete({ count: 'exact' })
+          .in('user_id', patientIds);
+        log.settings = count; }
+
+      // 8. Invitations
+      { const { count } = await supabaseAdmin.from('invitations').delete({ count: 'exact' })
+          .in('patient_user_id', patientIds);
+        log.invitations = count; }
+    }
+
+    // 9. Care relationships of this psychologist (except protected user)
+    {
+      let q = supabaseAdmin.from('care_relationships').delete({ count: 'exact' })
+        .eq('psychologist_user_id', psychId);
+      if (protectedId) q = q.neq('patient_user_id', protectedId);
+      const { count } = await q;
+      log.care_relationships = count;
+    }
+
+    // 10. Delete patient users that no longer have any care_relationship
+    if (patientIds.length > 0) {
+      const { data: stillLinked } = await supabaseAdmin
+        .from('care_relationships')
+        .select('patient_user_id')
+        .in('patient_user_id', patientIds);
+      const stillLinkedIds = new Set((stillLinked || []).map(r => r.patient_user_id));
+      const toDeleteIds = patientIds.filter(id => !stillLinkedIds.has(id));
+      if (toDeleteIds.length > 0) {
+        const { count } = await supabaseAdmin.from('users').delete({ count: 'exact' })
+          .in('id', toDeleteIds);
+        log.users = count;
+      }
+    }
+
+    auditLog('PURGE_PSYCHOLOGIST_DATA', { psychId, psychEmail: requesterEmail, patientCount: patientIds.length, log });
+    console.log('[purge-psychologist-data] ✅ Purge completado:', log);
+    return res.json({ success: true, log });
+
+  } catch (err) {
+    console.error('[purge-psychologist-data] Error:', err);
     return res.status(500).json({ error: err?.message || 'Error interno' });
   }
 });
@@ -10759,7 +11063,8 @@ app.get('/api/sessions', authenticateRequest, async (req, res) => {
               enriched.patientPhone = resolvedPhone;
             }
             if (enriched.status !== 'available') {
-              enriched.patientName = enriched.patientName === 'Disponible' || !enriched.patientName ? patient.name : enriched.patientName;
+              // Siempre usar el nombre actualizado del gebruiker, no el snapshot guardado en la sesión
+              enriched.patientName = patient.name || enriched.patientName;
             }
             enriched.patientEmail = patient.email;
           }

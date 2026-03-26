@@ -1143,7 +1143,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                     {psychPanelView === 'billing' && <BillingPanel psychologistId={currentUser.id} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} />}
                     {psychPanelView === 'centros' && <CentrosPanel ref={centrosPanelRef} psychologistId={currentUser.id} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} />}
                     {psychPanelView === 'profile' && <PsychologistProfilePanel userId={currentUser.id} userEmail={currentUser.email} />}
-                    {psychPanelView === 'schedule' && <PsychologistSchedule psychologistId={currentUser.id} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} />}
+                    {psychPanelView === 'schedule' && <PsychologistSchedule psychologistId={currentUser.id} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} onOpenSettings={handleOpenSettings} />}
                     {psychPanelView === 'ai-assistant' && <PsychologistAIChat psychologistId={currentUser.id} psychologistName={currentUser.name} />}
                     {psychPanelView === 'connections' && <ConnectionsPanel currentUser={currentUser} />}
                     {psychPanelView === 'templates' && <TemplatesPanel psychologistId={currentUser.id} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} />}

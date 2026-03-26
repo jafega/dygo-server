@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { User } from '../types';
 import * as AuthService from '../services/authService';
-import { Trash2, RefreshCcw, Shield, Users, Search, AlertTriangle, UserX } from 'lucide-react';
+import { Trash2, RefreshCcw, Shield, Users, Search, AlertTriangle, UserX, ArrowRightLeft } from 'lucide-react';
+import { API_URL } from '../services/config';
+import { apiFetch } from '../services/authService';
 
 // Panel de administración integrado como pestaña
 const SuperAdmin: React.FC = () => {
@@ -10,6 +12,7 @@ const SuperAdmin: React.FC = () => {
   const [query, setQuery] = useState('');
   const [deleteStates, setDeleteStates] = useState<Record<string, { status: 'idle'|'pending'|'success'|'error'; msg?: string }>>({});
   const [confirmingUser, setConfirmingUser] = useState<User | null>(null);
+  const [migrateStatus, setMigrateStatus] = useState<{ running: boolean; result?: string }>({ running: false });
 
   useEffect(() => {
     loadUsers();
@@ -51,6 +54,22 @@ const SuperAdmin: React.FC = () => {
       setConfirmingUser(null);
     } catch (err: any) {
       setDeleteStates(prev => ({ ...prev, [u.id]: { status: 'error', msg: err?.message || 'Error eliminando' } }));
+    }
+  };
+
+  const handleMigrateNames = async () => {
+    if (!window.confirm('Esto migrará nombre y apellido para todos los usuarios que solo tienen nombre completo. ¿Continuar?')) return;
+    setMigrateStatus({ running: true });
+    try {
+      const res = await apiFetch(`${API_URL}/admin/migrate-names`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        setMigrateStatus({ running: false, result: `✅ ${data.updated} actualizados, ${data.skipped} omitidos${data.errors?.length ? `, ${data.errors.length} errores` : ''}` });
+      } else {
+        setMigrateStatus({ running: false, result: `❌ Error: ${data.error}` });
+      }
+    } catch (err: any) {
+      setMigrateStatus({ running: false, result: `❌ ${err?.message || 'Error desconocido'}` });
     }
   };
 
@@ -115,7 +134,19 @@ const SuperAdmin: React.FC = () => {
             <RefreshCcw size={16} className={loading ? 'animate-spin' : ''} />
             <span className="hidden sm:inline">Refrescar</span>
           </button>
+          <button
+            className="px-5 py-3 bg-amber-600 text-white rounded-xl flex items-center gap-2 shadow-sm hover:bg-amber-700 transition-colors whitespace-nowrap disabled:opacity-50"
+            onClick={handleMigrateNames}
+            disabled={migrateStatus.running}
+            title="Migra nombre/apellido para todos los usuarios que solo tienen nombre completo"
+          >
+            <ArrowRightLeft size={16} className={migrateStatus.running ? 'animate-spin' : ''} />
+            <span className="hidden sm:inline">{migrateStatus.running ? 'Migrando...' : 'Migrar nombres'}</span>
+          </button>
         </div>
+        {migrateStatus.result && (
+          <p className="mt-2 text-sm text-slate-600">{migrateStatus.result}</p>
+        )}
       </div>
 
       {/* Lista de usuarios */}
