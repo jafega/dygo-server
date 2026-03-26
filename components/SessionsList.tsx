@@ -58,6 +58,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [editedSession, setEditedSession] = useState<Session | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSendingReminderEmail, setIsSendingReminderEmail] = useState(false);
   const [allPsychologistTags, setAllPsychologistTags] = useState<string[]>([]);
   const [sessionDetailsModalOpen, setSessionDetailsModalOpen] = useState(false);
   const [selectedSessionForDetails, setSelectedSessionForDetails] = useState<Session | null>(null);
@@ -1577,31 +1578,6 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                 </label>
               </div>
 
-              {/* Reminder toggle */}
-              <div>
-                <label className={`flex items-center gap-3 px-4 py-3 border rounded-lg transition-colors ${
-                  editedSession.patientEmail
-                    ? 'bg-blue-50 border-blue-200 cursor-pointer hover:bg-blue-100'
-                    : 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed'
-                }`}>
-                  <input
-                    type="checkbox"
-                    checked={editedSession.patientEmail ? ((editedSession as any).reminder_enabled ?? false) : false}
-                    onChange={(e) => handleFieldChange('reminder_enabled' as any, e.target.checked)}
-                    disabled={!editedSession.patientEmail}
-                    className="w-5 h-5 rounded border-blue-300 text-blue-600 focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed"
-                  />
-                  <div>
-                    <div className={`font-semibold ${editedSession.patientEmail ? 'text-blue-700' : 'text-slate-500'}`}>Recordatorio por email</div>
-                    <div className={`text-xs ${editedSession.patientEmail ? 'text-blue-600' : 'text-slate-400'}`}>
-                      {editedSession.patientEmail
-                        ? 'Enviar email al paciente 24h y 1h antes de la sesión'
-                        : 'El paciente no tiene email registrado'}
-                    </div>
-                  </div>
-                </label>
-              </div>
-
               {/* Payment Method */}
               {editedSession.paid && (
                 <div>
@@ -1716,6 +1692,70 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                   )}
                 </div>
               )}
+
+              {/* Comunicar */}
+              {(() => {
+                const rawEmail = (editedSession.patientEmail || '').trim();
+                const hasRealEmail = rawEmail.length > 0 && !rawEmail.includes('@noemail.dygo.local');
+                const reminderDisabledReason = !hasRealEmail
+                  ? (rawEmail.length > 0 ? 'El paciente no tiene un email real registrado' : 'El paciente no tiene email registrado')
+                  : null;
+                return (
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 mb-2">Comunicar</label>
+                    <div className="mb-3">
+                      <button
+                        onClick={async () => {
+                          if (!hasRealEmail || isSendingReminderEmail) return;
+                          setIsSendingReminderEmail(true);
+                          try {
+                            const res = await apiFetch(`${API_URL}/sessions/${editedSession.id}/send-reminder`, { method: 'POST' });
+                            if (res.ok) {
+                              alert(`Recordatorio enviado a ${rawEmail}`);
+                            } else {
+                              const err = await res.json().catch(() => ({}));
+                              alert(`Error al enviar: ${err.error || res.statusText}`);
+                            }
+                          } catch {
+                            alert('No se pudo enviar el email. Comprueba la conexión.');
+                          } finally {
+                            setIsSendingReminderEmail(false);
+                          }
+                        }}
+                        disabled={!hasRealEmail || isSendingReminderEmail}
+                        title={hasRealEmail ? `Enviar recordatorio a ${rawEmail}` : (rawEmail.length > 0 ? 'El paciente no tiene un email real' : 'El paciente no tiene email registrado')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-xl border transition-colors text-sm font-medium ${
+                          hasRealEmail && !isSendingReminderEmail
+                            ? 'bg-blue-500 border-blue-500 text-white hover:bg-blue-600 cursor-pointer'
+                            : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
+                        }`}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+                        {isSendingReminderEmail ? 'Enviando…' : 'Enviar recordatorio'}
+                      </button>
+                    </div>
+                    <label className={`flex items-center gap-3 px-4 py-3 border rounded-lg transition-colors ${
+                      hasRealEmail
+                        ? 'bg-blue-50 border-blue-200 cursor-pointer hover:bg-blue-100'
+                        : 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed'
+                    }`}>
+                      <input
+                        type="checkbox"
+                        checked={hasRealEmail ? ((editedSession as any).reminder_enabled ?? false) : false}
+                        onChange={(e) => handleFieldChange('reminder_enabled' as any, e.target.checked)}
+                        disabled={!hasRealEmail}
+                        className="w-5 h-5 rounded border-blue-300 text-blue-600 focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed"
+                      />
+                      <div>
+                        <div className={`font-semibold text-sm ${hasRealEmail ? 'text-blue-700' : 'text-slate-500'}`}>Recordatorio automático por email</div>
+                        <div className={`text-xs ${hasRealEmail ? 'text-blue-600' : 'text-slate-400'}`}>
+                          {reminderDisabledReason ?? 'Enviar email 24h y 1h antes de la sesión'}
+                        </div>
+                      </div>
+                    </label>
+                  </div>
+                );
+              })()}
 
               {/* Notes */}
               <div>

@@ -65,6 +65,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [editedSession, setEditedSession] = useState<Session | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSendingReminderEmail, setIsSendingReminderEmail] = useState(false);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const isCreatingSessionRef = useRef(false); // ref-based guard: updated synchronously, not subject to React batching
   const [isLoading, setIsLoading] = useState(false);
@@ -2864,31 +2865,6 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                 </label>
               </div>
 
-              {/* Reminder toggle */}
-              <div>
-                <label className={`flex items-center gap-3 px-4 py-3 border rounded-lg transition-colors ${
-                  editedSession.patientEmail
-                    ? 'bg-blue-50 border-blue-200 cursor-pointer hover:bg-blue-100'
-                    : 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed'
-                }`}>
-                  <input
-                    type="checkbox"
-                    checked={editedSession.patientEmail ? (editedSession.reminder_enabled ?? false) : false}
-                    onChange={(e) => handleFieldChange('reminder_enabled', e.target.checked)}
-                    disabled={!editedSession.patientEmail}
-                    className="w-5 h-5 rounded border-blue-300 text-blue-600 focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed"
-                  />
-                  <div>
-                    <div className={`font-semibold ${editedSession.patientEmail ? 'text-blue-700' : 'text-slate-500'}`}>Recordatorio por email</div>
-                    <div className={`text-xs ${editedSession.patientEmail ? 'text-blue-600' : 'text-slate-400'}`}>
-                      {editedSession.patientEmail
-                        ? 'Enviar email al paciente 24h y 1h antes de la sesión'
-                        : 'El paciente no tiene email registrado'}
-                    </div>
-                  </div>
-                </label>
-              </div>
-
               {/* Payment Method */}
               {editedSession.paid && (
                 <div>
@@ -3191,12 +3167,14 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                     const whatsappMessage = `¡Hola ${patientName}! 😊 Te escribo para recordarte nuestra sesión del ${sessionDate} a las ${editedSession.startTime}h. ¡Hasta pronto!`;
                     const whatsappUrl = `https://wa.me/${phone.replace(/^\+/, '')}?text=${encodeURIComponent(whatsappMessage)}`;
 
-                    const emailSubject = encodeURIComponent(`Recordatorio de tu sesión el ${sessionDate}`);
-                    const emailBody = encodeURIComponent(`Hola ${patientName},\n\nTe escribo para recordarte nuestra sesión del ${sessionDate} a las ${editedSession.startTime}h.\n\n¡Hasta pronto!`);
-                    const mailtoUrl = `mailto:${email}?subject=${emailSubject}&body=${emailBody}`;
+                    const hasRealEmail = hasEmail && !email.includes('@noemail.dygo.local');
+                    const reminderDisabledReason = !hasRealEmail
+                      ? (hasEmail ? 'El paciente no tiene un email real registrado' : 'El paciente no tiene email registrado')
+                      : null;
 
                     return (
                       <>
+                        <div className="flex items-center gap-3">
                         {/* WhatsApp */}
                         <button
                           onClick={() => hasPhone && window.open(whatsappUrl, '_blank')}
@@ -3215,18 +3193,58 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                         </button>
                         {/* Email */}
                         <button
-                          onClick={() => hasEmail && window.open(mailtoUrl, '_self')}
-                          disabled={!hasEmail}
-                          title={hasEmail ? `Enviar email a ${email}` : 'El paciente no tiene email registrado'}
+                          onClick={async () => {
+                            if (!hasRealEmail || isSendingReminderEmail) return;
+                            setIsSendingReminderEmail(true);
+                            try {
+                              const res = await apiFetch(`${API_URL}/sessions/${editedSession!.id}/send-reminder`, {
+                                method: 'POST'
+                              });
+                              if (res.ok) {
+                                alert(`Recordatorio enviado a ${email}`);
+                              } else {
+                                const err = await res.json().catch(() => ({}));
+                                alert(`Error al enviar: ${err.error || res.statusText}`);
+                              }
+                            } catch {
+                              alert('No se pudo enviar el email. Comprueba la conexión.');
+                            } finally {
+                              setIsSendingReminderEmail(false);
+                            }
+                          }}
+                          disabled={!hasRealEmail || isSendingReminderEmail}
+                          title={hasRealEmail ? `Enviar recordatorio a ${email}` : (hasEmail ? 'El paciente no tiene un email real' : 'El paciente no tiene email registrado')}
                           className={`flex items-center gap-2 px-4 py-2 rounded-xl border transition-colors text-sm font-medium ${
-                            hasEmail
+                            hasRealEmail && !isSendingReminderEmail
                               ? 'bg-blue-500 border-blue-500 text-white hover:bg-blue-600 cursor-pointer'
                               : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
                           }`}
                         >
                           <Mail size={16} />
-                          Email
+                          {isSendingReminderEmail ? 'Enviando…' : 'Email'}
                         </button>
+                        </div>
+
+                        {/* Reminder toggle */}
+                        <label className={`mt-3 flex items-center gap-3 px-4 py-3 border rounded-lg transition-colors ${
+                          hasRealEmail
+                            ? 'bg-blue-50 border-blue-200 cursor-pointer hover:bg-blue-100'
+                            : 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed'
+                        }`}>
+                          <input
+                            type="checkbox"
+                            checked={hasRealEmail ? (editedSession.reminder_enabled ?? false) : false}
+                            onChange={(e) => handleFieldChange('reminder_enabled', e.target.checked)}
+                            disabled={!hasRealEmail}
+                            className="w-5 h-5 rounded border-blue-300 text-blue-600 focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed"
+                          />
+                          <div>
+                            <div className={`font-semibold text-sm ${hasRealEmail ? 'text-blue-700' : 'text-slate-500'}`}>Recordatorio automático por email</div>
+                            <div className={`text-xs ${hasRealEmail ? 'text-blue-600' : 'text-slate-400'}`}>
+                              {reminderDisabledReason ?? 'Enviar email 24h y 1h antes de la sesión'}
+                            </div>
+                          </div>
+                        </label>
                       </>
                     );
                   })()}
@@ -3667,21 +3685,22 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                 {/* Reminder toggle for new session */}
                 {(() => {
                   const selectedPatient = patients.find(p => p.id === newSession.patientId);
-                  const hasEmail = !!selectedPatient?.email;
+                  const email = (selectedPatient?.email || '').trim();
+                  const hasRealEmail = email.length > 0 && !email.includes('@noemail.dygo.local');
                   return (
                     <div className="flex items-center col-span-2">
-                      <label className={`flex items-center gap-2 touch-manipulation ${hasEmail ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
+                      <label className={`flex items-center gap-2 touch-manipulation ${hasRealEmail ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
                         <input
                           type="checkbox"
-                          checked={hasEmail ? (newSession.reminder_enabled ?? false) : false}
+                          checked={hasRealEmail ? (newSession.reminder_enabled ?? false) : false}
                           onChange={(e) => setNewSession({ ...newSession, reminder_enabled: e.target.checked })}
-                          disabled={!hasEmail}
+                          disabled={!hasRealEmail}
                           className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed"
                         />
                         <span className="text-xs sm:text-sm font-medium text-slate-700">
-                          {hasEmail
+                          {hasRealEmail
                             ? 'Enviar recordatorio por email al paciente'
-                            : 'Recordatorio no disponible (paciente sin email)'}
+                            : (email.length > 0 ? 'Recordatorio no disponible (email no válido)' : 'Recordatorio no disponible (paciente sin email)')}
                         </span>
                       </label>
                     </div>

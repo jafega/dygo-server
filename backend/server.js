@@ -11510,6 +11510,200 @@ app.post('/api/sessions/:sessionId/generate-meet', authenticateRequest, async (r
   }
 });
 
+// Manual reminder email — triggered by psychologist from session edit modal
+app.post('/api/sessions/:sessionId/send-reminder', authenticateRequest, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const psychologistUserId = req.authenticatedUserId;
+    if (!psychologistUserId) return res.status(401).json({ error: 'No autenticado' });
+
+    if (!process.env.RESEND_API_KEY) {
+      return res.status(503).json({ error: 'Servicio de email no configurado (RESEND_API_KEY)' });
+    }
+
+    // Fetch session — try Supabase first for fresh data, fall back to in-memory cache
+    let session = null;
+    if (supabaseAdmin) {
+      const { data } = await supabaseAdmin
+        .from('sessions')
+        .select('id, data, starts_on, patient_user_id, psychologist_user_id, status')
+        .eq('id', sessionId)
+        .single();
+      session = data;
+    } else {
+      const db = getDb();
+      session = (db.sessions || []).find(s => s.id === sessionId);
+    }
+
+    if (!session) return res.status(404).json({ error: 'Sesión no encontrada' });
+    if (String(session.psychologist_user_id) !== String(psychologistUserId)) {
+      return res.status(403).json({ error: 'Sin permiso para esta sesión' });
+    }
+
+    // Get patient email
+    let patient = null;
+    if (supabaseAdmin) {
+      const { data } = await supabaseAdmin
+        .from('users')
+        .select('user_email, data')
+        .eq('id', session.patient_user_id)
+        .single();
+      patient = data;
+    } else {
+      const db = getDb();
+      patient = (db.users || []).find(u => u.id === session.patient_user_id);
+    }
+
+    const patientEmail = patient?.user_email || patient?.email;
+    if (!patientEmail || patientEmail.includes('@noemail.dygo.local')) {
+      return res.status(400).json({ error: 'El paciente no tiene un email válido' });
+    }
+
+    // Get psychologist profile
+    let psychProfile = null;
+    if (supabaseAdmin) {
+      const { data } = await supabaseAdmin
+        .from('psychologist_profiles')
+        .select('data')
+        .eq('id', psychologistUserId)
+        .single();
+      psychProfile = data;
+    } else {
+      const db = getDb();
+      psychProfile = (db.psychologist_profiles || []).find(p => p.id === psychologistUserId);
+    }
+
+    const psychName  = psychProfile?.data?.name  || null;
+    const psychEmail = psychProfile?.data?.email || null;
+    const psychPhone = psychProfile?.data?.phone || null;
+
+    const tz = session.data?.schedule_timezone || 'Europe/Madrid';
+    const sessionDateStr = new Date(session.starts_on).toLocaleDateString('es-ES', {
+      weekday: 'long', day: 'numeric', month: 'long', timeZone: tz
+    });
+    const sessionTimeStr = new Date(session.starts_on).toLocaleTimeString('es-ES', {
+      hour: '2-digit', minute: '2-digit', timeZone: tz
+    });
+
+    const patientFirstName =
+      patient?.data?.firstName ||
+      patient?.data?.name?.split?.(' ')?.[0] ||
+      '';
+
+    const html = buildManualReminderEmailHtml({
+      patientFirstName,
+      sessionDateStr,
+      sessionTimeStr,
+      meetLink: session.data?.meetLink || null,
+      sessionType: session.data?.type || null,
+      psychName,
+      psychEmail,
+      psychPhone
+    });
+
+    const emailPayload = {
+      from: 'mainds <no-reply@mainds.app>',
+      to: [patientEmail],
+      ...(psychEmail ? { cc: [psychEmail], reply_to: psychEmail } : {}),
+      subject: `Recordatorio de sesión — ${sessionDateStr} a las ${sessionTimeStr}`,
+      html
+    };
+
+    const resendRes = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(emailPayload)
+    });
+
+    if (!resendRes.ok) {
+      const errBody = await resendRes.json().catch(() => ({}));
+      console.error('[send-reminder] Resend error:', errBody);
+      return res.status(502).json({ error: 'Error al enviar el email', details: errBody?.message || '' });
+    }
+
+    console.log(`[send-reminder] ✉️  Manual reminder sent to ${patientEmail} for session ${sessionId}`);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('❌ [send-reminder] Error:', err?.message);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+function buildManualReminderEmailHtml({ patientFirstName, sessionDateStr, sessionTimeStr, meetLink, sessionType, psychName, psychEmail, psychPhone }) {
+  const greeting = patientFirstName ? `Hola <strong>${patientFirstName}</strong>,` : 'Hola,';
+  const isOnline = sessionType === 'online';
+
+  const meetLinkBlock = isOnline && meetLink
+    ? `<div style="text-align:center;margin-bottom:24px">
+        <a href="${meetLink}"
+           style="display:inline-block;padding:14px 32px;background:#10b981;color:white;text-decoration:none;border-radius:8px;font-weight:700;font-size:16px">
+          🎥 Unirse a la videollamada
+        </a>
+        <div style="margin-top:10px;font-size:11px;color:#94a3b8;word-break:break-all">${meetLink}</div>
+      </div>`
+    : '';
+
+  const bodyText = isOnline
+    ? 'Tu psicólogo/a te ha enviado este recordatorio para la sesión online. Prepara un espacio tranquilo y comprueba tu conexión con antelación.'
+    : 'Tu psicólogo/a te ha enviado este recordatorio. Si necesitas cancelar o cambiar la cita, contacta con antelación.';
+
+  const psychBlock = (psychName || psychEmail || psychPhone)
+    ? `<div style="margin-top:28px;padding:16px 20px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px">
+        <div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px">Tu psicólogo/a</div>
+        ${psychName  ? `<div style="font-size:14px;font-weight:600;color:#1e293b;margin-bottom:4px">${psychName}</div>` : ''}
+        ${psychEmail ? `<div style="font-size:13px;color:#475569;margin-bottom:2px">✉️ <a href="mailto:${psychEmail}" style="color:#667eea;text-decoration:none">${psychEmail}</a></div>` : ''}
+        ${psychPhone ? `<div style="font-size:13px;color:#475569">📞 ${psychPhone}</div>` : ''}
+      </div>`
+    : '';
+
+  return `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:Arial,sans-serif;color:#333">
+  <div style="max-width:600px;margin:32px auto;padding:0 16px">
+    <div style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;padding:32px 24px;text-align:center;border-radius:12px 12px 0 0">
+      <div style="font-size:32px;margin-bottom:8px">⏰</div>
+      <h1 style="margin:0;font-size:22px;font-weight:700">Recordatorio de sesión</h1>
+    </div>
+    <div style="background:#ffffff;padding:32px 24px;border-radius:0 0 12px 12px;box-shadow:0 4px 16px rgba(0,0,0,0.06)">
+      <p style="margin:0 0 16px">${greeting}</p>
+      <p style="margin:0 0 24px">Te recordamos que tienes una sesión programada.</p>
+
+      <div style="background:#f8f7ff;border:1px solid #e0ddf7;border-radius:10px;padding:20px;text-align:center;margin-bottom:24px">
+        <div style="font-size:17px;font-weight:600;color:#4a5568;text-transform:capitalize">${sessionDateStr}</div>
+        <div style="font-size:28px;font-weight:700;color:#667eea;margin-top:6px">${sessionTimeStr}</div>
+        ${isOnline ? '<div style="margin-top:8px;font-size:13px;color:#6366f1;font-weight:500">📹 Sesión online</div>' : ''}
+      </div>
+
+      <p style="margin:0 0 24px;color:#555">${bodyText}</p>
+
+      ${meetLinkBlock}
+
+      <div style="text-align:center">
+        <a href="${process.env.FRONTEND_URL || 'https://mi.mainds.app'}"
+           style="display:inline-block;padding:12px 32px;background:#667eea;color:white;text-decoration:none;border-radius:8px;font-weight:600;font-size:15px">
+          Ir a mainds
+        </a>
+      </div>
+
+      ${psychBlock}
+
+      <p style="margin-top:24px;font-size:12px;color:#94a3b8;text-align:center;border-top:1px solid #f1f5f9;padding-top:16px">
+        Este recordatorio fue enviado por tu psicólogo/a a través de mainds.<br>
+        Si tienes dudas, puedes responder directamente a este email.
+      </p>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
 app.post('/api/sessions/availability', authenticateRequest, async (req, res) => {
   try {
     const { slots, psychologistId } = req.body;

@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { Resend } from 'resend';
+import twilio from 'twilio';
 
 export const config = {
   api: { bodyParser: true }
@@ -26,6 +27,12 @@ export default async function handler(req, res) {
     process.env.SUPABASE_URL,
     process.env.SUPABASE_SERVICE_ROLE_KEY
   );
+
+  // Twilio WhatsApp (optional — only active when env vars are present)
+  const twilioClient = (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN)
+    ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
+    : null;
+  const twilioFrom = process.env.TWILIO_WHATSAPP_FROM || 'whatsapp:+14155238886';
 
   const now = new Date();
   // Query sessions starting in the next ~25 hours (covers both 1h and 24h windows)
@@ -83,6 +90,8 @@ export default async function handler(req, res) {
     const profile = await getProfile(session.psychologist_user_id);
     if (!profile?.data?.email_reminders_enabled) continue;
 
+    const whatsappEnabled = !!profile?.data?.whatsapp_reminders_enabled;
+
     const psychName  = profile?.data?.name  || null;
     const psychEmail = profile?.data?.email || null;
     const psychPhone = profile?.data?.phone || null;
@@ -95,7 +104,8 @@ export default async function handler(req, res) {
       .single();
 
     const patientEmail = patient?.user_email;
-    if (!patientEmail) continue;
+    const patientPhone  = patient?.data?.phone || null;
+    if (!patientEmail || patientEmail.includes('@noemail.dygo.local')) continue;
 
     const tz = session.data?.schedule_timezone || 'Europe/Madrid';
     const sessionDateStr = new Date(session.starts_on).toLocaleDateString('es-ES', {
@@ -130,6 +140,38 @@ export default async function handler(req, res) {
           psychPhone
         })
       });
+
+      // WhatsApp via Twilio (fire-and-forget alongside email)
+      const waSentKey = is1hWindow ? 'reminder_1h_whatsapp_sent_at' : 'reminder_24h_whatsapp_sent_at';
+      if (twilioClient && whatsappEnabled && patientPhone && !session.data?.[waSentKey]) {
+        try {
+          const toNumber = patientPhone.startsWith('+')
+            ? `whatsapp:${patientPhone}`
+            : `whatsapp:+${patientPhone.replace(/[^0-9]/g, '')}`;
+          const waBody = buildWhatsAppMessage({
+            patientFirstName,
+            sessionDateStr,
+            sessionTimeStr,
+            label,
+            is1hWindow,
+            meetLink: session.data?.meetLink || null,
+            sessionType: session.data?.type || null,
+            psychName
+          });
+          await twilioClient.messages.create({
+            from: twilioFrom,
+            to: toNumber,
+            body: waBody
+          });
+          console.log(`[send-reminders] 💬 WhatsApp ${is1hWindow ? '1h' : '24h'} reminder sent to ${toNumber} for session ${session.id}`);
+          // Persist whatsapp sent flag (merged into the email update below)
+          session.data = { ...session.data, [waSentKey]: new Date().toISOString() };
+        } catch (waErr) {
+          // Non-fatal: log and continue so email still counts
+          console.error(`[send-reminders] WhatsApp failed for session ${session.id}:`, waErr.message);
+          errors.push({ sessionId: session.id, channel: 'whatsapp', error: waErr.message });
+        }
+      }
 
       // Mark as sent to prevent duplicates on next cron run
       const sentKey = is1hWindow ? 'reminder_1h_sent_at' : 'reminder_24h_sent_at';
@@ -219,4 +261,25 @@ function buildReminderEmail({ patientFirstName, sessionDateStr, sessionTimeStr, 
   </div>
 </body>
 </html>`;
+}
+
+function buildWhatsAppMessage({ patientFirstName, sessionDateStr, sessionTimeStr, label, is1hWindow, meetLink, sessionType, psychName }) {
+  const name = patientFirstName ? `${patientFirstName}` : '';
+  const greeting = name ? `Hola ${name} 👋` : 'Hola 👋';
+  const isOnline = sessionType === 'online';
+
+  let body = `${greeting}\n\nTe recordamos que tienes una sesión con ${psychName || 'tu psicólogo/a'} *${label}*:\n\n📅 ${sessionDateStr}\n🕐 ${sessionTimeStr}`;
+
+  if (isOnline && meetLink) {
+    body += `\n\n🎥 Enlace para conectarte:\n${meetLink}`;
+  } else if (isOnline) {
+    body += '\n\n📹 Es una sesión online. Prepara tu dispositivo y conexión con antelación.';
+  }
+
+  if (!is1hWindow) {
+    body += '\n\nSi necesitas cancelar o cambiar la cita, contacta con tu psicólogo/a con antelación.';
+  }
+
+  body += '\n\n_Este mensaje fue enviado automáticamente por mainds._';
+  return body;
 }
