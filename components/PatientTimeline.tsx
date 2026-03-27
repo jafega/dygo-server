@@ -83,7 +83,11 @@ const PatientTimeline: React.FC<PatientTimelineProps> = ({ patientId, psychologi
   const loadEntries = async () => {
     setIsLoading(true);
     try {
-      const response = await apiFetch(`${API_URL}/entries?userId=${patientId}`);
+      // viewerId is required so the auth check passes (psychologist !== patient)
+      // and so the backend applies the correct per-relationship entry filter
+      const params = new URLSearchParams({ userId: patientId });
+      if (psychologistId) params.set('viewerId', psychologistId);
+      const response = await apiFetch(`${API_URL}/entries?${params.toString()}`);
       if (response.ok) {
         const data = await response.json();
         // Filtrar solo voiceSession, internal_note y feedback

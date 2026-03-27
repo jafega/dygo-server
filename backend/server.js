@@ -13,7 +13,6 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { google } from 'googleapis';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
-import twilio from 'twilio';
 
 // bcrypt: prefer native, fall back to pure-JS bcryptjs in serverless
 let bcrypt;
@@ -2519,17 +2518,9 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
     // Hash password with bcrypt (LOPD/GDPR Art. 32)
     const hashedPassword = await hashPassword(password);
 
-    // Split name into firstName/lastName so both fields are always populated
-    const sanitizedName = sanitizeString(name);
-    const nameSpaceIdx = sanitizedName.indexOf(' ');
-    const derivedFirstName = nameSpaceIdx !== -1 ? sanitizedName.substring(0, nameSpaceIdx).trim() : sanitizedName;
-    const derivedLastName  = nameSpaceIdx !== -1 ? sanitizedName.substring(nameSpaceIdx + 1).trim() : '';
-
     const newUser = {
       id: crypto.randomUUID(),
-      name: sanitizedName,
-      firstName: derivedFirstName,
-      lastName: derivedLastName,
+      name: sanitizeString(name),
       email: normalizedEmail,
       user_email: normalizedEmail,
       password: hashedPassword,
@@ -3734,45 +3725,6 @@ const handleAdminMigrateToPostgres = async (req, res) => {
 
 app.post('/api/admin/migrate-to-postgres', authenticateRequest, handleAdminMigrateToPostgres);
 app.post('/api/admin-migrate-to-postgres', authenticateRequest, handleAdminMigrateToPostgres);
-
-// --- Migración automática: rellenar firstName/lastName vacíos desde name ---
-async function autoMigrateMissingNames() {
-  let updated = 0;
-  if (supabaseAdmin) {
-    const { data: allUsers, error } = await supabaseAdmin
-      .from('users')
-      .select('id, data');
-    if (error) throw new Error(`Error leyendo usuarios: ${error.message}`);
-    for (const row of allUsers || []) {
-      const d = row.data || {};
-      if ((d.firstName && d.firstName.trim()) || !(d.name || '').trim()) continue;
-      const fullName = (d.name || '').trim();
-      const spaceIdx = fullName.indexOf(' ');
-      const firstName = spaceIdx !== -1 ? fullName.substring(0, spaceIdx).trim() : fullName;
-      const lastName  = spaceIdx !== -1 ? fullName.substring(spaceIdx + 1).trim() : '';
-      const updatedData = { ...d, firstName, lastName };
-      const { error: updErr } = await supabaseAdmin
-        .from('users')
-        .update({ data: cleanUserDataForStorage(updatedData) })
-        .eq('id', row.id);
-      if (!updErr) updated++;
-    }
-  } else {
-    const db = getDb();
-    let changed = false;
-    for (const user of db.users || []) {
-      if ((user.firstName && user.firstName.trim()) || !(user.name || '').trim()) continue;
-      const fullName = (user.name || '').trim();
-      const spaceIdx = fullName.indexOf(' ');
-      user.firstName = spaceIdx !== -1 ? fullName.substring(0, spaceIdx).trim() : fullName;
-      user.lastName  = spaceIdx !== -1 ? fullName.substring(spaceIdx + 1).trim() : '';
-      updated++;
-      changed = true;
-    }
-    if (changed) await saveDb(db, { awaitPersistence: true });
-  }
-  return { updated };
-}
 
 // --- ADMIN: Limpiar campos duplicados en data JSONB de users ---
 // Función reutilizable para limpiar datos anidados de TODAS las tablas con patrón data JSONB
@@ -5848,9 +5800,12 @@ app.get('/api/entries', authenticateRequest, async (req, res) => {
               // Incluir:
               // 1. Entradas creadas por el psicólogo (viewer)
               if (creatorId === String(viewerId)) return true;
-              // 2. Entradas del paciente que no tienen createdByPsychologistId (son propias del paciente)
+              // 2. Entradas propias del paciente (nuevo formato: creator_user_id = userId del paciente)
+              //    Esto cubre el caso donde el paciente también es psicólogo y tiene creator_user_id definido
+              if (creatorId === String(userId)) return true;
+              // 3. Entradas del paciente (formato antiguo: sin creator_user_id y no marcadas como de psicólogo)
               if (!creatorId && e.createdBy !== 'PSYCHOLOGIST') return true;
-              // 3. Excluir entradas creadas por OTROS psicólogos
+              // 4. Excluir entradas creadas por OTROS psicólogos
               return false;
             });
           }
@@ -5909,9 +5864,19 @@ app.get('/api/entries', authenticateRequest, async (req, res) => {
       if (relationship?.endedAt) {
         console.log('[GET /api/entries] Relación finalizada - filtrando entradas creadas por viewer:', viewerId);
         entries = entries.filter(e => {
-          if (e.createdByPsychologistId) {
-            return e.createdByPsychologistId === String(viewerId);
-          }
+          const creatorId = e.creator_user_id || e.createdByPsychologistId;
+          return creatorId === String(viewerId);
+        });
+      } else {
+        // Relación activa: mostrar entradas creadas por el viewer (psicólogo) + entradas propias del paciente
+        entries = entries.filter(e => {
+          const creatorId = e.creator_user_id || e.createdByPsychologistId;
+          // Entradas del psicólogo
+          if (creatorId === String(viewerId)) return true;
+          // Entradas propias del paciente (nuevo formato)
+          if (creatorId === String(userId)) return true;
+          // Entradas del paciente (formato antiguo: sin creator)
+          if (!creatorId && e.createdBy !== 'PSYCHOLOGIST') return true;
           return false;
         });
       }
@@ -9162,27 +9127,12 @@ app.get('/api/patient/:userId/profile', authenticateRequest, async (req, res) =>
     }
     
     const data = user.data || {};
-    // Auto-compute firstName/lastName from name if either is missing
-    const rawFirstName = user.firstName || data.firstName || '';
-    const rawLastName  = user.lastName  || data.lastName  || '';
-    let computedFirstName = rawFirstName;
-    let computedLastName  = rawLastName;
-    if (!rawFirstName && !rawLastName) {
-      const fullName = (user.name || data.name || '').trim();
-      if (fullName) {
-        const idx = fullName.indexOf(' ');
-        computedFirstName = idx !== -1 ? fullName.substring(0, idx).trim() : fullName;
-        computedLastName  = idx !== -1 ? fullName.substring(idx + 1).trim() : '';
-      }
-    }
     const profile = {
-      firstName: computedFirstName,
-      lastName: computedLastName,
+      firstName: user.firstName || data.firstName || '',
+      lastName: user.lastName || data.lastName || '',
       phone: user.phone || data.phone || '',
       email: user.user_email || user.email || data.email || '',
       address: user.address || data.address || '',
-      portal: user.portal || data.portal || '',
-      piso: user.piso || data.piso || '',
       city: user.city || data.city || '',
       postalCode: user.postalCode || data.postalCode || '',
       country: user.country || data.country || 'España'
@@ -9220,8 +9170,6 @@ app.put('/api/patient/:userId/profile', authenticateRequest, async (req, res) =>
         phone: req.body.phone,
         email: req.body.email,
         address: req.body.address,
-        portal: req.body.portal !== undefined ? req.body.portal : (currentData.portal || ''),
-        piso: req.body.piso !== undefined ? req.body.piso : (currentData.piso || ''),
         city: req.body.city,
         postalCode: req.body.postalCode,
         country: req.body.country
@@ -9266,8 +9214,6 @@ app.put('/api/patient/:userId/profile', authenticateRequest, async (req, res) =>
         lastName: req.body.lastName,
         phone: req.body.phone,
         address: req.body.address,
-        portal: req.body.portal !== undefined ? req.body.portal : (currentData.portal || ''),
-        piso: req.body.piso !== undefined ? req.body.piso : (currentData.piso || ''),
         city: req.body.city,
         postalCode: req.body.postalCode,
         country: req.body.country,
@@ -9278,8 +9224,6 @@ app.put('/api/patient/:userId/profile', authenticateRequest, async (req, res) =>
           lastName: req.body.lastName,
           phone: req.body.phone,
           address: req.body.address,
-          portal: req.body.portal !== undefined ? req.body.portal : (currentData.portal || ''),
-          piso: req.body.piso !== undefined ? req.body.piso : (currentData.piso || ''),
           city: req.body.city,
           postalCode: req.body.postalCode,
           country: req.body.country
@@ -11721,104 +11665,6 @@ app.post('/api/sessions/:sessionId/send-reminder', authenticateRequest, async (r
   }
 });
 
-// Manual WhatsApp via Twilio template — triggered by psychologist from session edit modal
-app.post('/api/sessions/:sessionId/send-whatsapp', authenticateRequest, async (req, res) => {
-  try {
-    const { sessionId } = req.params;
-    const psychologistUserId = req.authenticatedUserId;
-    if (!psychologistUserId) return res.status(401).json({ error: 'No autenticado' });
-
-    if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
-      return res.status(503).json({ error: 'Servicio de WhatsApp no configurado (Twilio)' });
-    }
-
-    // Fetch session
-    let session = null;
-    if (supabaseAdmin) {
-      const { data } = await supabaseAdmin
-        .from('sessions')
-        .select('id, data, starts_on, patient_user_id, psychologist_user_id, status')
-        .eq('id', sessionId)
-        .single();
-      session = data;
-    } else {
-      const db = getDb();
-      session = (db.sessions || []).find(s => s.id === sessionId);
-    }
-
-    if (!session) return res.status(404).json({ error: 'Sesión no encontrada' });
-    if (String(session.psychologist_user_id) !== String(psychologistUserId)) {
-      return res.status(403).json({ error: 'Sin permiso para esta sesión' });
-    }
-
-    // Get patient phone and name
-    let patient = null;
-    if (supabaseAdmin) {
-      const { data } = await supabaseAdmin
-        .from('users')
-        .select('user_email, data')
-        .eq('id', session.patient_user_id)
-        .single();
-      patient = data;
-    } else {
-      const db = getDb();
-      patient = (db.users || []).find(u => u.id === session.patient_user_id);
-    }
-
-    const patientPhone = patient?.data?.phone || null;
-    if (!patientPhone) return res.status(400).json({ error: 'El paciente no tiene teléfono registrado' });
-
-    const patientFirstName = patient?.data?.firstName || patient?.data?.name?.split?.(' ')?.[0] || 'paciente';
-
-    // Get psychologist name
-    let psychProfile = null;
-    if (supabaseAdmin) {
-      const { data } = await supabaseAdmin
-        .from('psychologist_profiles')
-        .select('data')
-        .eq('id', psychologistUserId)
-        .single();
-      psychProfile = data;
-    } else {
-      const db = getDb();
-      psychProfile = (db.psychologist_profiles || []).find(p => p.id === psychologistUserId);
-    }
-    const psychName = psychProfile?.data?.name || 'tu psicólogo/a';
-
-    const tz = session.data?.schedule_timezone || 'Europe/Madrid';
-    const sessionDateStr = new Date(session.starts_on).toLocaleDateString('es-ES', {
-      weekday: 'long', day: 'numeric', month: 'long', timeZone: tz
-    });
-    const sessionTimeStr = new Date(session.starts_on).toLocaleTimeString('es-ES', {
-      hour: '2-digit', minute: '2-digit', timeZone: tz
-    });
-
-    const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-    const twilioFrom = process.env.TWILIO_WHATSAPP_FROM || 'whatsapp:+14155238886';
-    const toNumber = patientPhone.startsWith('+')
-      ? `whatsapp:${patientPhone}`
-      : `whatsapp:+${patientPhone.replace(/[^0-9]/g, '')}`;
-
-    await twilioClient.messages.create({
-      from: twilioFrom,
-      to: toNumber,
-      contentSid: process.env.TWILIO_TEMPLATE_SID || 'HXfbba1476d17be5516c6b0ad80a7fd21b',
-      contentVariables: JSON.stringify({
-        patient_name: patientFirstName,
-        psych_name: psychName,
-        session_date: sessionDateStr,
-        session_time: sessionTimeStr
-      })
-    });
-
-    console.log(`[send-whatsapp] 💬 Manual WhatsApp sent to ${toNumber} for session ${sessionId}`);
-    return res.json({ success: true });
-  } catch (err) {
-    console.error('❌ [send-whatsapp] Error:', err?.message);
-    return res.status(500).json({ error: 'Error interno del servidor', details: err?.message });
-  }
-});
-
 function buildManualReminderEmailHtml({ patientFirstName, sessionDateStr, sessionTimeStr, meetLink, sessionType, psychName, psychEmail, psychPhone }) {
   const greeting = patientFirstName ? `Hola <strong>${patientFirstName}</strong>,` : 'Hola,';
   const isOnline = sessionType === 'online';
@@ -13801,18 +13647,18 @@ app.post('/api/signatures/external', authenticateRequest, async (req, res) => {
     const base64Data = matches[2];
     const buffer = Buffer.from(base64Data, 'base64');
 
-    // Verificar que el bucket 'external-documents' existe, si no crearlo
-    const { data: buckets } = await supabaseAdmin.storage.listBuckets();
-    const extBucketExists = buckets?.some(b => b.name === 'external-documents');
+    // Ensure bucket 'external-documents' exists
+    const { data: bucketList } = await supabaseAdmin.storage.listBuckets();
+    const extBucketExists = bucketList?.some(b => b.name === 'external-documents');
     if (!extBucketExists) {
       console.log('📦 Creando bucket external-documents...');
       const { error: createBucketError } = await supabaseAdmin.storage.createBucket('external-documents', {
-        public: true,
-        fileSizeLimit: 50 * 1024 * 1024 // 50MB
+        public: false,
+        fileSizeLimit: 50 * 1024 * 1024
       });
       if (createBucketError && !createBucketError.message.includes('already exists')) {
         console.error('[POST /api/signatures/external] Error creando bucket:', createBucketError);
-        return res.status(500).json({ error: 'Error creando bucket de almacenamiento: ' + createBucketError.message });
+        return res.status(500).json({ error: 'Error creando bucket: ' + createBucketError.message });
       }
     }
 
@@ -13823,7 +13669,7 @@ app.post('/api/signatures/external', authenticateRequest, async (req, res) => {
       .from('external-documents')
       .upload(safeFileName, buffer, {
         contentType: contentType || fileType,
-        upsert: false
+        upsert: true
       });
 
     if (uploadError) {
@@ -14213,15 +14059,6 @@ if (!process.env.VERCEL && !process.env.VERCEL_ENV) {
         }
       }).catch(err => {
         console.warn('⚠️ Error en limpieza automática:', err.message);
-      });
-
-      // Migración automática de nombres: rellenar firstName/lastName vacíos
-      autoMigrateMissingNames().then(result => {
-        if (result.updated > 0) {
-          console.log(`📛 Migración de nombres al inicio: ${result.updated} usuarios actualizados`);
-        }
-      }).catch(err => {
-        console.warn('⚠️ Error en migración de nombres:', err.message);
       });
     }
   });
