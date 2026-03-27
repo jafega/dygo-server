@@ -1,9 +1,4 @@
 {
-  "build": {
-    "env": {
-      "NODE_VERSION": "22"
-    }
-  },
   "crons": [
     {
       "path": "/api/sessions/send-reminders",
