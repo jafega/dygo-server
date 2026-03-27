@@ -151,6 +151,10 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
   const [invoiceStartNumber, setInvoiceStartNumber] = useState<string>('');
   const [invoiceSeriesInput, setInvoiceSeriesInput] = useState<string>('');
   const [pendingInvoiceData, setPendingInvoiceData] = useState<any>(null);
+  const [showRectSeriesModal, setShowRectSeriesModal] = useState(false);
+  const [rectSeriesInput, setRectSeriesInput] = useState<string>('');
+  const [rectStartNumber, setRectStartNumber] = useState<string>('');
+  const [pendingRectData, setPendingRectData] = useState<{ rectificationType: string; rectificationReason: string } | null>(null);
 
   // Estado para advertencia de fecha retroactiva
   const [showBackdateWarning, setShowBackdateWarning] = useState(false);
@@ -527,6 +531,90 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
     }
   };
 
+  const getRectificativaSeries = async (year: number): Promise<string | null> => {
+    try {
+      const response = await apiFetch(`${API_URL}/psychologist/${psychologistId}/profile`);
+      if (!response.ok) return null;
+      const profile = await response.json();
+      return profile?.rect_series?.[year] || null;
+    } catch (error) {
+      console.error('Error getting rectificativa series:', error);
+      return null;
+    }
+  };
+
+  const saveRectificativaConfig = async (year: number, startNumber: number, series: string): Promise<boolean> => {
+    try {
+      const response = await apiFetch(`${API_URL}/psychologist/${psychologistId}/profile`);
+      if (!response.ok) throw new Error('Failed to fetch profile');
+      const profile = await response.json();
+
+      const rectSeriesMap = profile.rect_series || {};
+      rectSeriesMap[year] = series;
+
+      const rectStartNumbers = profile.rect_start_numbers || {};
+      rectStartNumbers[year] = startNumber;
+
+      const updateResponse = await apiFetch(`${API_URL}/psychologist/${psychologistId}/profile`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...profile, rect_series: rectSeriesMap, rect_start_numbers: rectStartNumbers })
+      });
+      if (!updateResponse.ok) throw new Error('Failed to update profile');
+      return true;
+    } catch (error) {
+      console.error('Error saving rectificativa config:', error);
+      return false;
+    }
+  };
+
+  const generateRectificativaNumber = async (): Promise<string | null> => {
+    try {
+      const response = await apiFetch(`${API_URL}/invoices?psychologist_user_id=${psychologistId}`);
+      if (!response.ok) throw new Error('Failed to fetch invoices for rect numbering');
+      const allInvoices = await response.json();
+      const year = new Date().getFullYear();
+      const yearSuffix = String(year).slice(-2);
+
+      const customSeries = await getRectificativaSeries(year);
+      const prefix = customSeries || `R${yearSuffix}`;
+
+      const rectInvoices = allInvoices.filter((inv: any) =>
+        inv.invoiceNumber && inv.invoiceNumber.startsWith(prefix) && inv.is_rectificativa
+      );
+
+      if (rectInvoices.length === 0) {
+        // Primera rectificativa: ver si hay número inicial configurado
+        if (!customSeries) {
+          // No hay configuración todavía → pedir al usuario
+          return null;
+        }
+        // Hay serie configurada, buscar número inicial
+        try {
+          const profileResp = await apiFetch(`${API_URL}/psychologist/${psychologistId}/profile`);
+          if (profileResp.ok) {
+            const prof = await profileResp.json();
+            const startNum = prof?.rect_start_numbers?.[year];
+            if (startNum != null) return `${prefix}${startNum}`;
+          }
+        } catch {}
+        return `${prefix}1`;
+      }
+
+      const numbers = rectInvoices.map((inv: any) => {
+        const numPart = inv.invoiceNumber.slice(prefix.length);
+        return parseInt(numPart || '0', 10);
+      });
+      const maxNumber = Math.max(...numbers, 0);
+      return `${prefix}${maxNumber + 1}`;
+    } catch (error) {
+      console.error('Error generating rectificativa number:', error);
+      const year = new Date().getFullYear();
+      const yearSuffix = String(year).slice(-2);
+      return `R${yearSuffix}${String(Date.now()).slice(-6)}`;
+    }
+  };
+
   const generateInvoiceNumber = async (): Promise<string | null> => {
     try {
       const response = await apiFetch(`${API_URL}/invoices?psychologist_user_id=${psychologistId}`);
@@ -822,6 +910,37 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
     }
   };
 
+  const handleConfirmRectStart = async () => {
+    const startNum = parseInt(rectStartNumber);
+    if (isNaN(startNum) || startNum < 1) {
+      alert('Por favor ingresa un número válido mayor a 0');
+      return;
+    }
+    const trimmedSeries = rectSeriesInput.trim();
+    if (!trimmedSeries) {
+      alert('Por favor ingresa una serie para las rectificativas (ej: R26)');
+      return;
+    }
+
+    const year = new Date().getFullYear();
+    const success = await saveRectificativaConfig(year, startNum, trimmedSeries);
+    if (!success) {
+      alert('Error al guardar la configuración. Inténtalo de nuevo.');
+      return;
+    }
+
+    setShowRectSeriesModal(false);
+    setRectSeriesInput('');
+    setRectStartNumber('');
+
+    // Continuar con la rectificativa usando el número configurado
+    if (pendingRectData) {
+      const explicit = `${trimmedSeries}${startNum}`;
+      setPendingRectData(null);
+      await handleCancelInvoice(explicit);
+    }
+  };
+
   const handleDeleteInvoice = async (invoiceId: string) => {
     if (!confirm('¿Estás seguro de que deseas eliminar este borrador?')) return;
     
@@ -892,9 +1011,24 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
     }
   };
 
-  const handleCancelInvoice = async () => {
+  const handleCancelInvoice = async (explicitInvoiceNumber?: string) => {
     if (!invoiceToCancel) return;
-    
+
+    // Si no tenemos un número explícito, generarlo (o pedir configuración si es la primera)
+    let rectNumber = explicitInvoiceNumber;
+    if (!rectNumber) {
+      rectNumber = (await generateRectificativaNumber()) ?? undefined;
+      if (!rectNumber) {
+        // Primera rectificativa sin configuración → mostrar modal de serie
+        const yearSuffix = String(new Date().getFullYear()).slice(-2);
+        setRectSeriesInput(`R${yearSuffix}`);
+        setRectStartNumber('1');
+        setPendingRectData({ rectificationType, rectificationReason });
+        setShowRectSeriesModal(true);
+        return;
+      }
+    }
+
     try {
       const response = await apiFetch(`${API_URL}/invoices/${invoiceToCancel.id}/rectify`, {
         method: 'POST',
@@ -904,7 +1038,8 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
         },
         body: JSON.stringify({
           rectification_type: rectificationType,
-          rectification_reason: rectificationReason
+          rectification_reason: rectificationReason,
+          invoiceNumber: rectNumber
         })
       });
       
@@ -2503,6 +2638,91 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
               <button
                 onClick={handleConfirmInvoiceStart}
                 className="px-4 py-2 text-sm bg-indigo-600 text-white hover:bg-indigo-700 rounded-lg transition-colors font-medium"
+              >
+                Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para configurar serie y número inicial de facturas RECTIFICATIVAS */}
+      {showRectSeriesModal && (
+        <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6 border-b border-slate-200">
+              <h3 className="text-xl font-bold text-slate-900">Configura tu serie de rectificativas</h3>
+              <p className="text-sm text-slate-600 mt-2">
+                Es tu primera factura rectificativa de {new Date().getFullYear()}. Define la serie y el número con el que empezar.
+              </p>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Serie <span className="text-slate-400 font-normal">(prefijo)</span>
+                </label>
+                <input
+                  type="text"
+                  value={rectSeriesInput}
+                  onChange={(e) => setRectSeriesInput(e.target.value.toUpperCase())}
+                  placeholder={`Ej: R${String(new Date().getFullYear()).slice(-2)}, RECT, ${new Date().getFullYear()}-R/`}
+                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent font-mono"
+                  autoFocus
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Serie por defecto: <span className="font-mono font-semibold">R{String(new Date().getFullYear()).slice(-2)}</span>
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Número inicial
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  value={rectStartNumber}
+                  onChange={(e) => setRectStartNumber(e.target.value)}
+                  placeholder="Ej: 1, 5, 10..."
+                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleConfirmRectStart(); }}
+                />
+              </div>
+
+              {/* Vista previa */}
+              <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+                <p className="text-xs text-red-500 font-semibold uppercase tracking-wide mb-1">Vista previa</p>
+                <p className="font-mono text-2xl font-bold text-red-800">
+                  {(rectSeriesInput || `R${String(new Date().getFullYear()).slice(-2)}`) + (rectStartNumber || '1')}
+                </p>
+                <p className="text-xs text-red-400 mt-1">
+                  La siguiente sería: <span className="font-mono font-medium">
+                    {(rectSeriesInput || `R${String(new Date().getFullYear()).slice(-2)}`) + (parseInt(rectStartNumber || '1', 10) + 1)}
+                  </span>
+                </p>
+              </div>
+
+              <p className="text-xs text-slate-500">
+                Esta configuración se guardará para {new Date().getFullYear()} y los números se incrementarán automáticamente.
+              </p>
+            </div>
+
+            <div className="p-6 border-t border-slate-200 flex gap-3 justify-end">
+              <button
+                onClick={() => {
+                  setShowRectSeriesModal(false);
+                  setRectSeriesInput('');
+                  setRectStartNumber('');
+                  setPendingRectData(null);
+                }}
+                className="px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 rounded-lg transition-colors font-medium"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleConfirmRectStart}
+                className="px-4 py-2 text-sm bg-red-600 text-white hover:bg-red-700 rounded-lg transition-colors font-medium"
               >
                 Confirmar
               </button>
