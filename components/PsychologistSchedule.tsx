@@ -3161,7 +3161,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
               {/* Comunicar */}
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-2">Comunicar</label>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-col gap-2">
                   {(() => {
                     // Obtener datos siempre frescos desde el array de pacientes cargados
                     const patientRecord = patients.find(p => p.id === (editedSession.patient_user_id || editedSession.patientId));
@@ -3235,7 +3235,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                         </div>
 
                         {/* Reminder toggles */}
-                        <label className={`mt-3 flex items-center gap-3 px-4 py-3 border rounded-lg transition-colors ${
+                        <label className={`flex items-center gap-3 px-4 py-3 border rounded-lg transition-colors ${
                           hasRealEmail
                             ? 'bg-blue-50 border-blue-200 cursor-pointer hover:bg-blue-100'
                             : 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed'
@@ -3259,7 +3259,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                           const rawPhone = (patientRecord?.phone || '').replace(/\s/g, '');
                           const hasPhone = rawPhone.length > 0;
                           return (
-                            <label className={`mt-2 flex items-center gap-3 px-4 py-3 border rounded-lg transition-colors ${
+                            <label className={`flex items-center gap-3 px-4 py-3 border rounded-lg transition-colors ${
                               hasPhone
                                 ? 'bg-green-50 border-green-200 cursor-pointer hover:bg-green-100'
                                 : 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed'
