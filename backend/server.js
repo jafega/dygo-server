@@ -7337,6 +7337,21 @@ app.patch('/api/invoices/:id', authenticateRequest, async (req, res) => {
         }
         saveDb(db);
         
+        // Si se está cambiando el estado a paid/pending, sincronizar el campo paid de las sesiones asociadas
+        if (updates.status === 'paid' || updates.status === 'pending') {
+          const sessionPaid = updates.status === 'paid';
+          const { error: sessionUpdateError } = await supabaseAdmin
+            .from('sessions')
+            .update({ paid: sessionPaid })
+            .eq('invoice_id', id);
+          
+          if (sessionUpdateError) {
+            console.warn('⚠️ [PATCH /api/invoices/:id] Error al actualizar sesiones asociadas:', sessionUpdateError);
+          } else {
+            console.log(`✅ [PATCH /api/invoices/:id] Sesiones asociadas actualizadas con paid: ${sessionPaid}`);
+          }
+        }
+        
         console.log('✅ Factura actualizada correctamente en Supabase y caché local:', id);
         return res.json(updatedInvoice);
         

@@ -1354,6 +1354,18 @@ tr:nth-child(even) td{background:#f8fafc}
     }
   };
 
+  function getDocTitle(content: string): string {
+    const clean = (content || '').replace(/<!-- SIGNATURE_DATA:.*?-->$/s, '').trim();
+    if (/^(<(!DOCTYPE|html|head|body|div|section|article)|<!DOCTYPE)/i.test(clean)) {
+      const h1 = clean.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+      if (h1) return h1[1].replace(/<[^>]+>/g, '').trim();
+      const titleTag = clean.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+      if (titleTag) return titleTag[1].replace(/<[^>]+>/g, '').trim();
+      return 'Documento';
+    }
+    return clean.split('\n')[0].replace(/^#+\s*/, '').trim() || 'Documento';
+  }
+
   function docMarkdownToHtml(md: string): string {
     if (!md) return '';
     const clean = md.replace(/\n\n<!-- SIGNATURE_DATA:.*?-->$/s, '');
@@ -1374,7 +1386,7 @@ tr:nth-child(even) td{background:#f8fafc}
   }
 
   function downloadSignedPdf(sig: any) {
-    const titleRaw = (sig.content || '').replace(/<!-- SIGNATURE_DATA:[\s\S]*?-->$/s, '').split('\n')[0].replace(/^#+\s*/, '').trim() || 'Documento';
+    const titleRaw = getDocTitle(sig.content || '');
     const bodyHtml = docMarkdownToHtml(sig.content || '');
     const sigMatch = (sig.content || '').match(/<!-- SIGNATURE_DATA:(data:[^-]+) -->$/);
     const sigDataUrl = sigMatch ? sigMatch[1] : null;
@@ -2255,8 +2267,7 @@ tr:nth-child(even) td{background:#f8fafc}
                 <div className="space-y-3">
                   {docSignatures.map((sig: any) => {
                     const isExternal = !!sig.external_document_url;
-                    const firstLine = (sig.content || '').replace(/<!-- SIGNATURE_DATA:.*?-->$/s, '').split('\n')[0].replace(/^#+\s*/, '').trim();
-                    const title = firstLine || 'Documento';
+                    const title = getDocTitle(sig.content || '');
                     return (
                       <div key={sig.id} className="bg-white border border-slate-200 rounded-2xl p-4 flex items-center gap-3 shadow-sm">
                         <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${isExternal ? 'bg-teal-100' : sig.signed ? 'bg-green-100' : 'bg-amber-100'}`}>
