@@ -4287,7 +4287,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white" className="w-5 h-5"><path d="M20 2H4a2 2 0 00-2 2v18l4-4h14a2 2 0 002-2V4a2 2 0 00-2-2z"/></svg>
                 </div>
                 <div>
-                  <div className="font-semibold text-slate-800">{isSendingWhatsApp ? 'Enviando…' : 'Plantilla oficial'}</div>
+                  <div className="font-semibold text-slate-800">{isSendingWhatsApp ? 'Enviando…' : 'Enviar Recordatorio'}</div>
                   <div className="text-xs text-slate-500">Envía la plantilla aprobada a través de mainds</div>
                 </div>
               </button>
