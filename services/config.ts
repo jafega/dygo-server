@@ -49,7 +49,12 @@ let supabaseClient: any = null;
 
 export const getSupabaseClient = () => {
   if (!supabaseClient && SUPABASE_URL && SUPABASE_ANON_KEY) {
-    supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        // Tolerate up to 2h of clock skew (handles DST offset on local dev)
+        clockSkewInSeconds: 7200,
+      },
+    });
   }
   return supabaseClient;
 };

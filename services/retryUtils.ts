@@ -32,7 +32,12 @@ export async function retryWithBackoff<T>(
       return await fn();
     } catch (error) {
       lastError = error;
-      
+
+      // Don't retry on auth errors — session is invalid, reloading is handled by apiFetch
+      if (error instanceof Error && error.message.includes('401')) {
+        break;
+      }
+
       if (attempt === maxRetries) {
         break;
       }

@@ -3796,30 +3796,32 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                 </div>
               )}
 
-              {!googleCalendarConnected && newSession.type === 'online' && (
+              {newSession.type === 'online' && (
                 <div className="space-y-2.5">
-                  <div className="flex items-start gap-2.5 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                    <AlertTriangle size={16} className="text-amber-500 flex-shrink-0 mt-0.5" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs sm:text-sm font-medium text-amber-800">
-                        No tienes Google Calendar conectado
-                      </p>
-                      <p className="text-[10px] sm:text-xs text-amber-700 mt-0.5">
-                        No se generará automáticamente el enlace de la videollamada.{' '}
-                        {onOpenSettings ? (
-                          <button
-                            type="button"
-                            onClick={() => { setShowNewSession(false); resetNewSession(); onOpenSettings(); }}
-                            className="font-semibold underline hover:text-amber-900 transition-colors"
-                          >
-                            Haz click aquí para activar Google Calendar
-                          </button>
-                        ) : (
-                          <span className="font-semibold">Actívalo en Ajustes.</span>
-                        )}
-                      </p>
+                  {!googleCalendarConnected && (
+                    <div className="flex items-start gap-2.5 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                      <AlertTriangle size={16} className="text-amber-500 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs sm:text-sm font-medium text-amber-800">
+                          No tienes Google Calendar conectado
+                        </p>
+                        <p className="text-[10px] sm:text-xs text-amber-700 mt-0.5">
+                          No se generará automáticamente el enlace de la videollamada.{' '}
+                          {onOpenSettings ? (
+                            <button
+                              type="button"
+                              onClick={() => { setShowNewSession(false); resetNewSession(); onOpenSettings(); }}
+                              className="font-semibold underline hover:text-amber-900 transition-colors"
+                            >
+                              Haz click aquí para activar Google Calendar
+                            </button>
+                          ) : (
+                            <span className="font-semibold">Actívalo en Ajustes.</span>
+                          )}
+                        </p>
+                      </div>
                     </div>
-                  </div>
+                  )}
                   <div className="p-2.5 sm:p-3 bg-slate-50 border border-slate-200 rounded-lg">
                     <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1.5">
                       <Video size={14} className="inline-block mr-1 flex-shrink-0" />
@@ -3829,7 +3831,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                       type="url"
                       value={newSession.manualMeetLink}
                       onChange={(e) => setNewSession({ ...newSession, manualMeetLink: e.target.value })}
-                      placeholder="Pega aquí un enlace de Meet, Zoom, etc."
+                      placeholder={googleCalendarConnected ? 'Se generará automáticamente, o pega uno manual' : 'Pega aquí un enlace de Meet, Zoom, etc.'}
                       className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent touch-manipulation"
                     />
                   </div>

@@ -40,8 +40,8 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
     useEffect(() => {
         const checkServer = async () => {
             try {
-                await AuthService.apiFetch(`${API_URL}/users`, { method: 'HEAD' });
-                setServerStatus('online');
+                const res = await fetch(`${API_URL}/ping`);
+                setServerStatus(res.ok ? 'online' : 'offline');
             } catch (e) {
                 console.warn('Server check failed:', e);
                 setServerStatus('offline');

@@ -35,15 +35,25 @@ export const getAuthHeaders = (): Record<string, string> => {
 };
 
 // Authenticated fetch — auto-injects auth headers. Use instead of raw fetch() for all API calls.
+// On 401, clears the session token and reloads to force re-login (session expired or backend restarted).
 export const apiFetch = (url: string, options: RequestInit = {}): Promise<Response> => {
   const authHeaders = getAuthHeaders();
   const existingHeaders = (options.headers as Record<string, string>) || {};
+  const handleUnauthorized = (res: Response): Response => {
+    if (res.status === 401) {
+      clearSessionToken();
+      localStorage.removeItem(CURRENT_USER_KEY);
+      localStorage.removeItem(USER_CACHE_KEY);
+      window.location.reload();
+    }
+    return res;
+  };
   // Don't override Content-Type for FormData — browser needs to set multipart boundary
   if (options.body instanceof FormData) {
     const { 'Content-Type': _ct, ...headersWithoutContentType } = authHeaders;
-    return fetch(url, { ...options, headers: { ...headersWithoutContentType, ...existingHeaders } });
+    return fetch(url, { ...options, headers: { ...headersWithoutContentType, ...existingHeaders } }).then(handleUnauthorized);
   }
-  return fetch(url, { ...options, headers: { ...authHeaders, ...existingHeaders } });
+  return fetch(url, { ...options, headers: { ...authHeaders, ...existingHeaders } }).then(handleUnauthorized);
 };
 
 // --- Helper for LocalStorage Fallback ---

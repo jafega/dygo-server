@@ -156,8 +156,6 @@ const App: React.FC = () => {
     const init = async () => {
         console.log('📋 [App] Estableciendo isLoadingData = true');
         setIsLoadingData(true);
-        await AuthService.initializeDemoData();
-        
         try {
           console.log('👤 [App] Obteniendo usuario actual...');
           const user = await AuthService.getCurrentUser();
