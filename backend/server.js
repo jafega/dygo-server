@@ -11632,6 +11632,105 @@ app.post('/api/sessions/:sessionId/send-reminder', authenticateRequest, async (r
   }
 });
 
+// Manual WhatsApp via Twilio template — triggered by psychologist from session edit modal
+app.post('/api/sessions/:sessionId/send-whatsapp', authenticateRequest, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const psychologistUserId = req.authenticatedUserId;
+    if (!psychologistUserId) return res.status(401).json({ error: 'No autenticado' });
+
+    if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
+      return res.status(503).json({ error: 'Servicio de WhatsApp no configurado (Twilio)' });
+    }
+
+    // Fetch session
+    let session = null;
+    if (supabaseAdmin) {
+      const { data } = await supabaseAdmin
+        .from('sessions')
+        .select('id, data, starts_on, patient_user_id, psychologist_user_id, status')
+        .eq('id', sessionId)
+        .single();
+      session = data;
+    } else {
+      const db = getDb();
+      session = (db.sessions || []).find(s => s.id === sessionId);
+    }
+
+    if (!session) return res.status(404).json({ error: 'Sesión no encontrada' });
+    if (String(session.psychologist_user_id) !== String(psychologistUserId)) {
+      return res.status(403).json({ error: 'Sin permiso para esta sesión' });
+    }
+
+    // Get patient phone and name
+    let patient = null;
+    if (supabaseAdmin) {
+      const { data } = await supabaseAdmin
+        .from('users')
+        .select('user_email, data')
+        .eq('id', session.patient_user_id)
+        .single();
+      patient = data;
+    } else {
+      const db = getDb();
+      patient = (db.users || []).find(u => u.id === session.patient_user_id);
+    }
+
+    const patientPhone = patient?.data?.phone || null;
+    if (!patientPhone) return res.status(400).json({ error: 'El paciente no tiene teléfono registrado' });
+
+    const patientFirstName = patient?.data?.firstName || patient?.data?.name?.split?.(' ')?.[0] || 'paciente';
+
+    // Get psychologist name
+    let psychProfile = null;
+    if (supabaseAdmin) {
+      const { data } = await supabaseAdmin
+        .from('psychologist_profiles')
+        .select('data')
+        .eq('id', psychologistUserId)
+        .single();
+      psychProfile = data;
+    } else {
+      const db = getDb();
+      psychProfile = (db.psychologist_profiles || []).find(p => p.id === psychologistUserId);
+    }
+    const psychName = psychProfile?.data?.name || 'tu psicólogo/a';
+
+    const tz = session.data?.schedule_timezone || 'Europe/Madrid';
+    const sessionDateStr = new Date(session.starts_on).toLocaleDateString('es-ES', {
+      weekday: 'long', day: 'numeric', month: 'long', timeZone: tz
+    });
+    const sessionTimeStr = new Date(session.starts_on).toLocaleTimeString('es-ES', {
+      hour: '2-digit', minute: '2-digit', timeZone: tz
+    });
+
+    const { default: twilio } = await import('twilio');
+    const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+    const twilioFrom = process.env.TWILIO_WHATSAPP_FROM || 'whatsapp:+14155238886';
+    const toNumber = patientPhone.startsWith('+')
+      ? `whatsapp:${patientPhone}`
+      : `whatsapp:+${patientPhone.replace(/[^0-9]/g, '')}`;
+
+    await twilioClient.messages.create({
+      from: twilioFrom,
+      to: toNumber,
+      contentSid: process.env.TWILIO_TEMPLATE_SID || 'HXfbba1476d17be5516c6b0ad80a7fd21b',
+      contentVariables: JSON.stringify({
+        patient_name: patientFirstName,
+        psych_name: psychName,
+        session_date: sessionDateStr,
+        session_time: sessionTimeStr
+      })
+    });
+
+    console.log(`[send-whatsapp] 💬 Manual WhatsApp sent to ${toNumber} for session ${sessionId}`);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('❌ [send-whatsapp] Error:', err?.message);
+    return res.status(500).json({ error: 'Error interno del servidor', details: err?.message });
+  }
+});
+
 function buildManualReminderEmailHtml({ patientFirstName, sessionDateStr, sessionTimeStr, meetLink, sessionType, psychName, psychEmail, psychPhone }) {
   const greeting = patientFirstName ? `Hola <strong>${patientFirstName}</strong>,` : 'Hola,';
   const isOnline = sessionType === 'online';
