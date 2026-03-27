@@ -154,15 +154,12 @@ export default async function handler(req, res) {
           await twilioClient.messages.create({
             from: twilioFrom,
             to: toNumber,
-            body: buildWhatsAppMessage({
-              patientFirstName,
-              sessionDateStr,
-              sessionTimeStr,
-              label,
-              isTodaySession,
-              meetLink: session.data?.meetLink || null,
-              sessionType: session.data?.type || null,
-              psychName
+            contentSid: process.env.TWILIO_TEMPLATE_SID || 'HXfbba1476d17be5516c6b0ad80a7fd21b',
+            contentVariables: JSON.stringify({
+              patient_name: patientFirstName || 'paciente',
+              psych_name: psychName || 'tu psicólogo/a',
+              session_date: sessionDateStr,
+              session_time: sessionTimeStr
             })
           });
           session.data = { ...session.data, [waSentKey]: new Date().toISOString() };
