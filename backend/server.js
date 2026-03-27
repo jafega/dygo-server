@@ -13781,6 +13781,21 @@ app.post('/api/signatures/external', authenticateRequest, async (req, res) => {
     const base64Data = matches[2];
     const buffer = Buffer.from(base64Data, 'base64');
 
+    // Verificar que el bucket 'external-documents' existe, si no crearlo
+    const { data: buckets } = await supabaseAdmin.storage.listBuckets();
+    const extBucketExists = buckets?.some(b => b.name === 'external-documents');
+    if (!extBucketExists) {
+      console.log('📦 Creando bucket external-documents...');
+      const { error: createBucketError } = await supabaseAdmin.storage.createBucket('external-documents', {
+        public: true,
+        fileSizeLimit: 50 * 1024 * 1024 // 50MB
+      });
+      if (createBucketError && !createBucketError.message.includes('already exists')) {
+        console.error('[POST /api/signatures/external] Error creando bucket:', createBucketError);
+        return res.status(500).json({ error: 'Error creando bucket de almacenamiento: ' + createBucketError.message });
+      }
+    }
+
     // Upload to Supabase Storage bucket 'external-documents'
     const safeFileName = `${psych_user_id}/${patient_user_id}/${Date.now()}_${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
 
