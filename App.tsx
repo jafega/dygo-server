@@ -26,11 +26,12 @@ import SessionsList from './components/SessionsList';
 import CentrosPanel, { CentrosPanelRef } from './components/CentrosPanel';
 import ConnectionsPanel from './components/ConnectionsPanel';
 import TemplatesPanel from './components/TemplatesPanel';
+import PsychologistMaterialsPanel from './components/PsychologistMaterialsPanel';
 import PatientDocumentsPanel from './components/PatientDocumentsPanel';
 import BulkImportPanel from './components/BulkImportPanel';
 import PsychologistAIChat from './components/PsychologistAIChat';
 import UpgradeModal from './components/UpgradeModal';
-import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock, AlertCircle, Smile, Shield, Building2, LogOut, Upload, Bot } from 'lucide-react';
+import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock, AlertCircle, Smile, Shield, Building2, LogOut, Upload, Bot, FolderOpen } from 'lucide-react';
 
 // Custom Dygo Logo Component
 const DygoLogo: React.FC<{ className?: string }> = ({ className = "w-12 h-12" }) => (
@@ -47,7 +48,7 @@ const App: React.FC = () => {
   const [showFirstTimeRoleModal, setShowFirstTimeRoleModal] = useState(false);
   
   const [psychViewMode, setPsychViewMode] = useState<'DASHBOARD' | 'PERSONAL'>('DASHBOARD');
-  const [psychPanelView, setPsychPanelView] = useState<'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule' | 'centros' | 'templates' | 'import' | 'ai-assistant'>('schedule');
+  const [psychPanelView, setPsychPanelView] = useState<'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule' | 'centros' | 'templates' | 'import' | 'ai-assistant' | 'materials'>('schedule');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   
   // State for draggable menu button position (unified across personal/professional)
@@ -626,7 +627,7 @@ const App: React.FC = () => {
       setStripeNotification('success');
       // Restore the panel the user was on before going to Stripe
       const returnPanel = localStorage.getItem('dygo_stripe_return_panel');
-      const validPanels = ['patients', 'billing', 'profile', 'dashboard', 'sessions', 'schedule', 'centros', 'templates', 'import', 'ai-assistant', 'connections'];
+      const validPanels = ['patients', 'billing', 'profile', 'dashboard', 'sessions', 'schedule', 'centros', 'templates', 'import', 'ai-assistant', 'connections', 'materials'];
       if (returnPanel && validPanels.includes(returnPanel)) {
         setPsychPanelView(returnPanel as any);
       }
@@ -1031,6 +1032,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                         {psychPanelView === 'sessions' && <FileText className="w-6 h-6 text-indigo-600" />}
                         {psychPanelView === 'centros' && <Building2 className="w-6 h-6 text-indigo-600" />}
                         {psychPanelView === 'templates' && <FileText className="w-6 h-6 text-indigo-600" />}
+                        {psychPanelView === 'materials' && <FolderOpen className="w-6 h-6 text-indigo-600" />}
                         {psychPanelView === 'import' && <Upload className="w-6 h-6 text-indigo-600" />}
                         {psychPanelView === 'ai-assistant' && <Bot className="w-6 h-6 text-violet-600" />}
                         <h1 className="text-2xl font-bold text-slate-900">
@@ -1043,6 +1045,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                           {psychPanelView === 'sessions' && 'Sesiones'}
                           {psychPanelView === 'centros' && 'Centros'}
                           {psychPanelView === 'templates' && 'Documentos'}
+                          {psychPanelView === 'materials' && 'Materiales'}
                           {psychPanelView === 'import' && 'Importar Pacientes'}
                           {psychPanelView === 'ai-assistant' && 'Asistente IA'}
                         </h1>
@@ -1057,7 +1060,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                         {psychPanelView === 'sessions' && 'Gestión de sesiones'}
                         {psychPanelView === 'centros' && 'Gestiona tus centros de trabajo'}
                         {psychPanelView === 'templates' && 'Crea y envía documentos y consentimientos a pacientes'}
-                        {psychPanelView === 'import' && 'Sube un CSV, Excel o PDF y crea pacientes masivamente con IA'}
+                        {psychPanelView === 'materials' && 'Gestiona y envía materiales a tus pacientes como feedback'}
                         {psychPanelView === 'ai-assistant' && 'Consultas, reportes y asistencia con IA privada'}
                       </p>
                     </header>
@@ -1075,6 +1078,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                           {psychPanelView === 'sessions' && 'Sesiones'}
                           {psychPanelView === 'centros' && 'Centros'}
                           {psychPanelView === 'templates' && 'Documentos'}
+                          {psychPanelView === 'materials' && 'Materiales'}
                           {psychPanelView === 'import' && 'Importar Pacientes'}
                           {psychPanelView === 'ai-assistant' && 'Asistente IA'}
                         </h1>
@@ -1088,7 +1092,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                           {psychPanelView === 'sessions' && 'Gestión completa de sesiones con métricas'}
                           {psychPanelView === 'centros' && 'Gestiona los centros donde ofreces tus servicios'}
                           {psychPanelView === 'templates' && 'Crea templates, consentimientos y envíalos a pacientes para su firma'}
-                          {psychPanelView === 'import' && 'Importación masiva de pacientes desde CSV, Excel o PDF con análisis por IA'}
+                          {psychPanelView === 'materials' && 'Gestiona y envía materiales a tus pacientes como feedback'}
                           {psychPanelView === 'ai-assistant' && 'Consulta, genera reportes y solicita análisis con IA sobre tus datos — solo tú tienes acceso'}
                         </p>
                       </div>
@@ -1145,6 +1149,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                     {psychPanelView === 'ai-assistant' && <PsychologistAIChat psychologistId={currentUser.id} psychologistName={currentUser.name} />}
                     {psychPanelView === 'connections' && <ConnectionsPanel currentUser={currentUser} />}
                     {psychPanelView === 'templates' && <TemplatesPanel psychologistId={currentUser.id} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} />}
+                    {psychPanelView === 'materials' && <PsychologistMaterialsPanel psychologistId={currentUser.id} />}
                     {psychPanelView === 'import' && <BulkImportPanel psychologistId={currentUser.id} currentUser={currentUser} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} onImportComplete={() => setPsychPanelView('patients')} />}
 
                     {showSettings && (
@@ -1429,7 +1434,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
               }`}
             >
               <BookOpen size={18} />
-              <span className={`${sidebarOpen ? 'inline' : 'hidden'} md:inline`}>Documentos</span>
+              <span className={`${sidebarOpen ? 'inline' : 'hidden'} md:inline`}>Consentimientos</span>
             </button>
 
             <button
@@ -1536,7 +1541,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   {activeTab === 'billing' && 'Facturación'}
                   {activeTab === 'profile' && 'Mi Perfil'}
                   {activeTab === 'admin' && 'Administración'}
-                  {activeTab === 'documents' && 'Documentos'}
+                  {activeTab === 'documents' && 'Consentimientos'}
                 </h1>
               </div>
               <p className="text-sm text-slate-500">
@@ -1547,7 +1552,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                 {activeTab === 'billing' && 'Consulta y descarga tus facturas'}
                 {activeTab === 'profile' && 'Información personal y preferencias'}
                 {activeTab === 'admin' && 'Panel de administración del sistema'}
-                {activeTab === 'documents' && 'Documentos enviados por tu psicólogo'}
+                {activeTab === 'documents' && 'Consentimientos enviados por tu psicólogo'}
               </p>
             </header>
 
@@ -1562,7 +1567,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   {activeTab === 'billing' && 'Facturación'}
                   {activeTab === 'profile' && 'Mi Perfil'}
                   {activeTab === 'admin' && 'Administración del Sistema'}
-                  {activeTab === 'documents' && 'Mis Documentos'}
+                  {activeTab === 'documents' && 'Mis Consentimientos'}
                 </h1>
                 <p className="text-slate-500 mt-1">
                   {activeTab === 'insights' && 'Vista general de tu progreso'}
@@ -1572,7 +1577,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   {activeTab === 'billing' && 'Consulta y descarga tus facturas'}
                   {activeTab === 'profile' && 'Información personal y configuración de tu cuenta'}
                   {activeTab === 'admin' && 'Gestión de usuarios del sistema'}
-                  {activeTab === 'documents' && 'Lee y firma los documentos enviados por tu psicólogo'}
+                  {activeTab === 'documents' && 'Lee y firma los consentimientos enviados por tu psicólogo'}
                 </p>
               </div>
               {activeTab === 'calendar' && (

@@ -1,6 +1,36 @@
 -- WARNING: This schema is for context only and is not meant to be run.
 -- Table order and constraints may not be valid for execution.
 
+-- Migration: psychologist_materials table
+-- Run in Supabase SQL editor to create the materials table:
+-- CREATE TABLE public.psychologist_materials (
+--   id uuid NOT NULL DEFAULT gen_random_uuid(),
+--   created_at timestamp with time zone NOT NULL DEFAULT now(),
+--   psychologist_user_id text NOT NULL,
+--   name text NOT NULL,
+--   file_url text NOT NULL,
+--   file_name text NOT NULL DEFAULT '',
+--   file_type text NOT NULL DEFAULT 'application/octet-stream',
+--   CONSTRAINT psychologist_materials_pkey PRIMARY KEY (id),
+--   CONSTRAINT psychologist_materials_psychologist_user_id_fkey FOREIGN KEY (psychologist_user_id) REFERENCES public.users(id)
+-- );
+-- ALTER TABLE public.psychologist_materials ENABLE ROW LEVEL SECURITY;
+-- CREATE POLICY "Psychologist can manage own materials" ON public.psychologist_materials
+--   USING (psychologist_user_id = auth.uid()::text)
+--   WITH CHECK (psychologist_user_id = auth.uid()::text);
+
+CREATE TABLE public.psychologist_materials (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  psychologist_user_id text NOT NULL,
+  name text NOT NULL,
+  file_url text NOT NULL,
+  file_name text NOT NULL DEFAULT '',
+  file_type text NOT NULL DEFAULT 'application/octet-stream',
+  CONSTRAINT psychologist_materials_pkey PRIMARY KEY (id),
+  CONSTRAINT psychologist_materials_psychologist_user_id_fkey FOREIGN KEY (psychologist_user_id) REFERENCES public.users(id)
+);
+
 CREATE TABLE public.bono (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   created_at timestamp with time zone NOT NULL DEFAULT now(),

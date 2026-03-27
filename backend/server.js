@@ -7413,7 +7413,7 @@ app.post('/api/invoices/:id/rectify', authenticateRequest, async (req, res) => {
   try {
     const { id } = req.params;
     const psychologistId = req.authenticatedUserId;
-    const { rectification_type = 'R4', rectification_reason = '' } = req.body || {};
+    const { rectification_type = 'R4', rectification_reason = '', invoiceNumber: explicitInvoiceNumber } = req.body || {};
     
     console.log(`🔄 [POST /api/invoices/${id}/rectify] Creando factura rectificativa`);
     
@@ -7446,30 +7446,33 @@ app.post('/api/invoices/:id/rectify', authenticateRequest, async (req, res) => {
         }
         
         // Generar número de factura rectificativa
-        const { data: allInvoices } = await supabaseAdmin
-          .from('invoices')
-          .select('*')
-          .eq('psychologist_user_id', psychologistId || originalInvoice.psychologist_user_id)
-          .ilike('data->>invoiceNumber', 'R%');
-        
-        const year = new Date().getFullYear();
-        const rectPrefix = `R${year}`;
-        
-        let maxRectNumber = 0;
-        if (allInvoices && allInvoices.length > 0) {
-          allInvoices.forEach(inv => {
-            const normalized = normalizeSupabaseRow(inv);
-            if (normalized.invoiceNumber && normalized.invoiceNumber.startsWith(rectPrefix)) {
-              const numPart = normalized.invoiceNumber.replace(rectPrefix, '');
-              const num = parseInt(numPart, 10);
-              if (!isNaN(num) && num > maxRectNumber) {
-                maxRectNumber = num;
+        let rectificativaNumber = explicitInvoiceNumber || null;
+        if (!rectificativaNumber) {
+          const { data: allInvoices } = await supabaseAdmin
+            .from('invoices')
+            .select('*')
+            .eq('psychologist_user_id', psychologistId || originalInvoice.psychologist_user_id)
+            .ilike('data->>invoiceNumber', 'R%');
+
+          const year = new Date().getFullYear();
+          const rectPrefix = `R${year}`;
+
+          let maxRectNumber = 0;
+          if (allInvoices && allInvoices.length > 0) {
+            allInvoices.forEach(inv => {
+              const normalized = normalizeSupabaseRow(inv);
+              if (normalized.invoiceNumber && normalized.invoiceNumber.startsWith(rectPrefix)) {
+                const numPart = normalized.invoiceNumber.replace(rectPrefix, '');
+                const num = parseInt(numPart, 10);
+                if (!isNaN(num) && num > maxRectNumber) {
+                  maxRectNumber = num;
+                }
               }
-            }
-          });
+            });
+          }
+
+          rectificativaNumber = `${rectPrefix}${String(maxRectNumber + 1).padStart(5, '0')}`;
         }
-        
-        const rectificativaNumber = `${rectPrefix}${String(maxRectNumber + 1).padStart(5, '0')}`;
         
         // Crear factura rectificativa (con valores en negativo)
         const rectificativa = {
@@ -7588,15 +7591,18 @@ app.post('/api/invoices/:id/rectify', authenticateRequest, async (req, res) => {
     }
     
     // Generar número rectificativo
-    const year = new Date().getFullYear();
-    const rectPrefix = `R${year}`;
-    const rectInvoices = db.invoices.filter(inv => 
-      inv.invoiceNumber && inv.invoiceNumber.startsWith(rectPrefix)
-    );
-    const maxNumber = rectInvoices.length > 0 
-      ? Math.max(...rectInvoices.map(inv => parseInt(inv.invoiceNumber.replace(rectPrefix, ''), 10))) 
-      : 0;
-    const rectificativaNumber = `${rectPrefix}${String(maxNumber + 1).padStart(5, '0')}`;
+    let rectificativaNumber = explicitInvoiceNumber || null;
+    if (!rectificativaNumber) {
+      const year = new Date().getFullYear();
+      const rectPrefix = `R${year}`;
+      const rectInvoices = db.invoices.filter(inv =>
+        inv.invoiceNumber && inv.invoiceNumber.startsWith(rectPrefix)
+      );
+      const maxNumber = rectInvoices.length > 0
+        ? Math.max(...rectInvoices.map(inv => parseInt(inv.invoiceNumber.replace(rectPrefix, ''), 10)))
+        : 0;
+      rectificativaNumber = `${rectPrefix}${String(maxNumber + 1).padStart(5, '0')}`;
+    }
     
     // Crear rectificativa
     const rectificativa = {
@@ -13964,6 +13970,96 @@ app.put('/api/signatures/:id', authenticateRequest, async (req, res) => {
   } catch (error) {
     console.error('[PUT /api/signatures/:id] Error:', error);
     res.status(500).json({ error: 'Error al firmar documento' });
+  }
+});
+
+// ─── PSYCHOLOGIST MATERIALS ───────────────────────────────────────────────────
+
+// GET /api/materials  — list all materials for a psychologist
+app.get('/api/materials', authenticateRequest, async (req, res) => {
+  try {
+    const { psychologist_user_id } = req.query;
+    if (!psychologist_user_id) {
+      return res.status(400).json({ error: 'Se requiere psychologist_user_id' });
+    }
+    if (req.authenticatedUserId !== String(psychologist_user_id)) {
+      return res.status(403).json({ error: 'Acceso denegado' });
+    }
+    if (supabaseAdmin) {
+      const { data, error } = await supabaseAdmin
+        .from('psychologist_materials')
+        .select('*')
+        .eq('psychologist_user_id', psychologist_user_id)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return res.json(data || []);
+    }
+    return res.json([]);
+  } catch (err) {
+    console.error('[GET /api/materials] Error:', err);
+    res.status(500).json({ error: 'Error al obtener materiales' });
+  }
+});
+
+// POST /api/materials  — create a new material
+app.post('/api/materials', authenticateRequest, async (req, res) => {
+  try {
+    const { psychologist_user_id, name, file_url, file_name, file_type } = req.body;
+    if (!psychologist_user_id || !name || !file_url) {
+      return res.status(400).json({ error: 'Se requieren psychologist_user_id, name y file_url' });
+    }
+    if (req.authenticatedUserId !== String(psychologist_user_id)) {
+      return res.status(403).json({ error: 'Acceso denegado' });
+    }
+    if (supabaseAdmin) {
+      const { data, error } = await supabaseAdmin
+        .from('psychologist_materials')
+        .insert({
+          psychologist_user_id,
+          name: name.trim(),
+          file_url,
+          file_name: file_name || '',
+          file_type: file_type || 'application/octet-stream'
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      return res.status(201).json(data);
+    }
+    return res.status(501).json({ error: 'Solo disponible con Supabase' });
+  } catch (err) {
+    console.error('[POST /api/materials] Error:', err);
+    res.status(500).json({ error: 'Error al crear material' });
+  }
+});
+
+// DELETE /api/materials/:id  — delete a material (owner only)
+app.delete('/api/materials/:id', authenticateRequest, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (supabaseAdmin) {
+      const { data: existing, error: fetchErr } = await supabaseAdmin
+        .from('psychologist_materials')
+        .select('psychologist_user_id')
+        .eq('id', id)
+        .single();
+      if (fetchErr || !existing) {
+        return res.status(404).json({ error: 'Material no encontrado' });
+      }
+      if (existing.psychologist_user_id !== req.authenticatedUserId) {
+        return res.status(403).json({ error: 'Acceso denegado' });
+      }
+      const { error } = await supabaseAdmin
+        .from('psychologist_materials')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+      return res.json({ success: true });
+    }
+    return res.status(501).json({ error: 'Solo disponible con Supabase' });
+  } catch (err) {
+    console.error('[DELETE /api/materials/:id] Error:', err);
+    res.status(500).json({ error: 'Error al eliminar material' });
   }
 });
 

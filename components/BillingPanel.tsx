@@ -2486,26 +2486,26 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
 
             </div>
 
-            <div className="p-6 border-t border-slate-200 flex gap-3 justify-between">
-              <div className="flex gap-2">
+            <div className="p-4 border-t border-slate-100 bg-slate-50 rounded-b-2xl flex flex-wrap gap-2 justify-between items-center">
+              <div className="flex flex-wrap gap-2">
                 {selectedInvoice.status !== 'draft' && selectedInvoice.status !== 'cancelled' && !selectedInvoice.is_rectificativa && (
                   <>
                     {selectedInvoice.status === 'pending' && (
                       <button
                         onClick={() => handleStatusChange(selectedInvoice.id, 'paid')}
-                        className="px-4 py-2 text-sm bg-green-600 text-white hover:bg-green-700 rounded-lg transition-colors font-medium flex items-center gap-2"
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white shadow-sm shadow-emerald-200 transition-all duration-150"
                       >
-                        <Check size={16} />
-                        Marcar como Pagada
+                        <Check size={15} strokeWidth={2.5} />
+                        Marcar como pagada
                       </button>
                     )}
                     {selectedInvoice.status === 'paid' && (
                       <button
                         onClick={() => handleStatusChange(selectedInvoice.id, 'pending')}
-                        className="px-4 py-2 text-sm bg-yellow-600 text-white hover:bg-yellow-700 rounded-lg transition-colors font-medium flex items-center gap-2"
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-amber-400 hover:bg-amber-500 active:bg-amber-600 text-white shadow-sm shadow-amber-200 transition-all duration-150"
                       >
-                        <Clock size={16} />
-                        Marcar como Pendiente
+                        <Clock size={15} strokeWidth={2.5} />
+                        Marcar como pendiente
                       </button>
                     )}
                     <button
@@ -2514,40 +2514,27 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                         setSelectedInvoice(null);
                         setShowCancelModal(true);
                       }}
-                      className="px-4 py-2 text-sm bg-red-600 text-white hover:bg-red-700 rounded-lg transition-colors font-medium flex items-center gap-2"
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-white hover:bg-rose-50 active:bg-rose-100 text-rose-600 border border-rose-200 shadow-sm transition-all duration-150"
                     >
-                      <Trash2 size={16} />
-                      Cancelar Factura
+                      <Trash2 size={15} strokeWidth={2.5} />
+                      Cancelar factura
                     </button>
                   </>
                 )}
               </div>
               <div className="flex gap-2">
                 {selectedInvoice.status !== 'draft' && selectedInvoice.status !== 'cancelled' && (
-                  <>
-                    <button
-                      onClick={() => handleToggleSignature(selectedInvoice)}
-                      title={(selectedInvoice as any).show_signature ? 'Quitar bloque de firma del PDF' : 'Añadir bloque de firma al PDF'}
-                      className={`px-3 py-2 text-sm rounded-lg transition-colors font-medium flex items-center gap-2 border ${
-                        (selectedInvoice as any).show_signature
-                          ? 'border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
-                          : 'border-slate-200 text-slate-600 hover:bg-slate-100'
-                      }`}
-                    >
-                      ✍️ {(selectedInvoice as any).show_signature ? 'Firma activa' : 'Añadir firma'}
-                    </button>
-                    <button
-                      onClick={() => handleDownloadPDF(selectedInvoice.id)}
-                      className="px-3 py-2 text-sm bg-green-600 text-white hover:bg-green-700 rounded-lg transition-colors font-medium flex items-center gap-2"
-                    >
-                      <Download size={16} />
-                      Descargar PDF
-                    </button>
-                  </>
+                  <button
+                    onClick={() => handleDownloadPDF(selectedInvoice.id)}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white shadow-sm shadow-indigo-200 transition-all duration-150"
+                  >
+                    <Download size={15} strokeWidth={2.5} />
+                    Descargar PDF
+                  </button>
                 )}
                 <button
                   onClick={() => setSelectedInvoice(null)}
-                  className="px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 rounded-lg transition-colors font-medium"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-white hover:bg-slate-100 active:bg-slate-200 text-slate-600 border border-slate-200 shadow-sm transition-all duration-150"
                 >
                   Cerrar
                 </button>

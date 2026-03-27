@@ -185,6 +185,9 @@ const CentrosPanel = forwardRef<CentrosPanelRef, CentrosPanelProps>(({ psycholog
                   </div>
                   <div>
                     <h3 className="font-semibold text-slate-900">{centro.nombre_comercial || centro.center_name}</h3>
+                    {(centro.direccion_comercial || centro.address) && (
+                      <p className="text-xs text-slate-500 mt-0.5">{centro.direccion_comercial || centro.address}</p>
+                    )}
                   </div>
                 </div>
                 <div className="flex gap-2">

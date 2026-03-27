@@ -64,6 +64,8 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session: init
   const [editedSummary, setEditedSummary] = useState('');
   const [status, setStatus] = useState<'pending' | 'done'>('done');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [showAiPrompt, setShowAiPrompt] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -256,9 +258,9 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session: init
     }
   };
 
-  const generateAISummary = async (text: string) => {
-    if (!text.trim()) {
-      alert('Por favor, proporciona un texto para generar el resumen');
+  const generateAISummary = async (text: string, customPrompt: string) => {
+    if (!customPrompt.trim()) {
+      alert('Por favor, escribe qué quieres que haga la IA');
       return;
     }
 
@@ -268,31 +270,23 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session: init
         throw new Error('API de IA no configurada');
       }
 
-      const prompt = `Eres un asistente de psicología clínica. Genera un resumen profesional y estructurado de la siguiente sesión de terapia.
-
-Transcript de la sesión:
-${text}
-
-Por favor, genera un resumen que incluya:
-1. **Temas principales tratados**: Los temas clave discutidos en la sesión
-2. **Observaciones clínicas**: Estado emocional, comportamiento, y aspectos relevantes del paciente
-3. **Intervenciones realizadas**: Técnicas o estrategias terapéuticas aplicadas
-4. **Tareas o seguimiento**: Tareas asignadas o aspectos a seguir en próximas sesiones
-5. **Notas adicionales**: Cualquier otra información relevante
-
-Mantén un tono profesional y objetivo.`;
+      const fullPrompt = text.trim()
+        ? `${customPrompt}\n\nContenido de la sesión:\n${text}`
+        : customPrompt;
 
       const result = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
-        contents: prompt
+        contents: fullPrompt
       });
 
-      const summary = result.text || 'No se pudo generar el resumen';
+      const summary = result.text || 'No se pudo generar la respuesta';
       setAiSummary(summary);
       setEditedSummary(summary);
+      setShowAiPrompt(false);
+      setAiPrompt('');
     } catch (error) {
-      console.error('Error generating summary:', error);
-      alert('Error al generar el resumen con IA');
+      console.error('Error generating AI response:', error);
+      alert('Error al generar la respuesta con IA');
     } finally {
       setIsGenerating(false);
     }
@@ -576,11 +570,6 @@ Mantén un tono profesional y objetivo.`;
   const handleSave = async () => {
     if (!transcript.trim() && !uploadedFile && !audioBlob && !existingEntry) {
       alert('Por favor, proporciona contenido para la sesión');
-      return;
-    }
-
-    if (!editedSummary.trim()) {
-      alert('Por favor, genera un resumen de la sesión');
       return;
     }
 
@@ -1095,65 +1084,71 @@ Mantén un tono profesional y objetivo.`;
               </div>
             )}
 
-            {/* Generate AI Summary Button */}
-            {transcript && !aiSummary && (
-              <button
-                onClick={() => generateAISummary(transcript)}
-                disabled={isGenerating}
-                className="w-full px-4 py-3.5 sm:px-6 sm:py-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg sm:rounded-xl font-semibold hover:from-indigo-700 hover:to-purple-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2 touch-manipulation text-sm sm:text-base"
-              >
-                {isGenerating ? (
-                  <>
-                    <Loader className="animate-spin" size={18} />
-                    <span>Generando resumen...</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles size={18} />
-                    <span>Generar resumen con IA</span>
-                  </>
-                )}
-              </button>
-            )}
+            {/* AI Prompt Toggle */}
+            <div>
+              <div className="flex items-center justify-end mb-1">
+                <button
+                  onClick={() => setShowAiPrompt(v => !v)}
+                  className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-purple-500 transition-colors px-1.5 py-0.5 rounded-md hover:bg-purple-50"
+                  title="Usar IA"
+                >
+                  <Sparkles size={12} />
+                  <span>IA</span>
+                </button>
+              </div>
+              {showAiPrompt && (
+                <div className="flex gap-2 items-start p-2.5 border border-slate-200 rounded-lg bg-slate-50">
+                  <textarea
+                    value={aiPrompt}
+                    onChange={(e) => setAiPrompt(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        generateAISummary(transcript, aiPrompt);
+                      }
+                    }}
+                    placeholder="¿Qué quieres que haga la IA con estas notas?"
+                    rows={2}
+                    className="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs resize-none focus:ring-1 focus:ring-purple-400 focus:outline-none bg-white"
+                  />
+                  <button
+                    onClick={() => generateAISummary(transcript, aiPrompt)}
+                    disabled={isGenerating || !aiPrompt.trim()}
+                    className="mt-0.5 p-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
+                    title="Aplicar"
+                  >
+                    {isGenerating ? <Loader className="animate-spin" size={14} /> : <Sparkles size={14} />}
+                  </button>
+                </div>
+              )}
+            </div>
 
-            {/* AI Summary */}
+            {/* AI Result */}
             {aiSummary && (
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="text-xs sm:text-sm font-semibold text-slate-700 flex items-center gap-1.5 sm:gap-2">
-                    <Sparkles size={14} className="text-purple-600 sm:w-4 sm:h-4" />
-                    Resumen con IA
+                  <label className="text-xs sm:text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                    <Sparkles size={13} className="text-purple-500" />
+                    Resultado IA
                   </label>
                   <button
-                    onClick={() => generateAISummary(transcript)}
-                    disabled={isGenerating || !transcript.trim()}
-                    className="text-[10px] sm:text-xs text-purple-600 hover:text-purple-700 hover:bg-purple-50 active:bg-purple-100 font-medium flex items-center gap-1 touch-manipulation px-2 py-1 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={() => { setAiSummary(''); setEditedSummary(''); }}
+                    className="text-[10px] text-slate-400 hover:text-red-500 px-1.5 py-0.5 rounded transition-colors"
                   >
-                    {isGenerating ? (
-                      <>
-                        <Loader className="animate-spin" size={12} />
-                        <span>Regenerando...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles size={12} className="sm:w-3.5 sm:h-3.5" />
-                        <span>Regenerar</span>
-                      </>
-                    )}
+                    Limpiar
                   </button>
                 </div>
                 <textarea
                   value={editedSummary}
                   onChange={(e) => setEditedSummary(e.target.value)}
                   rows={8}
-                  className="w-full px-3 py-2.5 sm:px-4 sm:py-3 border-2 border-green-200 bg-green-50/50 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-green-500 resize-none text-sm sm:text-base"
+                  className="w-full px-3 py-2.5 sm:px-4 sm:py-3 border-2 border-purple-100 bg-purple-50/30 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-purple-400 resize-none text-sm sm:text-base"
                 />
               </div>
             )}
 
             {/* Status Selection - Compact */}
-            {aiSummary && (
-              <div>
+            <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-2">Estado</label>
                 <div className="flex gap-2 sm:gap-3">
                   <button
@@ -1180,7 +1175,6 @@ Mantén un tono profesional y objetivo.`;
                   </button>
                 </div>
               </div>
-            )}
           </div>
 
           {/* Footer */}
@@ -1193,7 +1187,7 @@ Mantén un tono profesional y objetivo.`;
             </button>
             <button
               onClick={handleSave}
-              disabled={isSaving || !editedSummary.trim()}
+              disabled={isSaving}
               className="px-5 py-3 bg-purple-600 text-white rounded-xl font-medium hover:bg-purple-700 active:bg-purple-800 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed text-base shadow-sm"
             >
               {isSaving ? (

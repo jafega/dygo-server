@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, FileText, User as UserIcon, Calendar, Menu, X, ArrowLeftRight, ShieldCheck, Link2, BarChart3, AlertCircle, ClipboardList, Building2, Scroll, Upload, Bot, Zap, RefreshCw } from 'lucide-react';
+import { Users, FileText, User as UserIcon, Calendar, Menu, X, ArrowLeftRight, ShieldCheck, Link2, BarChart3, AlertCircle, ClipboardList, Building2, Scroll, Upload, Bot, Zap, RefreshCw, FolderOpen } from 'lucide-react';
 import { createCheckoutSession, createBillingPortalSession } from '../services/authService';
 
 const DygoLogo: React.FC<{ className?: string }> = ({ className = "w-12 h-12" }) => (
@@ -23,8 +23,8 @@ interface SubscriptionInfo {
 }
 
 interface PsychologistSidebarProps {
-  activeView: 'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule' | 'centros' | 'templates' | 'import' | 'ai-assistant';
-  onViewChange: (view: 'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule' | 'centros' | 'templates' | 'import' | 'ai-assistant') => void;
+  activeView: 'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule' | 'centros' | 'templates' | 'import' | 'ai-assistant' | 'materials';
+  onViewChange: (view: 'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule' | 'centros' | 'templates' | 'import' | 'ai-assistant' | 'materials') => void;
   isOpen: boolean;
   onToggle: () => void;
   userName?: string;
@@ -57,6 +57,7 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
     { id: 'billing' as const, label: 'Facturación', icon: FileText },
     { id: 'centros' as const, label: 'Centros', icon: Building2 },
     { id: 'templates' as const, label: 'Documentos', icon: Scroll },
+    { id: 'materials' as const, label: 'Materiales', icon: FolderOpen },
     { id: 'ai-assistant' as const, label: 'Asistente IA', icon: Bot },
     { id: 'profile' as const, label: 'Mi Perfil Profesional', icon: UserIcon },
   ];
