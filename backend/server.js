@@ -5811,6 +5811,9 @@ app.get('/api/entries', authenticateRequest, async (req, res) => {
           }
         }
         
+        // Ordenar por timestamp descendente antes de aplicar el límite
+        filtered = filtered.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        
         // Aplicar límite si está especificado
         if (limit) {
           const limitNum = parseInt(limit);
@@ -5821,6 +5824,9 @@ app.get('/api/entries', authenticateRequest, async (req, res) => {
         
         return res.json(filtered);
       }
+      
+      // Ordenar por timestamp descendente antes de aplicar el límite
+      entries = entries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       
       // Aplicar límite si está especificado
       if (limit) {
@@ -5881,6 +5887,9 @@ app.get('/api/entries', authenticateRequest, async (req, res) => {
         });
       }
     }
+    
+    // Ordenar por timestamp descendente antes de aplicar el límite
+    entries = entries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     
     // Aplicar límite si está especificado
     if (limit) {
@@ -13653,7 +13662,7 @@ app.post('/api/signatures/external', authenticateRequest, async (req, res) => {
     if (!extBucketExists) {
       console.log('📦 Creando bucket external-documents...');
       const { error: createBucketError } = await supabaseAdmin.storage.createBucket('external-documents', {
-        public: false,
+        public: true,
         fileSizeLimit: 50 * 1024 * 1024
       });
       if (createBucketError && !createBucketError.message.includes('already exists')) {

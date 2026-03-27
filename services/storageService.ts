@@ -303,7 +303,7 @@ export const getEntriesForUser = async (
             return entries.map((e: JournalEntry) => ({
               ...e,
               transcript: e.transcript ? decompressTranscript(e.transcript) : e.transcript
-            })).sort((a: any, b: any) => b.timestamp - a.timestamp);
+            })).sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
           }
           throw new Error(`Server error: ${res.status}`);
       } catch (e) {
@@ -337,7 +337,7 @@ export const getEntriesForUser = async (
     });
   }
   
-  all = all.sort((a, b) => b.timestamp - a.timestamp);
+  all = all.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   
   if (options?.limit && options.limit > 0) {
     all = all.slice(0, options.limit);

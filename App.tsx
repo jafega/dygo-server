@@ -918,7 +918,7 @@ const personalGoals = safeGoals.filter(
 
 const feedbackEntries = [...safeEntries]
   .filter(e => hasFeedbackContent(e) || e.psychologistEntryType === 'FEEDBACK' || e.entryType === 'feedback')
-  .sort((a, b) => b.timestamp - a.timestamp);
+  .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
 const isSessionEntry = (entry: JournalEntry) => {
   if (entry.psychologistEntryType === 'SESSION') return true;
@@ -932,17 +932,17 @@ const isSessionEntry = (entry: JournalEntry) => {
 
 const sessionEntries = [...safeEntries]
   .filter(isSessionEntry)
-  .sort((a, b) => b.timestamp - a.timestamp);
+  .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
 const latestDiaryEntry = [...safeEntries]
   .filter(e => e.createdBy !== 'PSYCHOLOGIST')
   .filter(e => e.transcript && e.transcript.trim().length > 0)
-  .sort((a, b) => b.timestamp - a.timestamp)[0];
+  .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
 
 const latestSessionEntry = [...safeEntries]
   .filter(e => e.createdBy === 'PSYCHOLOGIST')
   .filter(e => e.psychologistEntryType === 'SESSION')
-  .sort((a, b) => b.timestamp - a.timestamp)[0];
+  .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
 
 const todayStr = (() => {
   const now = new Date();

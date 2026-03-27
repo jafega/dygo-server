@@ -175,7 +175,7 @@ const PatientTimeline: React.FC<PatientTimelineProps> = ({ patientId, psychologi
       const newEntry = {
         id: crypto.randomUUID(),
         content: newEntryContent,
-        timestamp: new Date().toISOString(),
+        timestamp: Date.now(),
         creator_user_id: psychologistId,
         target_user_id: patientId,
         createdBy: 'PSYCHOLOGIST',

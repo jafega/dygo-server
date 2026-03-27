@@ -62,7 +62,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
         // NO mostrar otros tipos
         return false;
       })
-      .sort((a, b) => b.timestamp - a.timestamp);
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
   return (
     <div className="max-w-2xl mx-auto">

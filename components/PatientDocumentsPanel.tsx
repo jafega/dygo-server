@@ -45,12 +45,13 @@ function getDocTitle(content: string): string {
 interface Signature {
   id: number;
   created_at: string;
-  template_id: number;
+  template_id: number | null;
   psych_user_id: string;
   patient_user_id: string;
   content: string;
   signed: boolean;
   signature_date: string | null;
+  external_document_url?: string;
 }
 
 interface PatientDocumentsPanelProps {
@@ -238,10 +239,39 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ doc, onClose, onSigned,
         </div>
 
         {/* Content */}
-        <div
-          className="flex-1 overflow-y-auto px-6 py-4 prose prose-slate max-w-none text-slate-800 leading-relaxed text-sm"
-          dangerouslySetInnerHTML={{ __html: markdownToHtml(doc.content) }}
-        />
+        {doc.external_document_url ? (
+          <div className="flex-1 overflow-hidden flex flex-col">
+            {doc.external_document_url.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
+              <img
+                src={doc.external_document_url}
+                alt={title}
+                className="flex-1 object-contain p-4 max-h-full"
+              />
+            ) : (
+              <iframe
+                src={doc.external_document_url}
+                title={title}
+                className="flex-1 w-full border-0"
+                style={{ minHeight: '400px' }}
+              />
+            )}
+            <div className="px-5 py-3 border-t border-slate-100 flex-shrink-0">
+              <a
+                href={doc.external_document_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center gap-2 w-full py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 hover:bg-slate-50 transition-colors font-medium"
+              >
+                <FileText size={15} /> Abrir / Descargar documento
+              </a>
+            </div>
+          </div>
+        ) : (
+          <div
+            className="flex-1 overflow-y-auto px-6 py-4 prose prose-slate max-w-none text-slate-800 leading-relaxed text-sm"
+            dangerouslySetInnerHTML={{ __html: markdownToHtml(doc.content) }}
+          />
+        )}
 
         {/* Sign area */}
         {!doc.signed && (
