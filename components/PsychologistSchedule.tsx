@@ -3251,7 +3251,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                           <div>
                             <div className={`font-semibold text-sm ${hasRealEmail ? 'text-blue-700' : 'text-slate-500'}`}>Recordatorio automático por email</div>
                             <div className={`text-xs ${hasRealEmail ? 'text-blue-600' : 'text-slate-400'}`}>
-                              {reminderDisabledReason ?? 'Enviar email 24h y 1h antes de la sesión'}
+                              {reminderDisabledReason ?? 'Se enviará el recordatorio el día anterior y el día de la sesión'}
                             </div>
                           </div>
                         </label>
@@ -3275,7 +3275,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                               <div>
                                 <div className={`font-semibold text-sm ${hasPhone ? 'text-green-700' : 'text-slate-500'}`}>Recordatorio automático por WhatsApp</div>
                                 <div className={`text-xs ${hasPhone ? 'text-green-600' : 'text-slate-400'}`}>
-                                  {hasPhone ? 'Enviar WhatsApp 24h y 1h antes de la sesión' : 'El paciente no tiene teléfono registrado'}
+                                  {hasPhone ? 'Se enviará el recordatorio el día anterior y el día de la sesión' : 'El paciente no tiene teléfono registrado'}
                                 </div>
                               </div>
                             </label>
