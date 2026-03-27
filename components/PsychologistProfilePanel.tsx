@@ -226,10 +226,12 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
   const handleSave = async () => {
     setIsSaving(true);
     try {
+      const prefix = detectDefaultPrefix();
+      const payload = { ...profile, phone: normalizePhone(String(profile.phone || ''), prefix) };
       const response = await apiFetch(`${API_URL}/psychologist/${userId}/profile`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(profile)
+        body: JSON.stringify(payload)
       });
 
       if (response.ok) {

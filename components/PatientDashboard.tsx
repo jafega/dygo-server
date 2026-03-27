@@ -214,7 +214,7 @@ const PatientDashboard = forwardRef<PatientDashboardHandle, PatientDashboardProp
           firstName: newPatient.firstName.trim(),
           lastName: newPatient.lastName.trim(),
           email: newPatient.email.trim() ? newPatient.email.trim().toLowerCase() : null,
-          phone: newPatient.phone.trim(),
+          phone: normalizePhone(newPatient.phone.trim(), detectDefaultPrefix()),
           psychologistId: currentUser.id
         })
       });

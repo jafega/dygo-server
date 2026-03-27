@@ -71,10 +71,12 @@ const PatientProfilePanel: React.FC<PatientProfilePanelProps> = ({ userId }) => 
   const handleSave = async () => {
     setIsSaving(true);
     try {
+      const prefix = detectDefaultPrefix();
+      const payload = { ...profile, phone: normalizePhone(profile.phone, prefix) };
       const response = await apiFetch(`${API_URL}/patient/${userId}/profile`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(profile)
+        body: JSON.stringify(payload)
       });
 
       if (response.ok) {

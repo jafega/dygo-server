@@ -1224,7 +1224,7 @@ tr:nth-child(even) td{background:#f8fafc}
           firstName: editedPatientData.firstName,
           lastName: editedPatientData.lastName,
           email: editedPatientData.email,
-          phone: editedPatientData.phone,
+          phone: normalizePhone(editedPatientData.phone || '', detectDefaultPrefix()),
           data: {
             ...patientData?.data,
             dni: editedPatientData.dni,
