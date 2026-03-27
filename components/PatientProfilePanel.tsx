@@ -14,6 +14,8 @@ interface PatientProfile {
   
   // Address
   address: string;
+  portal: string;
+  piso: string;
   city: string;
   postalCode: string;
   country: string;
@@ -38,6 +40,8 @@ const PatientProfilePanel: React.FC<PatientProfilePanelProps> = ({ userId }) => 
     phone: '',
     email: '',
     address: '',
+    portal: '',
+    piso: '',
     city: '',
     postalCode: '',
     country: 'España'
@@ -69,6 +73,10 @@ const PatientProfilePanel: React.FC<PatientProfilePanelProps> = ({ userId }) => 
   };
 
   const handleSave = async () => {
+    if (profile.address && !/\d/.test(profile.address)) {
+      alert('La dirección debe incluir al menos el nombre de la calle y el número.');
+      return;
+    }
     setIsSaving(true);
     try {
       const prefix = detectDefaultPrefix();
@@ -196,7 +204,7 @@ const PatientProfilePanel: React.FC<PatientProfilePanelProps> = ({ userId }) => 
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Dirección</label>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Calle y número *</label>
             <AddressAutocomplete
               value={profile.address}
               onChange={(val) => handleChange('address', val)}
@@ -208,8 +216,32 @@ const PatientProfilePanel: React.FC<PatientProfilePanelProps> = ({ userId }) => 
                   country: sel.country || prev.country,
                 }));
               }}
-              placeholder="Calle Principal, 123"
+              placeholder="Calle Principal, 23"
             />
+            <p className="text-xs text-slate-400 mt-1">Incluye siempre calle y número (ej: Calle Mayor, 15)</p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Portal / Escalera</label>
+              <input
+                type="text"
+                value={profile.portal}
+                onChange={(e) => handleChange('portal', e.target.value)}
+                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                placeholder="Portal A"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Piso / Puerta</label>
+              <input
+                type="text"
+                value={profile.piso}
+                onChange={(e) => handleChange('piso', e.target.value)}
+                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                placeholder="3º B"
+              />
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">

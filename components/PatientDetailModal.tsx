@@ -139,6 +139,8 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
           phone: data.phone || patient.phone,
           dni: data.data?.dni || data.dni || '',
           address: data.data?.address || data.address || '',
+          portal: data.data?.portal || data.portal || '',
+          piso: data.data?.piso || data.piso || '',
           birthDate: data.data?.birthDate || data.birthDate || '',
           notes: data.data?.notes || data.notes || ''
         });
@@ -1229,6 +1231,8 @@ tr:nth-child(even) td{background:#f8fafc}
             ...patientData?.data,
             dni: editedPatientData.dni,
             address: editedPatientData.address,
+            portal: editedPatientData.portal || '',
+            piso: editedPatientData.piso || '',
             birthDate: editedPatientData.birthDate,
             notes: editedPatientData.notes
           }
@@ -2054,14 +2058,14 @@ tr:nth-child(even) td{background:#f8fafc}
                   <div className="space-y-2 sm:space-y-3 md:col-span-2">
                     <label className="text-xs sm:text-sm font-bold text-slate-700 flex items-center gap-1.5 sm:gap-2">
                       <MapPin size={14} className="sm:w-4 sm:h-4 text-purple-600" />
-                      Dirección
+                      Dirección (calle y número)
                     </label>
                     {isEditingInfo ? (
                       <AddressAutocomplete
                         value={editedPatientData.address}
                         onChange={(val) => setEditedPatientData({ ...editedPatientData, address: val })}
-                        onSelect={(sel) => setEditedPatientData((prev: any) => ({ ...prev, address: sel.fullAddress }))}
-                        placeholder="Calle, número, ciudad, código postal..."
+                        onSelect={(sel) => setEditedPatientData((prev: any) => ({ ...prev, address: sel.streetAddress }))}
+                        placeholder="Calle Mayor, 15"
                         className="w-full"
                       />
                     ) : (
@@ -2069,6 +2073,41 @@ tr:nth-child(even) td{background:#f8fafc}
                         <span className={`text-xs sm:text-sm md:text-base font-medium ${editedPatientData.address ? 'text-slate-900' : 'text-slate-400'}`}>{editedPatientData.address || 'No especificado'}</span>
                       </div>
                     )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 sm:gap-4 md:col-span-2">
+                    <div className="space-y-2 sm:space-y-3">
+                      <label className="text-xs sm:text-sm font-bold text-slate-700">Portal / Escalera</label>
+                      {isEditingInfo ? (
+                        <input
+                          type="text"
+                          value={editedPatientData.portal || ''}
+                          onChange={(e) => setEditedPatientData({ ...editedPatientData, portal: e.target.value })}
+                          className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-white border-2 border-slate-300 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all text-sm"
+                          placeholder="Portal A"
+                        />
+                      ) : (
+                        <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-4 bg-white border-2 border-slate-200 rounded-lg sm:rounded-xl">
+                          <span className={`text-xs sm:text-sm md:text-base font-medium ${editedPatientData.portal ? 'text-slate-900' : 'text-slate-400'}`}>{editedPatientData.portal || 'No especificado'}</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="space-y-2 sm:space-y-3">
+                      <label className="text-xs sm:text-sm font-bold text-slate-700">Piso / Puerta</label>
+                      {isEditingInfo ? (
+                        <input
+                          type="text"
+                          value={editedPatientData.piso || ''}
+                          onChange={(e) => setEditedPatientData({ ...editedPatientData, piso: e.target.value })}
+                          className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-white border-2 border-slate-300 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all text-sm"
+                          placeholder="3º B"
+                        />
+                      ) : (
+                        <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-4 bg-white border-2 border-slate-200 rounded-lg sm:rounded-xl">
+                          <span className={`text-xs sm:text-sm md:text-base font-medium ${editedPatientData.piso ? 'text-slate-900' : 'text-slate-400'}`}>{editedPatientData.piso || 'No especificado'}</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
 

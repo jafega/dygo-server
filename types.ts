@@ -32,6 +32,8 @@ export interface User {
   dni?: string; // Documento Nacional de Identidad
   phone?: string;
   address?: string;
+  portal?: string; // Portal / Escalera
+  piso?: string;   // Piso / Puerta
   city?: string;
   postalCode?: string;
   country?: string;
