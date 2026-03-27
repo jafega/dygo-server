@@ -39,10 +39,16 @@ CREATE TABLE public.center (
   center_name text NOT NULL,
   cif text NOT NULL,
   address text NOT NULL,
+  nombre_comercial text,
+  direccion_comercial text,
   psychologist_user_id text NOT NULL,
   CONSTRAINT center_pkey PRIMARY KEY (id),
   CONSTRAINT center_psychologist_user_id_fkey FOREIGN KEY (psychologist_user_id) REFERENCES public.users(id)
 );
+
+-- Migration: add commercial name and address fields
+-- ALTER TABLE public.center ADD COLUMN IF NOT EXISTS nombre_comercial text;
+-- ALTER TABLE public.center ADD COLUMN IF NOT EXISTS direccion_comercial text;
 CREATE TABLE public.dispo (
   id text NOT NULL,
   data jsonb NOT NULL,

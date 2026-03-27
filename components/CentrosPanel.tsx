@@ -9,6 +9,8 @@ interface Centro {
   center_name: string;
   cif: string;
   address: string;
+  nombre_comercial?: string;
+  direccion_comercial?: string;
   created_at: string;
 }
 
@@ -30,14 +32,16 @@ const CentrosPanel = forwardRef<CentrosPanelRef, CentrosPanelProps>(({ psycholog
   const [formData, setFormData] = useState({
     center_name: '',
     cif: '',
-    address: ''
+    address: '',
+    nombre_comercial: '',
+    direccion_comercial: ''
   });
 
   useImperativeHandle(ref, () => ({
     openNewCenter: () => {
       if (!canCreate) { onNeedUpgrade?.(); return; }
       setEditingCentro(null);
-      setFormData({ center_name: '', cif: '', address: '' });
+      setFormData({ center_name: '', cif: '', address: '', nombre_comercial: '', direccion_comercial: '' });
       setShowModal(true);
     }
   }));
@@ -78,7 +82,7 @@ const CentrosPanel = forwardRef<CentrosPanelRef, CentrosPanelProps>(({ psycholog
         if (response.ok) {
           await loadCentros();
           setShowModal(false);
-          setFormData({ center_name: '', cif: '', address: '' });
+          setFormData({ center_name: '', cif: '', address: '', nombre_comercial: '', direccion_comercial: '' });
           setEditingCentro(null);
         }
       } else {
@@ -95,7 +99,7 @@ const CentrosPanel = forwardRef<CentrosPanelRef, CentrosPanelProps>(({ psycholog
         if (response.ok) {
           await loadCentros();
           setShowModal(false);
-          setFormData({ center_name: '', cif: '', address: '' });
+          setFormData({ center_name: '', cif: '', address: '', nombre_comercial: '', direccion_comercial: '' });
         }
       }
     } catch (error) {
@@ -108,7 +112,9 @@ const CentrosPanel = forwardRef<CentrosPanelRef, CentrosPanelProps>(({ psycholog
     setFormData({
       center_name: centro.center_name,
       cif: centro.cif,
-      address: centro.address
+      address: centro.address,
+      nombre_comercial: centro.nombre_comercial || '',
+      direccion_comercial: centro.direccion_comercial || ''
     });
     setShowModal(true);
   };
@@ -153,7 +159,7 @@ const CentrosPanel = forwardRef<CentrosPanelRef, CentrosPanelProps>(({ psycholog
             onClick={() => {
               if (!canCreate) { onNeedUpgrade?.(); return; }
               setEditingCentro(null);
-              setFormData({ center_name: '', cif: '', address: '' });
+              setFormData({ center_name: '', cif: '', address: '', nombre_comercial: '', direccion_comercial: '' });
               setShowModal(true);
             }}
             className="mt-6 inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
@@ -178,7 +184,7 @@ const CentrosPanel = forwardRef<CentrosPanelRef, CentrosPanelProps>(({ psycholog
                     <Building2 className="w-5 h-5 text-indigo-600" />
                   </div>
                   <div>
-                    <h3 className="font-semibold text-slate-900">{centro.center_name}</h3>
+                    <h3 className="font-semibold text-slate-900">{centro.nombre_comercial || centro.center_name}</h3>
                   </div>
                 </div>
                 <div className="flex gap-2">
@@ -209,7 +215,7 @@ const CentrosPanel = forwardRef<CentrosPanelRef, CentrosPanelProps>(({ psycholog
                 </div>
                 <div className="flex items-start gap-2 text-sm">
                   <MapPin size={14} className="text-slate-400 mt-0.5 flex-shrink-0" />
-                  <span className="text-slate-600">{centro.address}</span>
+                  <span className="text-slate-600">{centro.direccion_comercial || centro.address}</span>
                 </div>
               </div>
             </div>
@@ -219,7 +225,7 @@ const CentrosPanel = forwardRef<CentrosPanelRef, CentrosPanelProps>(({ psycholog
 
       {/* Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => { setShowModal(false); setEditingCentro(null); setFormData({ center_name: '', cif: '', address: '' }); }}>
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => { setShowModal(false); setEditingCentro(null); setFormData({ center_name: '', cif: '', address: '', nombre_comercial: '', direccion_comercial: '' }); }}>
           <div className="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             {/* Modal Header */}
             <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center rounded-t-2xl">
@@ -230,7 +236,7 @@ const CentrosPanel = forwardRef<CentrosPanelRef, CentrosPanelProps>(({ psycholog
                 onClick={() => {
                   setShowModal(false);
                   setEditingCentro(null);
-                  setFormData({ center_name: '', cif: '', address: '' });
+                  setFormData({ center_name: '', cif: '', address: '', nombre_comercial: '', direccion_comercial: '' });
                 }}
                 className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
               >
@@ -240,10 +246,40 @@ const CentrosPanel = forwardRef<CentrosPanelRef, CentrosPanelProps>(({ psycholog
 
             {/* Modal Content */}
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
-              {/* Nombre del Centro */}
+              {/* Nombre comercial */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Nombre del Centro *
+                  Nombre comercial
+                </label>
+                <input
+                  type="text"
+                  value={formData.nombre_comercial}
+                  onChange={(e) => setFormData({ ...formData, nombre_comercial: e.target.value })}
+                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  placeholder="Ej: Centro de Psicología Integral"
+                />
+              </div>
+
+              {/* Dirección comercial */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Dirección comercial
+                </label>
+                <textarea
+                  value={formData.direccion_comercial}
+                  onChange={(e) => setFormData({ ...formData, direccion_comercial: e.target.value })}
+                  rows={2}
+                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  placeholder="Ej: Calle Mayor 123, 28001 Madrid"
+                />
+              </div>
+
+              <hr className="border-slate-200" />
+
+              {/* Nombre de facturación */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Nombre de facturación *
                 </label>
                 <input
                   type="text"
@@ -251,7 +287,7 @@ const CentrosPanel = forwardRef<CentrosPanelRef, CentrosPanelProps>(({ psycholog
                   value={formData.center_name}
                   onChange={(e) => setFormData({ ...formData, center_name: e.target.value })}
                   className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                  placeholder="Ej: Centro de Psicología Integral"
+                  placeholder="Nombre que aparecerá en las facturas"
                 />
               </div>
 
@@ -270,10 +306,10 @@ const CentrosPanel = forwardRef<CentrosPanelRef, CentrosPanelProps>(({ psycholog
                 />
               </div>
 
-              {/* Dirección */}
+              {/* Dirección de facturación */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Dirección *
+                  Dirección de facturación *
                 </label>
                 <textarea
                   required
@@ -281,7 +317,7 @@ const CentrosPanel = forwardRef<CentrosPanelRef, CentrosPanelProps>(({ psycholog
                   onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                   rows={3}
                   className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                  placeholder="Ej: Calle Mayor 123, 28001 Madrid"
+                  placeholder="Dirección que aparecerá en las facturas"
                 />
               </div>
 
@@ -292,7 +328,7 @@ const CentrosPanel = forwardRef<CentrosPanelRef, CentrosPanelProps>(({ psycholog
                   onClick={() => {
                     setShowModal(false);
                     setEditingCentro(null);
-                    setFormData({ center_name: '', cif: '', address: '' });
+                    setFormData({ center_name: '', cif: '', address: '', nombre_comercial: '', direccion_comercial: '' });
                   }}
                   className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors"
                 >

@@ -1,7 +1,71 @@
 import React, { useState } from 'react';
 import { JournalEntry } from '../types';
-import { ChevronLeft, ChevronRight, Layers, Plus, Calendar as CalendarIcon, LayoutGrid, Clock, Lightbulb, FileText, MessageCircle, Mic, Heart, Smile, ChevronDown, ChevronUp, Sparkles, TrendingUp } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Layers, Plus, Calendar as CalendarIcon, LayoutGrid, Clock, Lightbulb, FileText, MessageCircle, Mic, Heart, Smile, ChevronDown, ChevronUp, Sparkles, TrendingUp, Paperclip, Download, Eye, Image as ImageIcon, File, Music } from 'lucide-react';
 import { decompressTranscript } from '../services/genaiService';
+
+interface AttachmentItem {
+  id: string;
+  name: string;
+  type: string;
+  url: string;
+  size?: number;
+}
+
+const getAttachmentIcon = (type: string) => {
+  if (type.startsWith('image/') || type === 'IMAGE') return <ImageIcon size={16} className="text-blue-600" />;
+  if (type.startsWith('audio/') || type === 'AUDIO') return <Music size={16} className="text-purple-600" />;
+  if (type === 'DOCUMENT' || type.includes('pdf') || type.includes('word') || type.includes('text')) return <FileText size={16} className="text-red-600" />;
+  return <File size={16} className="text-slate-600" />;
+};
+
+const isImageType = (type: string) => type.startsWith('image/') || type === 'IMAGE';
+
+const AttachmentList: React.FC<{ attachments: AttachmentItem[] }> = ({ attachments }) => (
+  <div className="space-y-2">
+    <div className="text-xs font-semibold text-slate-600 flex items-center gap-1">
+      <Paperclip size={12} />
+      Archivos adjuntos ({attachments.length})
+    </div>
+    <div className="grid grid-cols-1 gap-1.5">
+      {attachments.map((att) => (
+        <div key={att.id} className="flex items-center gap-2 bg-white rounded-lg border border-slate-200 p-2 hover:border-slate-300 transition-colors">
+          <div className="flex-shrink-0">{getAttachmentIcon(att.type)}</div>
+          <div className="flex-1 min-w-0">
+            <div className="text-xs font-medium text-slate-900 truncate">{att.name}</div>
+            {att.size != null && (
+              <div className="text-[10px] text-slate-500">
+                {att.size < 1024 ? `${att.size} B` : att.size < 1048576 ? `${(att.size / 1024).toFixed(1)} KB` : `${(att.size / 1048576).toFixed(1)} MB`}
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-1">
+            {isImageType(att.type) && (
+              <a href={att.url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors" title="Ver imagen">
+                <Eye size={14} className="text-slate-600" />
+              </a>
+            )}
+            <a href={att.url} download={att.name} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors" title="Descargar">
+              <Download size={14} className="text-slate-600" />
+            </a>
+          </div>
+        </div>
+      ))}
+    </div>
+    {attachments.some(a => isImageType(a.type)) && (
+      <div className="grid grid-cols-2 gap-1.5 mt-1">
+        {attachments.filter(a => isImageType(a.type)).map((att) => (
+          <a key={att.id} href={att.url} target="_blank" rel="noopener noreferrer"
+            className="relative group rounded-lg overflow-hidden border-2 border-slate-200 hover:border-indigo-400 transition-all aspect-square">
+            <img src={att.url} alt={att.name} className="w-full h-32 object-cover" />
+            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+              <Eye size={24} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+            </div>
+          </a>
+        ))}
+      </div>
+    )}
+  </div>
+);
 
 interface CalendarViewProps {
   entries: JournalEntry[];
@@ -104,10 +168,12 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
             // Para entradas de tipo feedback, el contenido está en entry.content
             // Para feedback adjunto a voice sessions, está en psychologistFeedback
             const feedback = isFeedback && entry.content
-              ? { text: entry.content, attachments: entry.attachments || [] }
-              : typeof entry.psychologistFeedback === 'string' 
-              ? { text: entry.psychologistFeedback, attachments: [] } 
-              : entry.psychologistFeedback;
+              ? { text: entry.content, attachments: (entry as any).attachments || [] }
+              : typeof entry.psychologistFeedback === 'string'
+              ? { text: entry.psychologistFeedback, attachments: [] }
+              : entry.psychologistFeedback && typeof entry.psychologistFeedback === 'object'
+              ? { text: (entry.psychologistFeedback as any).text || '', attachments: (entry.psychologistFeedback as any).attachments || [] }
+              : null;
 
             const showTranscript = expandedTranscripts[entry.id] || false;
             const isAdviceExpanded = expandedSections[entry.id]?.advice || false;
@@ -159,6 +225,9 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
                     <div className="prose prose-sm md:prose-base max-w-none">
                       <p className="text-slate-700 leading-relaxed whitespace-pre-wrap">{feedback.text}</p>
                     </div>
+                  )}
+                  {isFeedback && feedback?.attachments && feedback.attachments.length > 0 && (
+                    <AttachmentList attachments={feedback.attachments as any[]} />
                   )}
 
                   {/* Voice Session Content */}
@@ -241,8 +310,11 @@ const CalendarView: React.FC<CalendarViewProps> = ({ entries, onSelectDate, onSe
                             )}
                           </button>
                           {isFeedbackExpanded && (
-                            <div className="px-4 pb-4 md:px-5 md:pb-5 pt-2">
+                            <div className="px-4 pb-4 md:px-5 md:pb-5 pt-2 space-y-3">
                               <p className="text-sm md:text-base text-slate-700 leading-relaxed whitespace-pre-wrap">{feedback.text}</p>
+                              {feedback?.attachments && feedback.attachments.length > 0 && (
+                                <AttachmentList attachments={feedback.attachments as any[]} />
+                              )}
                             </div>
                           )}
                         </div>

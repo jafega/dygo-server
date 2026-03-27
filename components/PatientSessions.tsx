@@ -436,6 +436,7 @@ const PatientSessions: React.FC = () => {
             <button onClick={loadSessions} className="ml-auto text-xs underline hover:no-underline">Reintentar</button>
           </div>
         )}
+      </div>
 
       {/* Table View - Desktop */}
       <div className="hidden md:block overflow-x-auto">
@@ -475,7 +476,7 @@ const PatientSessions: React.FC = () => {
             </thead>
             <tbody className="divide-y divide-slate-200">
               {displayedSessions.map((session) => {
-                const isPast = new Date(session.date) < today || session.status !== 'scheduled';
+                const isPast = ((session as any).starts_on ? new Date((session as any).starts_on) < today : (session.date || '') < todayStr) || session.status !== 'scheduled';
                 return (
                   <tr 
                     key={session.id}
@@ -593,7 +594,7 @@ const PatientSessions: React.FC = () => {
         ) : (
           <div className="p-3 space-y-3">
             {displayedSessions.map((session) => {
-              const isPast = new Date(session.date) < today || session.status !== 'scheduled';
+              const isPast = ((session as any).starts_on ? new Date((session as any).starts_on) < today : (session.date || '') < todayStr) || session.status !== 'scheduled';
               return (
                 <div
                   key={session.id}

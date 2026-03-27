@@ -2,6 +2,7 @@
 import { Calendar, CheckCircle, XCircle, Clock, DollarSign, User, Filter, Edit2, Save, X as XIcon, FileText, Trash2, Receipt, Ticket, Copy, Send, ExternalLink, Globe, ChevronDown } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser, apiFetch } from '../services/authService';
+import { normalizePhone } from '../services/phoneUtils';
 import SessionDetailsModal from './SessionDetailsModal';
 
 interface Session {
@@ -1679,9 +1680,10 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                             month: 'long' 
                           });
                           const message = `Hola ${patientName}, aquí está el enlace para nuestra sesión del ${sessionDate} a las ${editedSession.startTime}: ${editedSession.meetLink}`;
-                          const phone = editedSession.patientPhone?.replace(/[^0-9]/g, '') || '';
-                          const whatsappUrl = phone 
-                            ? `https://wa.me/${phone}?text=${encodeURIComponent(message)}`
+                          const rawPhone = editedSession.patientPhone?.trim() || '';
+                          const normalizedPhone = rawPhone ? normalizePhone(rawPhone).replace(/[^0-9]/g, '') : '';
+                          const whatsappUrl = normalizedPhone 
+                            ? `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(message)}`
                             : `https://wa.me/?text=${encodeURIComponent(message)}`;
                           window.open(whatsappUrl, '_blank');
                         }}

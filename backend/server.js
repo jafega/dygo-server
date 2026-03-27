@@ -11746,6 +11746,134 @@ function buildManualReminderEmailHtml({ patientFirstName, sessionDateStr, sessio
 </html>`;
 }
 
+// Manual WhatsApp reminder via Twilio — triggered by psychologist from session modal
+app.post('/api/sessions/:sessionId/send-whatsapp', authenticateRequest, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const psychologistUserId = req.authenticatedUserId;
+    if (!psychologistUserId) return res.status(401).json({ error: 'No autenticado' });
+
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken  = process.env.TWILIO_AUTH_TOKEN;
+    if (!accountSid || !authToken) {
+      return res.status(503).json({ error: 'Servicio de WhatsApp no configurado (TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN)' });
+    }
+
+    // Fetch session
+    let session = null;
+    if (supabaseAdmin) {
+      const { data } = await supabaseAdmin
+        .from('sessions')
+        .select('id, data, starts_on, patient_user_id, psychologist_user_id')
+        .eq('id', sessionId)
+        .single();
+      session = data;
+    } else {
+      const db = getDb();
+      session = (db.sessions || []).find(s => s.id === sessionId);
+    }
+
+    if (!session) return res.status(404).json({ error: 'Sesión no encontrada' });
+    if (String(session.psychologist_user_id) !== String(psychologistUserId)) {
+      return res.status(403).json({ error: 'Sin permiso para esta sesión' });
+    }
+
+    // Fetch patient phone
+    let patient = null;
+    if (supabaseAdmin) {
+      const { data } = await supabaseAdmin
+        .from('users')
+        .select('data')
+        .eq('id', session.patient_user_id)
+        .single();
+      patient = data;
+    } else {
+      const db = getDb();
+      patient = (db.users || []).find(u => u.id === session.patient_user_id);
+    }
+
+    const rawPhone = patient?.data?.phone || '';
+    if (!rawPhone) {
+      return res.status(400).json({ error: 'El paciente no tiene teléfono registrado' });
+    }
+
+    // Normalise to E.164 (default Spain +34)
+    let normalised = rawPhone.trim().replace(/\s+/g, '');
+    if (!normalised.startsWith('+')) {
+      if (normalised.startsWith('0')) normalised = normalised.slice(1);
+      normalised = `+34${normalised}`;
+    }
+    const toNumber = `whatsapp:${normalised}`;
+
+    // Fetch psychologist profile for display name
+    let psychName = null;
+    if (supabaseAdmin) {
+      const { data } = await supabaseAdmin
+        .from('psychologist_profiles')
+        .select('data')
+        .eq('id', psychologistUserId)
+        .single();
+      psychName = data?.data?.name || null;
+    } else {
+      const db = getDb();
+      const prof = (db.psychologist_profiles || []).find(p => p.id === psychologistUserId);
+      psychName = prof?.data?.name || null;
+    }
+
+    const tz = session.data?.schedule_timezone || 'Europe/Madrid';
+    const sessionDateStr = new Date(session.starts_on).toLocaleDateString('es-ES', {
+      weekday: 'long', day: 'numeric', month: 'long', timeZone: tz
+    });
+    const sessionTimeStr = new Date(session.starts_on).toLocaleTimeString('es-ES', {
+      hour: '2-digit', minute: '2-digit', timeZone: tz
+    });
+    const patientFirstName =
+      patient?.data?.firstName ||
+      patient?.data?.name?.split?.(' ')?.[0] ||
+      'paciente';
+
+    const twilioFrom      = process.env.TWILIO_WHATSAPP_FROM || 'whatsapp:+14155238886';
+    const templateSid     = process.env.TWILIO_TEMPLATE_SID || 'HXfbba1476d17be5516c6b0ad80a7fd21b';
+    const contentVariables = JSON.stringify({
+      patient_name: patientFirstName,
+      psych_name:   psychName || 'tu psicólogo/a',
+      session_date: sessionDateStr,
+      session_time: sessionTimeStr
+    });
+
+    const body = new URLSearchParams({
+      From: twilioFrom,
+      To: toNumber,
+      ContentSid: templateSid,
+      ContentVariables: contentVariables
+    });
+
+    const twilioRes = await fetch(
+      `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString('base64')}`,
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: body.toString()
+      }
+    );
+
+    if (!twilioRes.ok) {
+      const errBody = await twilioRes.json().catch(() => ({}));
+      console.error('[send-whatsapp] Twilio error:', errBody);
+      return res.status(502).json({ error: errBody?.message || 'Error al enviar WhatsApp' });
+    }
+
+    console.log(`[send-whatsapp] 💬 Manual WhatsApp sent to ${toNumber} for session ${sessionId}`);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('❌ [send-whatsapp] Error:', err?.message);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
 app.post('/api/sessions/availability', authenticateRequest, async (req, res) => {
   try {
     const { slots, psychologistId } = req.body;
@@ -13208,7 +13336,7 @@ app.get('/api/centers', authenticateRequest, async (req, res) => {
 // POST /api/centers - Crear un nuevo centro
 app.post('/api/centers', authenticateRequest, async (req, res) => {
   try {
-    const { psychologistId, center_name, cif, address } = req.body;
+    const { psychologistId, center_name, cif, address, nombre_comercial, direccion_comercial } = req.body;
 
     if (!psychologistId || !center_name || !cif || !address) {
       return res.status(400).json({ 
@@ -13225,6 +13353,8 @@ app.post('/api/centers', authenticateRequest, async (req, res) => {
       center_name,
       cif,
       address,
+      nombre_comercial: nombre_comercial || null,
+      direccion_comercial: direccion_comercial || null,
       created_at: new Date().toISOString()
     };
 
@@ -13261,7 +13391,7 @@ app.post('/api/centers', authenticateRequest, async (req, res) => {
 app.patch('/api/centers/:id', authenticateRequest, async (req, res) => {
   try {
     const { id } = req.params;
-    const { center_name, cif, address, psychologistId } = req.body;
+    const { center_name, cif, address, nombre_comercial, direccion_comercial, psychologistId } = req.body;
 
     if (!psychologistId) {
       return res.status(400).json({ error: 'psychologistId es requerido' });
@@ -13289,6 +13419,8 @@ app.patch('/api/centers/:id', authenticateRequest, async (req, res) => {
         if (center_name !== undefined) updates.center_name = center_name;
         if (cif !== undefined) updates.cif = cif;
         if (address !== undefined) updates.address = address;
+        if (nombre_comercial !== undefined) updates.nombre_comercial = nombre_comercial;
+        if (direccion_comercial !== undefined) updates.direccion_comercial = direccion_comercial;
 
         const { data, error } = await supabaseAdmin
           .from('center')

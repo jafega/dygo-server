@@ -120,6 +120,8 @@ interface Center {
   center_name: string;
   cif: string;
   address: string;
+  nombre_comercial?: string;
+  direccion_comercial?: string;
   psychologist_user_id: string;
   created_at: string;
 }
@@ -365,7 +367,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
           if (relWithCenter) {
             const center = centers.find(c => c.id === relWithCenter.center_id);
             setPatientCenterWarning({
-              centerName: center?.center_name || relWithCenter.center_id,
+              centerName: center?.nombre_comercial || center?.center_name || relWithCenter.center_id,
               centerId: relWithCenter.center_id
             });
           }
@@ -953,7 +955,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
       setSelectedCenterId((invoice as any).centerId);
       const center = centers.find(c => c.id === (invoice as any).centerId);
       if (center) {
-        setCenterSearchTerm(center.center_name);
+        setCenterSearchTerm(center.nombre_comercial || center.center_name);
       }
       await loadCenterUnbilledSessions((invoice as any).centerId);
     } else {
@@ -1099,11 +1101,18 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
 
   const handleDownloadPDF = async (invoiceId: string) => {
     try {
-      // Abrir la factura en una nueva ventana para visualizar/imprimir
-      const pdfWindow = window.open(`${API_URL}/invoices/${invoiceId}/pdf`, '_blank');
-      if (!pdfWindow) {
-        alert('Por favor, permite ventanas emergentes para visualizar la factura');
+      const response = await apiFetch(`${API_URL}/invoices/${invoiceId}/pdf`);
+      if (!response.ok) {
+        throw new Error(`Error ${response.status}`);
       }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
     } catch (error) {
       console.error('Error opening PDF:', error);
       alert('Error al abrir la factura');
@@ -1559,14 +1568,14 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                       <div className="absolute z-50 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
                         {centers
                           .filter(center => 
-                            center.center_name.toLowerCase().includes(centerSearchTerm.toLowerCase())
+                            (center.nombre_comercial || center.center_name).toLowerCase().includes(centerSearchTerm.toLowerCase())
                           )
                           .map((center) => (
                             <div
                               key={center.id}
                               onClick={() => {
                                 setSelectedCenterId(center.id);
-                                setCenterSearchTerm(center.center_name);
+                                setCenterSearchTerm(center.nombre_comercial || center.center_name);
                                 setShowCenterDropdown(false);
                                 handleCenterSelect(center.id);
                               }}
@@ -1574,11 +1583,11 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                                 selectedCenterId === center.id ? 'bg-indigo-50' : ''
                               }`}
                             >
-                              <div className="font-medium text-slate-900">{center.center_name}</div>
+                              <div className="font-medium text-slate-900">{center.nombre_comercial || center.center_name}</div>
                             </div>
                           ))}
                         {centers.filter(center => 
-                          center.center_name.toLowerCase().includes(centerSearchTerm.toLowerCase())
+                          (center.nombre_comercial || center.center_name).toLowerCase().includes(centerSearchTerm.toLowerCase())
                         ).length === 0 && (
                           <div className="px-4 py-3 text-slate-500 text-center">
                             No se encontraron centros
