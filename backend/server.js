@@ -13,6 +13,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { google } from 'googleapis';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
+import twilio from 'twilio';
 
 // bcrypt: prefer native, fall back to pure-JS bcryptjs in serverless
 let bcrypt;
@@ -11704,7 +11705,6 @@ app.post('/api/sessions/:sessionId/send-whatsapp', authenticateRequest, async (r
       hour: '2-digit', minute: '2-digit', timeZone: tz
     });
 
-    const { default: twilio } = await import('twilio');
     const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
     const twilioFrom = process.env.TWILIO_WHATSAPP_FROM || 'whatsapp:+14155238886';
     const toNumber = patientPhone.startsWith('+')
