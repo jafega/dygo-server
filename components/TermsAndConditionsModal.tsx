@@ -1,5 +1,5 @@
-import React, { useState, useRef } from 'react';
-import { ScrollText, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { ScrollText, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface TermsAndConditionsModalProps {
     onAccept: () => void;
@@ -12,26 +12,18 @@ const TERMS_VERSION = '3.2';
 export const TERMS_ACCEPTED_KEY = 'mainds_terms_accepted_v3';
 
 const TermsAndConditionsModal: React.FC<TermsAndConditionsModalProps> = ({ onAccept, onDecline }) => {
-    const [hasScrolledToBottom, setHasScrolledToBottom] = useState(false);
     const [checked, setChecked] = useState(false);
-    const scrollRef = useRef<HTMLDivElement>(null);
-
-    const handleScroll = () => {
-        const el = scrollRef.current;
-        if (!el) return;
-        const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
-        if (atBottom) setHasScrolledToBottom(true);
-    };
+    const [showFullTerms, setShowFullTerms] = useState(false);
 
     const handleAccept = () => {
-        if (!checked || !hasScrolledToBottom) return;
+        if (!checked) return;
         localStorage.setItem(TERMS_ACCEPTED_KEY, JSON.stringify({ accepted: true, timestamp: Date.now(), version: TERMS_VERSION }));
         onAccept();
     };
 
     return (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-            <div className="bg-white w-full max-w-3xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+            <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
                 {/* Header */}
                 <div className="bg-indigo-700 text-white px-6 py-4 flex items-center gap-3 shrink-0">
                     <ScrollText size={24} className="shrink-0" />
@@ -41,20 +33,24 @@ const TermsAndConditionsModal: React.FC<TermsAndConditionsModalProps> = ({ onAcc
                     </div>
                 </div>
 
-                {/* Warning banner */}
-                <div className="bg-amber-50 border-b border-amber-200 px-6 py-2.5 flex items-start gap-2 shrink-0">
-                    <AlertTriangle size={15} className="text-amber-600 shrink-0 mt-0.5" />
-                    <p className="text-xs text-amber-800 leading-relaxed">
-                        Debes leer y desplazarte hasta el final del documento para poder aceptar. Tu aceptación es <strong>vinculante y legalmente válida</strong>.
+                {/* Accept section */}
+                <div className="px-8 py-6 shrink-0 space-y-4">
+                    <p className="text-sm text-slate-600 leading-relaxed">
+                        Para acceder a mainds necesitas aceptar los Términos y Condiciones de Uso de <strong>TOOMUCHDRAMA, S.L.</strong> (versión {TERMS_VERSION}, en vigor desde {TERMS_LAST_UPDATED}).
                     </p>
+
+                    <button
+                        onClick={() => setShowFullTerms(v => !v)}
+                        className="flex items-center gap-1.5 text-indigo-600 text-sm font-medium hover:text-indigo-800 transition-colors"
+                    >
+                        {showFullTerms ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                        {showFullTerms ? 'Ocultar términos completos' : 'Leer los Términos y Condiciones completos'}
+                    </button>
                 </div>
 
-                {/* Scrollable content */}
-                <div
-                    ref={scrollRef}
-                    onScroll={handleScroll}
-                    className="flex-1 overflow-y-auto px-8 py-6 text-sm text-slate-700 leading-relaxed space-y-6"
-                >
+                {/* Collapsible full terms */}
+                {showFullTerms && (
+                    <div className="flex-1 overflow-y-auto px-8 pb-6 text-sm text-slate-700 leading-relaxed space-y-6 border-t border-slate-100">
                     {/* Identidad del prestador */}
                     <section>
                         <h3 className="text-base font-bold text-slate-900 mb-2 uppercase tracking-wide border-b pb-1">PREÁMBULO E IDENTIFICACIÓN DEL TITULAR</h3>
@@ -329,26 +325,16 @@ const TermsAndConditionsModal: React.FC<TermsAndConditionsModalProps> = ({ onAcc
 
                     {/* Cláusula final */}
                     <section className="border-t pt-4 text-xs text-slate-500">
-                        <p className="font-semibold text-slate-700">Declaración final de aceptación</p>
-                        <p className="mt-1">
-                            AL MARCAR LA CASILLA DE ACEPTACIÓN Y HACER CLIC EN «ACEPTO LOS TÉRMINOS», EL USUARIO RECONOCE Y ACEPTA: (i) HABER LEÍDO ÍNTEGRAMENTE ESTOS TÉRMINOS; (ii) COMPRENDERLOS Y ACEPTARLOS; (iii) QUE DICHA ACEPTACIÓN TIENE PLENA VALIDEZ JURÍDICA AL AMPARO DEL ARTÍCULO 23 DE LA LEY 34/2002, DE 11 DE JULIO, DE SERVICIOS DE LA SOCIEDAD DE LA INFORMACIÓN Y DE COMERCIO ELECTRÓNICO (LSSI); Y (iv) QUE LA FECHA Y HORA DE ACEPTACIÓN QUEDARÁN REGISTRADAS EN LOS SISTEMAS DE LA EMPRESA.
-                        </p>
-                        <p className="mt-2 italic">
+                        <p className="mt-1 italic">
                             © {new Date().getFullYear()} TOOMUCHDRAMA, S.L. Todos los derechos reservados. | Versión {TERMS_VERSION} | {TERMS_LAST_UPDATED}
                         </p>
                     </section>
                 </div>
+                )}
 
                 {/* Footer */}
                 <div className="px-6 py-4 border-t bg-slate-50 shrink-0 space-y-3">
-                    {!hasScrolledToBottom && (
-                        <p className="text-xs text-amber-700 text-center flex items-center justify-center gap-1.5">
-                            <AlertTriangle size={13} />
-                            Desplázate hasta el final para poder aceptar
-                        </p>
-                    )}
-
-                    <label className={`flex items-start gap-3 cursor-pointer select-none ${!hasScrolledToBottom ? 'opacity-40 pointer-events-none' : ''}`}>
+                    <label className="flex items-start gap-3 cursor-pointer select-none">
                         <input
                             type="checkbox"
                             checked={checked}
@@ -356,7 +342,7 @@ const TermsAndConditionsModal: React.FC<TermsAndConditionsModalProps> = ({ onAcc
                             className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 accent-indigo-600 shrink-0"
                         />
                         <span className="text-xs text-slate-700 leading-relaxed">
-                            He leído, entendido y acepto íntegramente los <strong>Términos y Condiciones de Uso</strong> de mainds, operado por <strong>TOOMUCHDRAMA, S.L.</strong>, en su versión {TERMS_VERSION} de fecha {TERMS_LAST_UPDATED}. Acepto que dicha aceptación tiene plena validez jurídica.
+                            He leído y acepto los <strong>Términos y Condiciones de Uso</strong> de mainds, operado por <strong>TOOMUCHDRAMA, S.L.</strong>, en su versión {TERMS_VERSION} de fecha {TERMS_LAST_UPDATED}. Acepto que dicha aceptación tiene plena validez jurídica.
                         </span>
                     </label>
 
@@ -369,7 +355,7 @@ const TermsAndConditionsModal: React.FC<TermsAndConditionsModalProps> = ({ onAcc
                         </button>
                         <button
                             onClick={handleAccept}
-                            disabled={!checked || !hasScrolledToBottom}
+                            disabled={!checked}
                             className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                         >
                             <CheckCircle2 size={16} />
