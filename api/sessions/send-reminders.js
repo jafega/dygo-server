@@ -35,26 +35,22 @@ export default async function handler(req, res) {
   const twilioFrom = process.env.TWILIO_WHATSAPP_FROM || 'whatsapp:+14155238886';
 
   const now = new Date();
-  // Query sessions starting in the next ~25 hours (covers both 1h and 24h windows)
-  const windowMin = new Date(now.getTime() + 30 * 60 * 1000);           // +30 min (min)
-  const windowMax = new Date(now.getTime() + 25 * 60 * 60 * 1000);      // +25 h  (max)
+  // Query sessions for the rest of today and all of tomorrow (UTC)
+  const todayEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
+  const tomorrowStart = new Date(todayEnd.getTime() + 1);
+  const tomorrowEnd   = new Date(Date.UTC(tomorrowStart.getUTCFullYear(), tomorrowStart.getUTCMonth(), tomorrowStart.getUTCDate(), 23, 59, 59, 999));
 
   const { data: sessions, error: fetchError } = await supabase
     .from('sessions')
     .select('id, data, starts_on, patient_user_id, psychologist_user_id, status')
     .in('status', ['scheduled', 'confirmed'])
-    .gte('starts_on', windowMin.toISOString())
-    .lte('starts_on', windowMax.toISOString());
+    .gte('starts_on', now.toISOString())
+    .lte('starts_on', tomorrowEnd.toISOString());
 
   if (fetchError) {
     console.error('[send-reminders] Error fetching sessions:', fetchError.message);
     return res.status(500).json({ error: fetchError.message });
   }
-
-  // ±3 min tolerance window around the target time
-  const WINDOW_MS = 3 * 60 * 1000;
-  const target1h  = now.getTime() + 60 * 60 * 1000;
-  const target24h = now.getTime() + 24 * 60 * 60 * 1000;
 
   let sent = 0;
   const errors = [];
@@ -79,11 +75,11 @@ export default async function handler(req, res) {
     // Skip session if neither channel is enabled
     if (!emailReminderEnabled && !whatsappReminderEnabled) continue;
 
-    const sessionTime = new Date(session.starts_on).getTime();
-    const is1hWindow  = Math.abs(sessionTime - target1h)  <= WINDOW_MS;
-    const is24hWindow = Math.abs(sessionTime - target24h) <= WINDOW_MS;
+    const sessionTime    = new Date(session.starts_on).getTime();
+    const isTodaySession    = sessionTime <= todayEnd.getTime();
+    const isTomorrowSession = sessionTime >  todayEnd.getTime() && sessionTime <= tomorrowEnd.getTime();
 
-    if (!is1hWindow && !is24hWindow) continue;
+    if (!isTodaySession && !isTomorrowSession) continue;
 
     // Check psychologist profile settings for both channels
     const profile = await getProfile(session.psychologist_user_id);
@@ -115,7 +111,7 @@ export default async function handler(req, res) {
       hour: '2-digit', minute: '2-digit', timeZone: tz
     });
 
-    const label = is1hWindow ? 'en 1 hora' : 'mañana';
+    const label = isTodaySession ? 'hoy' : 'mañana';
     const patientFirstName =
       patient?.data?.firstName ||
       patient?.data?.name?.split?.(' ')?.[0] ||
@@ -123,7 +119,7 @@ export default async function handler(req, res) {
 
     try {
       // --- EMAIL CHANNEL ---
-      const emailSentKey = is1hWindow ? 'reminder_1h_sent_at' : 'reminder_24h_sent_at';
+      const emailSentKey = isTodaySession ? 'reminder_today_sent_at' : 'reminder_tomorrow_sent_at';
       if (emailReminderEnabled && psychEmailEnabled && patientEmail && !patientEmail.includes('@noemail.dygo.local') && !session.data?.[emailSentKey]) {
         await resend.emails.send({
           from: 'mainds <no-reply@mainds.app>',
@@ -135,7 +131,7 @@ export default async function handler(req, res) {
             sessionDateStr,
             sessionTimeStr,
             label,
-            is1hWindow,
+            isTodaySession,
             meetLink: session.data?.meetLink || null,
             sessionType: session.data?.type || null,
             psychName,
@@ -144,12 +140,12 @@ export default async function handler(req, res) {
           })
         });
         session.data = { ...session.data, [emailSentKey]: new Date().toISOString() };
-        console.log(`[send-reminders] ✉️  Sent ${is1hWindow ? '1h' : '24h'} email reminder to ${patientEmail} for session ${session.id}`);
+        console.log(`[send-reminders] ✉️  Sent ${isTodaySession ? 'today' : 'tomorrow'} email reminder to ${patientEmail} for session ${session.id}`);
         sent++;
       }
 
       // --- WHATSAPP CHANNEL ---
-      const waSentKey = is1hWindow ? 'reminder_1h_whatsapp_sent_at' : 'reminder_24h_whatsapp_sent_at';
+      const waSentKey = isTodaySession ? 'reminder_today_whatsapp_sent_at' : 'reminder_tomorrow_whatsapp_sent_at';
       if (whatsappReminderEnabled && whatsappEnabled && twilioClient && patientPhone && !session.data?.[waSentKey]) {
         try {
           const toNumber = patientPhone.startsWith('+')
@@ -163,14 +159,14 @@ export default async function handler(req, res) {
               sessionDateStr,
               sessionTimeStr,
               label,
-              is1hWindow,
+              isTodaySession,
               meetLink: session.data?.meetLink || null,
               sessionType: session.data?.type || null,
               psychName
             })
           });
           session.data = { ...session.data, [waSentKey]: new Date().toISOString() };
-          console.log(`[send-reminders] 💬 WhatsApp ${is1hWindow ? '1h' : '24h'} reminder sent to ${toNumber} for session ${session.id}`);
+          console.log(`[send-reminders] 💬 WhatsApp ${isTodaySession ? 'today' : 'tomorrow'} reminder sent to ${toNumber} for session ${session.id}`);
           sent++;
         } catch (waErr) {
           console.error(`[send-reminders] WhatsApp failed for session ${session.id}:`, waErr.message);
@@ -193,13 +189,13 @@ export default async function handler(req, res) {
   return res.status(200).json({ sent, errors });
 }
 
-function buildReminderEmail({ patientFirstName, sessionDateStr, sessionTimeStr, label, is1hWindow, meetLink, sessionType, psychName, psychEmail, psychPhone }) {
+function buildReminderEmail({ patientFirstName, sessionDateStr, sessionTimeStr, label, isTodaySession, meetLink, sessionType, psychName, psychEmail, psychPhone }) {
   const greeting = patientFirstName ? `Hola <strong>${patientFirstName}</strong>,` : 'Hola,';
   const isOnline = sessionType === 'online';
-  const bodyText = is1hWindow
+  const bodyText = isTodaySession
     ? isOnline
-      ? 'La sesión comienza en 1 hora. Usa el enlace de abajo para conectarte cuando sea el momento.'
-      : 'La sesión comienza pronto. Asegúrate de estar en un lugar tranquilo.'
+      ? 'La sesión es hoy. Usa el enlace de abajo para conectarte cuando sea el momento.'
+      : 'La sesión es hoy. Asegúrate de estar en un lugar tranquilo.'
     : isOnline
       ? 'Recuerda que mañana tienes sesión online. Prepara un espacio tranquilo y comprueba tu conexión con antelación.'
       : 'Recuerda que mañana tienes sesión. Si necesitas cancelar o cambiar la cita, contacta con tu psicólogo/a con antelación.';
@@ -265,7 +261,7 @@ function buildReminderEmail({ patientFirstName, sessionDateStr, sessionTimeStr, 
 </html>`;
 }
 
-function buildWhatsAppMessage({ patientFirstName, sessionDateStr, sessionTimeStr, label, is1hWindow, meetLink, sessionType, psychName }) {
+function buildWhatsAppMessage({ patientFirstName, sessionDateStr, sessionTimeStr, label, isTodaySession, meetLink, sessionType, psychName }) {
   const name = patientFirstName ? `${patientFirstName}` : '';
   const greeting = name ? `Hola ${name} 👋` : 'Hola 👋';
   const isOnline = sessionType === 'online';
@@ -278,7 +274,7 @@ function buildWhatsAppMessage({ patientFirstName, sessionDateStr, sessionTimeStr
     body += '\n\n📹 Es una sesión online. Prepara tu dispositivo y conexión con antelación.';
   }
 
-  if (!is1hWindow) {
+  if (!isTodaySession) {
     body += '\n\nSi necesitas cancelar o cambiar la cita, contacta con tu psicólogo/a con antelación.';
   }
 
