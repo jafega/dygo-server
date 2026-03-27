@@ -3164,11 +3164,12 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                 <div className="flex flex-col gap-2">
                   {(() => {
                     // Obtener datos siempre frescos desde el array de pacientes cargados
+                    // Usar también los campos enriquecidos de la sesión como fallback (producción/Supabase)
                     const patientRecord = patients.find(p => p.id === (editedSession.patient_user_id || editedSession.patientId));
-                    const rawPhone = (patientRecord?.phone || '').replace(/\s/g, '');
+                    const rawPhone = (patientRecord?.phone || editedSession.patientPhone || '').replace(/\s/g, '');
                     const hasPhone = rawPhone.length > 0;
                     const phone = rawPhone.replace(/[^0-9+]/g, '');
-                    const email = (patientRecord?.email || '').trim();
+                    const email = (patientRecord?.email || editedSession.patientEmail || '').trim();
                     const hasEmail = email.length > 0;
                     const patientName = editedSession.patientName?.split(' ')[0] || 'paciente';
                     const sessionDate = new Date(editedSession.date + 'T12:00:00').toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -3256,7 +3257,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                         </label>
                         {(() => {
                           const patientRecord = patients.find(p => p.id === (editedSession.patient_user_id || editedSession.patientId));
-                          const rawPhone = (patientRecord?.phone || '').replace(/\s/g, '');
+                          const rawPhone = (patientRecord?.phone || editedSession.patientPhone || '').replace(/\s/g, '');
                           const hasPhone = rawPhone.length > 0;
                           return (
                             <label className={`flex items-center gap-3 px-4 py-3 border rounded-lg transition-colors ${

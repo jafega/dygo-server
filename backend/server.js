@@ -3196,7 +3196,7 @@ const handleAdminCreatePatient = async (req, res) => {
         patient_user_id: existingPatientId,
         status: 'active',
         default_session_price: 0,
-        default_psych_percent: 80,
+        default_psych_percent: 100,
         active: true, // Campo directo en la tabla
         patientnumber: nextPatientNumber, // Campo directo en la tabla
         data: {
@@ -3220,7 +3220,7 @@ const handleAdminCreatePatient = async (req, res) => {
             psychologist_user_id: psychologistId,
             patient_user_id: existingPatientId,
             default_session_price: 0,
-            default_psych_percent: 80,
+            default_psych_percent: 100,
             active: true,
             patientnumber: nextPatientNumber
           });
@@ -3337,7 +3337,7 @@ const handleAdminCreatePatient = async (req, res) => {
       patient_user_id: newPatient.id,
       status: 'active',
       default_session_price: 0,
-      default_psych_percent: 80,
+      default_psych_percent: 100,
       active: true, // Campo directo en la tabla
       patientnumber: nextPatientNumber, // Campo directo en la tabla
       data: {
@@ -3400,7 +3400,7 @@ const handleAdminCreatePatient = async (req, res) => {
                   psychologist_user_id: psychologistId,
                   patient_user_id: existingByEmail.id,
                   default_session_price: 0,
-                  default_psych_percent: 80,
+                  default_psych_percent: 100,
                   active: true,
                   patientnumber: nextPatientNumber
                 });
@@ -3437,7 +3437,7 @@ const handleAdminCreatePatient = async (req, res) => {
             psychologist_user_id: psychologistId,
             patient_user_id: newPatient.id,
             default_session_price: 0,
-            default_psych_percent: 80,
+            default_psych_percent: 100,
             active: true,
             patientnumber: nextPatientNumber
           });
