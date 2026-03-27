@@ -7,3 +7,5 @@ api/settings/**
 api/stripe/**
 api/supabase/**
 api/users/**
+# Ignore backend vercel.json (backend is served via api/[...path].js)
+backend/vercel.json
