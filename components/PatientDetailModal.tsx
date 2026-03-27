@@ -1373,6 +1373,46 @@ tr:nth-child(even) td{background:#f8fafc}
     return `<p style="margin-bottom:10px">${html}</p>`;
   }
 
+  function downloadSignedPdf(sig: any) {
+    const titleRaw = (sig.content || '').replace(/<!-- SIGNATURE_DATA:[\s\S]*?-->$/s, '').split('\n')[0].replace(/^#+\s*/, '').trim() || 'Documento';
+    const bodyHtml = docMarkdownToHtml(sig.content || '');
+    const sigMatch = (sig.content || '').match(/<!-- SIGNATURE_DATA:(data:[^-]+) -->$/);
+    const sigDataUrl = sigMatch ? sigMatch[1] : null;
+    const signatureDate = sig.signature_date
+      ? new Date(sig.signature_date).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })
+      : '';
+
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>${titleRaw}</title>
+  <style>
+    body { font-family: Georgia, serif; max-width: 700px; margin: 40px auto; color: #1e293b; font-size: 13px; line-height: 1.7; }
+    h1,h2,h3 { font-family: Arial, sans-serif; }
+    .sig-block { margin-top: 40px; padding-top: 24px; border-top: 1px solid #cbd5e1; }
+    .sig-block p { font-size: 12px; color: #64748b; margin: 0 0 8px; }
+    .sig-img { max-width: 240px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
+    @media print { body { margin: 20px; } }
+  </style>
+</head>
+<body>
+  ${bodyHtml}
+  <div class="sig-block">
+    <p><strong>Firmado digitalmente</strong>${signatureDate ? ' el ' + signatureDate : ''}</p>
+    ${sigDataUrl ? `<img src="${sigDataUrl}" class="sig-img" alt="Firma" />` : '<p><em>Sin imagen de firma</em></p>'}
+  </div>
+  <script>window.onload = function() { window.print(); }<\/script>
+</body>
+</html>`;
+
+    const win = window.open('', '_blank');
+    if (win) {
+      win.document.write(html);
+      win.document.close();
+    }
+  }
+
   const tabs = [
     { id: 'PATIENT', label: 'Paciente', icon: FileText },
     { id: 'INFO', label: 'Información', icon: User },
@@ -2260,13 +2300,24 @@ tr:nth-child(even) td{background:#f8fafc}
                             <ExternalLink size={16} />
                           </a>
                         ) : (
-                          <button
-                            onClick={() => setPreviewDocSignature(sig)}
-                            className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                            title="Ver documento"
-                          >
-                            <Eye size={16} />
-                          </button>
+                          <div className="flex items-center gap-1">
+                            {sig.signed && (
+                              <button
+                                onClick={() => downloadSignedPdf(sig)}
+                                className="p-2 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                                title="Descargar PDF firmado"
+                              >
+                                <Download size={16} />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => setPreviewDocSignature(sig)}
+                              className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                              title="Ver documento"
+                            >
+                              <Eye size={16} />
+                            </button>
+                          </div>
                         )}
                       </div>
                     );
@@ -2458,8 +2509,16 @@ tr:nth-child(even) td{background:#f8fafc}
                       className="flex-1 overflow-y-auto p-5 text-sm text-slate-800 leading-relaxed"
                       dangerouslySetInnerHTML={{ __html: docMarkdownToHtml(previewDocSignature.content || '') }}
                     />
-                    <div className="p-4 border-t border-slate-200 flex justify-end">
-                      <button onClick={() => setPreviewDocSignature(null)} className="px-4 py-2 border border-slate-200 rounded-xl text-sm">Cerrar</button>
+                    <div className="p-4 border-t border-slate-200 flex items-center justify-between gap-2">
+                      {previewDocSignature.signed && (
+                        <button
+                          onClick={() => downloadSignedPdf(previewDocSignature)}
+                          className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-medium hover:bg-indigo-700 transition-colors"
+                        >
+                          <Download size={14} /> Descargar PDF firmado
+                        </button>
+                      )}
+                      <button onClick={() => setPreviewDocSignature(null)} className="ml-auto px-4 py-2 border border-slate-200 rounded-xl text-sm hover:bg-slate-50 transition-colors">Cerrar</button>
                     </div>
                   </div>
                 </div>

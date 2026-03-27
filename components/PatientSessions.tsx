@@ -29,6 +29,7 @@ const PatientSessions: React.FC = () => {
   const [showPastSessions, setShowPastSessions] = useState(false);
   const [psychologistId, setPsychologistId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showAvailability, setShowAvailability] = useState(false);
   const [availableSlots, setAvailableSlots] = useState<Session[]>([]);
   const [bookingSlotId, setBookingSlotId] = useState<string | null>(null);
@@ -42,6 +43,7 @@ const PatientSessions: React.FC = () => {
 
   const loadSessions = async () => {
     setIsLoading(true);
+    setLoadError(null);
     try {
       const user = await getCurrentUser();
       console.log('[PatientSessions] Current user:', { id: user?.id, role: user?.role, name: user?.name });
@@ -52,12 +54,12 @@ const PatientSessions: React.FC = () => {
 
       console.log('[PatientSessions] Fetching psychologists and sessions...');
       
-      // Optimización: Solo cargar sesiones desde 30 días atrás hasta 6 meses en el futuro
+      // Cargar sesiones desde 60 días atrás hasta 12 meses en el futuro
       const today = new Date();
       const past = new Date(today);
-      past.setDate(past.getDate() - 30);
+      past.setDate(past.getDate() - 60);
       const future = new Date(today);
-      future.setMonth(future.getMonth() + 6);
+      future.setMonth(future.getMonth() + 12);
       
       const params = new URLSearchParams({
         patientId: user.id,
@@ -65,16 +67,31 @@ const PatientSessions: React.FC = () => {
         endDate: future.toISOString().split('T')[0]
       });
       
-      const [psychologists, response] = await Promise.all([
+      // Cargar psicólogos y sesiones de forma independiente para que un fallo en uno no afecte al otro
+      const [psychologistsResult, response] = await Promise.allSettled([
         getPsychologistsForPatient(user.id),
         apiFetch(`${API_URL}/sessions?${params.toString()}`)
       ]);
+
+      const psychologists: User[] = psychologistsResult.status === 'fulfilled' ? psychologistsResult.value : [];
       
       console.log('[PatientSessions] psychologists from getPsychologistsForPatient:', psychologists);
-      console.log('[PatientSessions] sessions response ok:', response.ok);
+
+      if (psychologistsResult.status === 'rejected') {
+        console.warn('[PatientSessions] Error cargando psicólogos:', psychologistsResult.reason);
+      }
+
+      if (response.status === 'rejected') {
+        console.error('[PatientSessions] Error de red al cargar sesiones:', response.reason);
+        setLoadError('No se pudieron cargar las citas. Verifica tu conexión e inténtalo de nuevo.');
+        return;
+      }
+
+      const sessionsResponse = response.value;
+      console.log('[PatientSessions] sessions response ok:', sessionsResponse.ok);
       
-      if (response.ok) {
-        const data = await response.json();
+      if (sessionsResponse.ok) {
+        const data = await sessionsResponse.json();
         const filteredSessions = data.filter((s: Session) => s.status === 'scheduled' || s.status === 'completed' || s.status === 'cancelled');
         console.log('[PatientSessions] filteredSessions:', filteredSessions.length);
         
@@ -114,9 +131,15 @@ const PatientSessions: React.FC = () => {
           }
           return psychologistList[0] || null;
         });
+      } else {
+        const errData = await sessionsResponse.json().catch(() => ({}));
+        const msg = errData?.error || `Error al cargar citas (${sessionsResponse.status})`;
+        console.error('[PatientSessions] Sessions API error:', msg);
+        setLoadError(msg);
       }
     } catch (err) {
       console.error('Error loading sessions:', err);
+      setLoadError('Error inesperado al cargar las citas. Inténtalo de nuevo.');
     } finally {
       setIsLoading(false);
     }
@@ -289,15 +312,24 @@ const PatientSessions: React.FC = () => {
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  // Cadena de fecha local (YYYY-MM-DD) para comparar con s.date (que es fecha UTC del servidor)
+  const todayStr = today.getFullYear() + '-' +
+    String(today.getMonth() + 1).padStart(2, '0') + '-' +
+    String(today.getDate()).padStart(2, '0');
 
   const futureSessions = sessions.filter(s => {
-    const sessionDate = new Date(s.date);
-    return sessionDate >= today && s.status === 'scheduled';
+    // Usar starts_on (timestamp UTC exacto) si está disponible; si no, comparar strings de fecha
+    if ((s as any).starts_on) {
+      return new Date((s as any).starts_on) >= today && s.status === 'scheduled';
+    }
+    return (s.date || '') >= todayStr && s.status === 'scheduled';
   });
 
   const pastSessions = sessions.filter(s => {
-    const sessionDate = new Date(s.date);
-    return sessionDate < today || s.status === 'completed' || s.status === 'cancelled';
+    if ((s as any).starts_on) {
+      return new Date((s as any).starts_on) < today || s.status === 'completed' || s.status === 'cancelled';
+    }
+    return (s.date || '') < todayStr || s.status === 'completed' || s.status === 'cancelled';
   });
 
   const displayedSessions = showPastSessions ? [...futureSessions, ...pastSessions] : futureSessions;
@@ -389,9 +421,21 @@ const PatientSessions: React.FC = () => {
           />
           <label htmlFor="showPast" className="text-xs md:text-sm text-slate-700 cursor-pointer">
             Mostrar citas pasadas
+            {!showPastSessions && pastSessions.length > 0 && (
+              <span className="ml-1.5 inline-flex items-center justify-center px-1.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-700">
+                {pastSessions.length}
+              </span>
+            )}
           </label>
         </div>
-      </div>
+
+        {loadError && (
+          <div className="mt-3 flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+            <AlertCircle size={16} className="shrink-0" />
+            <span>{loadError}</span>
+            <button onClick={loadSessions} className="ml-auto text-xs underline hover:no-underline">Reintentar</button>
+          </div>
+        )}
 
       {/* Table View - Desktop */}
       <div className="hidden md:block overflow-x-auto">
@@ -402,8 +446,20 @@ const PatientSessions: React.FC = () => {
         ) : displayedSessions.length === 0 ? (
           <div className="text-center py-12 bg-slate-50">
             <Calendar size={48} className="mx-auto text-slate-300 mb-4" />
-            <p className="text-slate-500 font-medium">No tienes citas {showPastSessions ? '' : 'futuras'} programadas</p>
-            <p className="text-sm text-slate-400 mt-2">Haz clic en "Reservar Cita" para agendar una sesión</p>
+            {!showPastSessions && pastSessions.length > 0 ? (
+              <>
+                <p className="text-slate-500 font-medium">No tienes citas futuras programadas</p>
+                <p className="text-sm text-slate-400 mt-2">
+                  Tienes {pastSessions.length} cita{pastSessions.length !== 1 ? 's' : ''} pasada{pastSessions.length !== 1 ? 's' : ''}.
+                  Marca &ldquo;Mostrar citas pasadas&rdquo; para verlas.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-slate-500 font-medium">No tienes citas {showPastSessions ? '' : 'futuras'} programadas</p>
+                <p className="text-sm text-slate-400 mt-2">Haz clic en &ldquo;Reservar Cita&rdquo; para agendar una sesión</p>
+              </>
+            )}
           </div>
         ) : (
           <table className="w-full">
@@ -519,8 +575,20 @@ const PatientSessions: React.FC = () => {
             <div className="w-16 h-16 mx-auto mb-4 bg-gradient-to-br from-indigo-100 to-purple-100 rounded-2xl flex items-center justify-center">
               <Calendar size={32} className="text-indigo-600" />
             </div>
-            <p className="text-slate-900 font-semibold text-base mb-1">No tienes citas {showPastSessions ? '' : 'futuras'}</p>
-            <p className="text-sm text-slate-500">Reserva tu primera sesión</p>
+            {!showPastSessions && pastSessions.length > 0 ? (
+              <>
+                <p className="text-slate-900 font-semibold text-base mb-1">No tienes citas futuras</p>
+                <p className="text-sm text-slate-500">
+                  Tienes {pastSessions.length} cita{pastSessions.length !== 1 ? 's' : ''} pasada{pastSessions.length !== 1 ? 's' : ''}.
+                  Activa &ldquo;Mostrar citas pasadas&rdquo; para verlas.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-slate-900 font-semibold text-base mb-1">No tienes citas {showPastSessions ? '' : 'futuras'}</p>
+                <p className="text-sm text-slate-500">Reserva tu primera sesión</p>
+              </>
+            )}
           </div>
         ) : (
           <div className="p-3 space-y-3">

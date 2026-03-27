@@ -13662,7 +13662,7 @@ app.post('/api/signatures/external', authenticateRequest, async (req, res) => {
     if (!extBucketExists) {
       console.log('📦 Creando bucket external-documents...');
       const { error: createBucketError } = await supabaseAdmin.storage.createBucket('external-documents', {
-        public: true,
+        public: false,
         fileSizeLimit: 50 * 1024 * 1024
       });
       if (createBucketError && !createBucketError.message.includes('already exists')) {
