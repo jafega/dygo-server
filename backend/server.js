@@ -5932,7 +5932,7 @@ app.get('/api/entries', authenticateRequest, async (req, res) => {
   }
 });
 
-app.post('/api/entries', authenticateRequest, (req, res) => {
+app.post('/api/entries', authenticateRequest, async (req, res) => {
   const entry = req.body;
 
   // Si la entrada la crea un psicólogo para un paciente, validar que la relación esté activa
@@ -5943,20 +5943,43 @@ app.post('/api/entries', authenticateRequest, (req, res) => {
     
     // Si el creador y el objetivo son diferentes (psicólogo creando para paciente)
     if (creatorId && targetId && String(creatorId) !== String(targetId)) {
-      const findRelationship = () => {
-        if (supabaseDbCache?.careRelationships) {
-          return supabaseDbCache.careRelationships.find(rel => 
-            rel.psychologist_user_id === String(creatorId) && rel.patient_user_id === String(targetId)
-          );
-        }
-        const db = getDb();
-        if (!Array.isArray(db.careRelationships)) return null;
-        return db.careRelationships.find(rel => 
-          rel.psychologist_user_id === String(creatorId) && rel.patient_user_id === String(targetId)
-        );
-      };
+      let relationship = null;
 
-      const relationship = findRelationship();
+      // 1. Buscar en caché (solo si hay datos; [] vacío no cuenta)
+      if (supabaseDbCache?.careRelationships?.length) {
+        relationship = supabaseDbCache.careRelationships.find(rel =>
+          rel.psychologist_user_id === String(creatorId) && rel.patient_user_id === String(targetId)
+        ) || null;
+      }
+
+      // 2. Fallback a db.json
+      if (!relationship) {
+        const db = getDb();
+        if (Array.isArray(db.careRelationships)) {
+          relationship = db.careRelationships.find(rel =>
+            rel.psychologist_user_id === String(creatorId) && rel.patient_user_id === String(targetId)
+          ) || null;
+        }
+      }
+
+      // 3. Fallback a Supabase directo (cubre cold starts en serverless)
+      if (!relationship && supabaseAdmin) {
+        try {
+          const { data, error } = await supabaseAdmin
+            .from('care_relationships')
+            .select('*')
+            .eq('psychologist_user_id', String(creatorId))
+            .eq('patient_user_id', String(targetId))
+            .maybeSingle();
+          if (!error && data) {
+            relationship = data;
+            console.log('[POST /api/entries] ✅ Relación encontrada vía Supabase directo', { creatorId, targetId });
+          }
+        } catch (e) {
+          console.warn('[POST /api/entries] ⚠️ Supabase fallback para relación falló:', e?.message);
+        }
+      }
+
       if (!relationship) {
         console.warn('[POST /api/entries] ❌ Relación no encontrada para crear entrada clínica', { creatorId, targetId });
         return res.status(403).json({ error: 'No existe una relación activa con este paciente' });
@@ -5985,53 +6008,50 @@ app.post('/api/entries', authenticateRequest, (req, res) => {
   }
 
   if (supabaseAdmin) {
-    (async () => {
-      try {
-        console.log('[POST /api/entries] 💾 Guardando entrada en Supabase:', {
-          id: entry.id,
-          userId: entry.userId,
-          creator_user_id: entry.creator_user_id,
-          target_user_id: entry.target_user_id,
-          hasTranscript: !!entry.transcript,
-          transcriptLength: entry.transcript?.length || 0,
-          transcriptPreview: entry.transcript?.substring(0, 100),
-          hasSummary: !!entry.summary,
-          summaryPreview: entry.summary?.substring(0, 100),
-          entryType: entry.entry_type || entry.entryType
-        });
-        
-        const payload = buildSupabaseEntryRow(entry);
-        console.log('[POST /api/entries] 📝 Payload completo:', JSON.stringify({
-          id: payload.id,
-          creator_user_id: payload.creator_user_id,
-          target_user_id: payload.target_user_id,
-          entry_type: payload.entry_type,
-          center_id: payload.center_id,
-          hasTranscript: !!payload.transcript,
-          transcriptLength: payload.transcript?.length || 0,
-          transcriptPreview: payload.transcript?.substring(0, 100),
-          hasSummary: !!payload.summary,
-          summaryLength: payload.summary?.length || 0,
-          summaryPreview: payload.summary?.substring(0, 100),
-          dataKeys: Object.keys(payload.data || {})
-        }, null, 2));
-        
-        await trySupabaseUpsert('entries', [payload]);
+    try {
+      console.log('[POST /api/entries] 💾 Guardando entrada en Supabase:', {
+        id: entry.id,
+        userId: entry.userId,
+        creator_user_id: entry.creator_user_id,
+        target_user_id: entry.target_user_id,
+        hasTranscript: !!entry.transcript,
+        transcriptLength: entry.transcript?.length || 0,
+        transcriptPreview: entry.transcript?.substring(0, 100),
+        hasSummary: !!entry.summary,
+        summaryPreview: entry.summary?.substring(0, 100),
+        entryType: entry.entry_type || entry.entryType
+      });
+      
+      const payload = buildSupabaseEntryRow(entry);
+      console.log('[POST /api/entries] 📝 Payload completo:', JSON.stringify({
+        id: payload.id,
+        creator_user_id: payload.creator_user_id,
+        target_user_id: payload.target_user_id,
+        entry_type: payload.entry_type,
+        center_id: payload.center_id,
+        hasTranscript: !!payload.transcript,
+        transcriptLength: payload.transcript?.length || 0,
+        transcriptPreview: payload.transcript?.substring(0, 100),
+        hasSummary: !!payload.summary,
+        summaryLength: payload.summary?.length || 0,
+        summaryPreview: payload.summary?.substring(0, 100),
+        dataKeys: Object.keys(payload.data || {})
+      }, null, 2));
+      
+      await trySupabaseUpsert('entries', [payload]);
 
-        if (supabaseDbCache?.entries) {
-          const idx = supabaseDbCache.entries.findIndex(e => e.id === entry.id);
-          if (idx >= 0) supabaseDbCache.entries[idx] = entry;
-          else supabaseDbCache.entries.unshift(entry);
-        }
-        
-        console.log('[POST /api/entries] ✅ Entrada guardada exitosamente en Supabase');
-        return res.json(entry);
-      } catch (err) {
-        console.error('[POST /api/entries] ❌ Error saving entry (supabase)', err);
-        return res.status(500).json({ error: 'Error saving entry' });
+      if (supabaseDbCache?.entries) {
+        const idx = supabaseDbCache.entries.findIndex(e => e.id === entry.id);
+        if (idx >= 0) supabaseDbCache.entries[idx] = entry;
+        else supabaseDbCache.entries.unshift(entry);
       }
-    })();
-    return;
+      
+      console.log('[POST /api/entries] ✅ Entrada guardada exitosamente en Supabase');
+      return res.json(entry);
+    } catch (err) {
+      console.error('[POST /api/entries] ❌ Error saving entry (supabase)', err);
+      return res.status(500).json({ error: 'Error saving entry' });
+    }
   }
 
   const db = getDb();
