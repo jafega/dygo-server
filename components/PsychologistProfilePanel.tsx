@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Save, Building, Phone, Mail, MapPin, CreditCard, User as UserIcon, FileText, Calendar, CheckCircle, AlertCircle, Link2 } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
+import { normalizePhone, detectDefaultPrefix } from '../services/phoneUtils';
 
 interface PsychologistProfile {
   // Personal Info
@@ -345,8 +346,9 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
                   type="tel"
                   value={profile.phone}
                   onChange={(e) => handleChange('phone', e.target.value)}
+                  onBlur={(e) => { const n = normalizePhone(e.target.value, detectDefaultPrefix()); if (n !== e.target.value) handleChange('phone', n); }}
                   className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  placeholder="+34 600 000 000"
+                  placeholder={`${detectDefaultPrefix()} 600 000 000`}
                 />
               </div>
 

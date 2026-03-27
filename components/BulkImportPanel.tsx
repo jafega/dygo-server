@@ -11,6 +11,7 @@ import { Type } from '@google/genai';
 import * as XLSX from 'xlsx';
 import UpgradeModal from './UpgradeModal';
 import { User } from '../types';
+import { normalizePhone } from '../services/phoneUtils';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -303,7 +304,7 @@ REGLAS CRÍTICAS — LEE ESTO CON ATENCIÓN ANTES DE RESPONDER:
         firstName:             String(p.firstName ?? '').trim(),
         lastName:              String(p.lastName ?? '').trim(),
         email:                 String(p.email ?? '').trim(),
-        phone:                 String(p.phone ?? '').trim(),
+        phone:                 normalizePhone(String(p.phone ?? '').trim()),
         dni:                   String(p.dni ?? '').trim(),
         address:               String(p.address ?? '').trim(),
         date_of_birth:         String(p.date_of_birth ?? '').trim(),
@@ -436,7 +437,7 @@ REGLAS CRÍTICAS — LEE ESTO CON ATENCIÓN ANTES DE RESPONDER:
             firstName: row.firstName.trim(),
             lastName:  row.lastName.trim(),
             email: row.email.trim() || undefined,
-            phone: row.phone.trim() || undefined,
+            phone: normalizePhone(row.phone.trim()) || undefined,
             dni:   row.dni.trim() || undefined,
             address: row.address.trim() || undefined,
             dateOfBirth: row.date_of_birth.trim() || undefined,

@@ -10,6 +10,7 @@ import BonosPanel from './BonosPanel';
 import { AddressAutocomplete } from './AddressAutocomplete';
 import UpgradeModal from './UpgradeModal';
 import { HistoricalDocument, HistoricalDocumentsSummary } from '../types';
+import { normalizePhone, detectDefaultPrefix } from '../services/phoneUtils';
 
 interface PatientSummary {
   id: string;
@@ -1979,6 +1980,8 @@ tr:nth-child(even) td{background:#f8fafc}
                         type="tel"
                         value={editedPatientData.phone}
                         onChange={(e) => setEditedPatientData({ ...editedPatientData, phone: e.target.value })}
+                        onBlur={(e) => { const n = normalizePhone(e.target.value, detectDefaultPrefix()); if (n !== e.target.value) setEditedPatientData(d => ({ ...d, phone: n })); }}
+                        placeholder={`${detectDefaultPrefix()} 600 000 000`}
                         className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-white border-2 border-slate-300 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all text-sm"
                       />
                     ) : (

@@ -7,6 +7,7 @@ import ExportPatientsModal from './ExportPatientsModal';
 import UpgradeModal from './UpgradeModal';
 import { Users, Clock, Loader2, ToggleLeft, ToggleRight, Search, Filter, X, UserPlus, Mail, AlertCircle, Download, Upload } from 'lucide-react';
 import { API_URL } from '../services/config';
+import { normalizePhone, detectDefaultPrefix } from '../services/phoneUtils';
 
 export interface PatientDashboardHandle {
   closeModal: () => void;
@@ -568,8 +569,9 @@ const PatientDashboard = forwardRef<PatientDashboardHandle, PatientDashboardProp
                    type="tel"
                    value={newPatient.phone}
                    onChange={(e) => setNewPatient({...newPatient, phone: e.target.value})}
+                   onBlur={(e) => { const n = normalizePhone(e.target.value, detectDefaultPrefix()); if (n !== e.target.value) setNewPatient(p => ({...p, phone: n})); }}
                    className="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                   placeholder="+34 600 123 456"
+                   placeholder={`${detectDefaultPrefix()} 600 000 000`}
                  />
                </div>
              </div>

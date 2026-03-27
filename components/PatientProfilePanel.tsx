@@ -3,6 +3,7 @@ import { Save, Phone, Mail, MapPin, User as UserIcon, Heart } from 'lucide-react
 import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
 import { AddressAutocomplete, AddressSelection } from './AddressAutocomplete';
+import { normalizePhone, detectDefaultPrefix } from '../services/phoneUtils';
 
 interface PatientProfile {
   // Personal Info
@@ -164,8 +165,9 @@ const PatientProfilePanel: React.FC<PatientProfilePanelProps> = ({ userId }) => 
               type="tel"
               value={profile.phone}
               onChange={(e) => handleChange('phone', e.target.value)}
+              onBlur={(e) => { const n = normalizePhone(e.target.value, detectDefaultPrefix()); if (n !== e.target.value) handleChange('phone', n); }}
               className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-              placeholder="+34 600 000 000"
+              placeholder={`${detectDefaultPrefix()} 600 000 000`}
             />
           </div>
 
