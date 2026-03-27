@@ -230,7 +230,8 @@ const generalLimiter = rateLimit({
   max: 100, // 100 requests por minuto
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Demasiadas solicitudes. Inténtalo más tarde.' }
+  message: { error: 'Demasiadas solicitudes. Inténtalo más tarde.' },
+  validate: { xForwardedForHeader: false }
 });
 
 app.use('/api/', generalLimiter);

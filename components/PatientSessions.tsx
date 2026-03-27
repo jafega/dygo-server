@@ -537,17 +537,18 @@ const PatientSessions: React.FC = () => {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right">
-                      {session.meetLink && session.status === 'scheduled' ? (
-                        <a
-                          href={session.meetLink}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm font-medium"
-                        >
-                          <Video size={14} />
-                          Unirse
-                        </a>
-                      ) : (
+                      <div className="flex items-center justify-end gap-2">
+                        {session.meetLink && session.status === 'scheduled' && (
+                          <a
+                            href={session.meetLink}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm font-medium"
+                          >
+                            <Video size={14} />
+                            Conectar
+                          </a>
+                        )}
                         <button
                           onClick={() => setSelectedSession(session)}
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors text-sm font-medium"
@@ -555,7 +556,7 @@ const PatientSessions: React.FC = () => {
                           <Eye size={14} />
                           Ver detalles
                         </button>
-                      )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -676,7 +677,7 @@ const PatientSessions: React.FC = () => {
 
                     {/* Botones de acción */}
                     <div className="pt-2 flex gap-2">
-                      {session.meetLink && session.status === 'scheduled' ? (
+                      {session.meetLink && session.status === 'scheduled' && (
                         <a
                           href={session.meetLink}
                           target="_blank"
@@ -684,17 +685,16 @@ const PatientSessions: React.FC = () => {
                           className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl hover:from-green-700 hover:to-emerald-700 transition-all text-sm font-bold shadow-md"
                         >
                           <Video size={16} />
-                          Unirse
+                          Conectar
                         </a>
-                      ) : (
-                        <button
-                          onClick={() => setSelectedSession(session)}
-                          className="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all text-sm font-semibold"
-                        >
-                          <Eye size={16} />
-                          Ver detalles
-                        </button>
                       )}
+                      <button
+                        onClick={() => setSelectedSession(session)}
+                        className={`${session.meetLink && session.status === 'scheduled' ? '' : 'flex-1 '} flex items-center justify-center gap-2 px-4 py-3 text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all text-sm font-semibold`}
+                      >
+                        <Eye size={16} />
+                        Ver detalles
+                      </button>
                     </div>
                   </div>
                 </div>
