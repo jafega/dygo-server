@@ -1,5 +1,5 @@
 -- ============================================================
--- DYGO: Limpieza de datos de usuarios
+-- MAINDS: Limpieza de datos de usuarios
 -- Ejecutar en Supabase SQL Editor (paso a paso)
 -- ============================================================
 -- PROBLEMA: El campo data JSONB tiene anidamiento recursivo

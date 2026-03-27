@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Calendar, CheckCircle, XCircle, Clock, DollarSign, User, Filter, Edit2, Save, X as XIcon, FileText, Trash2, Receipt, Ticket, Copy, Send, ExternalLink, Globe, ChevronDown } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser, apiFetch } from '../services/authService';
@@ -1700,7 +1700,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
               {/* Comunicar */}
               {(() => {
                 const rawEmail = (editedSession.patientEmail || '').trim();
-                const hasRealEmail = rawEmail.length > 0 && !rawEmail.includes('@noemail.dygo.local');
+                const hasRealEmail = rawEmail.length > 0 && !rawEmail.includes('@noemail.mainds.local');
                 const reminderDisabledReason = !hasRealEmail
                   ? (rawEmail.length > 0 ? 'El paciente no tiene un email real registrado' : 'El paciente no tiene email registrado')
                   : null;

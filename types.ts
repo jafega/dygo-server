@@ -58,6 +58,8 @@ export interface CareRelationship {
   active?: boolean; // Estado activo/inactivo del paciente (en data JSONB)
   patient_number?: number; // Número secuencial del paciente por psicólogo (en data JSONB)
   
+  ai_instructions?: string; // Instrucciones del psicólogo para la IA en sesiones de voz con este paciente
+  
   // Campos adicionales en data JSONB (legacy)
   createdAt?: number; // timestamp en ms (puede estar en data)
   endedAt?: number; // Timestamp cuando se finalizó la relación (puede estar en data)

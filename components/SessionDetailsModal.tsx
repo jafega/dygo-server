@@ -66,6 +66,7 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session: init
   const [isGenerating, setIsGenerating] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
   const [showAiPrompt, setShowAiPrompt] = useState(false);
+  const [aiIterateMode, setAiIterateMode] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -283,8 +284,8 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session: init
       const summary = result.text || 'No se pudo generar la respuesta';
       setAiSummary(summary);
       setEditedSummary(summary);
-      setShowAiPrompt(false);
       setAiPrompt('');
+      setAiIterateMode(true);
     } catch (error) {
       console.error('Error generating AI response:', error);
       alert('Error al generar la respuesta con IA');
@@ -1090,15 +1091,19 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session: init
               <div className="flex items-center justify-end mb-1">
                 <button
                   onClick={() => setShowAiPrompt(v => !v)}
-                  className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-purple-500 transition-colors px-1.5 py-0.5 rounded-md hover:bg-purple-50"
+                  className={`flex items-center gap-1 text-xs font-medium transition-colors px-2 py-1 rounded-md border ${
+                    showAiPrompt
+                      ? 'border-purple-300 bg-purple-50 text-purple-600'
+                      : 'border-slate-200 bg-white text-slate-500 hover:border-purple-300 hover:text-purple-500 hover:bg-purple-50'
+                  }`}
                   title="Usar IA"
                 >
-                  <Sparkles size={12} />
+                  <Sparkles size={13} />
                   <span>IA</span>
                 </button>
               </div>
               {showAiPrompt && (
-                <div className="flex gap-2 items-start p-2.5 border border-slate-200 rounded-lg bg-slate-50">
+                <div className="flex gap-2 items-start p-2.5 border border-purple-100 rounded-lg bg-purple-50/40">
                   <textarea
                     value={aiPrompt}
                     onChange={(e) => setAiPrompt(e.target.value)}
@@ -1108,9 +1113,9 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session: init
                         generateAISummary(transcript, aiPrompt);
                       }
                     }}
-                    placeholder="¿Qué quieres que haga la IA con estas notas?"
+                    placeholder={aiIterateMode ? '¿Quieres que iteremos el resultado de la IA?' : '¿Qué quieres que haga la IA con estas notas?'}
                     rows={2}
-                    className="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs resize-none focus:ring-1 focus:ring-purple-400 focus:outline-none bg-white"
+                    className="flex-1 px-2.5 py-1.5 border border-purple-200 rounded-lg text-xs resize-none focus:ring-1 focus:ring-purple-400 focus:outline-none bg-white"
                   />
                   <button
                     onClick={() => generateAISummary(transcript, aiPrompt)}
@@ -1124,30 +1129,29 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session: init
               )}
             </div>
 
-            {/* AI Result - always visible */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-xs sm:text-sm font-semibold text-slate-700 flex items-center gap-1.5">
-                  <Sparkles size={13} className="text-purple-500" />
-                  Resultado IA
-                </label>
-                {editedSummary && (
+            {/* AI Result - only when there's content */}
+            {aiSummary && (
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs sm:text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                    <Sparkles size={13} className="text-purple-500" />
+                    Resultado IA
+                  </label>
                   <button
-                    onClick={() => { setAiSummary(''); setEditedSummary(''); }}
+                    onClick={() => { setAiSummary(''); setEditedSummary(''); setAiIterateMode(false); }}
                     className="text-[10px] text-slate-400 hover:text-red-500 px-1.5 py-0.5 rounded transition-colors"
                   >
                     Limpiar
                   </button>
-                )}
+                </div>
+                <textarea
+                  value={editedSummary}
+                  onChange={(e) => setEditedSummary(e.target.value)}
+                  rows={8}
+                  className="w-full px-3 py-2.5 sm:px-4 sm:py-3 border-2 border-purple-100 bg-purple-50/30 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-purple-400 resize-none text-sm sm:text-base"
+                />
               </div>
-              <textarea
-                value={editedSummary}
-                onChange={(e) => setEditedSummary(e.target.value)}
-                placeholder="El resultado de la IA aparecerá aquí. Puedes editarlo y usarlo como contexto para nuevas consultas."
-                rows={8}
-                className="w-full px-3 py-2.5 sm:px-4 sm:py-3 border-2 border-purple-100 bg-purple-50/30 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-purple-400 resize-none text-sm sm:text-base placeholder:text-slate-300"
-              />
-            </div>
+            )}
 
             {/* Status Selection - Compact */}
             <div>

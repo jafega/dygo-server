@@ -23,8 +23,8 @@ const InsightsPanel: React.FC<InsightsPanelProps> = ({ entries, mode = 'PERSONAL
     const userId = latestEntry?.userId || 'unknown';
     const modeKey = mode.toLowerCase();
     return {
-      idKey: `dygo_insight_last_entry_${modeKey}_${userId}`,
-      textKey: `dygo_insight_text_${modeKey}_${userId}`
+      idKey: `mainds_insight_last_entry_${modeKey}_${userId}`,
+      textKey: `mainds_insight_text_${modeKey}_${userId}`
     };
   };
 

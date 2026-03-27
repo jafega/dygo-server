@@ -65,10 +65,11 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
   const [googleCalendarLoading, setGoogleCalendarLoading] = useState(false);
   const [googleCalendarMsg, setGoogleCalendarMsg] = useState('');
 
-  // Gmail connection state
-  const [gmailConnected, setGmailConnected] = useState(false);
-  const [gmailLoading, setGmailLoading] = useState(false);
-  const [gmailMsg, setGmailMsg] = useState('');
+  // Gestor emails state
+  const [gestorEmails, setGestorEmails] = useState<string[]>([]);
+  const [gestorEmailInput, setGestorEmailInput] = useState('');
+  const [gestorSaving, setGestorSaving] = useState(false);
+  const [gestorMsg, setGestorMsg] = useState('');
 
   useEffect(() => {
     loadProfile();
@@ -98,24 +99,6 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
       window.history.replaceState({}, '', window.location.pathname);
     } else if (gcResult === 'error') {
       setGoogleCalendarMsg('Error al conectar Google Calendar. Inténtalo de nuevo.');
-      window.history.replaceState({}, '', window.location.pathname);
-    }
-    // Check Gmail
-    try {
-      const res = await apiFetch(`${API_URL}/gmail/status?userId=${userId}`);
-      if (res.ok) {
-        const data = await res.json();
-        setGmailConnected(data.connected);
-      }
-    } catch (_) {}
-    // Check Gmail callback result in URL
-    const gmailResult = params.get('gmail');
-    if (gmailResult === 'success') {
-      setGmailConnected(true);
-      setGmailMsg('¡Gmail conectado correctamente!');
-      window.history.replaceState({}, '', window.location.pathname);
-    } else if (gmailResult === 'error') {
-      setGmailMsg('Error al conectar Gmail. Inténtalo de nuevo.');
       window.history.replaceState({}, '', window.location.pathname);
     }
   };
@@ -156,42 +139,6 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
     }
   };
 
-  const handleConnectGmail = async () => {
-    setGmailLoading(true);
-    setGmailMsg('');
-    try {
-      const emailParam = userEmail ? `&email=${encodeURIComponent(userEmail)}` : '';
-      const res = await apiFetch(`${API_URL}/gmail/auth-url?userId=${userId}${emailParam}`);
-      if (res.ok) {
-        const { url } = await res.json();
-        window.location.href = url;
-      } else {
-        setGmailMsg('No se pudo iniciar la conexión. Inténtalo más tarde.');
-      }
-    } catch (_) {
-      setGmailMsg('Error de conexión con el servidor.');
-    } finally {
-      setGmailLoading(false);
-    }
-  };
-
-  const handleDisconnectGmail = async () => {
-    if (!window.confirm('¿Desconectar Gmail? Ya no podrás enviar emails desde la aplicación.')) return;
-    setGmailLoading(true);
-    setGmailMsg('');
-    try {
-      const res = await apiFetch(`${API_URL}/gmail/disconnect?userId=${userId}`, { method: 'DELETE' });
-      if (res.ok) {
-        setGmailConnected(false);
-        setGmailMsg('Gmail desconectado.');
-      }
-    } catch (_) {
-      setGmailMsg('Error al desconectar.');
-    } finally {
-      setGmailLoading(false);
-    }
-  };
-
   const loadProfile = async () => {
     setIsLoading(true);
     try {
@@ -216,6 +163,7 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
           email_reminders_enabled: data.email_reminders_enabled ?? false,
           whatsapp_reminders_enabled: data.whatsapp_reminders_enabled ?? false
         });
+        setGestorEmails(Array.isArray(data.gestor_emails) ? data.gestor_emails : []);
       }
     } catch (error) {
       console.error('Error loading profile:', error);
@@ -643,55 +591,106 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
             </div>
           </div>
 
-          {/* Gmail Card */}
+          {/* Gestor / Asesor Emails Card */}
           <div className="bg-white rounded-xl border border-slate-200 p-5">
-            <div className="flex items-start gap-4">
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${gmailConnected ? 'bg-green-50 text-green-600' : 'bg-slate-100 text-slate-500'}`}>
+            <div className="flex items-start gap-4 mb-4">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-indigo-50 text-indigo-600">
                 <Mail size={20} />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <h4 className="text-sm font-semibold text-slate-900">Gmail</h4>
-                  {gmailConnected ? (
-                    <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 px-2 py-0.5 rounded-full">
-                      <CheckCircle size={11} /> Conectado
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
-                      <AlertCircle size={11} /> No conectado
-                    </span>
-                  )}
-                </div>
+                <h4 className="text-sm font-semibold text-slate-900 mb-1">Emails del gestor / asesor</h4>
                 <p className="text-xs text-slate-500">
-                  {gmailConnected
-                    ? 'Puedes enviar emails directamente desde la aplicación usando tu cuenta de Gmail.'
-                    : 'Conecta tu Gmail para enviar emails a pacientes directamente desde la aplicación.'}
+                  Añade los emails de tu gestor o asesor fiscal. Cada vez que emitas o rectifiques una factura, se enviará automáticamente a estas direcciones (y a ti mismo) en formato PDF.
                 </p>
-                {gmailMsg && (
-                  <p className={`text-xs mt-2 ${gmailMsg.includes('Error') ? 'text-red-500' : 'text-green-600'}`}>
-                    {gmailMsg}
-                  </p>
-                )}
               </div>
             </div>
+
+            {/* Lista de emails guardados */}
+            {gestorEmails.length > 0 && (
+              <div className="mb-3 space-y-2">
+                {gestorEmails.map((email, idx) => (
+                  <div key={idx} className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                    <span className="text-sm text-slate-700 truncate">{email}</span>
+                    <button
+                      onClick={() => {
+                        const updated = gestorEmails.filter((_, i) => i !== idx);
+                        setGestorEmails(updated);
+                      }}
+                      className="ml-2 text-red-400 hover:text-red-600 flex-shrink-0"
+                      title="Eliminar"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Input para añadir nuevo email */}
+            <div className="flex gap-2">
+              <input
+                type="email"
+                value={gestorEmailInput}
+                onChange={(e) => setGestorEmailInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const trimmed = gestorEmailInput.trim().toLowerCase();
+                    if (trimmed && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) && !gestorEmails.includes(trimmed)) {
+                      setGestorEmails([...gestorEmails, trimmed]);
+                      setGestorEmailInput('');
+                    }
+                  }
+                }}
+                placeholder="gestor@ejemplo.com"
+                className="flex-1 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+              />
+              <button
+                onClick={() => {
+                  const trimmed = gestorEmailInput.trim().toLowerCase();
+                  if (trimmed && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) && !gestorEmails.includes(trimmed)) {
+                    setGestorEmails([...gestorEmails, trimmed]);
+                    setGestorEmailInput('');
+                  }
+                }}
+                disabled={!gestorEmailInput.trim()}
+                className="px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-40 text-sm font-medium"
+              >
+                Añadir
+              </button>
+            </div>
+
+            {/* Guardar */}
             <div className="mt-4">
-              {gmailConnected ? (
-                <button
-                  onClick={handleDisconnectGmail}
-                  disabled={gmailLoading}
-                  className="w-full py-2 px-4 text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors disabled:opacity-50"
-                >
-                  {gmailLoading ? 'Desconectando...' : 'Desconectar Gmail'}
-                </button>
-              ) : (
-                <button
-                  onClick={handleConnectGmail}
-                  disabled={gmailLoading}
-                  className="w-full py-2 px-4 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  <Mail size={15} />
-                  {gmailLoading ? 'Redirigiendo...' : 'Conectar Gmail'}
-                </button>
+              <button
+                onClick={async () => {
+                  setGestorSaving(true);
+                  setGestorMsg('');
+                  try {
+                    const res = await apiFetch(`${API_URL}/psychologist/${userId}/profile`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ ...profile, gestor_emails: gestorEmails })
+                    });
+                    if (res.ok) {
+                      setGestorMsg('✓ Emails guardados correctamente');
+                      setTimeout(() => setGestorMsg(''), 3000);
+                    } else {
+                      setGestorMsg('Error al guardar. Inténtalo de nuevo.');
+                    }
+                  } catch (_) {
+                    setGestorMsg('Error de conexión.');
+                  } finally {
+                    setGestorSaving(false);
+                  }
+                }}
+                disabled={gestorSaving}
+                className="w-full py-2 px-4 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {gestorSaving ? 'Guardando...' : 'Guardar emails del gestor'}
+              </button>
+              {gestorMsg && (
+                <p className={`text-xs mt-2 text-center ${gestorMsg.startsWith('✓') ? 'text-green-600' : 'text-red-500'}`}>{gestorMsg}</p>
               )}
             </div>
           </div>

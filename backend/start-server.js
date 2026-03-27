@@ -7,7 +7,7 @@ const __dirname = dirname(__filename);
 
 const serverPath = join(__dirname, 'server.js');
 
-console.log('🚀 Iniciando servidor dygo...');
+console.log('🚀 Iniciando servidor mainds...');
 console.log('📁 Ruta:', serverPath);
 
 const env = { ...process.env, PORT: '3001' };

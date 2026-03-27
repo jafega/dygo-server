@@ -101,7 +101,7 @@ export default async function handler(req, res) {
     const patientEmail = patient?.user_email;
     const patientPhone  = patient?.data?.phone || null;
     // Skip if there's nothing to send to
-    if ((!patientEmail || patientEmail.includes('@noemail.dygo.local')) && !patientPhone) continue;
+    if ((!patientEmail || patientEmail.includes('@noemail.mainds.local')) && !patientPhone) continue;
 
     const tz = session.data?.schedule_timezone || 'Europe/Madrid';
     const sessionDateStr = new Date(session.starts_on).toLocaleDateString('es-ES', {
@@ -120,7 +120,7 @@ export default async function handler(req, res) {
     try {
       // --- EMAIL CHANNEL ---
       const emailSentKey = isTodaySession ? 'reminder_today_sent_at' : 'reminder_tomorrow_sent_at';
-      if (emailReminderEnabled && psychEmailEnabled && patientEmail && !patientEmail.includes('@noemail.dygo.local') && !session.data?.[emailSentKey]) {
+      if (emailReminderEnabled && psychEmailEnabled && patientEmail && !patientEmail.includes('@noemail.mainds.local') && !session.data?.[emailSentKey]) {
         await resend.emails.send({
           from: 'mainds <no-reply@mainds.app>',
           to: patientEmail,

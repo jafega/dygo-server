@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, User, Calendar, Phone, Mail, FileText, DollarSign, Settings, Tag, Trash2, Save, Edit2, CreditCard, MapPin, Cake, Clock as ClockIcon, BookOpen, Sparkles, CheckCircle, AlertCircle, Download, Loader2, Ticket, Building2, TrendingUp, BarChart3, Upload, File, XCircle, Send, Scroll, Eye, Award, Shield, Lock, ClipboardList, Link, ExternalLink } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser, apiFetch } from '../services/authService';
@@ -41,7 +41,8 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
     centerId: '' as string | null,
     active: true, // Estado activo/inactivo del paciente
     patientNumber: 0, // Número de paciente para este psicólogo
-    status: '' // Estado de la relación (texto libre)
+    status: '', // Estado de la relación (texto libre)
+    aiInstructions: '' // Instrucciones del psicólogo para la IA de voz
   });
   const [centers, setCenters] = useState<any[]>([]);
   const [tagInput, setTagInput] = useState('');
@@ -173,7 +174,8 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
             centerId: rel.centerId || rel.center_id || null,
             active: rel.active !== false, // Leer de la columna directa (por defecto true)
             patientNumber: rel.patientnumber || 0, // Número del paciente
-            status: rel.status || '' // Estado de la relación
+            status: rel.status || '', // Estado de la relación
+            aiInstructions: rel.ai_instructions || rel.data?.ai_instructions || '' // Instrucciones IA
           });
           console.log('[PatientDetailModal] relationshipSettings loaded:', {
             active: rel.active !== false,
@@ -1024,7 +1026,8 @@ tr:nth-child(even) td{background:#f8fafc}
         center_id: relationshipSettings.centerId || null,
         active: relationshipSettings.active,
         patientnumber: relationshipSettings.patientNumber,
-        status: relationshipSettings.status || null
+        status: relationshipSettings.status || null,
+        ai_instructions: relationshipSettings.aiInstructions || null
       };
       
       console.log('[PatientDetailModal] Guardando configuración:', payload);
@@ -1983,7 +1986,7 @@ tr:nth-child(even) td{background:#f8fafc}
                       {patientData?.auth_user_id && (
                         <span className="text-[10px] sm:text-xs text-slate-500 font-normal">(vinculado a cuenta)</span>
                       )}
-                      {(!editedPatientData.email || editedPatientData.email.includes('@noemail.dygo.local')) && (
+                      {(!editedPatientData.email || editedPatientData.email.includes('@noemail.mainds.local')) && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full">
                           <AlertCircle size={12} />
                           <span className="text-[10px] sm:text-xs font-medium">Sin email</span>
@@ -1991,16 +1994,16 @@ tr:nth-child(even) td{background:#f8fafc}
                       )}
                     </label>
                     {/* Permitir editar si: está en modo edición, no tiene auth_user_id vinculado, o tiene un email temporal */}
-                    {isEditingInfo && (!patientData?.auth_user_id || patientData?.has_temp_email || (editedPatientData.email && editedPatientData.email.includes('@noemail.dygo.local'))) ? (
+                    {isEditingInfo && (!patientData?.auth_user_id || patientData?.has_temp_email || (editedPatientData.email && editedPatientData.email.includes('@noemail.mainds.local'))) ? (
                       <div className="space-y-2">
                         <input
                           type="email"
-                          value={editedPatientData.email && !editedPatientData.email.includes('@noemail.dygo.local') ? editedPatientData.email : ''}
+                          value={editedPatientData.email && !editedPatientData.email.includes('@noemail.mainds.local') ? editedPatientData.email : ''}
                           onChange={(e) => setEditedPatientData({ ...editedPatientData, email: e.target.value })}
                           className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-white border-2 border-slate-300 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all text-sm"
                           placeholder="correo@ejemplo.com"
                         />
-                        {(!editedPatientData.email || editedPatientData.email.includes('@noemail.dygo.local')) && (
+                        {(!editedPatientData.email || editedPatientData.email.includes('@noemail.mainds.local')) && (
                           <p className="text-xs text-amber-600 flex items-center gap-1">
                             <AlertCircle size={12} />
                             Agrega un email para poder enviar comunicaciones al paciente
@@ -2009,16 +2012,16 @@ tr:nth-child(even) td{background:#f8fafc}
                       </div>
                     ) : (
                       <div className={`flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-4 border-2 rounded-lg sm:rounded-xl ${
-                        !editedPatientData.email || editedPatientData.email.includes('@noemail.dygo.local')
+                        !editedPatientData.email || editedPatientData.email.includes('@noemail.mainds.local')
                           ? 'bg-amber-50 border-amber-200' 
                           : 'bg-white border-slate-200'
                       }`}>
                         <span className={`text-xs sm:text-sm md:text-base font-medium break-all ${
-                          (editedPatientData.email && !editedPatientData.email.includes('@noemail.dygo.local'))
+                          (editedPatientData.email && !editedPatientData.email.includes('@noemail.mainds.local'))
                             ? 'text-slate-900' 
                             : 'text-amber-700'
                         }`}>
-                          {(editedPatientData.email && !editedPatientData.email.includes('@noemail.dygo.local')) 
+                          {(editedPatientData.email && !editedPatientData.email.includes('@noemail.mainds.local')) 
                             ? editedPatientData.email 
                             : 'Email no configurado - Edita para agregar'}
                         </span>
@@ -2809,6 +2812,27 @@ tr:nth-child(even) td{background:#f8fafc}
                   )}
                 </div>
               </div>
+
+              {/* Instrucciones para la IA de voz */}
+              {relationship && (
+                <div className="bg-white rounded-lg sm:rounded-xl border border-purple-200 shadow-sm overflow-hidden">
+                  <div className="bg-gradient-to-r from-purple-50 to-indigo-50 px-3 sm:px-4 py-2.5 sm:py-3 border-b border-purple-100 flex items-center gap-2">
+                    <span className="text-base">🤖</span>
+                    <h4 className="text-sm sm:text-base font-bold text-purple-900">Instrucciones para la IA de voz</h4>
+                  </div>
+                  <div className="p-3 sm:p-4">
+                    <p className="text-xs text-slate-500 mb-2">Indica a dygo qué temas tratar, qué preguntar o cómo enfocar las conversaciones de voz con este paciente. Estas instrucciones se incluyen en cada llamada de IA del paciente.</p>
+                    <textarea
+                      value={relationshipSettings.aiInstructions}
+                      onChange={(e) => setRelationshipSettings({ ...relationshipSettings, aiInstructions: e.target.value })}
+                      onBlur={saveRelationshipSettings}
+                      rows={4}
+                      className="w-full px-3 sm:px-4 py-2 sm:py-3 border-2 border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none text-sm sm:text-base"
+                      placeholder="Ej: Preguntar cómo lleva el trabajo con los pensamientos automáticos. Explorar la relación con su madre esta semana. Animar a practicar la respiración diafragmática..."
+                    />
+                  </div>
+                </div>
+              )}
 
               {isLoadingHistory ? (
                 <div className="flex items-center justify-center h-64">

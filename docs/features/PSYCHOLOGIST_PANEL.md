@@ -1,4 +1,4 @@
-# Panel Profesional de Psicólogo - dygo
+# Panel Profesional de Psicólogo - mainds
 
 ## Nuevas Funcionalidades Implementadas
 

@@ -23,13 +23,13 @@ View your app in AI Studio: https://ai.studio/apps/drive/1JPTsVij3m8trFrph34MVx0
 
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 
-Optional: Enable Stripe (DYGO Premium demo)
+Optional: Enable Stripe (MAINDS Premium demo)
 - Add your Stripe keys to `backend/.env` (use test keys when developing):
   - `STRIPE_SECRET_KEY` (server secret) and `STRIPE_PUBLISHABLE_KEY` (client publishable key).
   - Optionally `STRIPE_WEBHOOK_SECRET` to verify webhooks (recommended if using Stripe CLI forwarding with signing enabled).
   - Optionally provide `STRIPE_PRICE_ID_EUR` to reuse an existing €9.99 monthly Price ID instead of creating one on the fly.
   - `FRONTEND_URL` can be set to your frontend origin (e.g. `http://localhost:5173`) to control success/cancel/portal redirects.
-- When configured the app will show a **DYGO Premium** card in `Perfil y Ajustes` allowing users to open Stripe Checkout (hosted Checkout) to subscribe monthly (€9.99 EUR by default).
+- When configured the app will show a **MAINDS Premium** card in `Perfil y Ajustes` allowing users to open Stripe Checkout (hosted Checkout) to subscribe monthly (€9.99 EUR by default).
 - Local webhook testing options:
   1. Stripe CLI (recommended):
      - Install the CLI and run: `stripe listen --forward-to http://localhost:3001/webhook`.

@@ -90,7 +90,7 @@ window.addEventListener('unhandledrejection', (event) => {
   console.error('💥 Unhandled promise rejection:', event.reason);
 });
 
-console.log('🚀 dygo iniciando...');
+console.log('🚀 mainds iniciando...');
 
 const root = ReactDOM.createRoot(rootElement);
 root.render(

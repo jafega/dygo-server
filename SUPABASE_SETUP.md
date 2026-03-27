@@ -1,4 +1,4 @@
-# 🔧 Configuración de Supabase para dygo
+# 🔧 Configuración de Supabase para mainds
 
 ## Problema Actual
 Los usuarios se están creando en **db.json local** en lugar de en **Supabase** porque las variables de entorno no están configuradas en el backend.

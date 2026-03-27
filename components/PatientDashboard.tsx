@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState, useMemo, forwardRef, useImperativeHandle } from 'react';
+import React, { useEffect, useState, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { PatientSummary } from '../types';
 import { getPatientsForPsychologist } from '../services/storageService';
 import { getCurrentUser, apiFetch } from '../services/authService';
@@ -125,8 +125,8 @@ const PatientDashboard = forwardRef<PatientDashboardHandle, PatientDashboardProp
     
     // Refresh on stripe return
     const handleStripeSynced = () => loadData();
-    window.addEventListener('dygo:stripe-synced', handleStripeSynced);
-    sessionStorage.removeItem('dygo_stripe_return');
+    window.addEventListener('mainds:stripe-synced', handleStripeSynced);
+    sessionStorage.removeItem('mainds_stripe_return');
     
     // Refrescar cada 30 segundos solo si no hay modal abierto
     const intervalId = setInterval(() => {
@@ -137,7 +137,7 @@ const PatientDashboard = forwardRef<PatientDashboardHandle, PatientDashboardProp
 
     return () => {
       clearInterval(intervalId);
-      window.removeEventListener('dygo:stripe-synced', handleStripeSynced);
+      window.removeEventListener('mainds:stripe-synced', handleStripeSynced);
     };
   }, [selectedPatientId, showInactive]);
 
@@ -430,7 +430,7 @@ const PatientDashboard = forwardRef<PatientDashboardHandle, PatientDashboardProp
                                 <div className="flex items-center gap-2">
                                     <h4 className="font-bold text-slate-800 text-sm sm:text-base group-hover:text-indigo-600 transition-colors truncate">{patient.name}</h4>
                                     {/* Alerta si no tiene email válido */}
-                                    {(!patient.email || patient.email.includes('@noemail.dygo.local')) && (
+                                    {(!patient.email || patient.email.includes('@noemail.mainds.local')) && (
                                         <div className="flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full" title="Paciente sin email">
                                             <AlertCircle size={12} className="shrink-0" />
                                             <span className="text-[9px] sm:text-[10px] font-medium hidden sm:inline">Sin email</span>
@@ -439,7 +439,7 @@ const PatientDashboard = forwardRef<PatientDashboardHandle, PatientDashboardProp
                                 </div>
                                 
                                 {/* Email - solo mostrar si no es temporal */}
-                                {patient.email && !patient.email.includes('@noemail.dygo.local') ? (
+                                {patient.email && !patient.email.includes('@noemail.mainds.local') ? (
                                     <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-slate-500 mt-0.5">
                                         <Mail size={12} className="shrink-0" />
                                         <span className="truncate">{patient.email}</span>

@@ -61,11 +61,11 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
 
     // Refresh on stripe return
     const handleStripeSynced = () => loadConnections(false);
-    window.addEventListener('dygo:stripe-synced', handleStripeSynced);
-    sessionStorage.removeItem('dygo_stripe_return');
+    window.addEventListener('mainds:stripe-synced', handleStripeSynced);
+    sessionStorage.removeItem('mainds_stripe_return');
 
     return () => {
-      window.removeEventListener('dygo:stripe-synced', handleStripeSynced);
+      window.removeEventListener('mainds:stripe-synced', handleStripeSynced);
     };
   }, [currentUser?.id]);
 

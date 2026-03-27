@@ -6,7 +6,7 @@ Esta funcionalidad permite consolidar usuarios temporales (creados sin email) cu
 
 ## Problema que Resuelve
 
-Cuando un psicólogo crea un paciente sin email (con un email temporal tipo `temp_xxxxx@noemail.dygo.local`), y posteriormente ese paciente se registra con su email real, el sistema podría crear duplicados. Esta funcionalidad evita eso consolidando automáticamente los datos.
+Cuando un psicólogo crea un paciente sin email (con un email temporal tipo `temp_xxxxx@noemail.mainds.local`), y posteriormente ese paciente se registra con su email real, el sistema podría crear duplicados. Esta funcionalidad evita eso consolidando automáticamente los datos.
 
 ## Flujo de Consolidación
 
@@ -42,7 +42,7 @@ Cuando un psicólogo crea un paciente sin email (con un email temporal tipo `tem
 
 ```
 1. Psicólogo crea paciente "Juan" sin email
-   → Usuario ID: temp-123, Email: temp_abc@noemail.dygo.local
+   → Usuario ID: temp-123, Email: temp_abc@noemail.mainds.local
    
 2. Se actualiza el email a "juan@example.com"
    → No existe otro usuario con ese email
@@ -54,7 +54,7 @@ Cuando un psicólogo crea un paciente sin email (con un email temporal tipo `tem
 
 ```
 1. Psicólogo A crea paciente "Juan" sin email
-   → Usuario ID: temp-123, Email: temp_abc@noemail.dygo.local
+   → Usuario ID: temp-123, Email: temp_abc@noemail.mainds.local
    → Relación: Psych-A ↔ temp-123
 
 2. Usuario "juan@example.com" ya existe (ID: real-456)
@@ -177,7 +177,7 @@ El sistema registra logs detallados durante la consolidación:
 ## Consideraciones Importantes
 
 1. **Validación de Email**: Solo se consolida cuando:
-   - El usuario tiene `has_temp_email: true` o email tipo `@noemail.dygo.local`
+   - El usuario tiene `has_temp_email: true` o email tipo `@noemail.mainds.local`
    - Se proporciona un email real (no temporal)
 
 2. **Prevención de Pérdida de Datos**:
@@ -197,4 +197,4 @@ El sistema registra logs detallados durante la consolidación:
 - `has_temp_email`: Boolean que indica si el email es temporal
 - `user_email`: Email del usuario (columna en tabla)
 - `email`: Email en el campo data (JSONB)
-- Emails temporales siguen el patrón: `temp_[uuid]@noemail.dygo.local`
+- Emails temporales siguen el patrón: `temp_[uuid]@noemail.mainds.local`

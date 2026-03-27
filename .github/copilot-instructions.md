@@ -1,4 +1,4 @@
-# Copilot Instructions for dygo
+# Copilot Instructions for mainds
 
 Quick reference for AI agents working in this repo:
 

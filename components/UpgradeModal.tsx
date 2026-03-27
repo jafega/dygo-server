@@ -34,7 +34,7 @@ const UpgradeModal: React.FC<UpgradeModalProps> = ({ currentUser, trialDaysLeft,
       const { url } = await res.json();
       if (url) {
         if (returnPanel) {
-          localStorage.setItem('dygo_stripe_return_panel', returnPanel);
+          localStorage.setItem('mainds_stripe_return_panel', returnPanel);
         }
         window.location.href = url;
       }

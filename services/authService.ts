@@ -113,8 +113,8 @@ export const initializeDemoData = async () => {
     if (!hasPsych && !USE_BACKEND) {
         const hashedDemoPass = await hashPasswordClient('123');
         const demoPsychs: User[] = [
-            { id: 'psych-demo-1', name: 'Dra. Elena Foster', email: 'elena@dygo.health', password: hashedDemoPass, is_psychologist: true, isPsychologist: true },
-            { id: 'psych-demo-2', name: 'Dr. Marc Spector', email: 'marc@dygo.health', password: hashedDemoPass, is_psychologist: true, isPsychologist: true }
+            { id: 'psych-demo-1', name: 'Dra. Elena Foster', email: 'elena@mainds.health', password: hashedDemoPass, is_psychologist: true, isPsychologist: true },
+            { id: 'psych-demo-2', name: 'Dr. Marc Spector', email: 'marc@mainds.health', password: hashedDemoPass, is_psychologist: true, isPsychologist: true }
         ];
         const updated = [...users, ...demoPsychs];
         saveLocalUsers(updated);

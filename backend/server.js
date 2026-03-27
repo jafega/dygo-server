@@ -166,8 +166,8 @@ const allowedOrigins = [
   'https://mi.mainds.app',
   'https://mainds.app',
   'https://www.mainds.app',
-  'https://dygo.vercel.app',
-  'https://dygo-frontend.vercel.app',
+  'https://mainds.vercel.app',
+  'https://mainds-frontend.vercel.app',
   'http://localhost:5173',
   'http://localhost:3000'
 ].filter(Boolean);
@@ -177,7 +177,7 @@ const corsOptions = {
     if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin)) return callback(null, true);
     // Only allow specific vercel deployments, not all *.vercel.app
-    if (origin === 'https://dygo.vercel.app' || origin === 'https://dygo-frontend.vercel.app') return callback(null, true);
+    if (origin === 'https://mainds.vercel.app' || origin === 'https://mainds-frontend.vercel.app') return callback(null, true);
     if (origin.endsWith('.mainds.app') || origin === 'https://mainds.app') return callback(null, true);
     // In development, allow localhost and LAN IP origins (for mobile/tablet testing)
     if (process.env.NODE_ENV !== 'production') {
@@ -3290,7 +3290,7 @@ const handleAdminCreatePatient = async (req, res) => {
 
     // Si el usuario no existe, crear el nuevo paciente
     // Si no hay email, usar un identificador temporal
-    const patientEmail = normalizedEmail || `temp_${crypto.randomUUID()}@noemail.dygo.local`;
+    const patientEmail = normalizedEmail || `temp_${crypto.randomUUID()}@noemail.mainds.local`;
     
     // Calcular el siguiente número de paciente para este psicólogo
     let nextPatientNumber = 1;
@@ -4144,7 +4144,7 @@ async function createCalendarEventForSession(userId, session, withMeet = true) {
     if (!startDt || !endDt) return null;
 
     const tz = session.schedule_timezone || 'Europe/Madrid';
-    const requestId = `dygo-${session.id || crypto.randomUUID()}`.substring(0, 50);
+    const requestId = `mainds-${session.id || crypto.randomUUID()}`.substring(0, 50);
 
     const eventBody = {
       summary: `Sesión con ${session.patientName || 'Paciente'}`,
@@ -4846,8 +4846,8 @@ app.get('/api/users', authenticateRequest, async (req, res) => {
           const newUser = {
             id: crypto.randomUUID(),
             name: 'Usuario Recuperado',
-            email: `recuperado_${Date.now()}@dygo.app`,
-            user_email: `recuperado_${Date.now()}@dygo.app`,
+            email: `recuperado_${Date.now()}@mainds.app`,
+            user_email: `recuperado_${Date.now()}@mainds.app`,
             password: await hashPassword(recoveredPassword), // hash immediately
             role: 'PATIENT',
             isPsychologist: false,
@@ -4999,7 +4999,7 @@ app.patch('/api/users/:id', authenticateRequest, async (req, res) => {
       if (idx === -1) return res.status(404).json({ error: 'Usuario no encontrado' });
       
       const currentUser = db.users[idx];
-      const hasTempEmail = currentUser.has_temp_email || (currentUser.email && currentUser.email.includes('@noemail.dygo.local'));
+      const hasTempEmail = currentUser.has_temp_email || (currentUser.email && currentUser.email.includes('@noemail.mainds.local'));
       
       // Permitir cambiar email solo si es temporal o si el nuevo email coincide con el actual
       if (req.body?.email && req.body.email !== currentUser.email && !hasTempEmail) {
@@ -5008,7 +5008,7 @@ app.patch('/api/users/:id', authenticateRequest, async (req, res) => {
       
       // Si se está cambiando desde un email temporal a uno real, actualizar la bandera
       let updatedFields = { ...req.body };
-      if (hasTempEmail && req.body?.email && !req.body.email.includes('@noemail.dygo.local')) {
+      if (hasTempEmail && req.body?.email && !req.body.email.includes('@noemail.mainds.local')) {
         const newEmail = normalizeEmail(req.body.email);
         
         // 🔍 Verificar si ya existe un usuario con ese email
@@ -5139,7 +5139,7 @@ app.patch('/api/users/:id', authenticateRequest, async (req, res) => {
     }
 
     const currentEmail = existingUser.user_email || existingUser.email;
-    const hasTempEmail = existingUser.has_temp_email || (currentEmail && currentEmail.includes('@noemail.dygo.local'));
+    const hasTempEmail = existingUser.has_temp_email || (currentEmail && currentEmail.includes('@noemail.mainds.local'));
     
     // Permitir cambiar email solo si es temporal o si el nuevo email coincide con el actual
     if (req.body?.email && normalizeEmail(req.body.email) !== normalizeEmail(currentEmail) && !hasTempEmail) {
@@ -5153,7 +5153,7 @@ app.patch('/api/users/:id', authenticateRequest, async (req, res) => {
     const updateFields = {};
     
     // Si se está cambiando desde un email temporal a uno real
-    if (hasTempEmail && req.body?.email && !req.body.email.includes('@noemail.dygo.local')) {
+    if (hasTempEmail && req.body?.email && !req.body.email.includes('@noemail.mainds.local')) {
       const newEmail = normalizeEmail(req.body.email);
       
       // 🔍 Verificar si ya existe un usuario con ese email
@@ -7661,6 +7661,102 @@ app.post('/api/invoices/:id/rectify', authenticateRequest, async (req, res) => {
   }
 });
 
+// Send invoice by email to psychologist + gestor emails
+app.post('/api/invoices/:id/send-email', authenticateRequest, async (req, res) => {
+  const { id } = req.params;
+
+  if (!process.env.RESEND_API_KEY) {
+    return res.status(503).json({ error: 'Resend no está configurado' });
+  }
+
+  if (!supabaseAdmin) {
+    return res.status(503).json({ error: 'Supabase no está configurado' });
+  }
+
+  try {
+    // Obtener factura
+    const { data: invoiceRows, error: invoiceError } = await supabaseAdmin
+      .from('invoices')
+      .select('*')
+      .eq('id', id)
+      .limit(1);
+
+    if (invoiceError || !invoiceRows || invoiceRows.length === 0) {
+      return res.status(404).json({ error: 'Factura no encontrada' });
+    }
+
+    const invoice = normalizeSupabaseRow(invoiceRows[0]);
+
+    // Autorización: solo el psicólogo propietario
+    if (invoice.psychologist_user_id !== req.authenticatedUserId) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    // Obtener perfil del psicólogo
+    const { data: profileRows } = await supabaseAdmin
+      .from('psychologist_profiles')
+      .select('data')
+      .eq('user_id', req.authenticatedUserId)
+      .limit(1);
+
+    const psychProfile = profileRows?.[0]?.data || {};
+    const gestorEmails = Array.isArray(psychProfile.gestor_emails) ? psychProfile.gestor_emails : [];
+
+    // Obtener email del psicólogo
+    const psychUser = await readSupabaseRowById('users', req.authenticatedUserId);
+    const psychEmail = psychUser?.user_email || psychUser?.email || '';
+
+    // Construir lista de destinatarios (psicólogo + gestores), sin duplicados ni placeholders
+    const allRecipients = [...new Set([psychEmail, ...gestorEmails])]
+      .filter(e => e && !e.endsWith('@noemail.mainds.local'));
+
+    if (allRecipients.length === 0) {
+      return res.status(400).json({ error: 'No hay destinatarios configurados' });
+    }
+
+    // Generar HTML de la factura
+    const htmlBody = await prepareAndBuildInvoiceHTML(invoice, supabaseAdmin);
+
+    const invoiceLabel = invoice.is_rectificativa ? 'Factura rectificativa' : 'Factura';
+    const subject = `${invoiceLabel} ${invoice.invoiceNumber} — ${psychProfile.businessName || psychProfile.name || 'mainds'}`;
+
+    // Enviar via Resend (un email por destinatario para privacidad)
+    const sendResults = await Promise.allSettled(
+      allRecipients.map(recipient =>
+        fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            from: 'mainds <no-reply@mainds.app>',
+            to: [recipient],
+            subject,
+            html: htmlBody,
+            attachments: [{
+              filename: `factura-${invoice.invoiceNumber}.html`,
+              content: Buffer.from(htmlBody).toString('base64'),
+              content_type: 'text/html'
+            }]
+          })
+        }).then(r => r.json())
+      )
+    );
+
+    const failed = sendResults.filter(r => r.status === 'rejected' || r.value?.statusCode >= 400);
+    if (failed.length === allRecipients.length) {
+      return res.status(500).json({ error: 'Error enviando email' });
+    }
+
+    console.log(`✅ Factura ${invoice.invoiceNumber} enviada por email a ${allRecipients.join(', ')}`);
+    res.json({ ok: true, recipients: allRecipients });
+  } catch (err) {
+    console.error('❌ Error en /api/invoices/:id/send-email:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
 // Delete draft invoice and unassign from sessions/bonos
 app.delete('/api/invoices/:id', authenticateRequest, async (req, res) => {
   try {
@@ -8999,6 +9095,125 @@ app.get('/api/invoices/:id/pdf', authenticateRequest, async (req, res) => {
 });
 
 // ─── HELPER: build invoice HTML (shared by PDF and ZIP endpoints) ───────────
+async function prepareAndBuildInvoiceHTML(invoice, supabase) {
+  // Get psychologist specialty from profile
+  let psychologistSpecialty = '';
+  if (invoice.psychologist_user_id && supabase) {
+    try {
+      const { data: profileRows } = await supabase
+        .from('psychologist_profiles')
+        .select('*')
+        .eq('id', invoice.psychologist_user_id)
+        .limit(1);
+      if (profileRows && profileRows.length > 0) {
+        const prof = normalizeSupabaseRow(profileRows[0]);
+        psychologistSpecialty = prof.specialty || '';
+      }
+    } catch (_) {}
+  }
+
+  const psychProfile = {
+    name: invoice.billing_psychologist_name || 'Psicólogo',
+    businessName: invoice.billing_psychologist_name || 'Servicios Profesionales de Psicología',
+    taxId: invoice.billing_psychologist_tax_id || '',
+    address: invoice.billing_psychologist_address || '',
+    city: '', postalCode: '', country: 'España', phone: '', email: '',
+    specialty: psychologistSpecialty, professionalId: '', iban: ''
+  };
+
+  const patientData = {
+    name: invoice.billing_client_name || invoice.patientName || 'Paciente',
+    taxId: invoice.billing_client_tax_id || '',
+    dni: invoice.billing_client_tax_id || '',
+    address: invoice.billing_client_address || '',
+    email: '', phone: '',
+    postalCode: invoice.billing_client_postal_code || '',
+    country: invoice.billing_client_country || '',
+    city: ''
+  };
+
+  const subtotal = parseFloat(invoice.amount) || 0;
+  let iva = (invoice.tax !== undefined && invoice.tax !== null)
+    ? parseFloat(invoice.tax)
+    : subtotal * ((parseFloat(invoice.taxRate) || 21) / 100);
+  let irpfAmount = (invoice.invoice_type === 'center' && invoice.irpf)
+    ? subtotal * (parseFloat(invoice.irpf) / 100) : 0;
+  let totalAmount = (invoice.total !== undefined && invoice.total !== null)
+    ? parseFloat(invoice.total)
+    : subtotal + iva - irpfAmount;
+
+  let detailedItems = [];
+
+  if (invoice.sessionIds && invoice.sessionIds.length > 0) {
+    const { data: sessions } = await supabase
+      .from('sessions').select('*').in('id', invoice.sessionIds);
+    if (sessions) {
+      sessions.sort((a, b) => new Date(a.starts_on || 0) - new Date(b.starts_on || 0));
+      sessions.forEach(session => {
+        const sessionData = session.data || {};
+        const sessionRawPrice = session.price || sessionData.price || 0;
+        const sessionDurationHours = getSessionDurationHours(session);
+        const sessionPercentPsych = session.percent_psych || sessionData.percent_psych || null;
+        const sessionPrice = (invoice.invoice_type === 'center' && sessionPercentPsych)
+          ? sessionRawPrice * sessionDurationHours * sessionPercentPsych / 100
+          : sessionRawPrice * sessionDurationHours;
+        const startDateLabel = session.starts_on
+          ? new Date(session.starts_on).toLocaleDateString('es-ES', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })
+          : 'Fecha no disponible';
+        const startTime = session.starts_on ? session.starts_on.substring(11, 16) : '';
+        const endTime = session.ends_on ? session.ends_on.substring(11, 16) : '';
+        const timeStr = startTime && endTime ? ` (${startTime}–${endTime})` : '';
+        let itemDescription;
+        if (invoice.invoice_type === 'center') {
+          let durationStr = '';
+          if (session.starts_on && session.ends_on) {
+            const durationH = (new Date(session.ends_on) - new Date(session.starts_on)) / 3600000;
+            durationStr = ` — ${Number.isInteger(durationH) ? durationH : durationH.toFixed(2)} h`;
+          }
+          itemDescription = `Sesión de psicología${durationStr} — ${startDateLabel}${timeStr}`;
+        } else {
+          const patStr = sessionData.patientName || invoice.patientName || '';
+          itemDescription = `Sesión de psicología${patStr ? ` — ${patStr}` : ''} — ${startDateLabel}${timeStr}`;
+        }
+        detailedItems.push({ description: itemDescription, quantity: invoice.is_rectificativa ? -1 : 1, unitPrice: sessionPrice });
+      });
+    }
+  }
+
+  let bonoIdsToQuery = (invoice.bonoIds && invoice.bonoIds.length > 0) ? invoice.bonoIds : null;
+  if (!bonoIdsToQuery && invoice.id) {
+    const { data: bonosByInvId } = await supabase.from('bono').select('id').eq('invoice_id', invoice.id);
+    if (bonosByInvId && bonosByInvId.length > 0) bonoIdsToQuery = bonosByInvId.map(b => b.id);
+  }
+  if (bonoIdsToQuery && bonoIdsToQuery.length > 0) {
+    const { data: bonos } = await supabase.from('bono').select('*').in('id', bonoIdsToQuery);
+    if (bonos) {
+      bonos.forEach(bono => {
+        const bonoData = bono.data || {};
+        const bonoRawPrice = bono.total_price_bono_amount || bonoData.total_price_bono_amount || 0;
+        const bonoPercentPsych = bono.percent_psych || bonoData.percent_psych || null;
+        const bonoPrice = (invoice.invoice_type === 'center' && bonoPercentPsych)
+          ? bonoRawPrice * bonoPercentPsych / 100 : bonoRawPrice;
+        const totalSessions = bono.total_sessions_amount || bonoData.total_sessions_amount || 0;
+        const pricePerSession = totalSessions > 0 ? (bonoPrice / totalSessions).toFixed(2) : '0.00';
+        const createdLabel = bono.created_at
+          ? new Date(bono.created_at).toLocaleDateString('es-ES', { year: 'numeric', month: 'short', day: 'numeric' }) : '';
+        detailedItems.push({
+          description: `Bono de psicología — ${totalSessions} sesiones${createdLabel ? ` (creado ${createdLabel})` : ''} · ${pricePerSession} €/sesión`,
+          quantity: invoice.is_rectificativa ? -1 : 1,
+          unitPrice: bonoPrice
+        });
+      });
+    }
+  }
+
+  if (detailedItems.length === 0) {
+    detailedItems = [{ description: invoice.description || 'Servicio de psicología', quantity: 1, unitPrice: subtotal }];
+  }
+
+  return buildInvoiceHTML(invoice, psychProfile, patientData, subtotal, iva, irpfAmount, totalAmount, detailedItems);
+}
+
 function buildInvoiceHTML(invoice, psychProfile, patientData, subtotal, iva, irpfAmount, totalAmount, detailedItems) {
   const escapeHtml = (str) => (str || '')
     .replace(/&/g, '&amp;')
@@ -10225,6 +10440,11 @@ app.put('/api/relationships/:id', authenticateRequest, async (req, res) => {
         // Si se envía uses_bonos, guardarlo en data
         if (updatedData.uses_bonos !== undefined) {
           newData.uses_bonos = updatedData.uses_bonos;
+        }
+        
+        // Si se envían instrucciones de IA, guardarlas en data
+        if (updatedData.ai_instructions !== undefined) {
+          newData.ai_instructions = updatedData.ai_instructions;
         }
         
         // Si se envía patientNumber, guardarlo en data
@@ -12051,7 +12271,7 @@ app.post('/api/sessions/:sessionId/send-reminder', authenticateRequest, async (r
     }
 
     const patientEmail = patient?.user_email || patient?.email;
-    if (!patientEmail || patientEmail.includes('@noemail.dygo.local')) {
+    if (!patientEmail || patientEmail.includes('@noemail.mainds.local')) {
       return res.status(400).json({ error: 'El paciente no tiene un email válido' });
     }
 
@@ -14512,7 +14732,7 @@ app.delete('/api/materials/:id', authenticateRequest, async (req, res) => {
 });
 
 app.get('/', (_req, res) => {
-  res.send('DYGO API OK ✅ Usa /api/users, /api/entries, etc.');
+  res.send('MAINDS API OK ✅ Usa /api/users, /api/entries, etc.');
 });
 
 // --- ERROR HANDLER MIDDLEWARE ---
@@ -14688,7 +14908,7 @@ app.post('/api/gdpr/consent', authenticateRequest, (req, res) => {
 // GDPR Art. 15.3 - Obtener información sobre el tratamiento de datos
 app.get('/api/gdpr/privacy-info', (_req, res) => {
   return res.json({
-    controller: 'mainds (Dygo Health S.L.)',
+    controller: 'mainds (Mainds Health S.L.)',
     purpose: 'Gestión de sesiones de terapia psicológica y seguimiento del bienestar emocional',
     legalBasis: 'Consentimiento explícito del interesado (Art. 6.1.a RGPD) y ejecución contractual (Art. 6.1.b RGPD)',
     specialCategories: 'Datos de salud tratados bajo Art. 9.2.a RGPD (consentimiento explícito) y Art. 9.2.h (fines de medicina preventiva)',
@@ -14732,7 +14952,7 @@ try {
 
 if (!process.env.VERCEL && !process.env.VERCEL_ENV) {
   const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log('\n🚀 SERVIDOR DYGO (ES MODULES) LISTO');
+    console.log('\n🚀 SERVIDOR MAINDS (ES MODULES) LISTO');
     console.log(`📡 URL: http://localhost:${PORT}`);
     console.log(`📂 DB: ${DB_FILE}\n`);
 

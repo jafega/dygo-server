@@ -866,9 +866,17 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
       });
 
       if (response.ok) {
+        const savedInvoice = await response.json();
         await loadInvoices();
         handleCloseModal();
         alert(isDraft ? 'Borrador guardado correctamente' : 'Factura creada correctamente');
+        // Enviar por email cuando se emite (no borradores)
+        if (!isDraft && savedInvoice?.id) {
+          apiFetch(`${API_URL}/invoices/${savedInvoice.id}/send-email`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          }).catch(() => {/* silencioso: el envío de email no bloquea el flujo */});
+        }
       } else {
         const errorData = await response.json();
         alert('Error: ' + (errorData.error || 'Error desconocido'));
@@ -1048,6 +1056,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
       });
       
       if (response.ok) {
+        const rectData = await response.json();
         await loadInvoices();
         setShowCancelModal(false);
         setInvoiceToCancel(null);
@@ -1055,6 +1064,14 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
         setRectificationType('R4');
         setRectificationReason('');
         alert('Factura cancelada y rectificativa creada correctamente');
+        // Enviar rectificativa por email
+        const rectId = rectData?.rectificativa?.id;
+        if (rectId) {
+          apiFetch(`${API_URL}/invoices/${rectId}/send-email`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          }).catch(() => {/* silencioso */});
+        }
       } else {
         const errorData = await response.json();
         alert('Error: ' + (errorData.error || 'Error desconocido'));

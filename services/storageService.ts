@@ -1015,3 +1015,12 @@ export const getAllPsychologists = async (currentUserId?: string): Promise<User[
 export const hasCareRelationship = async (psychologistId: string, patientId: string): Promise<boolean> => {
     return relationshipExists(psychologistId, patientId);
 };
+
+export const getPatientActiveRelationship = async (patientUserId: string): Promise<CareRelationship | null> => {
+  try {
+    const rels = await fetchRelationships({ patient_user_id: patientUserId });
+    return rels.find(r => r.active !== false) || rels[0] || null;
+  } catch {
+    return null;
+  }
+};

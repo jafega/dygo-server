@@ -3180,7 +3180,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                     const whatsappMessage = `¡Hola ${patientName}! 😊 Te escribo para recordarte nuestra sesión del ${sessionDate} a las ${editedSession.startTime}h. ¡Hasta pronto!`;
                     const whatsappUrl = `https://wa.me/${phone.replace(/^\+/, '')}?text=${encodeURIComponent(whatsappMessage)}`;
 
-                    const hasRealEmail = hasEmail && !email.includes('@noemail.dygo.local');
+                    const hasRealEmail = hasEmail && !email.includes('@noemail.mainds.local');
                     const reminderDisabledReason = !hasRealEmail
                       ? (hasEmail ? 'El paciente no tiene un email real registrado' : 'El paciente no tiene email registrado')
                       : null;
@@ -3729,7 +3729,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                 {(() => {
                   const selectedPatient = patients.find(p => p.id === newSession.patientId);
                   const email = (selectedPatient?.email || '').trim();
-                  const hasRealEmail = email.length > 0 && !email.includes('@noemail.dygo.local');
+                  const hasRealEmail = email.length > 0 && !email.includes('@noemail.mainds.local');
                   return (
                     <div className="flex items-center col-span-2">
                       <div className="flex flex-col gap-2 w-full">

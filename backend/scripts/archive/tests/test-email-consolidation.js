@@ -41,7 +41,7 @@ async function cleanup() {
   
   // Eliminar usuarios de prueba
   await supabase.from('users').delete().like('user_email', '%@test-consolidation.local');
-  await supabase.from('users').delete().like('user_email', 'temp_%@noemail.dygo.local');
+  await supabase.from('users').delete().like('user_email', 'temp_%@noemail.mainds.local');
   
   console.log('✅ Limpieza completada\n');
 }

@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { UserSettings, User } from '../types';
 import { getCurrentUser, updateUser, uploadAvatar, apiFetch } from '../services/authService';
 import { X, Clock, Shield, LogOut, Globe, Mic, Camera, UserCheck, Calendar, CheckCircle, AlertCircle } from 'lucide-react';
@@ -73,8 +73,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
     load();
     // Listen for stripe sync completion (triggered by App.tsx) to refresh subscription info
     const handleStripeSynced = () => { load(); };
-    window.addEventListener('dygo:stripe-synced', handleStripeSynced);
-    return () => window.removeEventListener('dygo:stripe-synced', handleStripeSynced);
+    window.addEventListener('mainds:stripe-synced', handleStripeSynced);
+    return () => window.removeEventListener('mainds:stripe-synced', handleStripeSynced);
   }, []);
 
   useEffect(() => {
