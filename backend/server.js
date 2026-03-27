@@ -4303,8 +4303,13 @@ app.get('/api/google/callback', async (req, res) => {
 app.get('/api/google/status', authenticateRequest, async (req, res) => {
   const userId = req.query.userId || req.authenticatedUserId;
   if (!userId) return res.status(400).json({ error: 'userId requerido' });
-  const tokens = await getGoogleTokensForUser(String(userId));
-  return res.json({ connected: !!tokens });
+  try {
+    const tokens = await getGoogleTokensForUser(String(userId));
+    return res.json({ connected: !!tokens });
+  } catch (err) {
+    console.error('❌ [google/status] Error:', err?.message);
+    return res.json({ connected: false });
+  }
 });
 
 // DELETE /api/google/disconnect — revoke and remove Google tokens
@@ -6265,31 +6270,31 @@ app.get('/api/goals', authenticateRequest, async (req, res) => {
       const { data, error } = await query;
 
       if (error) {
-        console.error('[GET /api/goals] ❌ Error obteniendo goals:', error);
-        throw error;
+        console.error('[GET /api/goals] ❌ Error obteniendo goals desde Supabase (code:', error?.code, '):', error?.message);
+        // Fall through to cache/db.json fallback
+      } else {
+        // Normalizar los datos: extraer el campo data de cada row
+        const goals = (data || []).map(row => ({
+          ...row.data,
+          id: row.id,
+          userId: row.patient_user_id
+        }));
+
+        console.log('[GET /api/goals] ✅ Goals obtenidos exitosamente:', goals.length);
+        return res.json(goals);
       }
-
-      // Normalizar los datos: extraer el campo data de cada row
-      const goals = (data || []).map(row => ({
-        ...row.data,
-        id: row.id,
-        userId: row.patient_user_id
-      }));
-
-      console.log('[GET /api/goals] ✅ Goals obtenidos exitosamente:', goals.length);
-      return res.json(goals);
     } catch (err) {
-      console.error('[GET /api/goals] ❌ Error:', err);
-      return res.status(500).json({ error: 'Error obteniendo goals desde Supabase' });
+      console.error('[GET /api/goals] ❌ Error:', err?.message || err);
+      // Fall through to cache/db.json fallback
     }
   }
 
-  // Fallback a db.json si Supabase no está disponible
+  // Fallback a cache o db.json
   const db = getDb();
   const safeGoals = Array.isArray(db.goals) ? db.goals : [];
 
   const goals = userId
-    ? safeGoals.filter((g) => String(g.userId) === String(userId))
+    ? safeGoals.filter((g) => String(g.userId) === String(userId) || String(g.patient_user_id) === String(userId))
     : safeGoals;
 
   res.json(goals);
@@ -11486,8 +11491,16 @@ app.get('/api/sessions', authenticateRequest, async (req, res) => {
       const { data: sessionsData, error: sessionsError } = await query;
       
       if (sessionsError) {
-        console.error('❌ Error consultando sesiones de Supabase:', sessionsError);
-        throw sessionsError;
+        console.error('❌ [GET /api/sessions] Error Supabase (code:', sessionsError?.code, '):', sessionsError?.message);
+        // Graceful fallback: use cached sessions filtered by psychologistId/patientId
+        const cachedSessions = supabaseDbCache?.sessions || [];
+        const filtered = cachedSessions.filter(s => {
+          if (psychologistId && s.psychologist_user_id !== psychologistId && s.psychologistId !== psychologistId) return false;
+          if (patientId && s.patient_user_id !== patientId && s.patientId !== patientId) return false;
+          return true;
+        });
+        console.warn(`⚠️ [GET /api/sessions] Using cache fallback: ${filtered.length} sessions`);
+        return res.json(filtered);
       }
       
       // Normalizar sesiones (convierte starts_on/ends_on a date/startTime/endTime)
