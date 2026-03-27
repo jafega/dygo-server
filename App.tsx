@@ -224,6 +224,7 @@ const App: React.FC = () => {
         console.log('⚠️ is_psychologist es false, forzando vista de paciente');
         setPsychViewMode('PERSONAL');
         setViewState(ViewState.CALENDAR);
+        setActiveTab('calendar');
       }
     }
   }, [currentUser?.is_psychologist, psychViewMode]);
@@ -535,6 +536,7 @@ const App: React.FC = () => {
         // Si is_psychologist es false O es un paciente, forzar vista de paciente
         setViewState(ViewState.CALENDAR);
         setPsychViewMode('PERSONAL');
+        setActiveTab('calendar');
       }
   };
 
@@ -1012,7 +1014,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   userName={currentUser.name}
                   userEmail={currentUser.email}
                   avatarUrl={currentUser.avatarUrl}
-                  onSwitchToPersonal={() => setPsychViewMode('PERSONAL')}
+                  onSwitchToPersonal={() => { setPsychViewMode('PERSONAL'); setActiveTab('calendar'); }}
                   onOpenSettings={handleOpenSettings}
                   isProfileIncomplete={isProfileIncomplete}
                   subscriptionInfo={psychSubscriptionInfo}
