@@ -270,9 +270,10 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session: init
         throw new Error('API de IA no configurada');
       }
 
-      const fullPrompt = text.trim()
-        ? `${customPrompt}\n\nContenido de la sesión:\n${text}`
-        : customPrompt;
+      const parts: string[] = [customPrompt];
+      if (text.trim()) parts.push(`Contenido de la sesión:\n${text}`);
+      if (editedSummary.trim()) parts.push(`Texto IA previo (puedes modificarlo o continuarlo):\n${editedSummary}`);
+      const fullPrompt = parts.join('\n\n');
 
       const result = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
@@ -1123,29 +1124,30 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session: init
               )}
             </div>
 
-            {/* AI Result */}
-            {aiSummary && (
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-xs sm:text-sm font-semibold text-slate-700 flex items-center gap-1.5">
-                    <Sparkles size={13} className="text-purple-500" />
-                    Resultado IA
-                  </label>
+            {/* AI Result - always visible */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs sm:text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                  <Sparkles size={13} className="text-purple-500" />
+                  Resultado IA
+                </label>
+                {editedSummary && (
                   <button
                     onClick={() => { setAiSummary(''); setEditedSummary(''); }}
                     className="text-[10px] text-slate-400 hover:text-red-500 px-1.5 py-0.5 rounded transition-colors"
                   >
                     Limpiar
                   </button>
-                </div>
-                <textarea
-                  value={editedSummary}
-                  onChange={(e) => setEditedSummary(e.target.value)}
-                  rows={8}
-                  className="w-full px-3 py-2.5 sm:px-4 sm:py-3 border-2 border-purple-100 bg-purple-50/30 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-purple-400 resize-none text-sm sm:text-base"
-                />
+                )}
               </div>
-            )}
+              <textarea
+                value={editedSummary}
+                onChange={(e) => setEditedSummary(e.target.value)}
+                placeholder="El resultado de la IA aparecerá aquí. Puedes editarlo y usarlo como contexto para nuevas consultas."
+                rows={8}
+                className="w-full px-3 py-2.5 sm:px-4 sm:py-3 border-2 border-purple-100 bg-purple-50/30 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-purple-400 resize-none text-sm sm:text-base placeholder:text-slate-300"
+              />
+            </div>
 
             {/* Status Selection - Compact */}
             <div>

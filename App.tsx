@@ -1044,7 +1044,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                           {psychPanelView === 'connections' && 'Conexiones'}
                           {psychPanelView === 'sessions' && 'Sesiones'}
                           {psychPanelView === 'centros' && 'Centros'}
-                          {psychPanelView === 'templates' && 'Documentos'}
+                          {psychPanelView === 'templates' && 'Consentimientos'}
                           {psychPanelView === 'materials' && 'Materiales'}
                           {psychPanelView === 'import' && 'Importar Pacientes'}
                           {psychPanelView === 'ai-assistant' && 'Asistente IA'}
@@ -1077,7 +1077,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                           {psychPanelView === 'connections' && 'Conexiones'}
                           {psychPanelView === 'sessions' && 'Sesiones'}
                           {psychPanelView === 'centros' && 'Centros'}
-                          {psychPanelView === 'templates' && 'Documentos'}
+                          {psychPanelView === 'templates' && 'Consentimientos'}
                           {psychPanelView === 'materials' && 'Materiales'}
                           {psychPanelView === 'import' && 'Importar Pacientes'}
                           {psychPanelView === 'ai-assistant' && 'Asistente IA'}

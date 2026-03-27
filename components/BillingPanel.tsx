@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, Plus, DollarSign, Check, Clock, ExternalLink, Download, Eye, Edit, Trash2, Send, CheckSquare, Square, Search, Building, User, X, ArrowUpDown } from 'lucide-react';
+import { FileText, Plus, DollarSign, Check, Clock, ExternalLink, Download, Eye, Edit, Trash2, Send, CheckSquare, Square, Search, Building, User, X, ArrowUpDown, Archive } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
 import { AddressAutocomplete } from './AddressAutocomplete';
@@ -165,6 +165,10 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [showZipPanel, setShowZipPanel] = useState(false);
+  const [zipDateFrom, setZipDateFrom] = useState('');
+  const [zipDateTo, setZipDateTo] = useState('');
+  const [isDownloadingZip, setIsDownloadingZip] = useState(false);
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
   // Detalle de sesiones/bonos de la factura seleccionada
@@ -1254,6 +1258,41 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
     }
   };
 
+  const handleDownloadZIP = async () => {
+    if (!zipDateFrom || !zipDateTo) {
+      alert('Por favor selecciona una fecha de inicio y una fecha de fin.');
+      return;
+    }
+    if (zipDateFrom > zipDateTo) {
+      alert('La fecha de inicio no puede ser posterior a la fecha de fin.');
+      return;
+    }
+    setIsDownloadingZip(true);
+    try {
+      const params = new URLSearchParams({ startDate: zipDateFrom, endDate: zipDateTo });
+      const response = await apiFetch(`${API_URL}/invoices/zip?${params}`);
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error((err as any).error || `Error ${response.status}`);
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `facturas_${zipDateFrom}_${zipDateTo}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      setShowZipPanel(false);
+    } catch (error: any) {
+      console.error('Error descargando ZIP:', error);
+      alert(error.message || 'Error al descargar el ZIP de facturas');
+    } finally {
+      setIsDownloadingZip(false);
+    }
+  };
+
   // Filtrado por draft/facturas/rectificativas
   const draftFilteredInvoices = showDrafts 
     ? invoices.filter(inv => inv.status === 'draft')
@@ -1458,6 +1497,66 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
               />
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ZIP Download Panel */}
+      {!showDrafts && !showRectificativas && (
+        <div className="bg-white rounded-lg shadow border border-slate-200 overflow-hidden">
+          <button
+            onClick={() => setShowZipPanel(!showZipPanel)}
+            className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+          >
+            <span className="flex items-center gap-2">
+              <Archive size={16} className="text-indigo-500" />
+              Descargar facturas en ZIP
+            </span>
+            <span className="text-slate-400 text-xs">{showZipPanel ? '▲' : '▼'}</span>
+          </button>
+          {showZipPanel && (
+            <div className="px-4 pb-4 border-t border-slate-100 bg-slate-50">
+              <p className="text-xs text-slate-500 mt-3 mb-3">
+                Selecciona un rango de fechas para descargar todas las facturas emitidas en ese período como archivos HTML dentro de un ZIP.
+              </p>
+              <div className="flex flex-col sm:flex-row items-end gap-3">
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Fecha inicio</label>
+                  <input
+                    type="date"
+                    value={zipDateFrom}
+                    onChange={(e) => setZipDateFrom(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Fecha fin</label>
+                  <input
+                    type="date"
+                    value={zipDateTo}
+                    onChange={(e) => setZipDateTo(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+                  />
+                </div>
+                <button
+                  onClick={handleDownloadZIP}
+                  disabled={isDownloadingZip || !zipDateFrom || !zipDateTo}
+                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium whitespace-nowrap"
+                >
+                  {isDownloadingZip ? (
+                    <>
+                      <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                      Generando...
+                    </>
+                  ) : (
+                    <>
+                      <Archive size={16} />
+                      Descargar ZIP
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

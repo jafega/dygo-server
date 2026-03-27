@@ -13,6 +13,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { google } from 'googleapis';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
+import archiver from 'archiver';
 
 // bcrypt: prefer native, fall back to pure-JS bcryptjs in serverless
 let bcrypt;
@@ -8989,6 +8990,424 @@ app.get('/api/invoices/:id/pdf', authenticateRequest, async (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Content-Disposition', `inline; filename="factura-${invoice.invoiceNumber}.html"`);
   res.send(html);
+});
+
+// ─── HELPER: build invoice HTML (shared by PDF and ZIP endpoints) ───────────
+function buildInvoiceHTML(invoice, psychProfile, patientData, subtotal, iva, irpfAmount, totalAmount, detailedItems) {
+  const escapeHtml = (str) => (str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+  const formatDateES = (dateStr) => {
+    if (!dateStr) return '';
+    const datePart = String(dateStr).split('T')[0];
+    const parts = datePart.split('-');
+    if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('es-ES', { year: 'numeric', month: '2-digit', day: '2-digit' });
+  };
+
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      color: #333;
+      line-height: 1.6;
+      padding: 40px;
+      background: #fff;
+    }
+    .container { max-width: 800px; margin: 0 auto; }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 40px;
+      padding-bottom: 20px;
+      border-bottom: 3px solid #2563eb;
+    }
+    .company-info { flex: 1; }
+    .company-name { font-size: 24px; font-weight: bold; color: #2563eb; margin-bottom: 10px; }
+    .company-details { font-size: 13px; color: #666; line-height: 1.8; }
+    .invoice-title { text-align: right; flex: 1; }
+    .invoice-title h1 { font-size: 32px; color: #1e40af; margin-bottom: 5px; }
+    .invoice-number { font-size: 16px; color: #666; font-weight: normal; }
+    .info-section { display: flex; justify-content: space-between; margin-bottom: 40px; gap: 30px; }
+    .info-box { flex: 1; background: #f8fafc; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; }
+    .info-box h3 { font-size: 14px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; font-weight: 600; }
+    .info-row { display: flex; margin-bottom: 8px; font-size: 14px; }
+    .info-label { font-weight: 600; min-width: 100px; color: #475569; }
+    .info-value { color: #1e293b; }
+    .items-table { width: 100%; border-collapse: collapse; margin: 30px 0; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
+    .items-table thead { background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%); color: white; }
+    .items-table th { padding: 15px; text-align: left; font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .items-table th:last-child, .items-table td:last-child { text-align: right; }
+    .items-table tbody tr { border-bottom: 1px solid #e2e8f0; }
+    .items-table tbody tr:last-child { border-bottom: none; }
+    .items-table tbody tr:hover { background: #f8fafc; }
+    .items-table td { padding: 15px; font-size: 14px; }
+    .totals-section { margin-top: 30px; display: flex; justify-content: flex-end; }
+    .totals-box { min-width: 350px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
+    .total-row { display: flex; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid #e2e8f0; }
+    .total-row:last-child { border-bottom: none; background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%); color: white; font-size: 18px; font-weight: bold; padding: 18px 20px; }
+    .total-label { font-weight: 600; }
+    .total-value { font-weight: bold; }
+    .status-badge { display: inline-block; padding: 6px 16px; border-radius: 20px; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .status-paid { background: #dcfce7; color: #166534; }
+    .status-pending { background: #fef3c7; color: #92400e; }
+    .status-overdue { background: #fee2e2; color: #991b1b; }
+    .status-cancelled { background: #fecaca; color: #7f1d1d; }
+    .footer { margin-top: 60px; padding-top: 20px; border-top: 2px solid #e2e8f0; text-align: center; font-size: 12px; color: #64748b; }
+    .footer-title { font-weight: 600; color: #475569; margin-bottom: 8px; }
+    .payment-info { background: #f1f5f9; padding: 15px; border-radius: 8px; margin-top: 20px; text-align: left; }
+    .payment-info h4 { color: #1e40af; margin-bottom: 10px; font-size: 14px; }
+    .cancelled .watermark { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-45deg); font-size: 120px; color: rgba(220, 38, 38, 0.08); z-index: -1; font-weight: bold; letter-spacing: 20px; }
+    .cancelled-notice { background: #fee2e2; border: 2px solid #dc2626; border-radius: 8px; padding: 15px; margin-top: 30px; color: #991b1b; font-weight: 600; text-align: center; }
+    .line-through { text-decoration: line-through; opacity: 0.6; }
+    .rectificativa-notice { background: #fff7ed; border: 2px solid #ea580c; border-radius: 8px; padding: 14px 18px; margin-bottom: 30px; color: #7c2d12; }
+    .rectificativa-notice .rect-title { font-weight: 700; font-size: 14px; margin-bottom: 6px; color: #c2410c; }
+    .rectificativa-notice .rect-row { font-size: 13px; margin-bottom: 4px; display: flex; gap: 8px; }
+    .rectificativa-notice .rect-label { font-weight: 600; min-width: 180px; }
+    .rect-title-badge { display: inline-block; background: #ea580c; color: white; font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 12px; letter-spacing: 0.3px; margin-left: 8px; vertical-align: middle; }
+  </style>
+</head>
+<body>
+  <div class="container ${invoice.status === 'cancelled' ? 'cancelled' : ''}">
+    ${invoice.status === 'cancelled' ? '<div class="watermark">CANCELADA</div>' : ''}
+    <div class="header">
+      <div class="company-info">
+        <div class="company-name">${escapeHtml(psychProfile.businessName || psychProfile.name)}</div>
+        <div class="company-details">
+          ${psychProfile.name && psychProfile.businessName ? `<div><strong>Profesional:</strong> ${escapeHtml(psychProfile.name)}</div>` : ''}
+          ${psychProfile.professionalId ? `<div><strong>Nº Colegiado:</strong> ${escapeHtml(psychProfile.professionalId)}</div>` : ''}
+          ${psychProfile.specialty ? `<div><strong>Especialidad:</strong> ${escapeHtml(psychProfile.specialty)}</div>` : ''}
+          ${psychProfile.taxId ? `<div><strong>NIF/CIF:</strong> ${escapeHtml(psychProfile.taxId)}</div>` : ''}
+          ${psychProfile.address ? `<div>${escapeHtml(psychProfile.address)}</div>` : ''}
+          ${psychProfile.postalCode || psychProfile.city ? `<div>${escapeHtml(psychProfile.postalCode || '')} ${escapeHtml(psychProfile.city || '')}</div>` : ''}
+          ${psychProfile.country ? `<div>${escapeHtml(psychProfile.country)}</div>` : ''}
+          ${psychProfile.phone ? `<div><strong>Tel:</strong> ${escapeHtml(psychProfile.phone)}</div>` : ''}
+          ${psychProfile.email ? `<div><strong>Email:</strong> ${escapeHtml(psychProfile.email)}</div>` : ''}
+        </div>
+      </div>
+      <div class="invoice-title">
+        <h1>${invoice.is_rectificativa ? 'FACTURA RECTIFICATIVA' : 'FACTURA'}</h1>
+        <div class="invoice-number">${escapeHtml(invoice.invoiceNumber)}${invoice.is_rectificativa ? `<span class="rect-title-badge">${escapeHtml(invoice.rectification_type || 'R4')}</span>` : ''}</div>
+      </div>
+    </div>
+    ${invoice.is_rectificativa ? `
+    <div class="rectificativa-notice">
+      <div class="rect-title">🔄 Factura Rectificativa${
+        invoice.rectification_type === 'R1' ? ' &mdash; R1: Error fundado en derecho' :
+        invoice.rectification_type === 'R2' ? ' &mdash; R2: Concurso de acreedores' :
+        invoice.rectification_type === 'R3' ? ' &mdash; R3: Crédito incobrable (impago)' :
+        invoice.rectification_type === 'R4' ? ' &mdash; R4: Resto de causas' :
+        invoice.rectification_type === 'R5' ? ' &mdash; R5: Factura simplificada' : ''
+      }</div>
+      <div class="rect-row"><span class="rect-label">Factura rectificada:</span><span>${escapeHtml(invoice.description ? invoice.description.replace('Factura rectificativa de ', '') : invoice.rectifies_invoice_id || '—')}</span></div>
+      ${invoice.rectification_reason ? `<div class="rect-row"><span class="rect-label">Motivo:</span><span>${escapeHtml(invoice.rectification_reason)}</span></div>` : ''}
+    </div>
+    ` : ''}
+    <div class="info-section">
+      <div class="info-box">
+        <h3>Datos de Facturación</h3>
+        <div class="info-row"><span class="info-label">Fecha:</span><span class="info-value">${formatDateES(invoice.invoice_date || invoice.date)}</span></div>
+        ${invoice.dueDate && !isNaN(new Date(invoice.dueDate).getTime()) ? `<div class="info-row"><span class="info-label">Vencimiento:</span><span class="info-value">${formatDateES(invoice.dueDate)}</span></div>` : ''}
+      </div>
+      <div class="info-box">
+        <h3>Cliente</h3>
+        <div class="info-row"><span class="info-label">Nombre:</span><span class="info-value">${escapeHtml(patientData.name)}</span></div>
+        ${patientData.taxId || patientData.dni ? `<div class="info-row"><span class="info-label">DNI/NIF:</span><span class="info-value">${escapeHtml(patientData.taxId || patientData.dni)}</span></div>` : ''}
+        ${patientData.address ? `<div class="info-row"><span class="info-label">Dirección:</span><span class="info-value">${escapeHtml(patientData.address)}</span></div>` : ''}
+        ${patientData.postalCode || patientData.city ? `<div class="info-row"><span class="info-label"></span><span class="info-value">${escapeHtml(patientData.postalCode || '')} ${escapeHtml(patientData.city || '')}</span></div>` : ''}
+        ${patientData.country ? `<div class="info-row"><span class="info-label"></span><span class="info-value">${escapeHtml(patientData.country)}</span></div>` : ''}
+        ${patientData.email ? `<div class="info-row"><span class="info-label">Email:</span><span class="info-value">${escapeHtml(patientData.email)}</span></div>` : ''}
+        ${patientData.phone ? `<div class="info-row"><span class="info-label">Teléfono:</span><span class="info-value">${escapeHtml(patientData.phone)}</span></div>` : ''}
+      </div>
+    </div>
+    ${invoice.description ? `
+      <div style="margin-top: 20px; margin-bottom: 4px; padding: 12px 16px; background: #f8fafc; border-left: 3px solid #6366f1; border-radius: 4px;">
+        <div style="font-size: 11px; font-weight: 600; color: #6366f1; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Descripción</div>
+        <div style="font-size: 13px; color: #334155; line-height: 1.6; white-space: pre-line;">${escapeHtml(invoice.description)}</div>
+      </div>
+    ` : ''}
+    <table class="items-table">
+      <thead>
+        <tr>
+          <th>Descripción</th>
+          <th style="width: 100px; text-align: center;">Cantidad</th>
+          <th style="width: 120px;">Precio Unit.</th>
+          <th style="width: 120px;">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${detailedItems.map(item => `
+          <tr ${invoice.status === 'cancelled' ? 'class="line-through"' : ''}>
+            <td>${escapeHtml(item.description)}</td>
+            <td style="text-align: center;">${item.quantity}</td>
+            <td>${(item.unitPrice).toFixed(2)} €</td>
+            <td>${(item.quantity * item.unitPrice).toFixed(2)} €</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+    <div class="totals-section">
+      <div class="totals-box">
+        <div class="total-row"><span class="total-label">Subtotal (Base imponible):</span><span class="total-value">${subtotal.toFixed(2)} €</span></div>
+        <div class="total-row"><span class="total-label">IVA (${invoice.taxRate || 21}%):</span><span class="total-value">${iva.toFixed(2)} €</span></div>
+        ${invoice.invoice_type === 'center' && irpfAmount > 0 ? `<div class="total-row"><span class="total-label">IRPF (${invoice.irpf || 0}%):</span><span class="total-value" style="color: #dc2626;">-${irpfAmount.toFixed(2)} €</span></div>` : ''}
+        <div class="total-row"><span class="total-label">TOTAL:</span><span class="total-value">${totalAmount.toFixed(2)} €</span></div>
+      </div>
+    </div>
+    ${invoice.status === 'cancelled' ? `<div class="cancelled-notice">⚠️ Esta factura fue cancelada el ${new Date(invoice.cancelledAt || invoice.date).toLocaleDateString('es-ES')}</div>` : ''}
+    ${invoice.notes ? `
+      <div style="margin-top: 30px; padding: 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;">
+        <div style="font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Notas</div>
+        <div style="font-size: 13px; color: #475569; line-height: 1.6; white-space: pre-line;">${escapeHtml(invoice.notes)}</div>
+      </div>
+    ` : ''}
+    ${invoice.show_signature ? `
+      <div style="margin-top: 50px; padding-top: 20px;">
+        <div style="display: flex; justify-content: flex-end;">
+          <div style="text-align: center; min-width: 220px;">
+            <div style="border-bottom: 1px solid #94a3b8; margin-bottom: 10px; height: 48px;"></div>
+            <div style="font-size: 13px; font-weight: 600; color: #1e293b;">${escapeHtml(psychProfile.name)}</div>
+            ${psychProfile.specialty ? `<div style="font-size: 12px; color: #64748b; margin-top: 3px;">${escapeHtml(psychProfile.specialty)}</div>` : ''}
+          </div>
+        </div>
+      </div>
+    ` : ''}
+    <div class="footer">
+      ${invoice.status !== 'cancelled' && invoice.status !== 'paid' ? `
+        <div class="payment-info">
+          <h4>Información de Pago</h4>
+          <div style="color: #475569;">
+            ${psychProfile.iban ? `<div><strong>IBAN:</strong> ${escapeHtml(psychProfile.iban)}</div>` : ''}
+            ${psychProfile.businessName || psychProfile.name ? `<div><strong>Titular:</strong> ${escapeHtml(psychProfile.businessName || psychProfile.name)}</div>` : ''}
+            <div style="margin-top: 8px;">Por favor, incluya el número de factura <strong>${escapeHtml(invoice.invoiceNumber)}</strong> como referencia en su pago.</div>
+          </div>
+        </div>
+      ` : ''}
+      <div style="margin-top: 30px;">
+        ${(psychProfile.professionalId || psychProfile.specialty) ? `
+        <div class="footer-title">Datos Profesionales</div>
+        ${psychProfile.professionalId ? `<div>Número de Colegiado: ${escapeHtml(psychProfile.professionalId)}</div>` : ''}
+        ${psychProfile.specialty ? `<div>Especialidad: ${escapeHtml(psychProfile.specialty)}</div>` : ''}
+        ` : ''}
+        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e2e8f0;">
+          <div class="footer-title">Términos y Condiciones</div>
+          <div>Los servicios profesionales de psicología están exentos de retención de IRPF según la normativa vigente.</div>
+          <div>Esta factura es válida sin necesidad de firma según el Real Decreto 1496/2003.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+  `;
+}
+
+// Download invoices as ZIP by date range
+app.get('/api/invoices/zip', authenticateRequest, async (req, res) => {
+  const psychologistId = req.authenticatedUserId;
+  const { startDate, endDate } = req.query;
+
+  if (!psychologistId) return res.status(401).json({ error: 'No autenticado' });
+  if (!startDate || !endDate) return res.status(400).json({ error: 'Se requieren startDate y endDate' });
+  if (!supabaseAdmin) return res.status(500).json({ error: 'Supabase no está configurado' });
+
+  // Sanitize date params (must be YYYY-MM-DD)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+    return res.status(400).json({ error: 'Formato de fecha incorrecto (usa YYYY-MM-DD)' });
+  }
+
+  try {
+    // 1. Fetch all invoices for this psychologist and filter by date range
+    const invoiceRows = await readTable('invoices');
+    const invoices = invoiceRows.map(normalizeSupabaseRow).filter(inv => {
+      if (inv.psychologist_user_id !== String(psychologistId)) return false;
+      if (inv.status === 'draft') return false;
+      const invDate = (inv.invoice_date || inv.date || '').split('T')[0];
+      if (!invDate) return false;
+      return invDate >= startDate && invDate <= endDate;
+    });
+
+    if (invoices.length === 0) {
+      return res.status(404).json({ error: 'No se encontraron facturas en ese rango de fechas' });
+    }
+
+    // 2. Get psychologist specialty once for all invoices
+    let psychologistSpecialty = '';
+    try {
+      const { data: profileRows } = await supabaseAdmin
+        .from('psychologist_profiles')
+        .select('*')
+        .eq('id', psychologistId)
+        .limit(1);
+      if (profileRows && profileRows.length > 0) {
+        const prof = normalizeSupabaseRow(profileRows[0]);
+        psychologistSpecialty = prof.specialty || '';
+      }
+    } catch (err) {
+      console.warn('⚠️ [ZIP] No se pudo obtener especialidad del psicólogo:', err.message);
+    }
+
+    // 3. Stream ZIP response
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="facturas_${startDate}_${endDate}.zip"`);
+
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    archive.on('error', err => {
+      console.error('❌ [ZIP] Error en archiver:', err);
+      if (!res.headersSent) res.status(500).json({ error: 'Error generando ZIP' });
+    });
+    archive.pipe(res);
+
+    // 4. Generate HTML for each invoice and add to ZIP
+    for (const invoice of invoices) {
+      try {
+        const psychProfile = {
+          name: invoice.billing_psychologist_name || 'Psicólogo',
+          businessName: invoice.billing_psychologist_name || 'Servicios Profesionales de Psicología',
+          taxId: invoice.billing_psychologist_tax_id || '',
+          address: invoice.billing_psychologist_address || '',
+          city: '', postalCode: '', country: 'España', phone: '', email: '',
+          specialty: psychologistSpecialty,
+          professionalId: '', iban: ''
+        };
+
+        const patientData = {
+          name: invoice.billing_client_name || invoice.patientName || 'Paciente',
+          taxId: invoice.billing_client_tax_id || '',
+          dni: invoice.billing_client_tax_id || '',
+          address: invoice.billing_client_address || '',
+          email: '', phone: '',
+          postalCode: invoice.billing_client_postal_code || '',
+          country: invoice.billing_client_country || '',
+          city: ''
+        };
+
+        const subtotal = parseFloat(invoice.amount) || 0;
+        let iva = 0;
+        if (invoice.tax !== undefined && invoice.tax !== null) {
+          iva = parseFloat(invoice.tax);
+        } else {
+          const taxRate = parseFloat(invoice.taxRate) || 21;
+          iva = subtotal * (taxRate / 100);
+        }
+        let irpfAmount = 0;
+        if (invoice.invoice_type === 'center' && invoice.irpf) {
+          irpfAmount = subtotal * (parseFloat(invoice.irpf) / 100);
+        }
+        let totalAmount = 0;
+        if (invoice.total !== undefined && invoice.total !== null) {
+          totalAmount = parseFloat(invoice.total);
+        } else {
+          totalAmount = subtotal + iva - irpfAmount;
+        }
+
+        let detailedItems = [];
+
+        // Fetch sessions
+        if (invoice.sessionIds && invoice.sessionIds.length > 0) {
+          const { data: sessions } = await supabaseAdmin
+            .from('sessions').select('*').in('id', invoice.sessionIds);
+          if (sessions) {
+            sessions.sort((a, b) => new Date(a.starts_on || 0) - new Date(b.starts_on || 0));
+            sessions.forEach(session => {
+              const sessionData = session.data || {};
+              const sessionRawPrice = session.price || sessionData.price || 0;
+              const sessionDurationHours = getSessionDurationHours(session);
+              const sessionPercentPsych = session.percent_psych || sessionData.percent_psych || null;
+              const sessionPrice = (invoice.invoice_type === 'center' && sessionPercentPsych)
+                ? sessionRawPrice * sessionDurationHours * sessionPercentPsych / 100
+                : sessionRawPrice * sessionDurationHours;
+              const startDateLabel = session.starts_on
+                ? new Date(session.starts_on).toLocaleDateString('es-ES', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })
+                : 'Fecha no disponible';
+              const startTime = session.starts_on ? session.starts_on.substring(11, 16) : '';
+              const endTime = session.ends_on ? session.ends_on.substring(11, 16) : '';
+              const timeStr = startTime && endTime ? ` (${startTime}–${endTime})` : '';
+              let itemDescription;
+              if (invoice.invoice_type === 'center') {
+                let durationStr = '';
+                if (session.starts_on && session.ends_on) {
+                  const durationMs = new Date(session.ends_on) - new Date(session.starts_on);
+                  const durationH = durationMs / 3600000;
+                  durationStr = ` — ${Number.isInteger(durationH) ? durationH : durationH.toFixed(2)} h`;
+                }
+                itemDescription = `Sesión de psicología${durationStr} — ${startDateLabel}${timeStr}`;
+              } else {
+                const patientStr = sessionData.patientName || invoice.patientName || '';
+                const patientPart = patientStr ? ` — ${patientStr}` : '';
+                itemDescription = `Sesión de psicología${patientPart} — ${startDateLabel}${timeStr}`;
+              }
+              detailedItems.push({
+                description: itemDescription,
+                quantity: invoice.is_rectificativa ? -1 : 1,
+                unitPrice: sessionPrice
+              });
+            });
+          }
+        }
+
+        // Fetch bonos
+        let bonoIdsToQuery = invoice.bonoIds && invoice.bonoIds.length > 0 ? invoice.bonoIds : null;
+        if (!bonoIdsToQuery && invoice.id) {
+          const { data: bonosByInvId } = await supabaseAdmin
+            .from('bono').select('id').eq('invoice_id', invoice.id);
+          if (bonosByInvId && bonosByInvId.length > 0) {
+            bonoIdsToQuery = bonosByInvId.map(b => b.id);
+          }
+        }
+        if (bonoIdsToQuery && bonoIdsToQuery.length > 0) {
+          const { data: bonos } = await supabaseAdmin
+            .from('bono').select('*').in('id', bonoIdsToQuery);
+          if (bonos) {
+            bonos.forEach(bono => {
+              const bonoData = bono.data || {};
+              const bonoRawPrice = bono.total_price_bono_amount || bonoData.total_price_bono_amount || 0;
+              const bonoPercentPsych = bono.percent_psych || bonoData.percent_psych || null;
+              const bonoPrice = (invoice.invoice_type === 'center' && bonoPercentPsych)
+                ? bonoRawPrice * bonoPercentPsych / 100 : bonoRawPrice;
+              const totalSessions = bono.total_sessions_amount || bonoData.total_sessions_amount || 0;
+              const pricePerSession = totalSessions > 0 ? (bonoPrice / totalSessions).toFixed(2) : '0.00';
+              const createdAtLabel = bono.created_at
+                ? new Date(bono.created_at).toLocaleDateString('es-ES', { year: 'numeric', month: 'short', day: 'numeric' })
+                : '';
+              const createdPart = createdAtLabel ? ` (creado ${createdAtLabel})` : '';
+              detailedItems.push({
+                description: `Bono de psicología — ${totalSessions} sesiones${createdPart} · ${pricePerSession} €/sesión`,
+                quantity: invoice.is_rectificativa ? -1 : 1,
+                unitPrice: bonoPrice
+              });
+            });
+          }
+        }
+
+        if (detailedItems.length === 0) {
+          detailedItems = [{ description: invoice.description || 'Servicio de psicología', quantity: 1, unitPrice: subtotal }];
+        }
+
+        const html = buildInvoiceHTML(invoice, psychProfile, patientData, subtotal, iva, irpfAmount, totalAmount, detailedItems);
+        const safeNumber = (invoice.invoiceNumber || invoice.id).replace(/[^a-zA-Z0-9\-_]/g, '_');
+        archive.append(Buffer.from(html, 'utf8'), { name: `factura_${safeNumber}.html` });
+      } catch (invoiceErr) {
+        console.error(`⚠️ [ZIP] Error procesando factura ${invoice.id}:`, invoiceErr.message);
+      }
+    }
+
+    await archive.finalize();
+  } catch (err) {
+    console.error('❌ [ZIP] Error generando ZIP:', err);
+    if (!res.headersSent) res.status(500).json({ error: 'Error interno generando ZIP' });
+  }
 });
 
 // --- PSYCHOLOGIST PROFILE ---

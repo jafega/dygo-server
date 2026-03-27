@@ -51,14 +51,14 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
 }) => {
   const menuItems = [
     { id: 'schedule' as const, label: 'Agenda', icon: Calendar },
-    { id: 'patients' as const, label: 'Pacientes', icon: Users },
     { id: 'sessions' as const, label: 'Sesiones', icon: ClipboardList },
-    { id: 'dashboard' as const, label: 'Métricas', icon: BarChart3 },
+    { id: 'patients' as const, label: 'Pacientes', icon: Users },
     { id: 'billing' as const, label: 'Facturación', icon: FileText },
-    { id: 'centros' as const, label: 'Centros', icon: Building2 },
-    { id: 'templates' as const, label: 'Documentos', icon: Scroll },
+    { id: 'ai-assistant' as const, label: 'Asistente de IA', icon: Bot },
     { id: 'materials' as const, label: 'Materiales', icon: FolderOpen },
-    { id: 'ai-assistant' as const, label: 'Asistente IA', icon: Bot },
+    { id: 'dashboard' as const, label: 'Métricas', icon: BarChart3 },
+    { id: 'centros' as const, label: 'Centros', icon: Building2 },
+    { id: 'templates' as const, label: 'Consentimientos', icon: Scroll },
     { id: 'profile' as const, label: 'Mi Perfil Profesional', icon: UserIcon },
   ];
 
