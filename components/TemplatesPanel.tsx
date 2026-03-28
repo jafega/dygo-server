@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   FileText, Plus, Edit2, Trash2, Send, Eye, X,
-  ChevronLeft, Save, Loader2, Award, User, CheckCircle, AlertCircle, Search
+  ChevronLeft, Save, Loader2, Award, User, CheckCircle, AlertCircle, Search,
+  Upload, GripHorizontal, PenLine
 } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
+import { ai } from '../services/genaiService';
 
 // ─── Simple Markdown → HTML converter ────────────────────────────────────────
 function markdownToHtml(md: string): string {
@@ -62,6 +64,28 @@ function renderContent(content: string): string {
   return markdownToHtml(content);
 }
 
+/** Render markdown + highlight {{variables}} and {{firma_X}} markers for preview */
+function renderContentWithVars(content: string): string {
+  let html = renderContent(content);
+  html = html.replace(/{{([^}]+)}}/g, (_match, varName) => {
+    const lower = varName.toLowerCase().trim();
+    if (lower.startsWith('firma')) {
+      return `<span style="display:inline-flex;align-items:center;gap:4px;background:#eef2ff;color:#4338ca;border:2px dashed #818cf8;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;margin:4px 0;">✍ {{${lower}}}</span>`;
+    }
+    return `<span style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;padding:1px 8px;border-radius:4px;font-size:13px;font-weight:500;">{{${lower}}}</span>`;
+  });
+  return html;
+}
+
+// ─── Patient variable chip definitions ───────────────────────────────────────
+const PATIENT_VARS = [
+  { id: 'nombre',    label: 'Nombre',    cls: 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100' },
+  { id: 'cif',       label: 'CIF/DNI',   cls: 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100' },
+  { id: 'direccion', label: 'Dirección', cls: 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100' },
+  { id: 'email',     label: 'Email',     cls: 'bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100' },
+  { id: 'telefono',  label: 'Teléfono',  cls: 'bg-pink-50 text-pink-700 border-pink-200 hover:bg-pink-100' },
+];
+
 // --- Types ---
 
 interface Template {
@@ -101,6 +125,14 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
   const [templateName, setTemplateName] = useState('');
   const [previewMode, setPreviewMode] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  // File import state
+  const [isImporting, setIsImporting] = useState(false);
+  const [importError, setImportError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Textarea ref for cursor position tracking
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Send-to-patient state
   const [showSendModal, setShowSendModal] = useState(false);
@@ -161,6 +193,7 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
     setTemplateName('');
     setEditorContent('# Título del documento\n\nEscribe aquí el contenido del documento...\n\n---\n\nFirma del paciente: ________________\n\nFecha: ________________');
     setPreviewMode(false);
+    setImportError('');
     setShowEditor(true);
   };
 
@@ -170,6 +203,7 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
     setTemplateName(tpl.template_name || '');
     setEditorContent(tpl.content);
     setPreviewMode(false);
+    setImportError('');
     setShowEditor(true);
   };
 
@@ -272,6 +306,90 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
     }
   };
 
+  // ─── Insert text at textarea cursor position ──────────────────────────────
+  const insertAtCursor = useCallback((text: string) => {
+    const ta = textareaRef.current;
+    if (!ta) {
+      setEditorContent(prev => prev + text);
+      return;
+    }
+    const start = ta.selectionStart ?? editorContent.length;
+    const end = ta.selectionEnd ?? editorContent.length;
+    const newContent = editorContent.slice(0, start) + text + editorContent.slice(end);
+    setEditorContent(newContent);
+    requestAnimationFrame(() => {
+      if (!textareaRef.current) return;
+      textareaRef.current.selectionStart = start + text.length;
+      textareaRef.current.selectionEnd = start + text.length;
+      textareaRef.current.focus();
+    });
+  }, [editorContent]);
+
+  // ─── Insert next sequential signature marker ──────────────────────────────
+  const insertSignatureMarker = useCallback(() => {
+    const existing = editorContent.match(/{{firma_\d+}}/g) || [];
+    const nextNum = existing.length + 1;
+    insertAtCursor(`\n\n{{firma_${nextNum}}}\n\n`);
+  }, [editorContent, insertAtCursor]);
+
+  // ─── File import: PDF (Gemini inline) / DOCX (mammoth + Gemini) ──────────
+  const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    setIsImporting(true);
+    setImportError('');
+    try {
+      const ext = file.name.split('.').pop()?.toLowerCase();
+      let markdown = '';
+
+      if (ext === 'pdf') {
+        if (!ai) throw new Error('API de IA no configurada (falta VITE_GEMINI_API_KEY)');
+        const arrayBuffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuffer);
+        let binary = '';
+        for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+        const base64 = btoa(binary);
+        const response = await (ai as any).models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: [{
+            role: 'user',
+            parts: [
+              { inlineData: { mimeType: 'application/pdf', data: base64 } },
+              { text: 'Extrae el texto de este documento PDF y conviértelo en Markdown limpio y bien estructurado para usar como plantilla de consentimiento. Preserva títulos, párrafos y listas. Devuelve SOLO el Markdown, sin explicaciones adicionales.' }
+            ]
+          }]
+        });
+        markdown = (response as any).text ?? '';
+      } else if (ext === 'docx' || ext === 'doc') {
+        if (!ai) throw new Error('API de IA no configurada (falta VITE_GEMINI_API_KEY)');
+        const mammothModule = await import('mammoth');
+        const mammoth = (mammothModule as any).default ?? mammothModule;
+        const arrayBuffer = await file.arrayBuffer();
+        const result = await mammoth.extractRawText({ arrayBuffer });
+        const rawText: string = result.value || '';
+        if (!rawText.trim()) throw new Error('No se pudo extraer texto del archivo');
+        const response = await (ai as any).models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: `Convierte el siguiente texto extraído de un documento Word en Markdown limpio y bien estructurado, adecuado para una plantilla de consentimiento informado. Preserva la estructura (títulos, párrafos, listas). Devuelve SOLO el Markdown, sin explicaciones.\n\n${rawText}`
+        });
+        markdown = (response as any).text ?? '';
+      } else {
+        throw new Error('Formato no soportado. Usa PDF, DOCX o DOC.');
+      }
+
+      if (markdown.trim()) {
+        setEditorContent(markdown.trim());
+      } else {
+        throw new Error('No se pudo extraer contenido del archivo');
+      }
+    } catch (err: any) {
+      setImportError(err.message || 'Error importando archivo');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   // Filtered list
   const filteredTemplates = templates.filter(t => {
     if (activeFilter === 'mine') return !t.master;
@@ -286,8 +404,17 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
   if (showEditor) {
     return (
       <div className="h-full flex flex-col">
+        {/* Hidden file input for PDF/Word import */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf,.docx,.doc"
+          className="hidden"
+          onChange={handleFileImport}
+        />
+
         {/* Editor Header */}
-        <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+        <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setShowEditor(false)}
@@ -299,7 +426,17 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
               {editorMode === 'create' ? 'Nuevo Template' : 'Editar Template'}
             </h2>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* PDF/Word import button */}
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isImporting}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors border border-slate-200 disabled:opacity-50"
+              title="Importar PDF o Word y convertir con IA a Markdown"
+            >
+              {isImporting ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
+              {isImporting ? 'Convirtiendo…' : 'Importar PDF/Word'}
+            </button>
             <button
               onClick={() => setPreviewMode(!previewMode)}
               className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -320,8 +457,16 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
           </div>
         </div>
 
+        {/* Import error message */}
+        {importError && (
+          <div className="mb-3 flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+            <AlertCircle size={14} className="flex-shrink-0" />
+            {importError}
+          </div>
+        )}
+
         {/* Template name input */}
-        <div className="mb-4">
+        <div className="mb-3">
           <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Nombre del template</label>
           <input
             type="text"
@@ -332,17 +477,68 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
           />
         </div>
 
+        {/* ─── Patient variable chips + signature marker toolbar ─── */}
+        {!previewMode && (
+          <div className="mb-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
+            <div className="flex items-center gap-2 mb-2">
+              <GripHorizontal size={14} className="text-slate-400" />
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                Arrastra o haz clic para insertar campos del paciente
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {PATIENT_VARS.map(v => (
+                <button
+                  key={v.id}
+                  type="button"
+                  draggable
+                  onDragStart={e => {
+                    e.dataTransfer.setData('text/plain', `{{${v.id}}}`);
+                    e.dataTransfer.effectAllowed = 'copy';
+                  }}
+                  onClick={() => insertAtCursor(`{{${v.id}}}`)}
+                  className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border cursor-grab active:cursor-grabbing transition-colors select-none ${v.cls}`}
+                  title={`Insertar \{\{${v.id}\}\} en la posición del cursor`}
+                >
+                  {v.label}
+                  <span className="opacity-50 font-mono text-[10px]">{`{{${v.id}}}`}</span>
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={insertSignatureMarker}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 transition-colors"
+                title="Insertar marcador de firma en la posición del cursor"
+              >
+                <PenLine size={13} />
+                + Insertar firma
+              </button>
+            </div>
+            <p className="mt-2 text-[11px] text-slate-400">
+              Los campos <code className="bg-white px-1 rounded">{'{{nombre}}'}</code>, <code className="bg-white px-1 rounded">{'{{cif}}'}</code>, etc. se rellenarán con los datos del paciente al firmar.
+              Puedes marcar varias posiciones de firma — el paciente firmará una vez y la firma aparecerá en todos los marcadores.
+            </p>
+          </div>
+        )}
+
         <div className="flex-1 flex flex-col lg:flex-row gap-4 min-h-0">
           {/* Markdown Editor */}
           {!previewMode && (
             <div className="flex-1 flex flex-col min-h-0">
               <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Markdown</div>
               <textarea
+                ref={textareaRef}
                 className="flex-1 w-full p-4 bg-white border border-slate-200 rounded-xl font-mono text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-300 leading-relaxed"
                 value={editorContent}
                 onChange={e => setEditorContent(e.target.value)}
                 placeholder="# Título&#10;&#10;Escribe el contenido en Markdown..."
                 style={{ minHeight: '400px' }}
+                onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
+                onDrop={e => {
+                  e.preventDefault();
+                  const text = e.dataTransfer.getData('text/plain');
+                  if (text) insertAtCursor(text);
+                }}
               />
             </div>
           )}
@@ -354,7 +550,7 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
               <div
                 className="flex-1 p-6 bg-white border border-slate-200 rounded-xl overflow-y-auto prose prose-slate max-w-none text-slate-800 leading-relaxed"
                 style={{ minHeight: '400px' }}
-                dangerouslySetInnerHTML={{ __html: renderContent(editorContent) }}
+                dangerouslySetInnerHTML={{ __html: renderContentWithVars(editorContent) }}
               />
             </div>
           )}
@@ -369,6 +565,8 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
           <span><code>- item</code> → Lista</span>
           <span><code>---</code> → Separador</span>
           <span><code>&gt; cita</code></span>
+          <span><code>{'{{nombre}}'}</code> → Campo paciente</span>
+          <span><code>{'{{firma_1}}'}</code> → Zona de firma</span>
         </div>
       </div>
     );
@@ -638,7 +836,7 @@ const TemplateCard: React.FC<TemplateCardProps> = ({ template, isOwn, onEdit, on
       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md transition-all group flex flex-col">
         <div className="p-5 flex-1">
           <div className="flex items-start justify-between gap-2 mb-3">
-            <div className="flex items-center gap-2 flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-1 min-w-0 flex-wrap">
               {template.master ? (
                 <span className="flex-shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 flex items-center gap-1">
                   <Award size={10} />
@@ -647,6 +845,18 @@ const TemplateCard: React.FC<TemplateCardProps> = ({ template, isOwn, onEdit, on
               ) : (
                 <span className="flex-shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200">
                   Mío
+                </span>
+              )}
+              {/\{\{[^}]+\}\}/.test(template.content) && (
+                <span className="flex-shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
+                  <GripHorizontal size={9} />
+                  Variables
+                </span>
+              )}
+              {/\{\{firma_\d+\}\}/.test(template.content) && (
+                <span className="flex-shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 flex items-center gap-1">
+                  <PenLine size={9} />
+                  Firma
                 </span>
               )}
             </div>
@@ -707,7 +917,7 @@ const TemplateCard: React.FC<TemplateCardProps> = ({ template, isOwn, onEdit, on
             </div>
             <div
               className="flex-1 overflow-y-auto p-6 prose prose-slate max-w-none text-slate-800 leading-relaxed"
-              dangerouslySetInnerHTML={{ __html: renderContent(template.content) }}
+              dangerouslySetInnerHTML={{ __html: renderContentWithVars(template.content) }}
             />
             <div className="p-4 border-t border-slate-200 flex justify-end gap-3">
               <button onClick={() => setShowPreview(false)} className="px-4 py-2 border border-slate-200 rounded-xl text-sm">Cerrar</button>

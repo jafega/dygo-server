@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
-  FileText, CheckCircle, Clock, X, Pen, RotateCcw, Check, Loader2, AlertCircle
+  FileText, CheckCircle, Clock, X, Pen, RotateCcw, Check, Loader2, AlertCircle, PenLine, User
 } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
@@ -174,6 +174,60 @@ const SignatureCanvas: React.FC<SignatureCanvasProps> = ({ onSave, onCancel }) =
   );
 };
 
+// ─── Variable & firma helpers ─────────────────────────────────────────────────
+const KNOWN_VARS: Record<string, string> = {
+  nombre: 'Nombre',
+  cif: 'DNI / NIF / CIF',
+  direccion: 'Dirección',
+  email: 'Correo electrónico',
+  telefono: 'Teléfono',
+};
+
+/** Extract unique non-firma variable names from template content */
+function extractVarNames(content: string): string[] {
+  const matches = content.matchAll(/\{\{([^}]+)\}\}/g);
+  const names = new Set<string>();
+  for (const m of matches) {
+    if (!/^firma_\d+$/.test(m[1])) names.add(m[1]);
+  }
+  return Array.from(names);
+}
+
+/** Count firma markers in content */
+function countFirmaMarkers(content: string): number {
+  return (content.match(/\{\{firma_\d+\}\}/g) || []).length;
+}
+
+/** Render document HTML with variable substitution and firma zone placeholders */
+function renderDocumentHtml(content: string, varValues: Record<string, string>): string {
+  if (!content) return '';
+  let md = content.replace(/\n\n<!-- SIGNATURE_DATA:.*?-->$/s, '');
+
+  // Replace {{firma_X}} before markdown processing so they don't get mangled
+  md = md.replace(/\{\{firma_(\d+)\}\}/g, (_full, n) => `__FIRMAZONE_${n}__`);
+
+  // Replace {{variable}} with resolved value or a styled placeholder
+  md = md.replace(/\{\{([^}]+)\}\}/g, (_full, varName) => {
+    const val = varValues[varName];
+    return val ? val : `[${varName}]`;
+  });
+
+  let html = markdownToHtml(md);
+
+  // Replace firma zone tokens with visual HTML blocks
+  html = html.replace(/__FIRMAZONE_(\d+)__/g, (_full, n) =>
+    `<div style="margin:16px 0;border:2px dashed #818cf8;border-radius:12px;padding:20px 16px;
+      display:flex;align-items:center;justify-content:center;gap:8px;background:#eef2ff;
+      color:#4f46e5;font-size:14px;font-weight:600;">` +
+    `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M12 20h9"/>
+      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+    </svg>Firma aquí (posición ${n})</div>`
+  );
+
+  return html;
+}
+
 // ─── Document Viewer Modal ────────────────────────────────────────────────────
 interface DocumentViewerProps {
   doc: Signature;
@@ -186,15 +240,57 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ doc, onClose, onSigned,
   const [showCanvas, setShowCanvas] = useState(false);
   const [isSigning, setIsSigning] = useState(false);
   const [signError, setSignError] = useState('');
+  const [variableValues, setVariableValues] = useState<Record<string, string>>({});
+  const [isLoadingProfile, setIsLoadingProfile] = useState(false);
+
+  const varNames = useMemo(() => extractVarNames(doc.content), [doc.content]);
+  const firmaCount = useMemo(() => countFirmaMarkers(doc.content), [doc.content]);
+  const hasVariables = varNames.length > 0 || firmaCount > 0;
+
+  // Pre-fill from patient profile
+  useEffect(() => {
+    if (varNames.length === 0) return;
+    setIsLoadingProfile(true);
+    apiFetch(`${API_URL}/users/${patientId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(user => {
+        if (!user) return;
+        const prefilled: Record<string, string> = {};
+        if (varNames.includes('nombre') && user.name) prefilled['nombre'] = user.name;
+        if (varNames.includes('cif') && (user.dni || user.cif)) prefilled['cif'] = user.dni || user.cif || '';
+        if (varNames.includes('direccion') && user.address) prefilled['direccion'] = user.address;
+        if (varNames.includes('email') && user.email) prefilled['email'] = user.email;
+        if (varNames.includes('telefono') && user.phone) prefilled['telefono'] = user.phone;
+        setVariableValues(prev => ({ ...prefilled, ...prev }));
+      })
+      .catch(() => {})
+      .finally(() => setIsLoadingProfile(false));
+  }, [patientId, varNames.join(',')]);
 
   const handleSign = async (dataUrl: string) => {
     setIsSigning(true);
     setSignError('');
     try {
+      // Build resolved content: substitute variables, replace {{firma_X}} with inline markers
+      let resolved = doc.content.replace(/\n\n<!-- SIGNATURE_DATA:.*?-->$/s, '');
+      // Replace {{variable}} with actual values
+      resolved = resolved.replace(/\{\{([^}]+)\}\}/g, (_full, varName) => {
+        if (/^firma_\d+$/.test(varName)) return `{{${varName}}}`; // keep for next step
+        return variableValues[varName] || `{{${varName}}}`;
+      });
+      // Replace {{firma_X}} with inline signature marker
+      resolved = resolved.replace(/\{\{firma_(\d+)\}\}/g, (_full, n) =>
+        `<!-- SIGNATURE_INLINE:firma_${n}:${dataUrl} -->`
+      );
+
       const res = await apiFetch(`${API_URL}/signatures/${doc.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ patient_user_id: patientId, signature_data: dataUrl })
+        body: JSON.stringify({
+          patient_user_id: patientId,
+          signature_data: dataUrl,
+          resolved_content: resolved,
+        })
       });
       if (!res.ok) throw new Error(await res.text());
       onSigned();
@@ -206,6 +302,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ doc, onClose, onSigned,
   };
 
   const title = getDocTitle(doc.content);
+  const missingVars = varNames.filter(v => !variableValues[v]?.trim());
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-stretch md:items-center justify-center p-0 md:p-4">
@@ -224,7 +321,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ doc, onClose, onSigned,
         </div>
 
         {/* Status badge */}
-        <div className="px-5 pt-3 flex-shrink-0">
+        <div className="px-5 pt-3 flex-shrink-0 flex items-center gap-2 flex-wrap">
           {doc.signed ? (
             <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-xl px-3 py-2">
               <CheckCircle size={16} />
@@ -236,7 +333,52 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ doc, onClose, onSigned,
               <span>Pendiente de firma</span>
             </div>
           )}
+          {firmaCount > 0 && (
+            <div className="flex items-center gap-1.5 text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-xl px-2.5 py-1.5">
+              <PenLine size={12} />
+              {firmaCount} zona{firmaCount > 1 ? 's' : ''} de firma
+            </div>
+          )}
         </div>
+
+        {/* Variable fill-in section (only when there are vars and doc is not yet signed) */}
+        {!doc.signed && varNames.length > 0 && (
+          <div className="px-5 pt-3 flex-shrink-0">
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
+              <div className="flex items-center gap-2 mb-2">
+                <User size={13} className="text-slate-400" />
+                <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                  {isLoadingProfile ? 'Cargando datos…' : 'Datos del documento'}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {varNames.map(varName => (
+                  <div key={varName}>
+                    <label className="block text-[11px] font-medium text-slate-500 mb-1">
+                      {KNOWN_VARS[varName] || varName}
+                      {!variableValues[varName]?.trim() && (
+                        <span className="ml-1 text-amber-600">*</span>
+                      )}
+                    </label>
+                    <input
+                      type={varName === 'email' ? 'email' : 'text'}
+                      value={variableValues[varName] || ''}
+                      onChange={e => setVariableValues(prev => ({ ...prev, [varName]: e.target.value }))}
+                      placeholder={`Tu ${KNOWN_VARS[varName]?.toLowerCase() || varName}`}
+                      className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white"
+                    />
+                  </div>
+                ))}
+              </div>
+              {missingVars.length > 0 && (
+                <p className="mt-2 text-[11px] text-amber-600 flex items-center gap-1">
+                  <AlertCircle size={11} />
+                  Rellena los campos marcados (*) antes de firmar
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Content */}
         {doc.external_document_url ? (
@@ -269,7 +411,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ doc, onClose, onSigned,
         ) : (
           <div
             className="flex-1 overflow-y-auto px-6 py-4 prose prose-slate max-w-none text-slate-800 leading-relaxed text-sm"
-            dangerouslySetInnerHTML={{ __html: markdownToHtml(doc.content) }}
+            dangerouslySetInnerHTML={{ __html: renderDocumentHtml(doc.content, variableValues) }}
           />
         )}
 
@@ -279,10 +421,11 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ doc, onClose, onSigned,
             {!showCanvas ? (
               <button
                 onClick={() => setShowCanvas(true)}
-                className="w-full flex items-center justify-center gap-2 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition-colors text-sm shadow-md"
+                disabled={missingVars.length > 0}
+                className="w-full flex items-center justify-center gap-2 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition-colors text-sm shadow-md disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Pen size={16} />
-                Firmar documento
+                {missingVars.length > 0 ? 'Rellena los datos antes de firmar' : 'Firmar documento'}
               </button>
             ) : isSigning ? (
               <div className="flex items-center justify-center gap-2 py-4 text-slate-500">
@@ -290,6 +433,12 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ doc, onClose, onSigned,
               </div>
             ) : (
               <>
+                {firmaCount > 0 && (
+                  <p className="mb-3 text-xs text-indigo-600 flex items-center gap-1.5">
+                    <PenLine size={13} />
+                    Tu firma se colocará en las {firmaCount} zona{firmaCount > 1 ? 's' : ''} marcada{firmaCount > 1 ? 's' : ''} del documento
+                  </p>
+                )}
                 <SignatureCanvas
                   onSave={handleSign}
                   onCancel={() => setShowCanvas(false)}

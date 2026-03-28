@@ -14600,7 +14600,7 @@ app.post('/api/signatures', authenticateRequest, async (req, res) => {
 app.put('/api/signatures/:id', authenticateRequest, async (req, res) => {
   try {
     const { id } = req.params;
-    const { signature_data, patient_user_id } = req.body;
+    const { signature_data, patient_user_id, resolved_content } = req.body;
 
     if (!patient_user_id) return res.status(400).json({ error: 'Se requiere patient_user_id' });
 
@@ -14618,9 +14618,11 @@ app.put('/api/signatures/:id', authenticateRequest, async (req, res) => {
         signed: true,
         signature_date: new Date().toISOString()
       };
-      // Store the signature drawing in content field appended as JSON metadata
+      // Use resolved_content (variables substituted + inline firma markers) if provided,
+      // otherwise fall back to original content. Append raw signature data as trailing metadata.
       if (signature_data) {
-        updatePayload.content = existing.content + `\n\n<!-- SIGNATURE_DATA:${signature_data} -->`;
+        const baseContent = resolved_content || existing.content;
+        updatePayload.content = baseContent + `\n\n<!-- SIGNATURE_DATA:${signature_data} -->`;
       }
 
       const { data, error } = await supabaseAdmin
