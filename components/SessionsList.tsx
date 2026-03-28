@@ -1289,21 +1289,37 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
             const isCompleted = session.status === 'completed';
             const dispTimes = sessionDisplayTimes.get(session.id) ?? { date: session.date, startTime: session.startTime, endTime: session.endTime };
             const dispDate = dispTimes.date ? new Date(`${dispTimes.date}T12:00:00`) : new Date(session.date);
+            const hasEntry = !!session.session_entry_id;
+            const entryDone = hasEntry && sessionEntries.get(session.session_entry_id)?.status === 'done';
+            const cardBg = isCompleted
+              ? entryDone
+                ? 'bg-green-50/60'
+                : hasEntry
+                  ? 'bg-orange-50/60'
+                  : 'bg-red-50/60'
+              : 'bg-white';
+            const cardHoverBorder = isCompleted
+              ? entryDone
+                ? 'hover:border-green-300'
+                : hasEntry
+                  ? 'hover:border-orange-300'
+                  : 'hover:border-red-300'
+              : 'hover:border-purple-300';
             
             return (
               <div
                 key={session.id}
                 onClick={() => handleOpenSession(session)}
-                className="bg-white rounded-lg sm:rounded-xl border border-slate-200 p-2 sm:p-3 md:p-4 hover:shadow-md transition-all cursor-pointer hover:border-purple-300"
+                className={`${cardBg} rounded-lg sm:rounded-xl border border-slate-200 p-2 sm:p-3 md:p-4 hover:shadow-md transition-all cursor-pointer ${cardHoverBorder}`}
               >
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3">
                   {/* Top row in mobile: Date + Session Details Button */}
                   <div className="flex items-start justify-between gap-2 sm:hidden">
-                    <div className="bg-purple-100 rounded p-1.5 text-center min-w-[40px]">
-                      <div className="text-[9px] font-semibold text-purple-600 uppercase">
+                    <div className="bg-slate-100 rounded p-1.5 text-center min-w-[40px]">
+                      <div className="text-[9px] font-semibold text-slate-500 uppercase">
                         {dispDate.toLocaleDateString('es-ES', { month: 'short' })}
                       </div>
-                      <div className="text-base font-bold text-purple-900">
+                      <div className="text-base font-bold text-slate-700">
                         {dispDate.getDate()}
                       </div>
                     </div>
@@ -1340,11 +1356,11 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
 
                   {/* Left: Date, Time & Patient - Desktop */}
                   <div className="flex items-start gap-2 sm:gap-3">
-                    <div className="hidden sm:block bg-purple-100 rounded-lg p-2 md:p-3 text-center min-w-[55px] md:min-w-[60px]">
-                      <div className="text-[10px] md:text-xs font-semibold text-purple-600 uppercase">
+                    <div className="hidden sm:block bg-slate-100 rounded-lg p-2 md:p-3 text-center min-w-[55px] md:min-w-[60px]">
+                      <div className="text-[10px] md:text-xs font-semibold text-slate-500 uppercase">
                         {dispDate.toLocaleDateString('es-ES', { month: 'short' })}
                       </div>
-                      <div className="text-xl md:text-2xl font-bold text-purple-900">
+                      <div className="text-xl md:text-2xl font-bold text-slate-700">
                         {dispDate.getDate()}
                       </div>
                     </div>
