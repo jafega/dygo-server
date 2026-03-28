@@ -1045,6 +1045,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   onOpenSettings={handleOpenSettings}
                   isProfileIncomplete={isProfileIncomplete}
                   subscriptionInfo={psychSubscriptionInfo}
+                  psychologistId={currentUser.id}
                />
                
                {/* Main Content */}

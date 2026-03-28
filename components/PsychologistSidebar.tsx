@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Users, FileText, User as UserIcon, Calendar, Menu, X, ArrowLeftRight, ShieldCheck, Link2, BarChart3, AlertCircle, ClipboardList, Building2, Scroll, Upload, Bot, Zap, RefreshCw, FolderOpen } from 'lucide-react';
-import { createCheckoutSession, createBillingPortalSession } from '../services/authService';
+import { createCheckoutSession, createBillingPortalSession, apiFetch } from '../services/authService';
+import { API_URL } from '../services/config';
 
 const MaindsLogo: React.FC<{ className?: string }> = ({ className = "w-12 h-12" }) => (
   <svg viewBox="0 0 1242 641" xmlns="http://www.w3.org/2000/svg" className={className}>
@@ -34,6 +35,7 @@ interface PsychologistSidebarProps {
   onOpenSettings: () => void;
   isProfileIncomplete?: boolean;
   subscriptionInfo?: SubscriptionInfo | null;
+  psychologistId?: string;
 }
 
 const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({ 
@@ -47,7 +49,8 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
   onSwitchToPersonal,
   onOpenSettings,
   isProfileIncomplete = false,
-  subscriptionInfo = null
+  subscriptionInfo = null,
+  psychologistId = ''
 }) => {
   const menuItems = [
     { id: 'schedule' as const, label: 'Agenda', icon: Calendar },
@@ -63,6 +66,42 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
   ];
 
   const [subActionLoading, setSubActionLoading] = useState(false);
+  const [pendingEntriesCount, setPendingEntriesCount] = useState(0);
+  const pendingEntriesIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (!psychologistId) return;
+
+    const fetchPendingEntries = async () => {
+      try {
+        const [sessionsRes, entriesRes] = await Promise.all([
+          apiFetch(`${API_URL}/sessions?psychologistId=${psychologistId}`),
+          apiFetch(`${API_URL}/session-entries?creator_user_id=${psychologistId}`)
+        ]);
+        if (!sessionsRes.ok || !entriesRes.ok) return;
+        const sessions = await sessionsRes.json();
+        const entries = await entriesRes.json();
+        const entriesMap = new Map<string, string>();
+        entries.forEach((e: any) => {
+          entriesMap.set(e.id, e.data?.status || e.status || 'pending');
+        });
+        const count = sessions.filter((s: any) => {
+          if (s.status !== 'completed') return false;
+          if (!s.session_entry_id) return true;
+          return entriesMap.get(s.session_entry_id) !== 'done';
+        }).length;
+        setPendingEntriesCount(count);
+      } catch {
+        // silently ignore
+      }
+    };
+
+    fetchPendingEntries();
+    pendingEntriesIntervalRef.current = setInterval(fetchPendingEntries, 60000);
+    return () => {
+      if (pendingEntriesIntervalRef.current) clearInterval(pendingEntriesIntervalRef.current);
+    };
+  }, [psychologistId]);
 
   const formatPeriodEnd = (ts: number | null) => {
     if (!ts) return '';
@@ -314,6 +353,11 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
               >
                 <Icon size={18} />
                 <span className="flex-1 text-left">{item.label}</span>
+                {item.id === 'sessions' && pendingEntriesCount > 0 && (
+                  <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-indigo-600 text-white text-[11px] font-bold leading-none">
+                    {pendingEntriesCount}
+                  </span>
+                )}
                 {item.id === 'profile' && isProfileIncomplete && (
                   <AlertCircle size={18} className="text-amber-500 animate-pulse" title="Perfil incompleto" />
                 )}
