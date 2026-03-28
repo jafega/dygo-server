@@ -144,6 +144,10 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
   const [showPatientDropdown, setShowPatientDropdown] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [sendSuccess, setSendSuccess] = useState(false);
+  const [lastSentSignatureId, setLastSentSignatureId] = useState<number | null>(null);
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
+  const [emailError, setEmailError] = useState('');
   // template IDs already sent to currently selected patient
   const [sentTemplateIds, setSentTemplateIds] = useState<Set<number>>(new Set());
   const [isLoadingSent, setIsLoadingSent] = useState(false);
@@ -294,11 +298,11 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
         })
       });
       if (!res.ok) throw new Error(await res.text());
+      const created = await res.json();
+      setLastSentSignatureId(created?.id ?? null);
+      setEmailSent(false);
+      setEmailError('');
       setSendSuccess(true);
-      setTimeout(() => {
-        setShowSendModal(false);
-        setSendSuccess(false);
-      }, 2000);
     } catch (e: any) {
       alert('Error enviando documento: ' + (e.message || e));
     } finally {
@@ -662,10 +666,58 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-md w-full">
             {sendSuccess ? (
-              <div className="py-8 text-center">
+              <div className="py-6 text-center">
                 <CheckCircle size={48} className="text-green-500 mx-auto mb-3" />
                 <h3 className="text-lg font-bold text-slate-900">¡Enviado!</h3>
                 <p className="text-sm text-slate-500 mt-1">El documento ha llegado al paciente.</p>
+
+                {/* Email notification button */}
+                <div className="mt-5 border-t border-slate-100 pt-5">
+                  <p className="text-xs text-slate-500 mb-3">¿Quieres notificar a <strong>{selectedPatient?.name}</strong> por email con el PDF del documento y un enlace para firmarlo?</p>
+                  {emailSent ? (
+                    <div className="flex items-center justify-center gap-2 text-sm text-green-600 font-medium">
+                      <CheckCircle size={16} />
+                      Email enviado correctamente
+                    </div>
+                  ) : (
+                    <>
+                      {emailError && (
+                        <p className="text-xs text-red-500 mb-2">{emailError}</p>
+                      )}
+                      <button
+                        onClick={async () => {
+                          if (!lastSentSignatureId) return;
+                          setIsSendingEmail(true);
+                          setEmailError('');
+                          try {
+                            const r = await apiFetch(`${API_URL}/signatures/${lastSentSignatureId}/send-email`, { method: 'POST' });
+                            if (!r.ok) {
+                              const err = await r.json().catch(() => ({}));
+                              throw new Error(err?.error || 'Error al enviar');
+                            }
+                            setEmailSent(true);
+                          } catch (e: any) {
+                            setEmailError(e.message || 'Error al enviar el email');
+                          } finally {
+                            setIsSendingEmail(false);
+                          }
+                        }}
+                        disabled={isSendingEmail}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+                      >
+                        {isSendingEmail ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                        Enviar email con PDF y enlace de firma
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                <button
+                  onClick={() => { setShowSendModal(false); setSendSuccess(false); }}
+                  className="mt-3 text-sm text-slate-400 hover:text-slate-600"
+                >
+                  Cerrar
+                </button>
               </div>
             ) : (
               <>

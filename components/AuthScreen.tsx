@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as AuthService from '../services/authService';
-import { Loader2, Server, WifiOff, CheckCircle } from 'lucide-react';
+import { Loader2, Server, WifiOff, CheckCircle, Eye, EyeOff, Mail, ArrowLeft } from 'lucide-react';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_REDIRECT_URL, API_URL, getSupabaseClient } from '../services/config';
 import TermsAndConditionsModal, { TERMS_ACCEPTED_KEY } from './TermsAndConditionsModal';
 
@@ -13,16 +13,29 @@ const MaindsLogoAuth: React.FC<{ className?: string }> = ({ className = "w-32 h-
 
 interface AuthScreenProps {
     onAuthSuccess: (user?: any) => void;
+    pendingSignDocumentId?: string | null;
 }
 
-const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
+const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess, pendingSignDocumentId }) => {
     const [error, setError] = useState('');
+    const [successMsg, setSuccessMsg] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [isAuthenticating, setIsAuthenticating] = useState(false);
     const [serverStatus, setServerStatus] = useState<'checking' | 'online' | 'offline'>('checking');
     const [showTerms, setShowTerms] = useState(false);
     const [pendingUser, setPendingUser] = useState<any>(null);
-    
+
+    // Auth mode: 'signin' | 'signup' | 'forgot' | 'reset'
+    const [authMode, setAuthMode] = useState<'signin' | 'signup' | 'forgot' | 'reset'>('signin');
+
+    // Form fields
+    const [emailInput, setEmailInput] = useState('');
+    const [passwordInput, setPasswordInput] = useState('');
+    const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
+    const [nameInput, setNameInput] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
+    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
     // Bandera para evitar múltiples ejecuciones del callback
     const authCallbackExecutedRef = useRef(false);
 
@@ -65,6 +78,27 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                 const hasCode = url.searchParams.get('code');
                 const hasSupabaseAuth = url.searchParams.get('supabase_auth');
                 const hasHashToken = hash.includes('access_token=');
+                const isRecovery = url.searchParams.get('type') === 'recovery' || hash.includes('type=recovery');
+
+                // Handle password reset redirect
+                if (isRecovery && hasHashToken) {
+                    authCallbackExecutedRef.current = true;
+                    const params = new URLSearchParams(hash.replace('#', '?'));
+                    const recoveryToken = params.get('access_token');
+                    if (recoveryToken && supabaseClient) {
+                        // Set the session so updateUser works
+                        await supabaseClient.auth.setSession({
+                            access_token: recoveryToken,
+                            refresh_token: params.get('refresh_token') || ''
+                        });
+                    }
+                    // Clean URL
+                    window.location.hash = '';
+                    url.searchParams.delete('type');
+                    history.replaceState(null, '', url.pathname + url.search);
+                    setAuthMode('reset');
+                    return;
+                }
 
                 if (!hasCode && !hasSupabaseAuth && !hasHashToken) return;
 
@@ -161,10 +195,9 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
     const handleSupabaseGoogle = async () => {
         try {
             setIsLoading(true);
+            setError('');
             const supabase = getSupabaseClient();
-            if (!supabase) {
-                throw new Error('Supabase client not available');
-            }
+            if (!supabase) throw new Error('Supabase client not available');
             const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
             const redirectTo = isLocalhost
                 ? 'http://localhost:3000/?supabase_auth=1'
@@ -177,6 +210,115 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
             if (data?.url) window.location.href = data.url;
         } catch (err: any) {
             setError(err?.message || 'Error iniciando OAuth');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleEmailSignIn = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError('');
+        setSuccessMsg('');
+
+        if (AuthService.isGmailAddress(emailInput)) {
+            setError('Las cuentas de Gmail deben usar el botón "Continuar con Google".');
+            return;
+        }
+
+        try {
+            setIsLoading(true);
+            const user = await AuthService.signInWithEmailPassword(emailInput, passwordInput);
+            handleAuthSuccessWithTerms(user);
+        } catch (err: any) {
+            setError(err?.message || 'Error al iniciar sesión');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleEmailSignUp = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError('');
+        setSuccessMsg('');
+
+        if (!nameInput.trim()) {
+            setError('Por favor, escribe tu nombre completo.');
+            return;
+        }
+        if (AuthService.isGmailAddress(emailInput)) {
+            setError('Las cuentas de Gmail deben usar el botón "Continuar con Google".');
+            return;
+        }
+        if (passwordInput.length < 8) {
+            setError('La contraseña debe tener al menos 8 caracteres.');
+            return;
+        }
+        if (passwordInput !== confirmPasswordInput) {
+            setError('Las contraseñas no coinciden.');
+            return;
+        }
+
+        try {
+            setIsLoading(true);
+            const result = await AuthService.signUpWithEmailPassword(nameInput, emailInput, passwordInput);
+            if (result.needsEmailConfirmation) {
+                setSuccessMsg('¡Cuenta creada! Revisa tu email para confirmar tu dirección y poder iniciar sesión.');
+                setPasswordInput('');
+                setConfirmPasswordInput('');
+            } else if (result.user) {
+                handleAuthSuccessWithTerms(result.user);
+            }
+        } catch (err: any) {
+            setError(err?.message || 'Error al crear la cuenta');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleForgotPassword = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError('');
+        setSuccessMsg('');
+
+        if (AuthService.isGmailAddress(emailInput)) {
+            setError('Las cuentas de Gmail deben recuperar la contraseña desde Google.');
+            return;
+        }
+
+        try {
+            setIsLoading(true);
+            await AuthService.sendPasswordResetEmail(emailInput);
+            setSuccessMsg('Te hemos enviado un correo con instrucciones para restablecer tu contraseña.');
+        } catch (err: any) {
+            setError(err?.message || 'Error al enviar el correo de recuperación');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleResetPassword = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError('');
+        setSuccessMsg('');
+
+        if (passwordInput.length < 8) {
+            setError('La contraseña debe tener al menos 8 caracteres.');
+            return;
+        }
+        if (passwordInput !== confirmPasswordInput) {
+            setError('Las contraseñas no coinciden.');
+            return;
+        }
+
+        try {
+            setIsLoading(true);
+            await AuthService.updatePasswordWithToken(passwordInput);
+            setSuccessMsg('¡Contraseña actualizada correctamente! Ahora puedes iniciar sesión.');
+            setAuthMode('signin');
+            setPasswordInput('');
+            setConfirmPasswordInput('');
+        } catch (err: any) {
+            setError(err?.message || 'Error al actualizar la contraseña');
         } finally {
             setIsLoading(false);
         }
@@ -225,6 +367,25 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         );
     }
 
+    const GoogleButton = () => (
+        SUPABASE_URL && SUPABASE_ANON_KEY ? (
+            <button
+                type="button"
+                onClick={handleSupabaseGoogle}
+                disabled={isLoading}
+                className="w-full bg-white text-slate-700 rounded-xl px-4 py-3 shadow-sm hover:shadow-md flex items-center justify-center gap-3 border border-slate-200 disabled:opacity-60 transition-shadow"
+            >
+                <svg className="w-5 h-5 shrink-0" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+                    <path fill="#EA4335" d="M24 9.5c3.09 0 5.84 1.19 7.99 3.15l5.95-5.95C34.5 3.6 29.6 1.5 24 1.5 14.64 1.5 6.54 6.8 2.74 14.4l6.94 5.39C11.46 13.4 17.2 9.5 24 9.5z"/>
+                    <path fill="#4285F4" d="M46.5 24.5c0-1.64-.15-3.21-.43-4.74H24v9.02h12.62c-.54 2.92-2.19 5.4-4.66 7.08l7.19 5.55C43.53 37.7 46.5 31.6 46.5 24.5z"/>
+                    <path fill="#FBBC05" d="M9.68 28.79a14.96 14.96 0 0 1-.78-4.79c0-1.66.29-3.26.78-4.79l-6.94-5.39A23.97 23.97 0 0 0 0 24c0 3.86.93 7.51 2.74 10.58l6.94-5.79z"/>
+                    <path fill="#34A853" d="M24 46.5c5.6 0 10.5-1.85 14-5.02l-7.19-5.55c-2 1.35-4.55 2.14-6.81 2.14-6.8 0-12.54-3.9-15.32-9.57l-6.94 5.79C6.54 41.2 14.64 46.5 24 46.5z"/>
+                </svg>
+                <span className="text-sm font-medium">Continuar con Google</span>
+            </button>
+        ) : null
+    );
+
     return (
         <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-slate-100 flex items-center justify-center p-4 relative">
             <div className="absolute top-4 right-4 flex items-center gap-2 px-3 py-1.5 bg-white/80 backdrop-blur rounded-full text-xs font-medium shadow-sm border border-slate-100">
@@ -234,12 +395,12 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
             </div>
 
             <div className="bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden flex flex-col">
+                {/* Header */}
                 <div className="bg-indigo-600 p-8 text-center flex flex-col items-center relative overflow-hidden">
                     <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
                         <div className="absolute top-[-50px] right-[-50px] w-40 h-40 bg-white rounded-full blur-3xl"></div>
                         <div className="absolute bottom-[-20px] left-[-20px] w-32 h-32 bg-indigo-300 rounded-full blur-2xl"></div>
                     </div>
-
                     <div className="mb-0 relative z-10">
                         <MaindsLogoAuth />
                     </div>
@@ -248,14 +409,19 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                 </div>
 
                 <div className="p-8">
-                    <h2 className="text-xl font-bold text-slate-800 mb-6 text-center">Inicia sesión con Google</h2>
-
                     {serverStatus === 'offline' && (
-                        <div className="mb-6 p-3 bg-amber-50 text-amber-800 text-xs rounded-lg border border-amber-200 flex items-start gap-2">
+                        <div className="mb-5 p-3 bg-amber-50 text-amber-800 text-xs rounded-lg border border-amber-200 flex items-start gap-2">
                             <Server size={16} className="shrink-0 mt-0.5" />
+                            <div><strong>Aviso:</strong> El servidor backend no responde.</div>
+                        </div>
+                    )}
+
+                    {pendingSignDocumentId && (
+                        <div className="mb-5 p-3 bg-indigo-50 text-indigo-800 text-sm rounded-xl border border-indigo-200 flex items-start gap-2">
+                            <span className="text-lg leading-none mt-0.5">✍️</span>
                             <div>
-                                <strong>Aviso:</strong> El servidor backend no responde.
-                                Asegúrate de que el backend esté disponible.
+                                <strong>Tienes un documento para firmar.</strong>
+                                <p className="text-xs text-indigo-600 mt-0.5">Inicia sesión para acceder a él y firmarlo digitalmente.</p>
                             </div>
                         </div>
                     )}
@@ -263,27 +429,244 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                     {error && (
                         <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100 animate-in fade-in slide-in-from-top-1">
                             {error}
+                            {AuthService.isGmailAddress(emailInput) && (
+                                <button
+                                    type="button"
+                                    onClick={handleSupabaseGoogle}
+                                    className="mt-2 w-full text-xs font-semibold text-indigo-600 underline"
+                                >
+                                    Iniciar sesión con Google →
+                                </button>
+                            )}
                         </div>
                     )}
 
-                    {SUPABASE_URL && SUPABASE_ANON_KEY ? (
-                        <div className="mb-2 flex justify-center">
-                            <button
-                                onClick={handleSupabaseGoogle}
-                                disabled={isLoading}
-                                className="w-full max-w-xs bg-white text-slate-700 rounded-xl px-4 py-3 shadow-sm hover:shadow-md flex items-center justify-center gap-3 border border-slate-200 disabled:opacity-60"
-                            >
-                                <svg className="w-5 h-5" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
-                                    <path fill="#EA4335" d="M24 9.5c3.09 0 5.84 1.19 7.99 3.15l5.95-5.95C34.5 3.6 29.6 1.5 24 1.5 14.64 1.5 6.54 6.8 2.74 14.4l6.94 5.39C11.46 13.4 17.2 9.5 24 9.5z"/>
-                                    <path fill="#4285F4" d="M46.5 24.5c0-1.64-.15-3.21-.43-4.74H24v9.02h12.62c-.54 2.92-2.19 5.4-4.66 7.08l7.19 5.55C43.53 37.7 46.5 31.6 46.5 24.5z"/>
-                                    <path fill="#FBBC05" d="M9.68 28.79a14.96 14.96 0 0 1-.78-4.79c0-1.66.29-3.26.78-4.79l-6.94-5.39A23.97 23.97 0 0 0 0 24c0 3.86.93 7.51 2.74 10.58l6.94-5.79z"/>
-                                    <path fill="#34A853" d="M24 46.5c5.6 0 10.5-1.85 14.0-5.02l-7.19-5.55c-2.0 1.35-4.55 2.14-6.81 2.14-6.8 0-12.54-3.9-15.32-9.57l-6.94 5.79C6.54 41.2 14.64 46.5 24 46.5z"/>
-                                </svg>
-                                <span className="text-sm font-medium">Continuar con Google</span>
-                            </button>
+                    {successMsg && (
+                        <div className="mb-4 p-3 bg-green-50 text-green-700 text-sm rounded-lg border border-green-100 animate-in fade-in slide-in-from-top-1">
+                            {successMsg}
                         </div>
-                    ) : (
-                        <p className="text-xs text-red-600 text-center">Falta configurar Supabase en el frontend.</p>
+                    )}
+
+                    {/* ── NEW PASSWORD (reset flow) ── */}
+                    {authMode === 'reset' && (
+                        <form onSubmit={handleResetPassword} className="space-y-4">
+                            <h2 className="text-lg font-bold text-slate-800 text-center mb-1">Nueva contraseña</h2>
+                            <p className="text-xs text-slate-500 text-center mb-4">Elige una nueva contraseña para tu cuenta.</p>
+                            <div className="relative">
+                                <input
+                                    type={showPassword ? 'text' : 'password'}
+                                    placeholder="Nueva contraseña (mín. 8 caracteres)"
+                                    value={passwordInput}
+                                    onChange={e => setPasswordInput(e.target.value)}
+                                    required
+                                    minLength={8}
+                                    className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 pr-10"
+                                />
+                                <button type="button" onClick={() => setShowPassword(p => !p)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                                    {showPassword ? <EyeOff size={16}/> : <Eye size={16}/>}
+                                </button>
+                            </div>
+                            <div className="relative">
+                                <input
+                                    type={showConfirmPassword ? 'text' : 'password'}
+                                    placeholder="Confirmar contraseña"
+                                    value={confirmPasswordInput}
+                                    onChange={e => setConfirmPasswordInput(e.target.value)}
+                                    required
+                                    className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 pr-10"
+                                />
+                                <button type="button" onClick={() => setShowConfirmPassword(p => !p)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                                    {showConfirmPassword ? <EyeOff size={16}/> : <Eye size={16}/>}
+                                </button>
+                            </div>
+                            <button
+                                type="submit"
+                                disabled={isLoading}
+                                className="w-full bg-indigo-600 text-white rounded-xl px-4 py-3 text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
+                            >
+                                {isLoading ? <Loader2 size={16} className="animate-spin"/> : null}
+                                Actualizar contraseña
+                            </button>
+                        </form>
+                    )}
+
+                    {/* ── FORGOT PASSWORD ── */}
+                    {authMode === 'forgot' && (
+                        <form onSubmit={handleForgotPassword} className="space-y-4">
+                            <button type="button" onClick={() => { setAuthMode('signin'); setError(''); setSuccessMsg(''); }} className="flex items-center gap-1 text-xs text-slate-500 hover:text-indigo-600 mb-2">
+                                <ArrowLeft size={14}/> Volver
+                            </button>
+                            <h2 className="text-lg font-bold text-slate-800 text-center">Recuperar contraseña</h2>
+                            <p className="text-xs text-slate-500 text-center">Te enviaremos un enlace para restablecer tu contraseña.</p>
+                            <div className="relative">
+                                <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                                <input
+                                    type="email"
+                                    placeholder="Tu email"
+                                    value={emailInput}
+                                    onChange={e => setEmailInput(e.target.value)}
+                                    required
+                                    className="w-full border border-slate-200 rounded-xl pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                                />
+                            </div>
+                            <button
+                                type="submit"
+                                disabled={isLoading}
+                                className="w-full bg-indigo-600 text-white rounded-xl px-4 py-3 text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
+                            >
+                                {isLoading ? <Loader2 size={16} className="animate-spin"/> : null}
+                                Enviar enlace de recuperación
+                            </button>
+                        </form>
+                    )}
+
+                    {/* ── SIGN IN / SIGN UP tabs ── */}
+                    {(authMode === 'signin' || authMode === 'signup') && (
+                        <>
+                            {/* Tab switcher */}
+                            <div className="flex rounded-xl bg-slate-100 p-1 mb-6">
+                                <button
+                                    type="button"
+                                    onClick={() => { setAuthMode('signin'); setError(''); setSuccessMsg(''); }}
+                                    className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-colors ${authMode === 'signin' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                                >
+                                    Iniciar sesión
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => { setAuthMode('signup'); setError(''); setSuccessMsg(''); }}
+                                    className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-colors ${authMode === 'signup' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                                >
+                                    Registrarse
+                                </button>
+                            </div>
+
+                            {/* Google button (always shown) */}
+                            <GoogleButton />
+
+                            {/* Divider */}
+                            <div className="flex items-center gap-3 my-5">
+                                <div className="flex-1 h-px bg-slate-200"/>
+                                <span className="text-xs text-slate-400 font-medium">o con email</span>
+                                <div className="flex-1 h-px bg-slate-200"/>
+                            </div>
+
+                            {/* Sign In Form */}
+                            {authMode === 'signin' && (
+                                <form onSubmit={handleEmailSignIn} className="space-y-3">
+                                    <div className="relative">
+                                        <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                                        <input
+                                            type="email"
+                                            placeholder="Email (no Gmail)"
+                                            value={emailInput}
+                                            onChange={e => { setEmailInput(e.target.value); setError(''); }}
+                                            required
+                                            className="w-full border border-slate-200 rounded-xl pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                                            autoComplete="email"
+                                        />
+                                    </div>
+                                    <div className="relative">
+                                        <input
+                                            type={showPassword ? 'text' : 'password'}
+                                            placeholder="Contraseña"
+                                            value={passwordInput}
+                                            onChange={e => setPasswordInput(e.target.value)}
+                                            required
+                                            className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 pr-10"
+                                            autoComplete="current-password"
+                                        />
+                                        <button type="button" onClick={() => setShowPassword(p => !p)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                                            {showPassword ? <EyeOff size={16}/> : <Eye size={16}/>}
+                                        </button>
+                                    </div>
+                                    <div className="flex justify-end">
+                                        <button
+                                            type="button"
+                                            onClick={() => { setAuthMode('forgot'); setError(''); setSuccessMsg(''); }}
+                                            className="text-xs text-indigo-600 hover:underline"
+                                        >
+                                            ¿Olvidaste tu contraseña?
+                                        </button>
+                                    </div>
+                                    <button
+                                        type="submit"
+                                        disabled={isLoading}
+                                        className="w-full bg-indigo-600 text-white rounded-xl px-4 py-3 text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
+                                    >
+                                        {isLoading ? <Loader2 size={16} className="animate-spin"/> : null}
+                                        Iniciar sesión
+                                    </button>
+                                </form>
+                            )}
+
+                            {/* Sign Up Form */}
+                            {authMode === 'signup' && (
+                                <form onSubmit={handleEmailSignUp} className="space-y-3">
+                                    <input
+                                        type="text"
+                                        placeholder="Nombre completo"
+                                        value={nameInput}
+                                        onChange={e => setNameInput(e.target.value)}
+                                        required
+                                        className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                                        autoComplete="name"
+                                    />
+                                    <div className="relative">
+                                        <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                                        <input
+                                            type="email"
+                                            placeholder="Email (no Gmail)"
+                                            value={emailInput}
+                                            onChange={e => { setEmailInput(e.target.value); setError(''); }}
+                                            required
+                                            className="w-full border border-slate-200 rounded-xl pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                                            autoComplete="email"
+                                        />
+                                    </div>
+                                    <div className="relative">
+                                        <input
+                                            type={showPassword ? 'text' : 'password'}
+                                            placeholder="Contraseña (mín. 8 caracteres)"
+                                            value={passwordInput}
+                                            onChange={e => setPasswordInput(e.target.value)}
+                                            required
+                                            minLength={8}
+                                            className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 pr-10"
+                                            autoComplete="new-password"
+                                        />
+                                        <button type="button" onClick={() => setShowPassword(p => !p)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                                            {showPassword ? <EyeOff size={16}/> : <Eye size={16}/>}
+                                        </button>
+                                    </div>
+                                    <div className="relative">
+                                        <input
+                                            type={showConfirmPassword ? 'text' : 'password'}
+                                            placeholder="Confirmar contraseña"
+                                            value={confirmPasswordInput}
+                                            onChange={e => setConfirmPasswordInput(e.target.value)}
+                                            required
+                                            className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 pr-10"
+                                            autoComplete="new-password"
+                                        />
+                                        <button type="button" onClick={() => setShowConfirmPassword(p => !p)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                                            {showConfirmPassword ? <EyeOff size={16}/> : <Eye size={16}/>}
+                                        </button>
+                                    </div>
+                                    <p className="text-xs text-slate-400">
+                                        ¿Tienes Gmail? Usa el botón de Google de arriba.
+                                    </p>
+                                    <button
+                                        type="submit"
+                                        disabled={isLoading}
+                                        className="w-full bg-indigo-600 text-white rounded-xl px-4 py-3 text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
+                                    >
+                                        {isLoading ? <Loader2 size={16} className="animate-spin"/> : null}
+                                        Crear cuenta
+                                    </button>
+                                </form>
+                            )}
+                        </>
                     )}
                 </div>
             </div>

@@ -1671,27 +1671,6 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                         <Copy size={16} />
                         Copiar enlace
                       </button>
-                      <button
-                        onClick={() => {
-                          const patientName = editedSession.patientName || 'Paciente';
-                          const sessionDate = new Date(editedSession.date).toLocaleDateString('es-ES', { 
-                            weekday: 'long', 
-                            day: 'numeric', 
-                            month: 'long' 
-                          });
-                          const message = `Hola ${patientName}, aquí está el enlace para nuestra sesión del ${sessionDate} a las ${editedSession.startTime}: ${editedSession.meetLink}`;
-                          const rawPhone = editedSession.patientPhone?.trim() || '';
-                          const normalizedPhone = rawPhone ? normalizePhone(rawPhone).replace(/[^0-9]/g, '') : '';
-                          const whatsappUrl = normalizedPhone 
-                            ? `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(message)}`
-                            : `https://wa.me/?text=${encodeURIComponent(message)}`;
-                          window.open(whatsappUrl, '_blank');
-                        }}
-                        className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors text-sm font-medium"
-                      >
-                        <Send size={16} />
-                        Enviar por WhatsApp
-                      </button>
                     </div>
                   )}
                 </div>

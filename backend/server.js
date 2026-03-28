@@ -14,6 +14,7 @@ import { google } from 'googleapis';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import archiver from 'archiver';
+import PDFDocument from 'pdfkit';
 
 // bcrypt: prefer native, fall back to pure-JS bcryptjs in serverless
 let bcrypt;
@@ -47,6 +48,7 @@ const __dirname = path.dirname(__filename);
 
 // --- CONFIGURACIÓN BÁSICA ---
 const app = express();
+app.set('trust proxy', 1); // Trust Vercel/reverse-proxy X-Forwarded-For header
 const PORT = process.env.PORT || 3001;
 const DB_FILE = path.join(__dirname, 'db.json');
 const IS_SERVERLESS = !!(process.env.VERCEL || process.env.VERCEL_ENV);
@@ -222,7 +224,6 @@ const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Demasiados intentos. Inténtalo de nuevo en 15 minutos.' },
-  validate: { xForwardedForHeader: false }
 });
 
 const generalLimiter = rateLimit({
@@ -231,7 +232,6 @@ const generalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Demasiadas solicitudes. Inténtalo más tarde.' },
-  validate: { xForwardedForHeader: false }
 });
 
 app.use('/api/', generalLimiter);
@@ -14640,6 +14640,243 @@ app.put('/api/signatures/:id', authenticateRequest, async (req, res) => {
   } catch (error) {
     console.error('[PUT /api/signatures/:id] Error:', error);
     res.status(500).json({ error: 'Error al firmar documento' });
+  }
+});
+
+// POST /api/signatures/:id/send-email — psychologist re-sends a document invite email to the patient
+app.post('/api/signatures/:id/send-email', authenticateRequest, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const psychUserId = req.authenticatedUserId;
+    if (!psychUserId) return res.status(401).json({ error: 'No autenticado' });
+
+    if (!process.env.RESEND_API_KEY) {
+      return res.status(503).json({ error: 'Servicio de email no configurado (RESEND_API_KEY)' });
+    }
+    if (!supabaseAdmin) {
+      return res.status(501).json({ error: 'Solo disponible con Supabase' });
+    }
+
+    // 1. Get signature record and verify ownership
+    const { data: sig, error: sigErr } = await supabaseAdmin
+      .from('signatures')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (sigErr || !sig) return res.status(404).json({ error: 'Documento no encontrado' });
+    if (String(sig.psych_user_id) !== String(psychUserId)) {
+      return res.status(403).json({ error: 'Sin permiso para este documento' });
+    }
+
+    // 2. Get patient email and name
+    const { data: patient, error: patientErr } = await supabaseAdmin
+      .from('users')
+      .select('id, user_email, data')
+      .eq('id', sig.patient_user_id)
+      .single();
+
+    if (patientErr || !patient) return res.status(404).json({ error: 'Paciente no encontrado' });
+
+    const patientEmail = patient.user_email || patient.data?.email;
+    if (!patientEmail || patientEmail.includes('@noemail.mainds.local')) {
+      return res.status(400).json({ error: 'El paciente no tiene un email válido' });
+    }
+
+    const patientName = patient.data?.name || patient.data?.firstName || patientEmail.split('@')[0];
+    const patientFirstName = patient.data?.firstName || patient.data?.name?.split?.(' ')?.[0] || patientName;
+
+    // 3. Get psychologist name
+    let psychName = null;
+    const { data: psychProfile } = await supabaseAdmin
+      .from('psychologist_profiles')
+      .select('data')
+      .eq('id', psychUserId)
+      .single();
+    if (psychProfile?.data?.name) psychName = psychProfile.data.name;
+
+    // 4. Get or create Supabase auth user for patient, then generate magic link
+    const frontendUrl = process.env.FRONTEND_URL || 'https://mi.mainds.app';
+    const redirectTo = `${frontendUrl}?sign_document=${id}`;
+    let magicLinkUrl = null;
+
+    try {
+      // Try to generate a magic link — if the user doesn't exist in Supabase Auth, create them first
+      let linkResult = await supabaseAdmin.auth.admin.generateLink({
+        type: 'magiclink',
+        email: patientEmail,
+        options: { redirectTo }
+      });
+
+      if (linkResult.error) {
+        // User probably doesn't exist in Supabase Auth yet — create them
+        const createResult = await supabaseAdmin.auth.admin.createUser({
+          email: patientEmail,
+          email_confirm: true,
+          user_metadata: { role: 'PATIENT', name: patientName }
+        });
+        if (createResult.error) {
+          console.warn('[send-email] Could not create Supabase auth user:', createResult.error.message);
+          // Fall back to plain app URL without magic link
+          magicLinkUrl = frontendUrl;
+        } else {
+          // Retry generating the magic link
+          linkResult = await supabaseAdmin.auth.admin.generateLink({
+            type: 'magiclink',
+            email: patientEmail,
+            options: { redirectTo }
+          });
+          if (linkResult.error) {
+            console.warn('[send-email] Could not generate magic link after user creation:', linkResult.error.message);
+            magicLinkUrl = frontendUrl;
+          } else {
+            magicLinkUrl = linkResult.data?.properties?.action_link || frontendUrl;
+          }
+        }
+      } else {
+        magicLinkUrl = linkResult.data?.properties?.action_link || frontendUrl;
+      }
+    } catch (mlErr) {
+      console.warn('[send-email] Magic link generation failed:', mlErr.message);
+      magicLinkUrl = frontendUrl;
+    }
+
+    // 5. Generate PDF of the document content
+    function stripMarkdown(md) {
+      return (md || '')
+        .replace(/\n\n<!-- SIGNATURE_DATA:.*?-->$/s, '')
+        .replace(/```[\s\S]*?```/g, '')
+        .replace(/^#{1,6}\s+/gm, '')
+        .replace(/\*\*\*(.+?)\*\*\*/g, '$1')
+        .replace(/\*\*(.+?)\*\*/g, '$1')
+        .replace(/\*(.+?)\*/g, '$1')
+        .replace(/`(.+?)`/g, '$1')
+        .replace(/^\s*[-*] /gm, '• ')
+        .replace(/^\s*\d+\. /gm, '')
+        .replace(/^> /gm, '')
+        .replace(/\{\{firma_\d+\}\}/g, '[Espacio para firma]')
+        .replace(/\{\{([^}]+)\}\}/g, '[$1]')
+        .replace(/---+/g, '─────────────────────────────')
+        .trim();
+    }
+
+    const docContent = stripMarkdown(sig.content || '');
+    const docTitle = (sig.content || '').split('\n')[0].replace(/^#+\s*/, '').trim() || 'Documento';
+
+    const pdfBuffer = await new Promise((resolve, reject) => {
+      const chunks = [];
+      const doc = new PDFDocument({ margin: 60, size: 'A4' });
+      doc.on('data', chunk => chunks.push(chunk));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+
+      // Title
+      doc.font('Helvetica-Bold').fontSize(18).text(docTitle, { align: 'left' });
+      doc.moveDown(0.5);
+      doc.moveTo(doc.x, doc.y).lineTo(doc.page.width - 60, doc.y).stroke('#cbd5e1');
+      doc.moveDown(0.5);
+
+      // Status
+      const statusLabel = sig.signed
+        ? `Firmado el ${new Date(sig.signature_date).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })}`
+        : 'Pendiente de firma';
+      doc.font('Helvetica').fontSize(10).fillColor('#64748b').text(statusLabel);
+      doc.moveDown(0.5);
+      doc.fillColor('#1e293b');
+
+      // Body content
+      doc.font('Helvetica').fontSize(11);
+      const lines = docContent.split('\n');
+      for (const line of lines) {
+        if (line.startsWith('─')) {
+          doc.moveDown(0.3);
+          doc.moveTo(doc.x, doc.y).lineTo(doc.page.width - 60, doc.y).stroke('#e2e8f0');
+          doc.moveDown(0.3);
+        } else if (line.trim() === '') {
+          doc.moveDown(0.4);
+        } else {
+          doc.text(line, { continued: false });
+        }
+      }
+
+      doc.end();
+    });
+
+    // 6. Build and send email via Resend
+    const greeting = patientFirstName ? `Hola <strong>${patientFirstName}</strong>,` : 'Hola,';
+    const psychBlock = psychName
+      ? `<div style="margin-top:24px;padding:14px 18px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px">
+          <div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Tu psicólogo/a</div>
+          <div style="font-size:14px;font-weight:600;color:#1e293b">${psychName}</div>
+        </div>`
+      : '';
+
+    const emailHtml = `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:Arial,sans-serif;color:#333">
+  <div style="max-width:600px;margin:32px auto;padding:0 16px">
+    <div style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;padding:32px 24px;text-align:center;border-radius:12px 12px 0 0">
+      <div style="font-size:32px;margin-bottom:8px">📄</div>
+      <h1 style="margin:0;font-size:22px;font-weight:700">Documento para firmar</h1>
+    </div>
+    <div style="background:#ffffff;padding:32px 24px;border-radius:0 0 12px 12px;box-shadow:0 4px 16px rgba(0,0,0,0.06)">
+      <p style="margin:0 0 16px">${greeting}</p>
+      <p style="margin:0 0 20px;color:#555">Tu psicólogo/a te ha enviado el documento <strong>${docTitle}</strong> para que lo revises y firmes.</p>
+      <p style="margin:0 0 24px;color:#555">Puedes consultar el documento adjunto en PDF y hacer clic en el botón de abajo para acceder a mainds y firmarlo digitalmente.</p>
+      <div style="text-align:center;margin-bottom:24px">
+        <a href="${magicLinkUrl}"
+           style="display:inline-block;padding:14px 32px;background:#667eea;color:white;text-decoration:none;border-radius:8px;font-weight:700;font-size:16px">
+          ✍️ Firmar documento
+        </a>
+      </div>
+      <p style="font-size:12px;color:#94a3b8;text-align:center">Si el botón no funciona, copia y pega este enlace en tu navegador:<br>
+        <span style="word-break:break-all;color:#667eea">${magicLinkUrl}</span>
+      </p>
+      ${psychBlock}
+      <p style="margin-top:24px;font-size:12px;color:#94a3b8;text-align:center;border-top:1px solid #f1f5f9;padding-top:16px">
+        Este mensaje fue enviado a través de mainds.<br>
+        Si no esperabas este email, puedes ignorarlo con total seguridad.
+      </p>
+    </div>
+  </div>
+</body>
+</html>`;
+
+    const emailPayload = {
+      from: 'mainds <no-reply@mainds.app>',
+      to: [patientEmail],
+      subject: `📄 Documento para firmar: ${docTitle}`,
+      html: emailHtml,
+      attachments: [
+        {
+          filename: `${docTitle.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ\s]/g, '_').trim()}.pdf`,
+          content: pdfBuffer.toString('base64'),
+          content_type: 'application/pdf'
+        }
+      ]
+    };
+
+    const resendRes = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(emailPayload)
+    });
+
+    if (!resendRes.ok) {
+      const errBody = await resendRes.json().catch(() => ({}));
+      console.error('[signatures/send-email] Resend error:', errBody);
+      return res.status(502).json({ error: 'Error al enviar el email', details: errBody?.message || '' });
+    }
+
+    console.log(`[signatures/send-email] ✉️  Document email sent to ${patientEmail} for signature ${id}`);
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('[POST /api/signatures/:id/send-email] Error:', error);
+    res.status(500).json({ error: 'Error al enviar el email' });
   }
 });
 

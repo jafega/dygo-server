@@ -2998,26 +2998,6 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                         <Copy size={16} />
                         Copiar enlace
                       </button>
-                      <button
-                        onClick={() => {
-                          const patientName = editedSession.patientName || 'Paciente';
-                          const sessionDate = new Date(editedSession.date).toLocaleDateString('es-ES', { 
-                            weekday: 'long', 
-                            day: 'numeric', 
-                            month: 'long' 
-                          });
-                          const message = `Hola ${patientName}, aquí está el enlace para nuestra sesión del ${sessionDate} a las ${editedSession.startTime}: ${editedSession.meetLink}`;
-                          const phone = editedSession.patientPhone?.replace(/[^0-9]/g, '') || '';
-                          const whatsappUrl = phone 
-                            ? `https://wa.me/${phone}?text=${encodeURIComponent(message)}`
-                            : `https://wa.me/?text=${encodeURIComponent(message)}`;
-                          window.open(whatsappUrl, '_blank');
-                        }}
-                        className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors text-sm font-medium"
-                      >
-                        <Send size={16} />
-                        Enviar por WhatsApp
-                      </button>
                     </div>
                   )}
                 </div>
@@ -3177,7 +3157,10 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                     const patientName = editedSession.patientName?.split(' ')[0] || 'paciente';
                     const sessionDate = new Date(editedSession.date + 'T12:00:00').toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
 
-                    const whatsappMessage = `¡Hola ${patientName}! 😊 Te escribo para recordarte nuestra sesión del ${sessionDate} a las ${editedSession.startTime}h. ¡Hasta pronto!`;
+                    const isOnlineWithLink = editedSession.type === 'online' && !!editedSession.meetLink;
+                    const whatsappMessage = isOnlineWithLink
+                      ? `¡Hola ${patientName}! 😊 Te escribo para recordarte nuestra sesión del ${sessionDate} a las ${editedSession.startTime}h. Aquí tienes el enlace para conectarte: ${editedSession.meetLink} ¡Hasta pronto!`
+                      : `¡Hola ${patientName}! 😊 Te escribo para recordarte nuestra sesión del ${sessionDate} a las ${editedSession.startTime}h. ¡Hasta pronto!`;
                     const whatsappUrl = `https://wa.me/${phone.replace(/^\+/, '')}?text=${encodeURIComponent(whatsappMessage)}`;
 
                     const hasRealEmail = hasEmail && !email.includes('@noemail.mainds.local');

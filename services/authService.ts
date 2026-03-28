@@ -284,6 +284,106 @@ export const signInWithSupabase = async (accessToken: string): Promise<User> => 
     throw new Error('La autenticación con Supabase requiere que el backend esté habilitado');
 };
 
+// --- Email/Password Auth via Supabase ---
+// Gmail domains that should use Google OAuth instead
+const GMAIL_DOMAINS = ['gmail.com', 'googlemail.com'];
+
+export const isGmailAddress = (email: string): boolean => {
+  const domain = email.trim().toLowerCase().split('@')[1] || '';
+  return GMAIL_DOMAINS.includes(domain);
+};
+
+export const signInWithEmailPassword = async (email: string, password: string): Promise<import('../types').User> => {
+  const { getSupabaseClient } = await import('./config');
+  const supabase = getSupabaseClient();
+  if (!supabase) throw new Error('Supabase no está configurado');
+
+  const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
+  if (error) {
+    if (error.message?.toLowerCase().includes('invalid login credentials') ||
+        error.message?.toLowerCase().includes('invalid credentials')) {
+      throw new Error('Email o contraseña incorrectos');
+    }
+    if (error.message?.toLowerCase().includes('email not confirmed')) {
+      throw new Error('Por favor, confirma tu email antes de iniciar sesión. Revisa tu bandeja de entrada.');
+    }
+    throw new Error(error.message || 'Error al iniciar sesión');
+  }
+
+  const accessToken = data.session?.access_token;
+  if (!accessToken) throw new Error('No se pudo obtener el token de sesión');
+
+  return signInWithSupabase(accessToken);
+};
+
+export const signUpWithEmailPassword = async (
+  name: string,
+  email: string,
+  password: string
+): Promise<{ user: import('../types').User | null; needsEmailConfirmation: boolean }> => {
+  const { getSupabaseClient, SUPABASE_REDIRECT_URL } = await import('./config');
+  const supabase = getSupabaseClient();
+  if (!supabase) throw new Error('Supabase no está configurado');
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  const redirectTo = isLocalhost
+    ? 'http://localhost:3000/?supabase_auth=1'
+    : (SUPABASE_REDIRECT_URL || `${window.location.origin}/?supabase_auth=1`);
+
+  const { data, error } = await supabase.auth.signUp({
+    email: normalizedEmail,
+    password,
+    options: {
+      data: { full_name: name.trim() },
+      emailRedirectTo: redirectTo,
+    },
+  });
+
+  if (error) {
+    if (error.message?.toLowerCase().includes('already registered') ||
+        error.message?.toLowerCase().includes('user already exists')) {
+      throw new Error('Este email ya está registrado. Intenta iniciar sesión.');
+    }
+    throw new Error(error.message || 'Error al registrar la cuenta');
+  }
+
+  // If session is immediately available (email confirmation disabled in Supabase)
+  if (data.session?.access_token) {
+    const user = await signInWithSupabase(data.session.access_token);
+    return { user, needsEmailConfirmation: false };
+  }
+
+  // Email confirmation required
+  return { user: null, needsEmailConfirmation: true };
+};
+
+export const sendPasswordResetEmail = async (email: string): Promise<void> => {
+  const { getSupabaseClient, SUPABASE_REDIRECT_URL } = await import('./config');
+  const supabase = getSupabaseClient();
+  if (!supabase) throw new Error('Supabase no está configurado');
+
+  const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  const redirectTo = isLocalhost
+    ? 'http://localhost:3000/?type=recovery'
+    : `${window.location.origin}/?type=recovery`;
+
+  const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+    redirectTo,
+  });
+
+  if (error) throw new Error(error.message || 'Error al enviar el correo de recuperación');
+};
+
+export const updatePasswordWithToken = async (newPassword: string): Promise<void> => {
+  const { getSupabaseClient } = await import('./config');
+  const supabase = getSupabaseClient();
+  if (!supabase) throw new Error('Supabase no está configurado');
+
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw new Error(error.message || 'Error al actualizar la contraseña');
+};
+
 export const logout = () => {
   localStorage.removeItem(CURRENT_USER_KEY);
   localStorage.removeItem(USER_CACHE_KEY);

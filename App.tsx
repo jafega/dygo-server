@@ -110,6 +110,12 @@ const App: React.FC = () => {
 
   const [showAppUpgradeModal, setShowAppUpgradeModal] = useState(false);
 
+  // Deep-link: ?sign_document=<signatureId> — patient arriving from email to sign a document
+  const [pendingSignDocumentId, setPendingSignDocumentId] = useState<string | null>(() => {
+    const p = new URLSearchParams(window.location.search);
+    return p.get('sign_document');
+  });
+
   // Can the psychologist create new items?
   // Allowed when: master user, or subscription not yet loaded, or active subscription, or trial active
   const psychCanCreate: boolean =
@@ -185,6 +191,15 @@ const App: React.FC = () => {
               const targetView = canAccessPsychologistView ? ViewState.PATIENTS : ViewState.CALENDAR;
               console.log('🎯 [App] Estableciendo vista:', targetView);
               setViewState(targetView);
+
+              // Handle sign_document deep-link: non-psychologist patients go straight to documents tab
+              if (pendingSignDocumentId && !canAccessPsychologistView) {
+                setActiveTab('documents');
+                // Clear the URL param so the link isn't re-processed on refresh
+                const url = new URL(window.location.href);
+                url.searchParams.delete('sign_document');
+                window.history.replaceState({}, '', url.toString());
+              }
           } else {
               console.log('🔐 [App] No hay usuario - mostrando AUTH');
               setViewState(ViewState.AUTH);
@@ -462,7 +477,19 @@ const App: React.FC = () => {
           // Establecer la vista ANTES de cargar los datos para evitar pantalla en blanco
           setViewState(canAccessPsychologistView ? ViewState.PATIENTS : ViewState.CALENDAR);
           setPsychViewMode(canAccessPsychologistView ? 'DASHBOARD' : 'PERSONAL');
-          setActiveTab(canAccessPsychologistView ? 'dashboard' : 'calendar');
+
+          // If the URL has ?sign_document=<id>, navigate the patient directly to their documents tab
+          const urlParams = new URLSearchParams(window.location.search);
+          const signDocParam = urlParams.get('sign_document');
+          if (!canAccessPsychologistView && signDocParam) {
+            setActiveTab('documents');
+            // Clean up the param from the URL without reloading
+            urlParams.delete('sign_document');
+            const newSearch = urlParams.toString();
+            history.replaceState(null, '', window.location.pathname + (newSearch ? '?' + newSearch : ''));
+          } else {
+            setActiveTab(canAccessPsychologistView ? 'dashboard' : 'calendar');
+          }
           
           // Desactivar loading ANTES de cargar datos para mostrar la UI
           // Los datos se cargarán en segundo plano
@@ -1179,7 +1206,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
   if (viewState === ViewState.AUTH) {
       return (
         <>
-          <AuthScreen onAuthSuccess={handleAuthSuccess} />
+          <AuthScreen onAuthSuccess={handleAuthSuccess} pendingSignDocumentId={pendingSignDocumentId} />
           {error && (
             <div className="fixed bottom-4 right-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg shadow-lg max-w-md">
               {error}

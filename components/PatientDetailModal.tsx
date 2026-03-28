@@ -73,6 +73,8 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   const [isSendingDoc, setIsSendingDoc] = useState(false);
   const [docSendSuccess, setDocSendSuccess] = useState(false);
   const [previewDocSignature, setPreviewDocSignature] = useState<any>(null);
+  const [sendingEmailDocId, setSendingEmailDocId] = useState<number | null>(null);
+  const [emailSentDocId, setEmailSentDocId] = useState<number | null>(null);
   const [previewDocTemplate, setPreviewDocTemplate] = useState<any>(null);
 
   // External doc upload state
@@ -1388,6 +1390,25 @@ tr:nth-child(even) td{background:#f8fafc}
     return `<p style="margin-bottom:10px">${html}</p>`;
   }
 
+  async function sendDocumentEmail(sig: any) {
+    setSendingEmailDocId(sig.id);
+    setEmailSentDocId(null);
+    try {
+      const res = await apiFetch(`${API_URL}/signatures/${sig.id}/send-email`, { method: 'POST' });
+      if (res.ok) {
+        setEmailSentDocId(sig.id);
+        setTimeout(() => setEmailSentDocId(null), 4000);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || 'Error al enviar el email');
+      }
+    } catch (e) {
+      alert('Error al enviar el email');
+    } finally {
+      setSendingEmailDocId(null);
+    }
+  }
+
   function downloadSignedPdf(sig: any) {
     const titleRaw = getDocTitle(sig.content || '');
     const bodyHtml = docMarkdownToHtml(sig.content || '');
@@ -2324,6 +2345,22 @@ tr:nth-child(even) td{background:#f8fafc}
                                 <Download size={16} />
                               </button>
                             )}
+                            <button
+                              onClick={() => sendDocumentEmail(sig)}
+                              disabled={sendingEmailDocId === sig.id}
+                              className={`p-2 rounded-lg transition-colors ${
+                                emailSentDocId === sig.id
+                                  ? 'text-green-600 bg-green-50'
+                                  : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'
+                              } disabled:opacity-50`}
+                              title={emailSentDocId === sig.id ? 'Email enviado' : 'Enviar por email para firmar'}
+                            >
+                              {sendingEmailDocId === sig.id
+                                ? <Loader2 size={16} className="animate-spin" />
+                                : emailSentDocId === sig.id
+                                  ? <CheckCircle size={16} />
+                                  : <Mail size={16} />}
+                            </button>
                             <button
                               onClick={() => setPreviewDocSignature(sig)}
                               className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
