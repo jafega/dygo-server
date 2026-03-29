@@ -4084,23 +4084,39 @@ app.post('/api/admin/purge-psychologist-data', authenticateRequest, async (req, 
         log.invitations = count; }
     }
 
-    // 9. Care relationships of this psychologist (except protected users)
+    // 9. Care relationships of this psychologist (ALL of them, regardless of patient)
+    // Note: patient accounts are protected via patientIds filtering above; we always
+    // want to remove the relationship rows themselves even with protected patients.
     {
-      let q = supabaseAdmin.from('care_relationships').delete({ count: 'exact' })
+      const { count } = await supabaseAdmin.from('care_relationships').delete({ count: 'exact' })
         .eq('psychologist_user_id', psychId);
-      for (const pid of protectedIds) q = q.neq('patient_user_id', pid);
-      const { count } = await q;
       log.care_relationships = count;
     }
 
-    // 10. Delete patient users that no longer have any care_relationship
+    // 10. Signatures of this psychologist (must go before templates due to FK constraint)
+    {
+      const { count } = await supabaseAdmin.from('signatures').delete({ count: 'exact' })
+        .eq('psych_user_id', psychId);
+      log.signatures = count;
+    }
+
+    // 11. Own (non-master) templates of this psychologist
+    {
+      const { count } = await supabaseAdmin.from('templates').delete({ count: 'exact' })
+        .eq('psych_user_id', psychId)
+        .eq('master', false);
+      log.templates = count;
+    }
+
+    // 12. Delete patient users that no longer have any care_relationship
+    // IMPORTANT: never delete the psychologist accounts of Dani or Javi themselves.
     if (patientIds.length > 0) {
       const { data: stillLinked } = await supabaseAdmin
         .from('care_relationships')
         .select('patient_user_id')
         .in('patient_user_id', patientIds);
       const stillLinkedIds = new Set((stillLinked || []).map(r => r.patient_user_id));
-      const toDeleteIds = patientIds.filter(id => !stillLinkedIds.has(id));
+      const toDeleteIds = patientIds.filter(id => !stillLinkedIds.has(id) && !protectedIds.has(id));
       if (toDeleteIds.length > 0) {
         const { count } = await supabaseAdmin.from('users').delete({ count: 'exact' })
           .in('id', toDeleteIds);
