@@ -935,7 +935,9 @@ export const getPatientsForPsychologist = async (psychId: string, includeInactiv
                 isSelf: false,
                 tags: patientData.tags || [],
                 active: patientData.active !== false, // Por defecto true
-                patientNumber: patientData.patientNumber || 0 // Ahora viene del backend desde el campo directo
+                patientNumber: patientData.patientNumber || 0, // Ahora viene del backend desde el campo directo
+                auth_user_id: patientData.auth_user_id || null,
+                invitation_token: patientData.invitation_token || null
             } as PatientSummary;
         };
         

@@ -231,10 +231,13 @@ export const login = async (email: string, password: string): Promise<User> => {
 export const signInWithSupabase = async (accessToken: string): Promise<User> => {
     if (USE_BACKEND) {
         try {
+            // Include any pending invite token so the backend can link the user
+            const inviteToken = sessionStorage.getItem('mainds_invite_token') || undefined;
+
             const res = await fetch(`${API_URL}/supabase-auth`, {
                 method: 'POST', 
                 headers: { 'Content-Type': 'application/json' }, 
-                body: JSON.stringify({ access_token: accessToken })
+                body: JSON.stringify({ access_token: accessToken, ...(inviteToken ? { invite_token: inviteToken } : {}) })
             });
             
             if (!res.ok) {
@@ -263,6 +266,9 @@ export const signInWithSupabase = async (accessToken: string): Promise<User> => 
             if (user.sessionToken) {
               setSessionToken(user.sessionToken);
             }
+            
+            // Clear invite token now that it has been consumed by the backend
+            sessionStorage.removeItem('mainds_invite_token');
             
             // Guardar ID del usuario en localStorage
             localStorage.setItem(CURRENT_USER_KEY, user.id);

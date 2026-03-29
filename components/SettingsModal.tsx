@@ -513,7 +513,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                                                 setPurgeResult(`❌ Error: ${json.error || 'Error desconocido'}`);
                                             } else {
                                                 const l = json.log || {};
-                                                setPurgeResult(`✅ Limpieza completada — Sesiones: ${l.sessions ?? 0}, Pacientes: ${l.users ?? 0}, Relaciones: ${l.care_relationships ?? 0}`);
+                                                setPurgeResult(`✅ Limpieza completada — Sesiones: ${l.sessions ?? 0}, Facturas: ${l.invoices ?? 0}, Bonos: ${l.bonos ?? 0}, Pacientes: ${l.users ?? 0}, Relaciones: ${l.care_relationships ?? 0}`);
                                             }
                                         } catch (err: any) {
                                             setPurgeResult(`❌ Error: ${err?.message || 'Error de red'}`);

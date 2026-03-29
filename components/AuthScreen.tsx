@@ -39,6 +39,18 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess, pendingSignDocum
     // Bandera para evitar múltiples ejecuciones del callback
     const authCallbackExecutedRef = useRef(false);
 
+    // Read invite token from URL and persist it for the auth flow
+    useEffect(() => {
+        const url = new URL(window.location.href);
+        const token = url.searchParams.get('invite_token');
+        if (token) {
+            sessionStorage.setItem('mainds_invite_token', token);
+            // Clean token from URL without reloading
+            url.searchParams.delete('invite_token');
+            history.replaceState(null, '', url.pathname + url.search);
+        }
+    }, []);
+
     const handleAuthSuccessWithTerms = (user: any) => {
         const accepted = localStorage.getItem(TERMS_ACCEPTED_KEY);
         if (accepted) {

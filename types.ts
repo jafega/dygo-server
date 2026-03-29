@@ -193,6 +193,8 @@ export interface WeeklyReport {
 // Derived view for dashboard
 export interface PatientSummary {
   id: string;
+  name: string;
+  email?: string;
   phone?: string;
   avatarUrl?: string;
   lastUpdate: string;
@@ -203,8 +205,8 @@ export interface PatientSummary {
   tags?: string[]; // Tags from care_relationships
   active?: boolean; // Estado activo/inactivo
   patientNumber?: number; // Número secuencial del paciente
-  isSelf?: boolean; // To mark if this is the psychologist themselves
-  tags?: string[]; // Tags from care_relationships
+  auth_user_id?: string | null; // UUID linked to Supabase auth — non-null means the patient has a mainds account
+  invitation_token?: string | null; // Pending invite token
 }
 
 export enum ViewState {
