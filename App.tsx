@@ -390,7 +390,15 @@ const App: React.FC = () => {
       const res = await fetch(`${API_URL}/subscription?psychologist_user_id=${userId}`, {
         headers: AuthService.getAuthHeaders()
       });
-      if (res.ok) setPsychSubscriptionInfo(await res.json());
+      if (res.ok) {
+        const info = await res.json();
+        setPsychSubscriptionInfo(info);
+        // Sync master flag to currentUser if server says this user is master
+        // (localStorage cache may be stale from before master was set)
+        if (info?.is_master === true) {
+          setCurrentUser(u => u ? { ...u, master: true } : u);
+        }
+      }
     } catch (_) {}
   };
 
@@ -399,7 +407,14 @@ const App: React.FC = () => {
       const res = await fetch(`${API_URL}/patient-subscription?patient_user_id=${userId}`, {
         headers: AuthService.getAuthHeaders()
       });
-      if (res.ok) setPatientSubscriptionInfo(await res.json());
+      if (res.ok) {
+        const info = await res.json();
+        setPatientSubscriptionInfo(info);
+        // Sync master flag to currentUser if server says this user is master
+        if (info?.is_master === true) {
+          setCurrentUser(u => u ? { ...u, master: true } : u);
+        }
+      }
     } catch (_) {}
   };
 

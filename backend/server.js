@@ -4951,8 +4951,19 @@ app.get('/api/patient-subscription', authenticateRequest, async (req, res) => {
   const isActive = ['active', 'trialing'].includes(patSub.stripe_status) && !patSub.access_blocked;
 
   // Determine if this patient is a master/superadmin
+  // Query Supabase directly for accurate master status (cache may be stale)
   const allUsers = (supabaseDbCache?.users?.length ? supabaseDbCache.users : null) || db.users || [];
-  const patientUser = allUsers.find(u => u.id === String(patientId));
+  let patientUser = allUsers.find(u => u.id === String(patientId));
+  if (supabaseAdmin) {
+    try {
+      const { data: freshUser } = await supabaseAdmin
+        .from('users')
+        .select('id, master, user_email, data')
+        .eq('id', String(patientId))
+        .single();
+      if (freshUser) patientUser = { ...patientUser, ...freshUser, email: freshUser.data?.email || freshUser.user_email };
+    } catch (_) {}
+  }
   const isMaster = patientUser
     ? (isSuperAdmin(patientUser.email || patientUser.user_email) || patientUser.master === true)
     : false;
