@@ -2406,22 +2406,24 @@ tr:nth-child(even) td{background:#f8fafc}
                                 <Download size={16} />
                               </button>
                             )}
-                            <button
-                              onClick={() => sendDocumentEmail(sig)}
-                              disabled={sendingEmailDocId === sig.id}
-                              className={`p-2 rounded-lg transition-colors ${
-                                emailSentDocId === sig.id
-                                  ? 'text-green-600 bg-green-50'
-                                  : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'
-                              } disabled:opacity-50`}
-                              title={emailSentDocId === sig.id ? 'Email enviado' : 'Enviar por email para firmar'}
-                            >
-                              {sendingEmailDocId === sig.id
-                                ? <Loader2 size={16} className="animate-spin" />
-                                : emailSentDocId === sig.id
-                                  ? <CheckCircle size={16} />
-                                  : <Mail size={16} />}
-                            </button>
+                            {!sig.signed && (
+                              <button
+                                onClick={() => sendDocumentEmail(sig)}
+                                disabled={sendingEmailDocId === sig.id}
+                                className={`p-2 rounded-lg transition-colors ${
+                                  emailSentDocId === sig.id
+                                    ? 'text-green-600 bg-green-50'
+                                    : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'
+                                } disabled:opacity-50`}
+                                title={emailSentDocId === sig.id ? 'Email enviado' : 'Enviar por email para firmar'}
+                              >
+                                {sendingEmailDocId === sig.id
+                                  ? <Loader2 size={16} className="animate-spin" />
+                                  : emailSentDocId === sig.id
+                                    ? <CheckCircle size={16} />
+                                    : <Mail size={16} />}
+                              </button>
+                            )}
                             <button
                               onClick={() => setPreviewDocSignature(sig)}
                               className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"

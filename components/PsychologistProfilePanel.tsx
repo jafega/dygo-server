@@ -496,7 +496,7 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
                   <div>
                     <div className="font-semibold text-blue-700">Recordatorios automáticos por email</div>
                     <div className="text-xs text-blue-600">
-                      Envía un email a tus pacientes 24h y 1h antes de cada sesión que tenga el recordatorio activado.
+                      Envía un email a tus pacientes el día antes y el mismo día de cada sesión que tenga el recordatorio activado.
                       Al activar esta opción, las nuevas sesiones tendrán el recordatorio activado por defecto.
                     </div>
                   </div>
@@ -511,7 +511,7 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
                   <div>
                     <div className="font-semibold text-green-700">Recordatorios automáticos por WhatsApp</div>
                     <div className="text-xs text-green-600">
-                      Envía un WhatsApp a tus pacientes 24h y 1h antes de la sesión (requiere Twilio configurado y que el paciente tenga teléfono registrado).
+                      Envía un WhatsApp a tus pacientes el día antes y el mismo día de la sesión (requiere Twilio configurado y que el paciente tenga teléfono registrado).
                     </div>
                   </div>
                 </label>

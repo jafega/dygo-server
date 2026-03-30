@@ -35,8 +35,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
 
   const [premiumLoading, setPremiumLoading] = useState(false);
   const [premiumError, setPremiumError] = useState('');
-  const [purgeLoading, setPurgeLoading] = useState(false);
-  const [purgeResult, setPurgeResult] = useState<string | null>(null);
+
     const [premiumUrl, setPremiumUrl] = useState<string | null>(null);
     const [portalUrl, setPortalUrl] = useState<string | null>(null);
   const [subscriptionInfo, setSubscriptionInfo] = useState<{
@@ -478,55 +477,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                             );
                         })()}
 
-                        {/* PURGE TOOL — only for specific internal accounts */}
-                        {(() => {
-                            const ue = (currentUser?.user_email || (currentUser as any)?.data?.email || currentUser?.email || '').toLowerCase();
-                            return ['daniel.m.mendezv@gmail.com', 'garryjavi@gmail.com'].includes(ue);
-                        })() && (
-                            <div className="bg-white border border-red-200 rounded-2xl p-4">
-                                <h4 className="text-sm font-bold text-red-700">🗑 Limpiar datos del psicólogo</h4>
-                                <p className="text-xs text-slate-500 mt-1">
-                                    Elimina todos los pacientes, sesiones y relaciones vinculadas a tu cuenta como psicólogo.<br />
-                                    <strong>No se eliminarán</strong> tu propio usuario, garryjavi@gmail.com ni daniel.m.mendezv@gmail.com.
-                                </p>
-                                {purgeResult && (
-                                    <div className={`mt-2 text-xs p-2 rounded-lg ${
-                                        purgeResult.startsWith('✅') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
-                                    }`}>{purgeResult}</div>
-                                )}
-                                <button
-                                    disabled={purgeLoading}
-                                    onClick={async () => {
-                                        if (!window.confirm(
-                                            '⚠️ ATENCIÓN: Esta acción eliminará permanentemente todos tus pacientes, sesiones, relaciones y datos asociados.\n\nEsta acción NO se puede deshacer.\n\n¿Estás seguro?'
-                                        )) return;
-                                        if (!window.confirm('Segunda confirmación: ¿Realmente quieres borrar todos estos datos de forma irreversible?')) return;
-                                        setPurgeLoading(true);
-                                        setPurgeResult(null);
-                                        try {
-                                            const resp = await apiFetch(`${API_URL}/admin/purge-psychologist-data`, {
-                                                method: 'POST',
-                                                headers: AuthService.getAuthHeaders()
-                                            });
-                                            const json = await resp.json();
-                                            if (!resp.ok) {
-                                                setPurgeResult(`❌ Error: ${json.error || 'Error desconocido'}`);
-                                            } else {
-                                                const l = json.log || {};
-                                                setPurgeResult(`✅ Limpieza completada — Sesiones: ${l.sessions ?? 0}, Facturas: ${l.invoices ?? 0}, Bonos: ${l.bonos ?? 0}, Pacientes: ${l.users ?? 0}, Relaciones: ${l.care_relationships ?? 0}`);
-                                            }
-                                        } catch (err: any) {
-                                            setPurgeResult(`❌ Error: ${err?.message || 'Error de red'}`);
-                                        } finally {
-                                            setPurgeLoading(false);
-                                        }
-                                    }}
-                                    className="mt-3 w-full py-2.5 rounded-xl bg-red-600 text-white hover:bg-red-700 font-medium disabled:opacity-60"
-                                >
-                                    {purgeLoading ? 'Eliminando...' : 'Eliminar todos mis datos de psicólogo'}
-                                </button>
-                            </div>
-                        )}
+
 
                         {!currentUser?.is_psychologist && (
                             <div className="bg-white border border-slate-100 rounded-2xl p-4">
