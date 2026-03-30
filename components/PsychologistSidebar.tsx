@@ -18,9 +18,14 @@ interface SubscriptionInfo {
   cancel_at_period_end: boolean;
   current_period_end: number | null;
   blocked_reason?: string | null;
-  monthly_price_eur: string;
   trial_expiry_date?: number | null;
   is_master?: boolean;
+  plan_id?: string;
+  plan_name?: string;
+  plan_price?: number;
+  max_relations?: number | null;
+  active_relations?: number;
+  relations_remaining?: number | null;
 }
 
 interface PsychologistSidebarProps {
@@ -36,6 +41,7 @@ interface PsychologistSidebarProps {
   isProfileIncomplete?: boolean;
   subscriptionInfo?: SubscriptionInfo | null;
   psychologistId?: string;
+  onNeedUpgrade?: () => void;
 }
 
 const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({ 
@@ -50,7 +56,8 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
   onOpenSettings,
   isProfileIncomplete = false,
   subscriptionInfo = null,
-  psychologistId = ''
+  psychologistId = '',
+  onNeedUpgrade
 }) => {
   const menuItems = [
     { id: 'schedule' as const, label: 'Agenda', icon: Calendar },
@@ -110,6 +117,10 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
   };
 
   const handleUpgrade = async () => {
+    if (onNeedUpgrade) {
+      onNeedUpgrade();
+      return;
+    }
     setSubActionLoading(true);
     try {
       const resp = await createCheckoutSession();
@@ -166,8 +177,42 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
       );
     }
 
-    // 3. Suscripcion activa → no mostrar nada
-    if (s.is_subscribed) return null;
+    // 3. Suscripcion activa → mostrar plan info
+    if (s.is_subscribed) {
+      const hasLimit = s.max_relations != null;
+      const nearLimit = hasLimit && s.active_relations != null && s.relations_remaining != null && s.relations_remaining <= 3 && s.relations_remaining > 0;
+      const atLimit = hasLimit && s.relations_remaining === 0;
+      if (!hasLimit && !s.plan_name) return null;
+      return (
+        <div className={`mx-1 mb-2 rounded-xl p-3 text-xs border ${atLimit ? 'bg-orange-50 border-orange-200' : nearLimit ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
+          <div className="flex justify-between items-center mb-1">
+            <p className={`font-semibold ${atLimit ? 'text-orange-700' : nearLimit ? 'text-amber-700' : 'text-emerald-700'}`}>
+              Plan {s.plan_name || 'Activo'}
+            </p>
+            <button onClick={handleManage} className="text-indigo-600 hover:text-indigo-700 font-medium">Gestionar</button>
+          </div>
+          {hasLimit && s.active_relations != null && (
+            <div>
+              <div className="flex justify-between text-gray-600 mb-1">
+                <span>{s.active_relations} / {s.max_relations} pacientes</span>
+                {s.relations_remaining != null && <span>{s.relations_remaining} restantes</span>}
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-1.5">
+                <div
+                  className={`h-1.5 rounded-full transition-all ${atLimit ? 'bg-orange-500' : nearLimit ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                  style={{ width: `${Math.min(100, ((s.active_relations || 0) / (s.max_relations || 1)) * 100)}%` }}
+                />
+              </div>
+            </div>
+          )}
+          {atLimit && (
+            <button onClick={handleUpgrade} disabled={subActionLoading} className="w-full mt-2 py-1.5 rounded-lg bg-orange-500 text-white font-medium hover:bg-orange-600 disabled:opacity-60 transition-colors">
+              {subActionLoading ? 'Cargando…' : 'Subir de plan →'}
+            </button>
+          )}
+        </div>
+      );
+    }
 
     // 4. Prueba gratuita activa
     if (s.trial_active) {

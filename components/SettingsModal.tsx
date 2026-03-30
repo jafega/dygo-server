@@ -4,6 +4,7 @@ import { getCurrentUser, updateUser, uploadAvatar, apiFetch } from '../services/
 import { X, Clock, Shield, LogOut, Globe, Mic, Camera, UserCheck, Calendar, CheckCircle, AlertCircle } from 'lucide-react';
 import * as AuthService from '../services/authService';
 import { API_URL } from '../services/config';
+import UpgradeModal from './UpgradeModal';
 
 interface SettingsModalProps {
   settings: UserSettings;
@@ -35,6 +36,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
 
   const [premiumLoading, setPremiumLoading] = useState(false);
   const [premiumError, setPremiumError] = useState('');
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
     const [premiumUrl, setPremiumUrl] = useState<string | null>(null);
     const [portalUrl, setPortalUrl] = useState<string | null>(null);
@@ -49,6 +51,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
     current_period_end?: number | null;
     trial_expiry_date?: number | null;
     is_master?: boolean;
+    plan_id?: string | null;
+    plan_price?: number | null;
   } | null>(null);
 
   useEffect(() => {
@@ -201,6 +205,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
   };
 
   return (
+    <>
     <div className="fixed top-0 left-0 w-screen h-[100dvh] bg-slate-900/50 flex items-center justify-center z-[9999] p-4 backdrop-blur-sm" onClick={onClose}>
       <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden relative animate-in fade-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
         <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
@@ -315,8 +320,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                             </div>
                         </div>
 
-                        {/* PLAN / BILLING CARD */}
-                        {(() => {
+                        {/* PLAN / BILLING CARD — only for psychologists */}
+                        {currentUser?.is_psychologist && (() => {
                             // Determine card state
                             const isMaster = subscriptionInfo?.is_master === true;
                             const isActive = subscriptionInfo?.is_subscribed && !subscriptionInfo?.cancel_at_period_end;
@@ -385,7 +390,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                                                         </div>
                                                         <div className="flex justify-between">
                                                             <span className="text-white/80">Precio mensual</span>
-                                                            <span className="font-semibold">€24.99/mes</span>
+                                                            <span className="font-semibold">{subscriptionInfo.plan_price ? `€${subscriptionInfo.plan_price}/mes` : 'desde 9,99€/mes'}</span>
                                                         </div>
                                                     </>
                                                 ) : isCancelPending && subscriptionInfo.current_period_end ? (
@@ -416,7 +421,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                                                         </div>
                                                         <div className="flex justify-between">
                                                             <span className="text-indigo-100">Precio después de la prueba</span>
-                                                            <span className="font-semibold">€24.99/mes</span>
+                                                            <span className="font-semibold">desde 9,99€/mes</span>
                                                         </div>
                                                     </>
                                                 ) : null}
@@ -446,26 +451,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                                                     {premiumLoading ? 'Cargando...' : 'Gestionar suscripción'}
                                                 </button>
                                             ) : (
-                                                <button onClick={async () => {
-                                                    setPremiumLoading(true);
-                                                    setPremiumError('');
-                                                    setPremiumUrl(null);
-                                                    try {
-                                                        const resp = await AuthService.createCheckoutSession();
-                                                        if (resp?.url) {
-                                                            setPremiumUrl(resp.url);
-                                                            const w = window.open(resp.url, '_blank', 'noopener,noreferrer');
-                                                            if (!w) setPremiumError('El navegador bloqueó la nueva pestaña. Usa el enlace que aparece abajo.');
-                                                        }
-                                                    } catch (err: any) {
-                                                        setPremiumError(err?.message || 'Error iniciando el pago');
-                                                    } finally { setPremiumLoading(false); }
-                                                }} disabled={premiumLoading} className={`py-2.5 rounded-xl font-medium disabled:opacity-60 ${
+                                                <button onClick={() => setShowUpgradeModal(true)} disabled={premiumLoading} className={`py-2.5 rounded-xl font-medium disabled:opacity-60 ${
                                                     isCancelPending ? 'bg-white text-amber-700 hover:bg-amber-50' :
                                                     isCancelled ? 'bg-white text-red-700 hover:bg-red-50' :
                                                     'bg-white text-indigo-700 hover:bg-indigo-50'
                                                 }`}>
-                                                    {premiumLoading ? 'Cargando...' : 'Suscribirse — €24.99/mes'}
+                                                    {premiumLoading ? 'Cargando...' : 'Suscríbete desde 9,99€/mes'}
                                                 </button>
                                             )}
                                         </div>
@@ -477,8 +468,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                             );
                         })()}
 
-
-
                         {!currentUser?.is_psychologist && (
                             <div className="bg-white border border-slate-100 rounded-2xl p-4">
                                 <h4 className="text-sm font-bold text-slate-800">¿Eres psicólogo/a?</h4>
@@ -488,12 +477,20 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                                         if (!currentUser) return;
                                         if (!window.confirm('¿Quieres convertir tu perfil en psicólogo/a?')) return;
                                         try {
-                                            const updated = { ...currentUser, is_psychologist: true, isPsychologist: true } as User;
-                                            await updateUser(updated);
-                                            setCurrentUser(updated);
-                                            if (onUserUpdate) onUserUpdate(updated);
+                                            const res = await AuthService.apiFetch(`${API_URL}/become-psychologist`, {
+                                                method: 'POST',
+                                                headers: AuthService.getAuthHeaders()
+                                            });
+                                            if (!res.ok) {
+                                                const err = await res.json().catch(() => ({}));
+                                                throw new Error(err.error || `Error ${res.status}`);
+                                            }
+                                            const updatedUser = await res.json();
+                                            const merged = { ...currentUser, ...updatedUser, is_psychologist: true, isPsychologist: true } as User;
+                                            setCurrentUser(merged);
+                                            if (onUserUpdate) onUserUpdate(merged);
                                         } catch (err:any) {
-                                            console.error('Error updating to psychologist', err);
+                                            console.error('Error becoming psychologist', err);
                                             alert(err?.message || 'Error actualizando el perfil.');
                                         }
                                     }}
@@ -514,6 +511,16 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
             </div>
         </div>
     </div>
+
+    {showUpgradeModal && currentUser && (
+      <UpgradeModal
+        currentUser={currentUser}
+        trialDaysLeft={subscriptionInfo?.trial_days_left ?? 0}
+        currentPlanId={subscriptionInfo?.plan_id ?? undefined}
+        onClose={() => setShowUpgradeModal(false)}
+      />
+    )}
+    </>
   );
 };
 

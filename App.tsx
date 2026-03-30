@@ -94,6 +94,19 @@ const App: React.FC = () => {
   const [isProfileIncomplete, setIsProfileIncomplete] = useState(false);
   const [error, setError] = useState('');
   const [stripeNotification, setStripeNotification] = useState<'success' | 'cancel' | null>(null);
+  const [patientSubscriptionInfo, setPatientSubscriptionInfo] = useState<{
+    is_subscribed: boolean;
+    is_master: boolean;
+    trial_active: boolean;
+    trial_days_left: number;
+    stripe_status: string | null;
+    access_blocked: boolean;
+    cancel_at_period_end: boolean;
+    current_period_end: number | null;
+    plan_price?: number;
+  } | null>(null);
+  const [showPatientUpgradeModal, setShowPatientUpgradeModal] = useState(false);
+
   const [psychSubscriptionInfo, setPsychSubscriptionInfo] = useState<{
     is_subscribed: boolean;
     trial_active: boolean;
@@ -103,9 +116,14 @@ const App: React.FC = () => {
     cancel_at_period_end: boolean;
     current_period_end: number | null;
     blocked_reason?: string | null;
-    monthly_price_eur: string;
     trial_expiry_date?: number | null;
     is_master?: boolean;
+    plan_id?: string;
+    plan_name?: string;
+    plan_price?: number;
+    max_relations?: number | null;
+    active_relations?: number;
+    relations_remaining?: number | null;
   } | null>(null);
 
   const [showAppUpgradeModal, setShowAppUpgradeModal] = useState(false);
@@ -124,6 +142,13 @@ const App: React.FC = () => {
     (!psychSubscriptionInfo.access_blocked &&
       (psychSubscriptionInfo.is_subscribed || psychSubscriptionInfo.trial_active)) ||
     psychSubscriptionInfo.is_master === true;
+
+  // Patient can use AI voice if subscribed, in trial, or is master/superadmin
+  const patientCanUseVoice: boolean =
+    patientSubscriptionInfo === null ||
+    patientSubscriptionInfo.is_master === true ||
+    patientSubscriptionInfo.is_subscribed === true ||
+    patientSubscriptionInfo.trial_active === true;
 
   const getFeedbackText = (entry: JournalEntry) => {
     // Nuevo formato: entryType: 'feedback' con content
@@ -251,10 +276,13 @@ const App: React.FC = () => {
         try {
           const freshUser = await AuthService.getUserById(currentUser.id);
           if (freshUser) {
-            setCurrentUser(freshUser);
+            // Never downgrade is_psychologist — if current state says true, keep it true
+            const mergedIsPsych = currentUser.is_psychologist === true || freshUser.is_psychologist === true;
+            const merged = { ...freshUser, is_psychologist: mergedIsPsych, isPsychologist: mergedIsPsych };
+            setCurrentUser(merged);
             console.log('🔄 Usuario refrescado al cambiar de vista:', {
-              email: freshUser.email,
-              is_psychologist: freshUser.is_psychologist,
+              email: merged.email,
+              is_psychologist: merged.is_psychologist,
               psychViewMode
             });
           }
@@ -308,7 +336,13 @@ const App: React.FC = () => {
           refreshed.isPsychologist = false;
         }
         console.log('✅ Usuario refrescado:', refreshed.email);
-        setCurrentUser(refreshed);
+        // Never downgrade is_psychologist — if current state says true, keep it true
+        setCurrentUser(prev => {
+          if (prev?.is_psychologist === true && refreshed.is_psychologist !== true) {
+            return { ...refreshed, is_psychologist: true, isPsychologist: true };
+          }
+          return refreshed;
+        });
       }
       // Siempre cargar datos del usuario, incluso si falla la actualización
       await loadUserData(userId);
@@ -360,13 +394,27 @@ const App: React.FC = () => {
     } catch (_) {}
   };
 
+  const loadPatientSubscription = async (userId: string) => {
+    try {
+      const res = await fetch(`${API_URL}/patient-subscription?patient_user_id=${userId}`, {
+        headers: AuthService.getAuthHeaders()
+      });
+      if (res.ok) setPatientSubscriptionInfo(await res.json());
+    } catch (_) {}
+  };
+
   useEffect(() => {
     if (currentUser?.isPsychologist && currentUser?.id) {
       loadPsychSubscription(currentUser.id);
     } else {
       setPsychSubscriptionInfo(null);
     }
-  }, [currentUser?.id, currentUser?.isPsychologist]);
+    if (currentUser?.id) {
+      loadPatientSubscription(currentUser.id);
+    } else {
+      setPatientSubscriptionInfo(null);
+    }
+  }, [currentUser?.id, currentUser?.isPsychologist, currentUser?.is_psychologist]);
 
   // Refresh subscription info when Stripe sync completes
   useEffect(() => {
@@ -397,7 +445,7 @@ const App: React.FC = () => {
         ? `${API_URL}/psychologist/${userId}/profile`
         : `${API_URL}/patient/${userId}/profile`;
       
-      const response = await fetch(endpoint);
+      const response = await fetch(endpoint, { headers: AuthService.getAuthHeaders() });
       if (response.ok) {
         const profile = await response.json();
         
@@ -537,18 +585,27 @@ const App: React.FC = () => {
 
   const handleUserUpdate = async (updatedUser: User) => {
       setCurrentUser(updatedUser);
+      // Update localStorage cache immediately so refreshes don't regress
+      localStorage.setItem('ai_diary_user_cache', JSON.stringify(updatedUser));
       
       // Refrescar datos del usuario desde el servidor
       if (updatedUser.id) {
         try {
           const freshUser = await AuthService.getUserById(updatedUser.id);
           if (freshUser) {
-            setCurrentUser(freshUser);
+            // Never downgrade fields we just explicitly set (e.g. is_psychologist)
+            const merged: User = {
+              ...freshUser,
+              is_psychologist: updatedUser.is_psychologist || freshUser.is_psychologist,
+              isPsychologist: updatedUser.is_psychologist || freshUser.is_psychologist,
+            };
+            setCurrentUser(merged);
+            localStorage.setItem('ai_diary_user_cache', JSON.stringify(merged));
             console.log('🔄 Usuario refrescado desde servidor:', {
-              email: freshUser.email,
-              is_psychologist: freshUser.is_psychologist
+              email: merged.email,
+              is_psychologist: merged.is_psychologist
             });
-            updatedUser = freshUser;
+            updatedUser = merged;
           }
         } catch (err) {
           console.warn('No se pudo refrescar usuario:', err);
@@ -750,6 +807,10 @@ const App: React.FC = () => {
   }, [selectedEntryId, entries, currentUser]);
 
   const handleStartSession = (dateStr?: string | React.MouseEvent) => {
+    if (!patientCanUseVoice) {
+      setShowPatientUpgradeModal(true);
+      return;
+    }
     const safeDate = typeof dateStr === 'string' ? dateStr : null;
     setSessionDate(safeDate);
     setSelectedDate(null);
@@ -1046,6 +1107,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   isProfileIncomplete={isProfileIncomplete}
                   subscriptionInfo={psychSubscriptionInfo}
                   psychologistId={currentUser.id}
+                  onNeedUpgrade={() => setShowAppUpgradeModal(true)}
                />
                
                {/* Main Content */}
@@ -1197,6 +1259,8 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                         trialDaysLeft={psychSubscriptionInfo?.trial_days_left ?? 0}
                         onClose={() => setShowAppUpgradeModal(false)}
                         returnPanel={psychPanelView}
+                        currentPlanId={psychSubscriptionInfo?.plan_id}
+                        activeRelations={psychSubscriptionInfo?.active_relations}
                       />
                     )}
                </div>
@@ -1517,6 +1581,36 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                 <p className="text-xs text-slate-500 truncate">{currentUser?.email}</p>
               </div>
             </button>
+
+            {/* Patient AI subscription card */}
+            {patientSubscriptionInfo && (() => {
+              const sub = patientSubscriptionInfo;
+              if (sub.is_master) return (
+                <div className="rounded-xl bg-gradient-to-br from-green-600 to-emerald-600 text-white p-3 text-xs">
+                  <p className="font-semibold">✅ Acceso completo</p>
+                  <p className="text-white/80 mt-0.5">Llamadas con IA ilimitadas.</p>
+                </div>
+              );
+              if (sub.is_subscribed) return (
+                <div className="rounded-xl bg-gradient-to-br from-green-600 to-emerald-600 text-white p-3 text-xs">
+                  <p className="font-semibold">✅ Plan Personal activo</p>
+                  <p className="text-white/80 mt-0.5">Llamadas con IA ilimitadas.</p>
+                </div>
+              );
+              if (sub.trial_active) return (
+                <button onClick={() => setShowPatientUpgradeModal(true)} className="w-full text-left rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 text-white p-3 text-xs hover:opacity-90 transition-opacity">
+                  <p className="font-semibold">🎙️ Suscríbete a Personal</p>
+                  <p className="text-white/80 mt-0.5">Llamadas ilimitadas con IA · 4,99€/mes</p>
+                  {sub.trial_days_left > 0 && <p className="text-white/70 mt-1">{sub.trial_days_left} días de prueba restantes</p>}
+                </button>
+              );
+              return (
+                <button onClick={() => setShowPatientUpgradeModal(true)} className="w-full text-left rounded-xl bg-gradient-to-br from-red-600 to-rose-600 text-white p-3 text-xs hover:opacity-90 transition-opacity">
+                  <p className="font-semibold">⛔ Sin acceso a IA</p>
+                  <p className="text-white/80 mt-0.5">Suscríbete para hablar con la IA · 4,99€/mes</p>
+                </button>
+              );
+            })()}
             
             {/* Botón de Cerrar Sesión - Visible directamente en el sidebar */}
             <button
@@ -1858,6 +1952,59 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
       </div>
 
       {viewState === ViewState.VOICE_SESSION && <VoiceSession key={Date.now()} onSessionEnd={handleSessionEnd} onCancel={() => setViewState(ViewState.CALENDAR)} settings={settings} />}
+
+      {/* Patient upgrade modal */}
+      {showPatientUpgradeModal && currentUser && (() => {
+        const trialAvailable = patientSubscriptionInfo?.trial_active === true;
+        return (
+        <div className="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl overflow-hidden">
+            <div className="bg-gradient-to-br from-indigo-600 to-violet-600 p-6 text-white text-center">
+              <div className="text-4xl mb-2">🎙️</div>
+              <h2 className="text-xl font-bold">Plan Personal</h2>
+              <p className="text-white/80 text-sm mt-1">Llamadas ilimitadas con la IA para tu bienestar diario</p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="space-y-2 text-sm text-slate-600">
+                <div className="flex items-center gap-2"><span className="text-green-500 font-bold">✓</span> Llamadas ilimitadas con IA</div>
+                <div className="flex items-center gap-2"><span className="text-green-500 font-bold">✓</span> Diario de voz con análisis automático</div>
+                <div className="flex items-center gap-2"><span className="text-green-500 font-bold">✓</span> Seguimiento de tu progreso</div>
+                {trialAvailable && (
+                  <div className="flex items-center gap-2"><span className="text-green-500 font-bold">✓</span> {patientSubscriptionInfo!.trial_days_left} días de prueba gratis restantes</div>
+                )}
+              </div>
+              <div className="bg-indigo-50 rounded-xl p-3 text-center">
+                <span className="text-2xl font-bold text-indigo-700">4,99€</span>
+                <span className="text-slate-500 text-sm">/mes</span>
+                {trialAvailable && <p className="text-xs text-slate-400 mt-0.5">Los primeros {patientSubscriptionInfo!.trial_days_left} días son gratis</p>}
+              </div>
+              <button
+                onClick={async () => {
+                  try {
+                    const resp = await AuthService.createCheckoutSession({ subscription_type: 'patient', plan_id: 'patient_premium' });
+                    if (resp?.url) {
+                      window.location.href = resp.url;
+                    }
+                  } catch (err: any) {
+                    alert(err?.message || 'Error iniciando el pago');
+                  }
+                  setShowPatientUpgradeModal(false);
+                }}
+                className="w-full py-3 rounded-xl font-semibold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+              >
+                {trialAvailable ? `Empezar prueba — ${patientSubscriptionInfo!.trial_days_left} días gratis` : 'Suscribirse — 4,99€/mes'}
+              </button>
+              <button
+                onClick={() => setShowPatientUpgradeModal(false)}
+                className="w-full py-2 text-sm text-slate-500 hover:text-slate-700 transition-colors"
+              >
+                Ahora no
+              </button>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
       {selectedDate && (
         <EntryModal 
           entries={entriesForModal} 

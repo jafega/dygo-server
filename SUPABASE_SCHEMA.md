@@ -1,36 +1,6 @@
 -- WARNING: This schema is for context only and is not meant to be run.
 -- Table order and constraints may not be valid for execution.
 
--- Migration: psychologist_materials table
--- Run in Supabase SQL editor to create the materials table:
--- CREATE TABLE public.psychologist_materials (
---   id uuid NOT NULL DEFAULT gen_random_uuid(),
---   created_at timestamp with time zone NOT NULL DEFAULT now(),
---   psychologist_user_id text NOT NULL,
---   name text NOT NULL,
---   file_url text NOT NULL,
---   file_name text NOT NULL DEFAULT '',
---   file_type text NOT NULL DEFAULT 'application/octet-stream',
---   CONSTRAINT psychologist_materials_pkey PRIMARY KEY (id),
---   CONSTRAINT psychologist_materials_psychologist_user_id_fkey FOREIGN KEY (psychologist_user_id) REFERENCES public.users(id)
--- );
--- ALTER TABLE public.psychologist_materials ENABLE ROW LEVEL SECURITY;
--- CREATE POLICY "Psychologist can manage own materials" ON public.psychologist_materials
---   USING (psychologist_user_id = auth.uid()::text)
---   WITH CHECK (psychologist_user_id = auth.uid()::text);
-
-CREATE TABLE public.psychologist_materials (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  created_at timestamp with time zone NOT NULL DEFAULT now(),
-  psychologist_user_id text NOT NULL,
-  name text NOT NULL,
-  file_url text NOT NULL,
-  file_name text NOT NULL DEFAULT '',
-  file_type text NOT NULL DEFAULT 'application/octet-stream',
-  CONSTRAINT psychologist_materials_pkey PRIMARY KEY (id),
-  CONSTRAINT psychologist_materials_psychologist_user_id_fkey FOREIGN KEY (psychologist_user_id) REFERENCES public.users(id)
-);
-
 CREATE TABLE public.bono (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
@@ -57,7 +27,8 @@ CREATE TABLE public.care_relationships (
   center_id text,
   active boolean,
   historical_info text,
-  patientnumber integer,
+  patientnumber bigint,
+  status text,
   CONSTRAINT care_relationships_pkey PRIMARY KEY (id),
   CONSTRAINT care_relationships_psychologist_user_id_fkey FOREIGN KEY (psychologist_user_id) REFERENCES public.users(id),
   CONSTRAINT care_relationships_patient_user_id_fkey FOREIGN KEY (patient_user_id) REFERENCES public.users(id),
@@ -69,16 +40,12 @@ CREATE TABLE public.center (
   center_name text NOT NULL,
   cif text NOT NULL,
   address text NOT NULL,
+  psychologist_user_id text NOT NULL,
   nombre_comercial text,
   direccion_comercial text,
-  psychologist_user_id text NOT NULL,
   CONSTRAINT center_pkey PRIMARY KEY (id),
   CONSTRAINT center_psychologist_user_id_fkey FOREIGN KEY (psychologist_user_id) REFERENCES public.users(id)
 );
-
--- Migration: add commercial name and address fields
--- ALTER TABLE public.center ADD COLUMN IF NOT EXISTS nombre_comercial text;
--- ALTER TABLE public.center ADD COLUMN IF NOT EXISTS direccion_comercial text;
 CREATE TABLE public.dispo (
   id text NOT NULL,
   data jsonb NOT NULL,
@@ -94,6 +61,8 @@ CREATE TABLE public.entries (
   target_user_id text NOT NULL,
   entry_type text NOT NULL,
   center_id text,
+  transcript text,
+  summary text,
   CONSTRAINT entries_pkey PRIMARY KEY (id),
   CONSTRAINT entries_creator_user_id_fkey FOREIGN KEY (creator_user_id) REFERENCES public.users(id),
   CONSTRAINT entries_target_user_id_fkey FOREIGN KEY (target_user_id) REFERENCES public.users(id),
@@ -134,6 +103,17 @@ CREATE TABLE public.invoices (
   CONSTRAINT invoices_pkey PRIMARY KEY (id),
   CONSTRAINT invoices_psychologist_user_id_fkey FOREIGN KEY (psychologist_user_id) REFERENCES public.users(id),
   CONSTRAINT invoices_patient_user_id_fkey FOREIGN KEY (patient_user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.psychologist_materials (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  psychologist_user_id text NOT NULL,
+  name text NOT NULL,
+  file_url text NOT NULL,
+  file_name text NOT NULL DEFAULT ''::text,
+  file_type text NOT NULL DEFAULT 'application/octet-stream'::text,
+  CONSTRAINT psychologist_materials_pkey PRIMARY KEY (id),
+  CONSTRAINT psychologist_materials_psychologist_user_id_fkey FOREIGN KEY (psychologist_user_id) REFERENCES public.users(id)
 );
 CREATE TABLE public.psychologist_profiles (
   id text NOT NULL,
@@ -187,6 +167,53 @@ CREATE TABLE public.settings (
   CONSTRAINT settings_pkey PRIMARY KEY (id),
   CONSTRAINT settings_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
 );
+CREATE TABLE public.signatures (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  template_id bigint,
+  psych_user_id text NOT NULL,
+  patient_user_id text NOT NULL,
+  content text NOT NULL,
+  signed boolean NOT NULL,
+  signature_date timestamp with time zone,
+  external_document_url text,
+  CONSTRAINT signatures_pkey PRIMARY KEY (id),
+  CONSTRAINT signatures_template_id_fkey FOREIGN KEY (template_id) REFERENCES public.templates(id),
+  CONSTRAINT signatures_psych_user_id_fkey FOREIGN KEY (psych_user_id) REFERENCES public.users(id),
+  CONSTRAINT signatures_patient_user_id_fkey FOREIGN KEY (patient_user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.subscriptions (
+  id text NOT NULL,
+  data jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamp with time zone NOT NULL DEFAULT timezone('utc'::text, now()),
+  CONSTRAINT subscriptions_pkey PRIMARY KEY (id)
+);
+-- Patient premium subscriptions (AI voice diary, €4.99/month with 14-day trial)
+CREATE TABLE public.patient_subscriptions (
+  id text NOT NULL,
+  patient_user_id text NOT NULL,
+  stripe_customer_id text,
+  stripe_subscription_id text,
+  stripe_status text,
+  plan_id text NOT NULL DEFAULT 'patient_premium',
+  access_blocked boolean NOT NULL DEFAULT false,
+  cancel_at_period_end boolean NOT NULL DEFAULT false,
+  current_period_end bigint,
+  created_at timestamp with time zone NOT NULL DEFAULT timezone('utc'::text, now()),
+  CONSTRAINT patient_subscriptions_pkey PRIMARY KEY (id),
+  CONSTRAINT patient_subscriptions_patient_user_id_fkey FOREIGN KEY (patient_user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.templates (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  content text NOT NULL,
+  psych_user_id text,
+  master boolean,
+  template_name text NOT NULL,
+  archived boolean NOT NULL DEFAULT false,
+  CONSTRAINT templates_pkey PRIMARY KEY (id),
+  CONSTRAINT templates_psych_user_id_fkey FOREIGN KEY (psych_user_id) REFERENCES public.users(id)
+);
 CREATE TABLE public.users (
   id text NOT NULL,
   data jsonb NOT NULL,
@@ -194,6 +221,8 @@ CREATE TABLE public.users (
   user_email text,
   psychologist_profile_id text,
   auth_user_id uuid,
+  master boolean,
+  invitation_token text,
   CONSTRAINT users_pkey PRIMARY KEY (id),
   CONSTRAINT users_auth_user_id_fkey FOREIGN KEY (auth_user_id) REFERENCES auth.users(id),
   CONSTRAINT users_psychologist_profile_id_fkey FOREIGN KEY (psychologist_profile_id) REFERENCES public.psychologist_profiles(id)

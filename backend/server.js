@@ -597,23 +597,87 @@ const ensureDbShape = (db) => {
   if (!Array.isArray(db.invoices)) db.invoices = [];
   if (!db.psychologistProfiles || typeof db.psychologistProfiles !== 'object') db.psychologistProfiles = {};
   if (!Array.isArray(db.subscriptions)) db.subscriptions = [];
+  if (!Array.isArray(db.patientSubscriptions)) db.patientSubscriptions = [];
 
   return db;
 };
 
 // --- SUBSCRIPTION BILLING HELPERS ---
 const TRIAL_DAYS = 14;
-const MONTHLY_PRICE_EUR = 24.99;
+
+// --- PSYCHOLOGIST PLAN TIERS ---
+const PSYCH_PLANS = {
+  starter:      { id: 'starter',      name: 'Starter',      price: 9.99,  maxRelations: 10  },
+  mainder:      { id: 'mainder',      name: 'Mainder',      price: 19.99, maxRelations: 30  },
+  supermainder: { id: 'supermainder', name: 'Supermainder', price: 29.99, maxRelations: Infinity }
+};
+const DEFAULT_PSYCH_PLAN = 'starter';
+const PSYCH_PLAN_IDS = Object.keys(PSYCH_PLANS);
+
+// --- PATIENT PREMIUM PLAN ---
+const PATIENT_PREMIUM = {
+  id: 'patient_premium',
+  name: 'Premium',
+  price: 4.99,
+  trialDays: 14,
+  description: 'Llamadas con IA para seguimiento diario'
+};
+
+// Legacy constant kept for backward-compat in responses
+const MONTHLY_PRICE_EUR = 9.99;
 
 /**
  * Returns the count of active care relationships for a psychologist.
- * A relationship is active unless explicitly set active=false.
+ * Prefers Supabase count, falls back to local DB.
  */
-const countActivePatients = (db, psychUserId) => {
+const countActivePatients = async (db, psychUserId) => {
+  if (supabaseAdmin) {
+    try {
+      const { count, error } = await supabaseAdmin
+        .from('care_relationships')
+        .select('id', { count: 'exact', head: true })
+        .eq('psychologist_user_id', String(psychUserId))
+        .or('active.is.null,active.eq.true');
+      if (!error && typeof count === 'number') return count;
+    } catch (_) { /* fall through to local */ }
+  }
   if (!Array.isArray(db.careRelationships)) return 0;
   return db.careRelationships.filter(
     rel => rel.psychologist_user_id === psychUserId && rel.active !== false
   ).length;
+};
+
+/**
+ * Returns the plan object for a subscription record.
+ */
+const getSubPlan = (sub) => {
+  const planId = sub?.plan_id || DEFAULT_PSYCH_PLAN;
+  return PSYCH_PLANS[planId] || PSYCH_PLANS[DEFAULT_PSYCH_PLAN];
+};
+
+/**
+ * Checks whether adding one more active relationship would exceed the plan limit.
+ * Returns { allowed, currentCount, maxRelations, plan, upgradeTo }
+ */
+const checkRelationLimit = async (db, psychUserId, sub) => {
+  const plan = getSubPlan(sub);
+  const currentCount = await countActivePatients(db, psychUserId);
+  if (currentCount >= plan.maxRelations) {
+    // Find next tier
+    const sortedPlans = Object.values(PSYCH_PLANS).sort((a, b) => a.price - b.price);
+    const nextPlan = sortedPlans.find(p => p.maxRelations > currentCount);
+    return {
+      allowed: false,
+      currentCount,
+      maxRelations: plan.maxRelations,
+      plan: plan.id,
+      planName: plan.name,
+      upgradeTo: nextPlan ? nextPlan.id : null,
+      upgradeToName: nextPlan ? nextPlan.name : null,
+      upgradeToPrice: nextPlan ? nextPlan.price : null
+    };
+  }
+  return { allowed: true, currentCount, maxRelations: plan.maxRelations, plan: plan.id, planName: plan.name };
 };
 
 /**
@@ -662,10 +726,13 @@ const getPsychSub = (db, psychUserId) => {
       stripe_customer_id: null,
       stripe_subscription_id: null,
       stripe_status: null,
+      plan_id: DEFAULT_PSYCH_PLAN,
       access_blocked: false
     };
     db.subscriptions.push(sub);
   }
+  // Backfill plan_id for existing records
+  if (!sub.plan_id) sub.plan_id = DEFAULT_PSYCH_PLAN;
   return sub;
 };
 
@@ -3153,8 +3220,26 @@ const handleAdminCreatePatient = async (req, res) => {
       console.log(`❌ [handleAdminCreatePatient] Subscription required for psych ${psychologistId}`);
       return res.status(402).json({
         error: 'subscription_required',
-        message: 'Tu período de prueba ha finalizado. Activa la suscripción por €24.99/mes para continuar.',
+        message: 'Tu período de prueba ha finalizado. Activa una suscripción para continuar.',
         trialDaysLeft: 0
+      });
+    }
+
+    // --- PLAN RELATION LIMIT CHECK ---
+    const psychSub = getPsychSub(db, String(psychologistId));
+    const limitCheck = await checkRelationLimit(db, String(psychologistId), psychSub);
+    if (!limitCheck.allowed) {
+      console.log(`❌ [handleAdminCreatePatient] Relation limit reached for psych ${psychologistId}: ${limitCheck.currentCount}/${limitCheck.maxRelations} (plan: ${limitCheck.plan})`);
+      return res.status(402).json({
+        error: 'patient_limit_reached',
+        message: `Has alcanzado el límite de ${limitCheck.maxRelations} pacientes activos de tu plan ${limitCheck.planName}. Mejora a ${limitCheck.upgradeToName} para continuar.`,
+        currentCount: limitCheck.currentCount,
+        maxRelations: limitCheck.maxRelations,
+        plan: limitCheck.plan,
+        planName: limitCheck.planName,
+        upgradeTo: limitCheck.upgradeTo,
+        upgradeToName: limitCheck.upgradeToName,
+        upgradeToPrice: limitCheck.upgradeToPrice
       });
     }
 
@@ -4002,9 +4087,38 @@ app.post('/api/admin/cleanup-user-data', authenticateRequest, async (req, res) =
   }
 });
 
-// --- STRIPE: Flat monthly subscription billing ---
-// Model: €24.99/month flat fee per psychologist after 14-day free trial.
-// Set STRIPE_PRICE_ID env var to your recurring price id.
+// --- STRIPE: Tiered subscription billing for psychologists + patient premium ---
+// Psych plans: starter (€9.99), mainder (€19.99), supermainder (€29.99)
+// Patient premium: €4.99/month with 14-day trial
+// Set STRIPE_PRICE_ID_STARTER, STRIPE_PRICE_ID_MAINDER, STRIPE_PRICE_ID_SUPERMAINDER,
+// and STRIPE_PRICE_ID_PATIENT_PREMIUM env vars to your recurring price ids.
+
+const STRIPE_PRICE_IDS = {
+  starter:         process.env.STRIPE_PRICE_ID_STARTER      || process.env.STRIPE_PRICE_ID || 'price_starter_placeholder',
+  mainder:         process.env.STRIPE_PRICE_ID_MAINDER       || 'price_mainder_placeholder',
+  supermainder:    process.env.STRIPE_PRICE_ID_SUPERMAINDER  || 'price_supermainder_placeholder',
+  patient_premium: process.env.STRIPE_PRICE_ID_PATIENT_PREMIUM || 'price_patient_premium_placeholder'
+};
+
+/**
+ * Gets or creates a patient subscription record (for patient premium plan).
+ */
+const getPatientSub = (db, patientUserId) => {
+  if (!Array.isArray(db.patientSubscriptions)) db.patientSubscriptions = [];
+  let sub = db.patientSubscriptions.find(s => s.patient_user_id === patientUserId);
+  if (!sub) {
+    sub = {
+      patient_user_id: patientUserId,
+      stripe_customer_id: null,
+      stripe_subscription_id: null,
+      stripe_status: null,
+      plan_id: 'patient_premium',
+      access_blocked: false
+    };
+    db.patientSubscriptions.push(sub);
+  }
+  return sub;
+};
 
 const handleCreateCheckoutSession = async (req, res) => {
   try {
@@ -4017,19 +4131,137 @@ const handleCreateCheckoutSession = async (req, res) => {
     const user = db.users.find(u => u.id === String(requesterId));
     if (!user) return res.status(404).json({ error: 'User not found' });
 
+    // Determine subscription type from request body
+    const subscriptionType = req.body?.subscription_type || 'psychologist'; // 'psychologist' | 'patient'
+    const requestedPlanId = req.body?.plan_id || DEFAULT_PSYCH_PLAN;
+
+    console.log(`[checkout] userId=${requesterId} subscriptionType=${subscriptionType} planId=${requestedPlanId} userEmail=${user?.email || user?.user_email} STRIPE_KEY_SET=${!!process.env.STRIPE_SECRET_KEY} PATIENT_PRICE_ID=${STRIPE_PRICE_IDS.patient_premium}`);
+
+    if (subscriptionType === 'patient') {
+      // --- PATIENT PREMIUM CHECKOUT ---
+      // Master users have unlimited access — no Stripe session needed
+      const allCachedUsers = (supabaseDbCache?.users?.length ? supabaseDbCache.users : null) || db.users || [];
+      const checkoutPatientUser = allCachedUsers.find(u => u.id === String(requesterId));
+      const isPatientMaster = checkoutPatientUser
+        ? (isSuperAdmin(checkoutPatientUser.email || checkoutPatientUser.user_email) || checkoutPatientUser.master === true)
+        : false;
+      if (isPatientMaster) {
+        return res.json({ master: true, message: 'Master users have unlimited access — no subscription required.' });
+      }
+
+      // Read patient subscription directly from Supabase (cache may not have it after restart)
+      const userEmail = user.email || user.user_email;
+      let stripeCustomerId = null;
+
+      if (supabaseAdmin) {
+        const { data: subRows } = await supabaseAdmin
+          .from('patient_subscriptions')
+          .select('*')
+          .eq('patient_user_id', requesterId)
+          .limit(1);
+        if (subRows && subRows.length > 0) {
+          stripeCustomerId = subRows[0].stripe_customer_id || null;
+        }
+      } else {
+        // Fallback: local cache
+        const patSub = getPatientSub(db, requesterId);
+        stripeCustomerId = patSub.stripe_customer_id || null;
+      }
+
+      if (!stripeCustomerId) {
+        const customer = await stripe.customers.create({
+          email: userEmail,
+          name: user.name || userEmail,
+          metadata: { user_id: requesterId, subscription_type: 'patient' }
+        });
+        stripeCustomerId = customer.id;
+
+        // Persist to Supabase or local cache
+        if (supabaseAdmin) {
+          await supabaseAdmin
+            .from('patient_subscriptions')
+            .upsert([{
+              id: requesterId,
+              patient_user_id: requesterId,
+              stripe_customer_id: stripeCustomerId,
+              plan_id: 'patient_premium',
+              access_blocked: false
+            }]);
+        } else {
+          const patSub = getPatientSub(db, requesterId);
+          patSub.stripe_customer_id = stripeCustomerId;
+          saveDb(db);
+        }
+      }
+
+      const priceId = STRIPE_PRICE_IDS.patient_premium;
+      const successUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}?stripe=success&type=patient`;
+      const cancelUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}?stripe=cancel`;
+
+      // Fetch real created_at from Supabase (local db cache may not have it)
+      let patCreatedAtMs = null;
+      try {
+        const patSupabaseUser = supabaseAdmin ? await readSupabaseRowById('users', requesterId) : null;
+        const patCreatedAt = patSupabaseUser?.created_at || patSupabaseUser?.createdAt
+          || user?.created_at || user?.createdAt || null;
+        if (patCreatedAt) {
+          const ms = typeof patCreatedAt === 'number' ? patCreatedAt : new Date(patCreatedAt).getTime();
+          if (!isNaN(ms)) patCreatedAtMs = ms;
+        }
+      } catch (e) {
+        console.warn('Could not fetch user created_at for trial calc:', e);
+      }
+
+      const patTrialEndMs = patCreatedAtMs ? (patCreatedAtMs + TRIAL_DAYS * 24 * 60 * 60 * 1000) : null;
+      const patTrialDaysLeft = patTrialEndMs
+        ? Math.max(0, Math.ceil((patTrialEndMs - Date.now()) / (24 * 60 * 60 * 1000)))
+        : 0;
+
+      const patientSubscriptionData = {
+        metadata: { patient_user_id: requesterId, subscription_type: 'patient', plan_id: 'patient_premium' }
+      };
+      if (patTrialDaysLeft > 0) {
+        patientSubscriptionData.trial_period_days = patTrialDaysLeft;
+      }
+      // If trial already expired, don't set trial_end — Stripe requires it to be ≥48h in the future.
+      // Omitting it causes Stripe to charge immediately, which is correct behaviour.
+
+      console.log(`[checkout/patient] userId=${requesterId} email=${userEmail} customerId=${stripeCustomerId} trialDaysLeft=${patTrialDaysLeft} priceId=${priceId}`);
+
+      const session = await stripe.checkout.sessions.create({
+        mode: 'subscription',
+        payment_method_types: ['card'],
+        line_items: [{ price: priceId, quantity: 1 }],
+        customer: stripeCustomerId,
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        subscription_data: patientSubscriptionData,
+        metadata: { patient_user_id: requesterId, subscription_type: 'patient', plan_id: 'patient_premium' }
+      });
+
+      return res.json({ url: session.url });
+    }
+
+    // --- PSYCHOLOGIST PLAN CHECKOUT ---
+    if (!PSYCH_PLAN_IDS.includes(requestedPlanId)) {
+      return res.status(400).json({ error: `Plan inválido. Planes disponibles: ${PSYCH_PLAN_IDS.join(', ')}` });
+    }
+
     const sub = getPsychSub(db, requesterId);
 
     // Create or reuse Stripe customer
     if (!sub.stripe_customer_id) {
-      const customer = await stripe.customers.create({ email: user.email, name: user.name || user.email });
+      const customer = await stripe.customers.create({
+        email: user.email,
+        name: user.name || user.email,
+        metadata: { user_id: requesterId, subscription_type: 'psychologist' }
+      });
       sub.stripe_customer_id = customer.id;
       saveDb(db);
     }
 
-    // Use configured price ID, falling back to the production price
-    const priceId = process.env.STRIPE_PRICE_ID || 'price_1TD1evGHzbtugDuUh810BSbb';
-
-    const successUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}?stripe=success`;
+    const priceId = STRIPE_PRICE_IDS[requestedPlanId];
+    const successUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}?stripe=success&plan=${requestedPlanId}`;
     const cancelUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}?stripe=cancel`;
 
     const session = await stripe.checkout.sessions.create({
@@ -4039,21 +4271,42 @@ const handleCreateCheckoutSession = async (req, res) => {
       customer: sub.stripe_customer_id,
       success_url: successUrl,
       cancel_url: cancelUrl,
-      metadata: { psychologist_user_id: requesterId },
+      metadata: { psychologist_user_id: requesterId, subscription_type: 'psychologist', plan_id: requestedPlanId },
       subscription_data: {
-        metadata: { psychologist_user_id: requesterId }
+        metadata: { psychologist_user_id: requesterId, subscription_type: 'psychologist', plan_id: requestedPlanId }
       }
     });
 
     return res.json({ url: session.url });
   } catch (err) {
-    console.error('Error creating checkout session', err);
-    return res.status(500).json({ error: 'Error creating checkout session' });
+    console.error('Error creating checkout session', err?.message || err);
+    console.error('Error type:', err?.type, 'code:', err?.code, 'param:', err?.param);
+    return res.status(500).json({ error: err?.message || 'Error creating checkout session' });
   }
 };
 
 app.post('/api/stripe/create-checkout-session', authenticateRequest, handleCreateCheckoutSession);
 app.post('/api/stripe-create-checkout-session', authenticateRequest, handleCreateCheckoutSession);
+
+// --- GET /api/plans — returns available plans (no auth required) ---
+app.get('/api/plans', (req, res) => {
+  return res.json({
+    psychologist: Object.values(PSYCH_PLANS).map(p => ({
+      id: p.id,
+      name: p.name,
+      price: p.price,
+      maxRelations: p.maxRelations === Infinity ? null : p.maxRelations
+    })),
+    patient: {
+      id: PATIENT_PREMIUM.id,
+      name: PATIENT_PREMIUM.name,
+      price: PATIENT_PREMIUM.price,
+      trialDays: PATIENT_PREMIUM.trialDays,
+      description: PATIENT_PREMIUM.description
+    },
+    trialDays: TRIAL_DAYS
+  });
+});
 
 // --- POST /api/stripe/sync-subscription ---
 // Called by the frontend after returning from Stripe Checkout (success URL).
@@ -4095,7 +4348,11 @@ app.post('/api/stripe/sync-subscription', authenticateRequest, async (req, res) 
       sub.quantity = activeSub.items.data[0]?.quantity ?? sub.quantity;
       sub.cancel_at_period_end = activeSub.cancel_at_period_end ?? false;
       sub.current_period_end = activeSub.current_period_end ?? null;
-      console.log(`[sync-subscription] Synced psych ${requesterId}: status=${activeSub.status}, cancel_at_period_end=${activeSub.cancel_at_period_end}`);
+      // Sync plan_id from subscription metadata if available
+      if (activeSub.metadata?.plan_id && PSYCH_PLAN_IDS.includes(activeSub.metadata.plan_id)) {
+        sub.plan_id = activeSub.metadata.plan_id;
+      }
+      console.log(`[sync-subscription] Synced psych ${requesterId}: status=${activeSub.status}, plan=${sub.plan_id}, cancel_at_period_end=${activeSub.cancel_at_period_end}`);
     } else {
       // No active subscription found — reset
       sub.stripe_subscription_id = null;
@@ -4128,12 +4385,23 @@ const handleCreatePortalSession = async (req, res) => {
 
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2022-11-15' });
     const db = getDb();
-    const sub = getPsychSub(db, requesterId);
-    if (!sub.stripe_customer_id) return res.status(400).json({ error: 'No hay suscripción activa' });
+
+    const subscriptionType = req.body?.subscription_type || 'psychologist';
+    let customerId;
+
+    if (subscriptionType === 'patient') {
+      const patSub = getPatientSub(db, requesterId);
+      customerId = patSub.stripe_customer_id;
+    } else {
+      const sub = getPsychSub(db, requesterId);
+      customerId = sub.stripe_customer_id;
+    }
+
+    if (!customerId) return res.status(400).json({ error: 'No hay suscripción activa' });
 
     const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     const returnUrl = `${baseUrl}?stripe=success`;
-    const session = await stripe.billingPortal.sessions.create({ customer: sub.stripe_customer_id, return_url: returnUrl });
+    const session = await stripe.billingPortal.sessions.create({ customer: customerId, return_url: returnUrl });
     return res.json({ url: session.url });
   } catch (err) {
     console.error('Error creating portal session', err);
@@ -4626,10 +4894,13 @@ app.get('/api/subscription', authenticateRequest, async (req, res) => {
   const access = await checkPsychAccessAsync(db, String(psychId));
   const isMaster = access.isMaster === true;
   const userCreatedAt = access.userCreatedAt || null;
+  const isSubscribed = isMaster ? true : access.isSubscribed;
+  const plan = isSubscribed ? getSubPlan(sub) : null;
+  const activeCount = await countActivePatients(db, String(psychId));
 
   return res.json({
     psychologist_user_id: psychId,
-    is_subscribed: isMaster ? true : access.isSubscribed,
+    is_subscribed: isSubscribed,
     trial_active: isMaster ? false : access.trialActive,
     trial_days_left: isMaster ? 0 : access.trialDaysLeft,
     stripe_status: sub.stripe_status,
@@ -4637,9 +4908,79 @@ app.get('/api/subscription', authenticateRequest, async (req, res) => {
     cancel_at_period_end: sub.cancel_at_period_end ?? false,
     current_period_end: sub.current_period_end ?? null,
     blocked_reason: sub.blocked_reason ?? null,
-    monthly_price_eur: MONTHLY_PRICE_EUR.toFixed(2),
     trial_expiry_date: userCreatedAt ? Math.floor((userCreatedAt + TRIAL_DAYS * 24 * 60 * 60 * 1000) / 1000) : null,
-    is_master: isMaster
+    is_master: isMaster,
+    // Plan info — only show when subscribed
+    plan_id: plan ? sub.plan_id : null,
+    plan_name: plan ? plan.name : null,
+    plan_price: plan ? plan.price : null,
+    max_relations: plan ? (plan.maxRelations === Infinity ? null : plan.maxRelations) : null,
+    active_relations: activeCount,
+    relations_remaining: plan ? (plan.maxRelations === Infinity ? null : Math.max(0, plan.maxRelations - activeCount)) : null,
+    plans: Object.values(PSYCH_PLANS).map(p => ({
+      id: p.id,
+      name: p.name,
+      price: p.price,
+      maxRelations: p.maxRelations === Infinity ? null : p.maxRelations
+    }))
+  });
+});
+
+// --- GET /api/patient-subscription — returns patient premium subscription status ---
+app.get('/api/patient-subscription', authenticateRequest, async (req, res) => {
+  const patientId = req.query.patient_user_id || req.authenticatedUserId;
+  if (!patientId) return res.status(400).json({ error: 'patient_user_id requerido' });
+  const db = getDb();
+
+  // Read from Supabase directly if available (avoids stale in-memory cache)
+  let patSub = null;
+  if (supabaseAdmin) {
+    const { data: subRows } = await supabaseAdmin
+      .from('patient_subscriptions')
+      .select('*')
+      .eq('patient_user_id', String(patientId))
+      .limit(1);
+    if (subRows && subRows.length > 0) {
+      patSub = subRows[0];
+    }
+  }
+  if (!patSub) {
+    patSub = getPatientSub(db, String(patientId));
+  }
+
+  const isActive = ['active', 'trialing'].includes(patSub.stripe_status) && !patSub.access_blocked;
+
+  // Determine if this patient is a master/superadmin
+  const allUsers = (supabaseDbCache?.users?.length ? supabaseDbCache.users : null) || db.users || [];
+  const patientUser = allUsers.find(u => u.id === String(patientId));
+  const isMaster = patientUser
+    ? (isSuperAdmin(patientUser.email || patientUser.user_email) || patientUser.master === true)
+    : false;
+
+  // Trial: 14 days from account creation
+  const createdAt = patientUser?.createdAt || patientUser?.created_at || null;
+  // created_at from Supabase is an ISO string; createdAt (legacy) may be a ms timestamp
+  const createdAtMs = createdAt
+    ? (typeof createdAt === 'number' ? createdAt : new Date(createdAt).getTime())
+    : null;
+  const trialEndMs = (createdAtMs && !isNaN(createdAtMs)) ? (createdAtMs + TRIAL_DAYS * 24 * 60 * 60 * 1000) : null;
+  const trialActive = !isMaster && !isActive && trialEndMs ? Date.now() < trialEndMs : false;
+  const trialDaysLeft = trialActive && trialEndMs ? Math.max(0, Math.ceil((trialEndMs - Date.now()) / (24 * 60 * 60 * 1000))) : 0;
+
+  return res.json({
+    patient_user_id: patientId,
+    is_subscribed: isActive,
+    is_master: isMaster,
+    trial_active: trialActive,
+    trial_days_left: trialDaysLeft,
+    stripe_status: patSub.stripe_status,
+    access_blocked: patSub.access_blocked,
+    cancel_at_period_end: patSub.cancel_at_period_end ?? false,
+    current_period_end: patSub.current_period_end ?? null,
+    plan_id: PATIENT_PREMIUM.id,
+    plan_name: PATIENT_PREMIUM.name,
+    plan_price: PATIENT_PREMIUM.price,
+    trial_days: PATIENT_PREMIUM.trialDays
   });
 });
 
@@ -4682,51 +5023,112 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
 
     switch (event.type) {
       case 'checkout.session.completed': {
-        // Flat subscription created via checkout — link it to the psychologist
         const session = event.data.object;
         if (session.mode !== 'subscription') break;
-        const psychId = session.metadata?.psychologist_user_id;
+        const subscriptionType = session.metadata?.subscription_type || 'psychologist';
         const stripeSubId = session.subscription;
         const stripeCustomerId = session.customer;
-        if (!psychId || !stripeSubId) break;
 
-        const sub = getPsychSub(db, psychId);
-        sub.stripe_subscription_id = stripeSubId;
-        sub.stripe_customer_id = stripeCustomerId;
-        sub.stripe_status = 'active';
-        sub.access_blocked = false;
-        saveDb(db);
-        console.log(`[Webhook] checkout.session.completed: psychologist ${psychId} subscribed (flat plan)`);
+        if (subscriptionType === 'patient') {
+          const patientId = session.metadata?.patient_user_id;
+          if (!patientId || !stripeSubId) break;
+          // Persist to Supabase directly
+          if (supabaseAdmin) {
+            await supabaseAdmin.from('patient_subscriptions').upsert([{
+              id: patientId,
+              patient_user_id: patientId,
+              stripe_subscription_id: stripeSubId,
+              stripe_customer_id: stripeCustomerId,
+              stripe_status: 'active',
+              plan_id: 'patient_premium',
+              access_blocked: false
+            }]);
+          } else {
+            const patSub = getPatientSub(db, patientId);
+            patSub.stripe_subscription_id = stripeSubId;
+            patSub.stripe_customer_id = stripeCustomerId;
+            patSub.stripe_status = 'active';
+            patSub.access_blocked = false;
+            saveDb(db);
+          }
+          console.log(`[Webhook] checkout.session.completed: patient ${patientId} subscribed (premium)`);
+        } else {
+          const psychId = session.metadata?.psychologist_user_id;
+          const planId = session.metadata?.plan_id || DEFAULT_PSYCH_PLAN;
+          if (!psychId || !stripeSubId) break;
+          const sub = getPsychSub(db, psychId);
+          sub.stripe_subscription_id = stripeSubId;
+          sub.stripe_customer_id = stripeCustomerId;
+          sub.stripe_status = 'active';
+          sub.plan_id = planId;
+          sub.access_blocked = false;
+          saveDb(db);
+          console.log(`[Webhook] checkout.session.completed: psychologist ${psychId} subscribed (plan: ${planId})`);
+        }
         break;
       }
       case 'customer.subscription.created': {
         const subscription = event.data.object;
-        // Link subscription to psychologist via metadata (set in checkout session)
-        const psychId = subscription.metadata?.psychologist_user_id;
-        const sub = psychId
-          ? getPsychSub(db, psychId)
-          : findSubByStripe(null, subscription.customer);
-        if (sub) {
-          sub.stripe_subscription_id = subscription.id;
-          sub.stripe_customer_id = subscription.customer;
-          sub.stripe_status = subscription.status;
-          sub.access_blocked = !['active', 'trialing'].includes(subscription.status);
-          saveDb(db);
-          console.log(`[Webhook] subscription.created: ${subscription.id} → status=${subscription.status}`);
+        const subscriptionType = subscription.metadata?.subscription_type || 'psychologist';
+
+        if (subscriptionType === 'patient') {
+          const patientId = subscription.metadata?.patient_user_id;
+          const patSub = patientId
+            ? getPatientSub(db, patientId)
+            : (db.patientSubscriptions || []).find(s => s.stripe_customer_id === subscription.customer);
+          if (patSub) {
+            patSub.stripe_subscription_id = subscription.id;
+            patSub.stripe_customer_id = subscription.customer;
+            patSub.stripe_status = subscription.status;
+            patSub.access_blocked = !['active', 'trialing'].includes(subscription.status);
+            saveDb(db);
+            console.log(`[Webhook] patient subscription.created: ${subscription.id} → status=${subscription.status}`);
+          }
+        } else {
+          const psychId = subscription.metadata?.psychologist_user_id;
+          const planId = subscription.metadata?.plan_id;
+          const sub = psychId
+            ? getPsychSub(db, psychId)
+            : findSubByStripe(null, subscription.customer);
+          if (sub) {
+            sub.stripe_subscription_id = subscription.id;
+            sub.stripe_customer_id = subscription.customer;
+            sub.stripe_status = subscription.status;
+            if (planId) sub.plan_id = planId;
+            sub.access_blocked = !['active', 'trialing'].includes(subscription.status);
+            saveDb(db);
+            console.log(`[Webhook] subscription.created: ${subscription.id} → status=${subscription.status}, plan=${sub.plan_id}`);
+          }
         }
         break;
       }
       case 'customer.subscription.updated': {
         const subscription = event.data.object;
-        const sub = findSubByStripe(subscription.id, subscription.customer);
+        // Try psychologist first, then patient
+        let sub = findSubByStripe(subscription.id, subscription.customer);
         if (sub) {
           sub.stripe_status = subscription.status;
           sub.quantity = subscription.items.data[0]?.quantity ?? sub.quantity;
           sub.access_blocked = !['active', 'trialing'].includes(subscription.status);
           sub.cancel_at_period_end = subscription.cancel_at_period_end ?? false;
-          sub.current_period_end = subscription.current_period_end ?? null; // Unix timestamp (seconds)
+          sub.current_period_end = subscription.current_period_end ?? null;
+          if (subscription.metadata?.plan_id) sub.plan_id = subscription.metadata.plan_id;
           saveDb(db);
-          console.log(`[Webhook] subscription.updated: ${subscription.id} → status=${subscription.status}, cancel_at_period_end=${subscription.cancel_at_period_end}`);
+          console.log(`[Webhook] subscription.updated: ${subscription.id} → status=${subscription.status}, plan=${sub.plan_id}`);
+        } else {
+          // Check patient subscriptions
+          const patSub = (db.patientSubscriptions || []).find(s =>
+            (s.stripe_subscription_id === subscription.id) ||
+            (s.stripe_customer_id === subscription.customer)
+          );
+          if (patSub) {
+            patSub.stripe_status = subscription.status;
+            patSub.access_blocked = !['active', 'trialing'].includes(subscription.status);
+            patSub.cancel_at_period_end = subscription.cancel_at_period_end ?? false;
+            patSub.current_period_end = subscription.current_period_end ?? null;
+            saveDb(db);
+            console.log(`[Webhook] patient subscription.updated: ${subscription.id} → status=${subscription.status}`);
+          }
         }
         break;
       }
@@ -4737,9 +5139,18 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
           sub.stripe_status = 'canceled';
           sub.stripe_subscription_id = null;
           sub.quantity = 0;
-          sub.access_blocked = false; // Let them stay on freemium, not actively blocked
+          sub.access_blocked = false;
           saveDb(db);
           console.log(`[Webhook] subscription.deleted: ${subscription.id}`);
+        } else {
+          const patSub = (db.patientSubscriptions || []).find(s => s.stripe_subscription_id === subscription.id);
+          if (patSub) {
+            patSub.stripe_status = 'canceled';
+            patSub.stripe_subscription_id = null;
+            patSub.access_blocked = false;
+            saveDb(db);
+            console.log(`[Webhook] patient subscription.deleted: ${subscription.id}`);
+          }
         }
         break;
       }
@@ -4751,6 +5162,16 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
           sub.access_blocked = false;
           saveDb(db);
           console.log(`[Webhook] invoice.payment_succeeded for subscription ${invoice.subscription}`);
+        } else {
+          const patSub = (db.patientSubscriptions || []).find(s =>
+            s.stripe_subscription_id === invoice.subscription || s.stripe_customer_id === invoice.customer
+          );
+          if (patSub) {
+            patSub.stripe_status = 'active';
+            patSub.access_blocked = false;
+            saveDb(db);
+            console.log(`[Webhook] patient invoice.payment_succeeded for subscription ${invoice.subscription}`);
+          }
         }
         break;
       }
@@ -4762,6 +5183,16 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
           sub.access_blocked = true;
           saveDb(db);
           console.log(`[Webhook] invoice.payment_failed for subscription ${invoice.subscription} — access blocked`);
+        } else {
+          const patSub = (db.patientSubscriptions || []).find(s =>
+            s.stripe_subscription_id === invoice.subscription || s.stripe_customer_id === invoice.customer
+          );
+          if (patSub) {
+            patSub.stripe_status = 'past_due';
+            patSub.access_blocked = true;
+            saveDb(db);
+            console.log(`[Webhook] patient invoice.payment_failed for subscription ${invoice.subscription} — access blocked`);
+          }
         }
         break;
       }
@@ -5493,12 +5924,12 @@ app.put('/api/users', authenticateRequest, async (req, res) => {
         }]);
       
       if (profileError) {
-        console.error('❌ Error creando perfil de psicólogo en Supabase:', profileError);
-        throw new Error(`Error creando perfil: ${profileError.message}`);
+        console.error('⚠️ Error creando perfil de psicólogo (no fatal):', profileError);
+        // Don't throw — proceed with is_psychologist update even if profile creation fails
+      } else {
+        console.log(`✓ Nuevo perfil de psicólogo creado en Supabase: ${profileId}`);
+        updated.psychologist_profile_id = profileId;
       }
-      
-      console.log(`✓ Nuevo perfil de psicólogo creado en Supabase: ${profileId}`);
-      updated.psychologist_profile_id = profileId;
     }
     
     // Actualizar en Supabase (sin cambiar el email)
@@ -5517,10 +5948,110 @@ app.put('/api/users', authenticateRequest, async (req, res) => {
     }
     
     console.log('✅ Usuario actualizado en Supabase:', id);
+
+    // Sync in-memory cache so next saveDb() doesn't overwrite these changes
+    if (supabaseDbCache?.users) {
+      const cachedIdx = supabaseDbCache.users.findIndex(u => u.id === String(id));
+      if (cachedIdx !== -1) {
+        supabaseDbCache.users[cachedIdx] = {
+          ...supabaseDbCache.users[cachedIdx],
+          ...updated,
+          is_psychologist: updated.is_psychologist ?? supabaseDbCache.users[cachedIdx].is_psychologist,
+          isPsychologist: updated.isPsychologist ?? supabaseDbCache.users[cachedIdx].isPsychologist,
+        };
+      }
+    }
+
     return res.json(updated);
   } catch (err) {
     console.error('Error in PUT /api/users', err);
     return res.status(500).json({ error: err?.message || 'Error actualizando el usuario' });
+  }
+});
+
+// --- CONVERTIRSE EN PSICÓLOGO ---
+app.post('/api/become-psychologist', authenticateRequest, async (req, res) => {
+  try {
+    const userId = req.authenticatedUserId;
+    if (!userId) return res.status(401).json({ error: 'Autenticación requerida' });
+
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: 'Supabase no está configurado' });
+    }
+
+    console.log(`[become-psychologist] userId=${userId}`);
+
+    const existingUser = await readSupabaseRowById('users', userId);
+    if (!existingUser) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    console.log(`[become-psychologist] existingUser.is_psychologist=${existingUser.is_psychologist}, profile_id=${existingUser.psychologist_profile_id}`);
+
+    if (existingUser.is_psychologist === true) {
+      return res.json({ ...existingUser, is_psychologist: true, isPsychologist: true });
+    }
+
+    // Intentar crear psychologist_profile (no fatal si falla)
+    let profileId = existingUser.psychologist_profile_id || null;
+    if (!profileId) {
+      profileId = crypto.randomUUID();
+      const { error: profileError } = await supabaseAdmin
+        .from('psychologist_profiles')
+        .insert([{
+          id: profileId,
+          user_id: userId,
+          data: { id: profileId, license: '', specialties: [], bio: '', hourly_rate: 0,
+            created_at: new Date().toISOString(), updated_at: new Date().toISOString() }
+        }]);
+      if (profileError) {
+        console.error('⚠️ Error creando psychologist_profile (no fatal):', profileError);
+        profileId = null;
+      } else {
+        console.log(`✓ psychologist_profile creado: ${profileId}`);
+      }
+    }
+
+    // Actualizar is_psychologist en Supabase - request count to detect 0-row updates
+    const updatePayload = { is_psychologist: true };
+    if (profileId) updatePayload.psychologist_profile_id = profileId;
+
+    console.log(`[become-psychologist] updating with payload:`, JSON.stringify(updatePayload));
+
+    const { data: updateData, error: updateError, count } = await supabaseAdmin
+      .from('users')
+      .update(updatePayload)
+      .eq('id', userId)
+      .select();
+
+    console.log(`[become-psychologist] update result: data=${JSON.stringify(updateData)}, error=${JSON.stringify(updateError)}, count=${count}`);
+
+    if (updateError) {
+      console.error('❌ Error actualizando is_psychologist:', updateError);
+      return res.status(500).json({ error: `Error actualizando usuario: ${updateError.message}` });
+    }
+
+    if (!updateData || updateData.length === 0) {
+      console.error('❌ Update ejecutado pero ninguna fila actualizada para userId:', userId);
+      return res.status(500).json({ error: 'No se pudo actualizar el usuario (0 filas afectadas)' });
+    }
+
+    console.log(`✅ Usuario ${userId} convertido en psicólogo`);
+
+    // Update in-memory cache so subsequent saveDb() calls don't overwrite is_psychologist back to false
+    if (supabaseDbCache?.users) {
+      const cachedIdx = supabaseDbCache.users.findIndex(u => u.id === userId);
+      if (cachedIdx !== -1) {
+        supabaseDbCache.users[cachedIdx].is_psychologist = true;
+        supabaseDbCache.users[cachedIdx].isPsychologist = true;
+        if (profileId) supabaseDbCache.users[cachedIdx].psychologist_profile_id = profileId;
+      }
+    }
+
+    const freshUser = await readSupabaseRowById('users', userId);
+    console.log(`[become-psychologist] freshUser.is_psychologist=${freshUser?.is_psychologist}`);
+    return res.json({ ...(freshUser || existingUser), is_psychologist: true, isPsychologist: true });
+  } catch (err) {
+    console.error('Error in POST /api/become-psychologist', err);
+    return res.status(500).json({ error: err?.message || 'Error interno' });
   }
 });
 
@@ -6512,8 +7043,26 @@ app.post('/api/invitations', authenticateRequest, async (req, res) => {
       console.log(`❌ [POST /api/invitations] Subscription required for psych ${psychUserId}`);
       return res.status(402).json({
         error: 'subscription_required',
-        message: 'Tu período de prueba ha finalizado. Activa la suscripción por €24.99/mes para continuar.',
+        message: 'Tu período de prueba ha finalizado. Activa una suscripción para continuar.',
         trialDaysLeft: 0
+      });
+    }
+
+    // --- PLAN RELATION LIMIT CHECK ---
+    const sub = getPsychSub(db, psychUserId);
+    const limitCheck = await checkRelationLimit(db, psychUserId, sub);
+    if (!limitCheck.allowed) {
+      console.log(`❌ [POST /api/invitations] Relation limit reached for psych ${psychUserId}: ${limitCheck.currentCount}/${limitCheck.maxRelations} (plan: ${limitCheck.plan})`);
+      return res.status(402).json({
+        error: 'patient_limit_reached',
+        message: `Has alcanzado el límite de ${limitCheck.maxRelations} pacientes activos de tu plan ${limitCheck.planName}. Mejora a ${limitCheck.upgradeToName} para continuar.`,
+        currentCount: limitCheck.currentCount,
+        maxRelations: limitCheck.maxRelations,
+        plan: limitCheck.plan,
+        planName: limitCheck.planName,
+        upgradeTo: limitCheck.upgradeTo,
+        upgradeToName: limitCheck.upgradeToName,
+        upgradeToPrice: limitCheck.upgradeToPrice
       });
     }
   }
@@ -10227,8 +10776,26 @@ app.post('/api/relationships', authenticateRequest, async (req, res) => {
         console.log(`❌ [POST /api/relationships] Subscription required for psych ${psychId}`);
         return res.status(402).json({
           error: 'subscription_required',
-          message: 'Tu período de prueba ha finalizado. Activa la suscripción por €24.99/mes para continuar.',
+          message: 'Tu período de prueba ha finalizado. Activa una suscripción para continuar.',
           trialDaysLeft: 0
+        });
+      }
+
+      // --- PLAN RELATION LIMIT CHECK ---
+      const sub = getPsychSub(dbCheck, psychId);
+      const limitCheck = await checkRelationLimit(dbCheck, psychId, sub);
+      if (!limitCheck.allowed) {
+        console.log(`❌ [POST /api/relationships] Relation limit reached for psych ${psychId}: ${limitCheck.currentCount}/${limitCheck.maxRelations} (plan: ${limitCheck.plan})`);
+        return res.status(402).json({
+          error: 'patient_limit_reached',
+          message: `Has alcanzado el límite de ${limitCheck.maxRelations} pacientes activos de tu plan ${limitCheck.planName}. Mejora a ${limitCheck.upgradeToName} para continuar.`,
+          currentCount: limitCheck.currentCount,
+          maxRelations: limitCheck.maxRelations,
+          plan: limitCheck.plan,
+          planName: limitCheck.planName,
+          upgradeTo: limitCheck.upgradeTo,
+          upgradeToName: limitCheck.upgradeToName,
+          upgradeToPrice: limitCheck.upgradeToPrice
         });
       }
     }

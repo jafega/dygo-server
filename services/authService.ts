@@ -674,7 +674,7 @@ export const adminDeleteUser = async (targetEmail: string) => {
 };
 
 // Stripe: create a Checkout session (redirect to Stripe hosted checkout)
-export const createCheckoutSession = async () => {
+export const createCheckoutSession = async (options?: { plan_id?: string; subscription_type?: 'psychologist' | 'patient' }) => {
     if (!USE_BACKEND) {
         // Local demo: just toggle premium for 14 days
         const current = await getCurrentUser();
@@ -685,13 +685,19 @@ export const createCheckoutSession = async () => {
         users[idx].isPremium = true;
         users[idx].premiumUntil = Date.now() + 14 * 24 * 60 * 60 * 1000;
         saveLocalUsers(users);
-        // Also note: support opening Settings to refresh the UI; return current url
         return { url: window.location.href };
     }
 
     const current = await getCurrentUser();
     if (!current) throw new Error('No authenticated user');
-    const res = await fetch(`${API_URL}/stripe-create-checkout-session`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({}) });
+    const res = await fetch(`${API_URL}/stripe-create-checkout-session`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        plan_id: options?.plan_id || 'starter',
+        subscription_type: options?.subscription_type || 'psychologist'
+      })
+    });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || 'Error creating checkout session');
@@ -699,7 +705,7 @@ export const createCheckoutSession = async () => {
     return await res.json();
 };
 
-export const createBillingPortalSession = async () => {
+export const createBillingPortalSession = async (subscriptionType?: 'psychologist' | 'patient') => {
     if (!USE_BACKEND) {
         const current = await getCurrentUser();
         if (!current) throw new Error('No authenticated user');
@@ -709,7 +715,11 @@ export const createBillingPortalSession = async () => {
 
     const current = await getCurrentUser();
     if (!current) throw new Error('No authenticated user');
-    const res = await fetch(`${API_URL}/stripe-create-portal-session`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({}) });
+    const res = await fetch(`${API_URL}/stripe-create-portal-session`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ subscription_type: subscriptionType || 'psychologist' })
+    });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || 'Error creating portal session');
