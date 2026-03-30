@@ -3226,8 +3226,9 @@ const handleAdminCreatePatient = async (req, res) => {
     }
 
     // --- PLAN RELATION LIMIT CHECK ---
+    // Master users bypass all relation limits
     const psychSub = getPsychSub(db, String(psychologistId));
-    const limitCheck = await checkRelationLimit(db, String(psychologistId), psychSub);
+    const limitCheck = access.isMaster ? { allowed: true } : await checkRelationLimit(db, String(psychologistId), psychSub);
     if (!limitCheck.allowed) {
       console.log(`❌ [handleAdminCreatePatient] Relation limit reached for psych ${psychologistId}: ${limitCheck.currentCount}/${limitCheck.maxRelations} (plan: ${limitCheck.plan})`);
       return res.status(402).json({
@@ -7061,7 +7062,7 @@ app.post('/api/invitations', authenticateRequest, async (req, res) => {
 
     // --- PLAN RELATION LIMIT CHECK ---
     const sub = getPsychSub(db, psychUserId);
-    const limitCheck = await checkRelationLimit(db, psychUserId, sub);
+    const limitCheck = access.isMaster ? { allowed: true } : await checkRelationLimit(db, psychUserId, sub);
     if (!limitCheck.allowed) {
       console.log(`❌ [POST /api/invitations] Relation limit reached for psych ${psychUserId}: ${limitCheck.currentCount}/${limitCheck.maxRelations} (plan: ${limitCheck.plan})`);
       return res.status(402).json({
@@ -10794,7 +10795,7 @@ app.post('/api/relationships', authenticateRequest, async (req, res) => {
 
       // --- PLAN RELATION LIMIT CHECK ---
       const sub = getPsychSub(dbCheck, psychId);
-      const limitCheck = await checkRelationLimit(dbCheck, psychId, sub);
+      const limitCheck = access.isMaster ? { allowed: true } : await checkRelationLimit(dbCheck, psychId, sub);
       if (!limitCheck.allowed) {
         console.log(`❌ [POST /api/relationships] Relation limit reached for psych ${psychId}: ${limitCheck.currentCount}/${limitCheck.maxRelations} (plan: ${limitCheck.plan})`);
         return res.status(402).json({

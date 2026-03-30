@@ -68,6 +68,20 @@ const UpgradeModal: React.FC<UpgradeModalProps> = ({ currentUser, trialDaysLeft,
   const isCurrentPlan = (planId: string) => currentPlanId === planId;
   const isSuggested = (planId: string) => suggestedPlanId === planId;
 
+  // A plan is insufficient if it can't cover the existing patient count
+  const isPlanInsufficient = (plan: PlanInfo): boolean => {
+    if (plan.maxRelations === null) return false; // unlimited always ok
+    if (typeof activeRelations !== 'number') return false;
+    return activeRelations > plan.maxRelations;
+  };
+
+  // Auto-derive the minimum viable plan from activeRelations when no suggestedPlanId given
+  const effectiveSuggestedId = suggestedPlanId ?? (() => {
+    if (typeof activeRelations !== 'number') return undefined;
+    const viable = PLANS.find(p => p.maxRelations === null || p.maxRelations > activeRelations);
+    return viable?.id;
+  })();
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl p-8 relative max-h-[90vh] overflow-y-auto">
@@ -106,18 +120,27 @@ const UpgradeModal: React.FC<UpgradeModalProps> = ({ currentUser, trialDaysLeft,
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           {PLANS.map((plan) => {
             const current = isCurrentPlan(plan.id);
-            const suggested = isSuggested(plan.id);
-            const highlight = suggested || (plan.id === 'mainder' && !currentPlanId && !suggestedPlanId);
+            const insufficient = isPlanInsufficient(plan);
+            const suggested = plan.id === effectiveSuggestedId;
+            const highlight = suggested || (plan.id === 'mainder' && !currentPlanId && !effectiveSuggestedId);
+            const disabled = loading !== null || current || insufficient;
             return (
               <div
                 key={plan.id}
                 className={`rounded-xl border-2 p-5 flex flex-col transition-all ${
-                  highlight ? 'border-indigo-500 bg-indigo-50 shadow-lg scale-[1.02]' : 'border-gray-200 bg-white'
+                  insufficient
+                    ? 'border-gray-200 bg-gray-50 opacity-50'
+                    : highlight
+                      ? 'border-indigo-500 bg-indigo-50 shadow-lg scale-[1.02]'
+                      : 'border-gray-200 bg-white'
                 } ${current ? 'opacity-70' : ''}`}
               >
-                {highlight && (
+                {insufficient && (
+                  <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">No disponible</span>
+                )}
+                {!insufficient && highlight && (
                   <span className="text-xs font-semibold text-indigo-600 uppercase tracking-wide mb-2">
-                    {suggested ? 'Recomendado' : 'Más popular'}
+                    {suggested ? (currentPlanId ? 'Upgrade recomendado' : 'Recomendado') : 'Más popular'}
                   </span>
                 )}
                 <h3 className="text-lg font-bold text-gray-900">{plan.name}</h3>
@@ -140,14 +163,16 @@ const UpgradeModal: React.FC<UpgradeModalProps> = ({ currentUser, trialDaysLeft,
                   </li>
                 </ul>
                 <button
-                  onClick={() => handleSubscribe(plan.id)}
-                  disabled={loading !== null || current}
+                  onClick={() => !disabled && handleSubscribe(plan.id)}
+                  disabled={disabled}
                   className={`w-full font-semibold py-2.5 px-4 rounded-xl transition-colors flex items-center justify-center gap-2 text-sm ${
                     current
                       ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                      : highlight
-                        ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                        : 'bg-gray-800 hover:bg-gray-900 text-white'
+                      : insufficient
+                        ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                        : highlight
+                          ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                          : 'bg-gray-800 hover:bg-gray-900 text-white'
                   } disabled:opacity-60`}
                 >
                   {loading === plan.id ? (
@@ -160,6 +185,8 @@ const UpgradeModal: React.FC<UpgradeModalProps> = ({ currentUser, trialDaysLeft,
                     </>
                   ) : current ? (
                     'Plan actual'
+                  ) : insufficient ? (
+                    'No disponible'
                   ) : (
                     `Elegir ${plan.name}`
                   )}
