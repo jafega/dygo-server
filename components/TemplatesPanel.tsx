@@ -86,6 +86,16 @@ const PATIENT_VARS = [
   { id: 'telefono',  label: 'Teléfono',  cls: 'bg-pink-50 text-pink-700 border-pink-200 hover:bg-pink-100' },
 ];
 
+// ─── Psychologist variable chip definitions ───────────────────────────────────
+const PSYCH_VARS = [
+  { id: 'psicologo_nombre',       label: 'Tu nombre',       cls: 'bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100' },
+  { id: 'psicologo_colegiado',    label: 'Nº colegiado',   cls: 'bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100' },
+  { id: 'psicologo_especialidad', label: 'Especialidad',    cls: 'bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100' },
+  { id: 'psicologo_direccion',    label: 'Tu dirección',    cls: 'bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100' },
+  { id: 'psicologo_telefono',     label: 'Tu teléfono',     cls: 'bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100' },
+  { id: 'psicologo_email',        label: 'Tu email',        cls: 'bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100' },
+];
+
 // --- Types ---
 
 interface Template {
@@ -160,8 +170,18 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
   const [isArchiving, setIsArchiving] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
 
+  // Psychologist profile (for resolving {{psicologo_*}} vars at send time)
+  const [psychProfile, setPsychProfile] = useState<Record<string, string>>({});
+
   useEffect(() => {
     loadTemplates();
+  }, [psychologistId]);
+
+  useEffect(() => {
+    apiFetch(`${API_URL}/psychologist/${psychologistId}/profile`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) setPsychProfile(data); })
+      .catch(() => {});
   }, [psychologistId]);
 
   const loadTemplates = async () => {
@@ -329,6 +349,19 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
     const patientUserId = selectedPatient.userId || selectedPatient.user_id || selectedPatient.id;
     setIsSending(true);
     try {
+      // Resolve psychologist variables before storing the signature
+      const address = [psychProfile.address, psychProfile.city, psychProfile.postalCode].filter(Boolean).join(', ');
+      const psychVars: Record<string, string> = {
+        psicologo_nombre:       psychProfile.name            || '',
+        psicologo_colegiado:    psychProfile.professionalId  || '',
+        psicologo_especialidad: psychProfile.specialty       || '',
+        psicologo_direccion:    address,
+        psicologo_telefono:     psychProfile.phone           || '',
+        psicologo_email:        psychProfile.email           || '',
+      };
+      const resolvedContent = sendingTemplate.content.replace(/\{\{([^}]+)\}\}/g, (_full, varName) =>
+        psychVars[varName] !== undefined ? psychVars[varName] : `{{${varName}}}`
+      );
       const res = await apiFetch(`${API_URL}/signatures`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -336,7 +369,7 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
           template_id: sendingTemplate.id,
           psych_user_id: psychologistId,
           patient_user_id: patientUserId,
-          content: sendingTemplate.content
+          content: resolvedContent
         })
       });
       if (!res.ok) throw new Error(await res.text());
@@ -531,7 +564,7 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
             <div className="flex items-center gap-2 mb-2">
               <GripHorizontal size={14} className="text-slate-400" />
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
-                Arrastra o haz clic para insertar campos del paciente
+                Campos del paciente
               </span>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -562,9 +595,34 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
                 + Insertar firma
               </button>
             </div>
+            <div className="flex items-center gap-2 mt-3 mb-2">
+              <User size={14} className="text-slate-400" />
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                Tus datos (psicólogo/a) — se rellenan al enviar
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {PSYCH_VARS.map(v => (
+                <button
+                  key={v.id}
+                  type="button"
+                  draggable
+                  onDragStart={e => {
+                    e.dataTransfer.setData('text/plain', `{{${v.id}}}`);
+                    e.dataTransfer.effectAllowed = 'copy';
+                  }}
+                  onClick={() => insertAtCursor(`{{${v.id}}}`)}
+                  className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border cursor-grab active:cursor-grabbing transition-colors select-none ${v.cls}`}
+                  title={`Insertar \{\{${v.id}\}\} en la posición del cursor`}
+                >
+                  {v.label}
+                  <span className="opacity-50 font-mono text-[10px]">{`{{${v.id}}}`}</span>
+                </button>
+              ))}
+            </div>
             <p className="mt-2 text-[11px] text-slate-400">
-              Los campos <code className="bg-white px-1 rounded">{'{{nombre}}'}</code>, <code className="bg-white px-1 rounded">{'{{cif}}'}</code>, etc. se rellenarán con los datos del paciente al firmar.
-              Puedes marcar varias posiciones de firma — el paciente firmará una vez y la firma aparecerá en todos los marcadores.
+              Campos del <strong>paciente</strong>: se rellenan al firmar. ·
+              Campos <span className="text-violet-600 font-semibold">del psicólogo/a</span>: se sustituyen desde tu perfil al enviar.
             </p>
           </div>
         )}

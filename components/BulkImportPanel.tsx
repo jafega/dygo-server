@@ -15,7 +15,7 @@ import { normalizePhone } from '../services/phoneUtils';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type RowStatus = 'pending' | 'importing' | 'success' | 'error' | 'duplicate' | 'skipped';
+type RowStatus = 'pending' | 'importing' | 'success' | 'error' | 'duplicate' | 'skipped' | 'inactive';
 
 interface ImportRow {
   _id: string;
@@ -32,6 +32,7 @@ interface ImportRow {
   tags: string;
   _status: RowStatus;
   _error?: string;
+  _patientId?: string;
 }
 
 interface BulkImportPanelProps {
@@ -104,6 +105,7 @@ const STATUS_CONFIG: Record<RowStatus, { label: string; classes: string }> = {
   error:     { label: 'Error', classes: 'bg-red-100 text-red-700' },
   duplicate: { label: 'Duplicado', classes: 'bg-amber-100 text-amber-700' },
   skipped:   { label: 'Omitido', classes: 'bg-slate-100 text-slate-500' },
+  inactive:  { label: 'Inactivo', classes: 'bg-orange-100 text-orange-700' },
 };
 
 const ACCEPTED_EXTS = '.csv,.xlsx,.xls,.pdf,.ods';
@@ -460,18 +462,20 @@ REGLAS CRÍTICAS — LEE ESTO CON ATENCIÓN ANTES DE RESPONDER:
             break;
           }
           const isDuplicate = (createData.error ?? '').includes('Ya existe una relación');
+          const isInactive = createData.error === 'RELATIONSHIP_INACTIVE';
           setRows(prev =>
             prev.map(r =>
               r._id === row._id
                 ? {
                     ...r,
-                    _status: isDuplicate ? 'duplicate' : 'error',
-                    _error: createData.error ?? `HTTP ${createRes.status}`,
+                    _status: isInactive ? 'inactive' : isDuplicate ? 'duplicate' : 'error',
+                    _error: isInactive ? 'Relación inactiva' : createData.error ?? `HTTP ${createRes.status}`,
+                    _patientId: isInactive ? createData.patientId : r._patientId,
                   }
                 : r
             )
           );
-          if (!isDuplicate) errorCountLocal++;
+          if (!isDuplicate && !isInactive) errorCountLocal++;
           continue;
         }
 
@@ -526,6 +530,25 @@ REGLAS CRÍTICAS — LEE ESTO CON ATENCIÓN ANTES DE RESPONDER:
     }
   };
 
+  const handleReactivateRow = async (row: ImportRow) => {
+    if (!row._patientId) return;
+    setRows(prev => prev.map(r => r._id === row._id ? { ...r, _status: 'importing', _error: undefined } : r));
+    try {
+      const response = await apiFetch(`${API_URL}/relationships/${psychologistId}/patients/${row._patientId}/reactivate`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': psychologistId },
+      });
+      if (response.ok) {
+        setRows(prev => prev.map(r => r._id === row._id ? { ...r, _status: 'success', _error: undefined } : r));
+      } else {
+        const errData = await response.json();
+        setRows(prev => prev.map(r => r._id === row._id ? { ...r, _status: 'error', _error: errData.error || 'Error al reactivar' } : r));
+      }
+    } catch (err: any) {
+      setRows(prev => prev.map(r => r._id === row._id ? { ...r, _status: 'error', _error: err.message || 'Error de red' } : r));
+    }
+  };
+
   const resetPanel = () => {
     setRows([]);
     setParseError(null);
@@ -539,6 +562,7 @@ REGLAS CRÍTICAS — LEE ESTO CON ATENCIÓN ANTES DE RESPONDER:
   const successCount   = rows.filter(r => r._status === 'success').length;
   const errorCount     = rows.filter(r => r._status === 'error').length;
   const duplicateCount = rows.filter(r => r._status === 'duplicate').length;
+  const inactiveCount  = rows.filter(r => r._status === 'inactive').length;
   const pendingCount   = rows.filter(r => r._status === 'pending').length;
 
   // Rows that are valid AND not yet successfully imported
@@ -773,6 +797,7 @@ REGLAS CRÍTICAS — LEE ESTO CON ATENCIÓN ANTES DE RESPONDER:
                         row._status === 'success'   ? 'bg-emerald-50/40' :
                         row._status === 'error'     ? 'bg-red-50/40' :
                         row._status === 'duplicate' ? 'bg-amber-50/40' :
+                        row._status === 'inactive'  ? 'bg-orange-50/40' :
                         row._status === 'importing' ? 'bg-indigo-50/40' :
                         'bg-white hover:bg-slate-50'
                       }`}>
@@ -949,7 +974,16 @@ REGLAS CRÍTICAS — LEE ESTO CON ATENCIÓN ANTES DE RESPONDER:
                               )}
                               {cfg.label}
                             </span>
-                            {row._error && (
+                            {row._status === 'inactive' && row._patientId && (
+                              <button
+                                onClick={() => handleReactivateRow(row)}
+                                disabled={isImporting}
+                                className="text-xs text-blue-600 hover:underline font-medium"
+                              >
+                                Reactivar
+                              </button>
+                            )}
+                            {row._error && row._status !== 'inactive' && (
                               <button
                                 onClick={() => toggleError(row._id)}
                                 className="text-xs text-red-500 hover:underline flex items-center gap-0.5"
@@ -1030,6 +1064,21 @@ REGLAS CRÍTICAS — LEE ESTO CON ATENCIÓN ANTES DE RESPONDER:
                   )}
                   {duplicateCount > 0 && (
                     <span className="text-amber-700">⚠ {duplicateCount} ya existían (relación duplicada)</span>
+                  )}
+                  {inactiveCount > 0 && (
+                    <span className="text-orange-700 flex items-center gap-2">
+                      ⏸ {inactiveCount} con relación inactiva
+                      <button
+                        onClick={async () => {
+                          const inactiveRows = rows.filter(r => r._status === 'inactive' && r._patientId);
+                          for (const row of inactiveRows) await handleReactivateRow(row);
+                        }}
+                        disabled={isImporting}
+                        className="text-blue-600 hover:underline text-xs font-medium"
+                      >
+                        Reactivar todos
+                      </button>
+                    </span>
                   )}
                   {errorCount > 0 && (
                     <span className="text-red-700">✗ {errorCount} con errores</span>
@@ -1140,6 +1189,9 @@ REGLAS CRÍTICAS — LEE ESTO CON ATENCIÓN ANTES DE RESPONDER:
               )}
               {rows.filter(r => r._status === 'duplicate').length > 0 && (
                 <p className="text-amber-700">⚠ {rows.filter(r => r._status === 'duplicate').length} ya tenían relación activa (omitidos)</p>
+              )}
+              {rows.filter(r => r._status === 'inactive').length > 0 && (
+                <p className="text-orange-700">⏸ {rows.filter(r => r._status === 'inactive').length} con relación inactiva — usa el botón "Reactivar" en la tabla</p>
               )}
               {rows.filter(r => r._status === 'error').length > 0 && (
                 <>

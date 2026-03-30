@@ -54,6 +54,8 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
   const [inviteEmail, setInviteEmail] = useState('');
   const [isSendingInvite, setIsSendingInvite] = useState(false);
   const [upgradeModal, setUpgradeModal] = useState<boolean>(false);
+  const [reactivateModal, setReactivateModal] = useState<{ patientId: string; patientName: string } | null>(null);
+  const [isReactivating, setIsReactivating] = useState(false);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -271,11 +273,38 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ currentUser, onPend
       console.error('Error sending invitation', err);
       if (err?.status === 402 || err?.error === 'subscription_required' || err?.error === 'patient_limit_reached') {
         setUpgradeModal(true);
+      } else if (err?.status === 409 || err?.error === 'RELATIONSHIP_INACTIVE') {
+        setReactivateModal({ patientId: err.patientId, patientName: err.patientName || targetEmail });
       } else {
         setToast({ type: 'error', text: err?.message || 'No se pudo enviar la solicitud' });
       }
     } finally {
       setIsSendingInvite(false);
+    }
+  };
+
+  const handleReactivatePatient = async () => {
+    if (!currentUser || !reactivateModal) return;
+    setIsReactivating(true);
+    try {
+      const response = await apiFetch(`${API_URL}/relationships/${currentUser.id}/patients/${reactivateModal.patientId}/reactivate`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': currentUser.id }
+      });
+      if (response.ok) {
+        setToast({ type: 'success', text: 'Paciente reactivado correctamente' });
+        setInviteEmail('');
+        setReactivateModal(null);
+        await loadConnections();
+      } else {
+        const errData = await response.json();
+        setToast({ type: 'error', text: errData.error || 'No se pudo reactivar el paciente' });
+      }
+    } catch (err: any) {
+      console.error('Error reactivating patient:', err);
+      setToast({ type: 'error', text: 'Error al reactivar el paciente' });
+    } finally {
+      setIsReactivating(false);
     }
   };
 
@@ -757,6 +786,45 @@ ${currentUser.name || 'Tu psicólogo/a'}
         onClose={() => setUpgradeModal(false)}
         returnPanel="connections"
       />
+    )}
+
+    {reactivateModal && (
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4" onClick={() => setReactivateModal(null)}>
+        <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center gap-3">
+            <div className="bg-blue-100 p-3 rounded-full">
+              <UserCheck size={24} className="text-blue-600" />
+            </div>
+            <h3 className="text-xl font-bold text-slate-900">Paciente inactivo</h3>
+          </div>
+          <p className="text-sm text-slate-700">
+            Ya tienes una relación con <strong>{reactivateModal.patientName}</strong>, pero está marcada como inactiva. ¿Quieres reactivarla para que vuelva a aparecer en tu lista de pacientes?
+          </p>
+          <div className="flex gap-3 pt-2">
+            <button
+              onClick={() => setReactivateModal(null)}
+              disabled={isReactivating}
+              className="flex-1 px-4 py-3 bg-slate-100 text-slate-700 rounded-lg font-medium hover:bg-slate-200 transition-colors disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleReactivatePatient}
+              disabled={isReactivating}
+              className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {isReactivating ? (
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <>
+                  <UserCheck size={18} />
+                  Reactivar
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
     )}
     </>
   );

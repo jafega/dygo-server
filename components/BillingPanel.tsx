@@ -2358,7 +2358,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                   Cancelar
                 </button>
                 <button
-                  onClick={handleCancelInvoice}
+                  onClick={() => handleCancelInvoice()}
                   className="px-4 py-2 text-sm bg-red-600 text-white hover:bg-red-700 rounded-lg transition-colors font-medium"
                 >
                   Emitir rectificativa

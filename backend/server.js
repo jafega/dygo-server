@@ -3188,25 +3188,34 @@ const handleAdminCreatePatient = async (req, res) => {
       console.log(`[handleAdminCreatePatient] Usuario ya existe: ${existingPatientId}, verificando relación...`);
       
       // Verificar si ya existe una relación entre este psicólogo y este paciente
-      let relationshipExists = false;
+      let existingRelRecord = null;
       
       if (supabaseAdmin) {
         const { data: existingRel } = await supabaseAdmin
           .from('care_relationships')
-          .select('id')
+          .select('id, active')
           .eq('psychologist_user_id', psychologistId)
           .eq('patient_user_id', existingPatientId)
           .maybeSingle();
         
-        relationshipExists = !!existingRel;
+        existingRelRecord = existingRel;
       } else {
-        relationshipExists = db.careRelationships?.some(r => 
+        existingRelRecord = db.careRelationships?.find(r => 
           r.psychologist_user_id === psychologistId && 
           r.patient_user_id === existingPatientId
-        );
+        ) || null;
       }
       
-      if (relationshipExists) {
+      if (existingRelRecord) {
+        if (existingRelRecord.active === false) {
+          const patientName = existingPatient?.name || existingPatient?.firstName || name || '';
+          return res.status(409).json({
+            error: 'RELATIONSHIP_INACTIVE',
+            patientId: existingPatientId,
+            patientName,
+            message: 'Ya existe una relación inactiva con este paciente.'
+          });
+        }
         return res.status(400).json({ error: 'Ya existe una relación con este paciente' });
       }
       
@@ -6705,6 +6714,41 @@ app.post('/api/invitations', authenticateRequest, async (req, res) => {
     invitation.patient_user_name = invitation.patient_user_name || existingPatient.name;
     // Mantener compatibilidad legacy
     invitation.patientId = existingPatient.id;
+
+    // Verificar si ya existe una relación inactiva con este paciente
+    let inactiveRel = Array.isArray(db.careRelationships)
+      ? db.careRelationships.find(r =>
+          r.psychologist_user_id === psychUserId &&
+          r.patient_user_id === existingPatient.id &&
+          r.active === false
+        )
+      : null;
+
+    if (!inactiveRel && supabaseAdmin) {
+      try {
+        const { data: supRel } = await supabaseAdmin
+          .from('care_relationships')
+          .select('id, active')
+          .eq('psychologist_user_id', psychUserId)
+          .eq('patient_user_id', existingPatient.id)
+          .eq('active', false)
+          .maybeSingle();
+        if (supRel) inactiveRel = supRel;
+      } catch (e) {
+        console.error('[POST /api/invitations] Error checking inactive rel:', e);
+      }
+    }
+
+    if (inactiveRel) {
+      const patientName = existingPatient.name || existingPatient.data?.name || normalizedPatientEmail;
+      console.log(`⚠️ [POST /api/invitations] Relación inactiva encontrada con paciente ${existingPatient.id}`);
+      return res.status(409).json({
+        error: 'RELATIONSHIP_INACTIVE',
+        patientId: existingPatient.id,
+        patientName,
+        message: 'Ya existe una relación inactiva con este paciente.'
+      });
+    }
   } else {
     console.log(`📧 Paciente ${normalizedPatientEmail} no existe - invitación queda PENDING`);
   }
@@ -10793,7 +10837,7 @@ app.put('/api/relationships/:id', authenticateRequest, async (req, res) => {
   }
 });
 
-// Eliminar paciente (relación y sesiones)
+// Eliminar paciente (solo si no tiene datos; si tiene datos, usar /inactive)
 app.delete('/api/relationships/:psychologistId/patients/:patientId', authenticateRequest, async (req, res) => {
   try {
     const { psychologistId, patientId } = req.params;
@@ -10804,9 +10848,6 @@ app.delete('/api/relationships/:psychologistId/patients/:patientId', authenticat
       return res.status(400).json({ error: 'Se requieren psychologistId y patientId' });
     }
 
-    // Verificar si el paciente tiene autenticación (auth_user_id)
-    let patientHasAuth = false;
-    
     if (supabaseAdmin) {
       try {
         // Buscar el usuario para ver si tiene auth_user_id
@@ -10816,15 +10857,36 @@ app.delete('/api/relationships/:psychologistId/patients/:patientId', authenticat
           .eq('id', patientId)
           .single();
         
-        if (userError && userError.code !== 'PGRST116') { // PGRST116 = no rows returned
+        if (userError && userError.code !== 'PGRST116') {
           console.error('[DELETE patient] Error al buscar usuario:', userError);
           throw userError;
         }
         
-        patientHasAuth = userData && userData.auth_user_id;
-        console.log('[DELETE patient] ¿Paciente tiene auth?:', patientHasAuth, '(auth_user_id:', userData?.auth_user_id || 'null', ')');
+        const patientHasAuth = !!(userData && userData.auth_user_id);
+        console.log('[DELETE patient] ¿Paciente tiene auth?:', patientHasAuth);
+
+        // Verificar si el paciente tiene datos asociados
+        const [sessionsResult, invoicesResult, entriesResult] = await Promise.all([
+          supabaseAdmin.from('sessions').select('id', { count: 'exact', head: true })
+            .eq('psychologist_user_id', psychologistId).eq('patient_user_id', patientId),
+          supabaseAdmin.from('invoices').select('id', { count: 'exact', head: true })
+            .eq('psychologist_user_id', psychologistId).eq('patient_user_id', patientId),
+          supabaseAdmin.from('session_entry').select('id', { count: 'exact', head: true })
+            .eq('creator_user_id', psychologistId).eq('target_user_id', patientId),
+        ]);
+
+        const hasData = (sessionsResult.count || 0) > 0 || (invoicesResult.count || 0) > 0 || (entriesResult.count || 0) > 0;
+        console.log('[DELETE patient] ¿Tiene datos?:', hasData, { sessions: sessionsResult.count, invoices: invoicesResult.count, entries: entriesResult.count });
+
+        if (hasData) {
+          return res.status(409).json({
+            error: 'PATIENT_HAS_DATA',
+            canDeactivate: true,
+            message: 'El paciente tiene datos asociados. Puedes marcarlo como inactivo en lugar de eliminarlo.'
+          });
+        }
         
-        // Eliminar la relación
+        // Sin datos → eliminar la relación
         const { error: relError } = await supabaseAdmin
           .from('care_relationships')
           .delete()
@@ -10835,17 +10897,16 @@ app.delete('/api/relationships/:psychologistId/patients/:patientId', authenticat
           console.error('[DELETE patient] Error eliminando relación:', relError);
           throw relError;
         }
-        
-        // Eliminar sesiones relacionadas con este psicólogo y paciente
-        const { error: sessionsError } = await supabaseAdmin
-          .from('sessions')
-          .delete()
-          .eq('psychologist_user_id', psychologistId)
-          .eq('patient_user_id', patientId);
-        
-        if (sessionsError) {
-          console.error('[DELETE patient] Error eliminando sesiones:', sessionsError);
-          throw sessionsError;
+
+        // Si el paciente no tiene cuenta propia, eliminar también el usuario
+        if (!patientHasAuth && userData) {
+          const { error: userDeleteError } = await supabaseAdmin
+            .from('users')
+            .delete()
+            .eq('id', patientId);
+          if (userDeleteError) {
+            console.error('[DELETE patient] Error eliminando usuario (no bloqueante):', userDeleteError);
+          }
         }
         
         // Actualizar cache
@@ -10855,10 +10916,8 @@ app.delete('/api/relationships/:psychologistId/patients/:patientId', authenticat
               !(rel.psychologist_user_id === psychologistId && rel.patient_user_id === patientId)
             );
           }
-          if (supabaseDbCache.sessions) {
-            supabaseDbCache.sessions = supabaseDbCache.sessions.filter(session =>
-              !(session.psychologist_user_id === psychologistId && session.patient_user_id === patientId)
-            );
+          if (!patientHasAuth && supabaseDbCache.users) {
+            supabaseDbCache.users = supabaseDbCache.users.filter(u => u.id !== patientId);
           }
         }
         
@@ -10867,17 +10926,10 @@ app.delete('/api/relationships/:psychologistId/patients/:patientId', authenticat
           success: true, 
           message: patientHasAuth 
             ? 'Relación eliminada. El paciente puede seguir accediendo a su información.' 
-            : 'Paciente y sesiones eliminados correctamente.'
+            : 'Paciente eliminado correctamente.'
         });
       } catch (err) {
         console.error('[DELETE patient] ❌ Error en Supabase:', err);
-        console.error('[DELETE patient] Error details:', {
-          message: err?.message,
-          code: err?.code,
-          details: err?.details,
-          hint: err?.hint,
-          stack: err?.stack
-        });
         return res.status(500).json({ 
           error: 'Error eliminando el paciente',
           details: err?.message || String(err)
@@ -10887,10 +10939,26 @@ app.delete('/api/relationships/:psychologistId/patients/:patientId', authenticat
     
     // Fallback a DB local
     const db = getDb();
-    
+
+    // Verificar si el paciente tiene datos en DB local
+    const hasSessions = Array.isArray(db.sessions) && db.sessions.some(s =>
+      s.psychologist_user_id === psychologistId && s.patient_user_id === patientId
+    );
+    const hasInvoices = Array.isArray(db.invoices) && db.invoices.some(inv =>
+      inv.psychologist_user_id === psychologistId && inv.patient_user_id === patientId
+    );
+
+    if (hasSessions || hasInvoices) {
+      return res.status(409).json({
+        error: 'PATIENT_HAS_DATA',
+        canDeactivate: true,
+        message: 'El paciente tiene datos asociados. Puedes marcarlo como inactivo en lugar de eliminarlo.'
+      });
+    }
+
     // Verificar si tiene auth en DB local
-    const userExists = db.users && db.users.find(u => u.id === patientId && u.email);
-    patientHasAuth = !!userExists;
+    const userInLocal = db.users && db.users.find(u => u.id === patientId);
+    const patientHasAuth = !!(userInLocal && userInLocal.auth_user_id);
     
     // Eliminar relación
     if (Array.isArray(db.careRelationships)) {
@@ -10899,12 +10967,10 @@ app.delete('/api/relationships/:psychologistId/patients/:patientId', authenticat
         return res.status(404).json({ error: 'Relación no encontrada' });
       }
     }
-    
-    // Eliminar sesiones
-    if (Array.isArray(db.sessions)) {
-      db.sessions = db.sessions.filter(session =>
-        !(session.psychologist_user_id === psychologistId && session.patient_user_id === patientId)
-      );
+
+    // Si no tiene cuenta propia, eliminar también el usuario
+    if (!patientHasAuth && userInLocal) {
+      db.users = db.users.filter(u => u.id !== patientId);
     }
     
     await saveDb(db, { awaitPersistence: true });
@@ -10913,11 +10979,125 @@ app.delete('/api/relationships/:psychologistId/patients/:patientId', authenticat
       success: true,
       message: patientHasAuth 
         ? 'Relación eliminada. El paciente puede seguir accediendo a su información.' 
-        : 'Paciente y sesiones eliminados correctamente.'
+        : 'Paciente eliminado correctamente.'
     });
   } catch (err) {
     console.error('❌ Error deleting patient:', err);
     return res.status(500).json({ error: err?.message || 'No se pudo eliminar el paciente' });
+  }
+});
+
+// Marcar paciente como inactivo
+app.patch('/api/relationships/:psychologistId/patients/:patientId/inactive', authenticateRequest, async (req, res) => {
+  try {
+    const { psychologistId, patientId } = req.params;
+
+    if (!psychologistId || !patientId) {
+      return res.status(400).json({ error: 'Se requieren psychologistId y patientId' });
+    }
+
+    if (supabaseAdmin) {
+      try {
+        const { error } = await supabaseAdmin
+          .from('care_relationships')
+          .update({ active: false })
+          .eq('psychologist_user_id', psychologistId)
+          .eq('patient_user_id', patientId);
+
+        if (error) throw error;
+
+        if (supabaseDbCache?.careRelationships) {
+          supabaseDbCache.careRelationships = supabaseDbCache.careRelationships.map(rel =>
+            rel.psychologist_user_id === psychologistId && rel.patient_user_id === patientId
+              ? { ...rel, active: false }
+              : rel
+          );
+        }
+
+        console.log('[PATCH inactive] ✓ Paciente marcado como inactivo (Supabase)');
+        return res.json({ success: true, message: 'Paciente marcado como inactivo.' });
+      } catch (err) {
+        console.error('[PATCH inactive] ❌ Error en Supabase:', err);
+        return res.status(500).json({ error: err?.message || 'Error al marcar como inactivo' });
+      }
+    }
+
+    // Fallback DB local
+    const db = getDb();
+    const idx = Array.isArray(db.careRelationships)
+      ? db.careRelationships.findIndex(rel =>
+          rel.psychologist_user_id === psychologistId && rel.patient_user_id === patientId
+        )
+      : -1;
+
+    if (idx === -1) {
+      return res.status(404).json({ error: 'Relación no encontrada' });
+    }
+
+    db.careRelationships[idx].active = false;
+    await saveDb(db, { awaitPersistence: true });
+    console.log('[PATCH inactive] ✓ Paciente marcado como inactivo (DB local)');
+    return res.json({ success: true, message: 'Paciente marcado como inactivo.' });
+  } catch (err) {
+    console.error('❌ Error marking patient inactive:', err);
+    return res.status(500).json({ error: err?.message || 'No se pudo marcar como inactivo' });
+  }
+});
+
+// Reactivar paciente (poner active = true en la care_relationship)
+app.patch('/api/relationships/:psychologistId/patients/:patientId/reactivate', authenticateRequest, async (req, res) => {
+  try {
+    const { psychologistId, patientId } = req.params;
+
+    if (!psychologistId || !patientId) {
+      return res.status(400).json({ error: 'Se requieren psychologistId y patientId' });
+    }
+
+    if (supabaseAdmin) {
+      try {
+        const { error } = await supabaseAdmin
+          .from('care_relationships')
+          .update({ active: true })
+          .eq('psychologist_user_id', psychologistId)
+          .eq('patient_user_id', patientId);
+
+        if (error) throw error;
+
+        if (supabaseDbCache?.careRelationships) {
+          supabaseDbCache.careRelationships = supabaseDbCache.careRelationships.map(rel =>
+            rel.psychologist_user_id === psychologistId && rel.patient_user_id === patientId
+              ? { ...rel, active: true }
+              : rel
+          );
+        }
+
+        console.log('[PATCH reactivate] ✓ Paciente reactivado (Supabase)');
+        return res.json({ success: true, message: 'Paciente reactivado correctamente.' });
+      } catch (err) {
+        console.error('[PATCH reactivate] ❌ Error en Supabase:', err);
+        return res.status(500).json({ error: err?.message || 'Error al reactivar' });
+      }
+    }
+
+    // Fallback DB local
+    const db = getDb();
+    const idx = Array.isArray(db.careRelationships)
+      ? db.careRelationships.findIndex(rel =>
+          rel.psychologist_user_id === psychologistId && rel.patient_user_id === patientId
+        )
+      : -1;
+
+    if (idx === -1) {
+      return res.status(404).json({ error: 'Relación no encontrada' });
+    }
+
+    db.careRelationships[idx].active = true;
+    await saveDb(db, { awaitPersistence: true });
+    console.log('[PATCH reactivate] ✓ Paciente reactivado (DB local)');
+    return res.json({ success: true, message: 'Paciente reactivado correctamente.' });
+  } catch (err) {
+    console.error('❌ Error reactivating patient:', err);
+    return res.status(500).json({ error: err?.message || 'No se pudo reactivar el paciente' });
   }
 });
 

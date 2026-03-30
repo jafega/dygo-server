@@ -61,7 +61,9 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   const [patientStats, setPatientStats] = useState<any>(null);
   const [isLoadingStats, setIsLoadingStats] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isDeactivating, setIsDeactivating] = useState(false);
   
   // Docs (templates/signatures) state
   const [docSignatures, setDocSignatures] = useState<any[]>([]);
@@ -1096,9 +1098,16 @@ tr:nth-child(even) td{background:#f8fafc}
       if (response.ok) {
         const result = await response.json();
         alert(result.message || 'Paciente eliminado correctamente');
-        onClose(); // Cerrar el modal
-        // Recargar la página para reflejar los cambios
+        onClose();
         window.location.reload();
+      } else if (response.status === 409) {
+        const errorData = await response.json();
+        if (errorData.error === 'PATIENT_HAS_DATA') {
+          setShowDeleteConfirm(false);
+          setShowDeactivateConfirm(true);
+        } else {
+          alert('Error al eliminar el paciente: ' + (errorData.error || 'Error desconocido'));
+        }
       } else {
         const errorData = await response.json();
         console.error('Error response:', errorData);
@@ -1109,7 +1118,41 @@ tr:nth-child(even) td{background:#f8fafc}
       alert('Error al eliminar el paciente');
     } finally {
       setIsDeleting(false);
-      setShowDeleteConfirm(false);
+    }
+  };
+
+  const handleDeactivatePatient = async () => {
+    if (!currentPsychologistId || !patientUserId) return;
+
+    setIsDeactivating(true);
+    try {
+      const currentUser = await getCurrentUser();
+      if (!currentUser) {
+        alert('Error: Usuario no autenticado');
+        return;
+      }
+
+      const response = await apiFetch(`${API_URL}/relationships/${currentPsychologistId}/patients/${patientUserId}/inactive`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': currentUser.id
+        }
+      });
+
+      if (response.ok) {
+        onClose();
+        window.location.reload();
+      } else {
+        const errorData = await response.json();
+        alert('Error al marcar como inactivo: ' + (errorData.error || 'Error desconocido'));
+      }
+    } catch (error) {
+      console.error('Error deactivating patient:', error);
+      alert('Error al marcar como inactivo');
+    } finally {
+      setIsDeactivating(false);
+      setShowDeactivateConfirm(false);
     }
   };
 
@@ -1371,7 +1414,15 @@ tr:nth-child(even) td{background:#f8fafc}
 
   function docMarkdownToHtml(md: string): string {
     if (!md) return '';
-    const clean = md.replace(/\n\n<!-- SIGNATURE_DATA:.*?-->$/s, '');
+    let clean = md.replace(/\n\n<!-- SIGNATURE_DATA:.*?-->$/s, '');
+
+    // Extract inline signature images before markdown processing
+    const inlineSigs: Record<string, string> = {};
+    clean = clean.replace(/<!-- SIGNATURE_INLINE:firma_(\d+):(data:.*?) -->/g, (_full, n, dataUrl) => {
+      inlineSigs[n] = dataUrl;
+      return `__FIRMASIGNED_${n}__`;
+    });
+
     let html = clean
       .replace(/^### (.+)$/gm, '<h3 style="font-size:1.1em;font-weight:700;margin:12px 0 4px">$1</h3>')
       .replace(/^## (.+)$/gm, '<h2 style="font-size:1.25em;font-weight:700;margin:16px 0 4px">$1</h2>')
@@ -1385,7 +1436,19 @@ tr:nth-child(even) td{background:#f8fafc}
       .replace(/\n\n/g, '</p><p style="margin-bottom:10px">')
       .replace(/\n/g, '<br />');
     html = html.replace(/(<li[\s\S]+?<\/li>)/g, '<ul style="margin:8px 0">$1</ul>');
-    return `<p style="margin-bottom:10px">${html}</p>`;
+    html = `<p style="margin-bottom:10px">${html}</p>`;
+
+    // Replace signed firma tokens with inline signature image
+    html = html.replace(/__FIRMASIGNED_(\d+)__/g, (_full, n) => {
+      const dataUrl = inlineSigs[n];
+      if (!dataUrl) return '';
+      return `<div style="margin:16px 0;padding:12px 16px;border:1px solid #d1fae5;border-radius:10px;background:#f0fdf4;">`
+        + `<p style="font-size:11px;font-weight:600;color:#16a34a;margin:0 0 8px;">✓ Firmado digitalmente</p>`
+        + `<img src="${dataUrl}" style="max-width:240px;max-height:90px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;display:block;" alt="Firma" />`
+        + `</div>`;
+    });
+
+    return html;
   }
 
   async function sendDocumentEmail(sig: any) {
@@ -3364,7 +3427,7 @@ tr:nth-child(even) td{background:#f8fafc}
                         <div>
                           <span className="text-slate-600">Estado:</span>
                           <p className="font-semibold text-slate-900">
-                            {relationship.endedAt ? '❌ Finalizada' : '✅ Activa'}
+                            {relationship.endedAt ? '❌ Finalizada' : !relationshipSettings.active ? '⏸️ Inactiva' : '✅ Activa'}
                           </p>
                         </div>
                       </div>
@@ -3423,15 +3486,8 @@ tr:nth-child(even) td{background:#f8fafc}
             </div>
             
             <div className="space-y-3 text-slate-700">
-              <p className="font-semibold">
-                Esta acción eliminará permanentemente:
-              </p>
-              <ul className="list-disc list-inside space-y-1 text-sm">
-                <li>La relación entre tú y el paciente</li>
-                <li>Todas las sesiones registradas con este paciente</li>
-              </ul>
               <p className="text-sm">
-                <strong>No se eliminarán:</strong> Las facturas emitidas
+                Solo puedes eliminar pacientes que <strong>no tengan ningún dato</strong> registrado (sesiones, facturas ni notas). Si el paciente tiene datos, se te ofrecerá la opción de marcarlo como inactivo.
               </p>
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mt-3">
                 <p className="text-sm text-yellow-800">
@@ -3463,6 +3519,54 @@ tr:nth-child(even) td{background:#f8fafc}
                     <Trash2 size={18} />
                     Eliminar
                   </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Modal de Confirmación de Inactivar */}
+      {showDeactivateConfirm && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4" onClick={() => setShowDeactivateConfirm(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3">
+              <div className="bg-amber-100 p-3 rounded-full">
+                <AlertCircle size={24} className="text-amber-600" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-900">No se puede eliminar</h3>
+            </div>
+
+            <div className="space-y-3 text-slate-700">
+              <p className="text-sm">
+                Este paciente tiene sesiones, facturas o notas registradas. No es posible eliminarlo.
+              </p>
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <p className="text-sm text-blue-800">
+                  Puedes marcarlo como <strong>inactivo</strong> para que deje de aparecer en tu lista de pacientes. Seguirá visible si activas la vista de pacientes inactivos.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => setShowDeactivateConfirm(false)}
+                disabled={isDeactivating}
+                className="flex-1 px-4 py-3 bg-slate-100 text-slate-700 rounded-lg font-medium hover:bg-slate-200 transition-colors disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleDeactivatePatient}
+                disabled={isDeactivating}
+                className="flex-1 px-4 py-3 bg-amber-500 text-white rounded-lg font-medium hover:bg-amber-600 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {isDeactivating ? (
+                  <>
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Procesando...
+                  </>
+                ) : (
+                  <>Marcar como inactivo</>
                 )}
               </button>
             </div>

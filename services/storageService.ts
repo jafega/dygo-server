@@ -691,6 +691,8 @@ export const sendInvitation = async (
                 err.error = errorData.error;
                 err.activePatients = errorData.activePatients;
                 err.freeLimit = errorData.freeLimit;
+                err.patientId = errorData.patientId;
+                err.patientName = errorData.patientName;
                 throw err;
             }
             return;

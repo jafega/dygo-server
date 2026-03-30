@@ -188,7 +188,7 @@ function extractVarNames(content: string): string[] {
   const matches = content.matchAll(/\{\{([^}]+)\}\}/g);
   const names = new Set<string>();
   for (const m of matches) {
-    if (!/^firma_\d+$/.test(m[1])) names.add(m[1]);
+    if (!/^firma_\d+$/.test(m[1]) && !m[1].startsWith('psicologo_')) names.add(m[1]);
   }
   return Array.from(names);
 }
@@ -203,7 +203,14 @@ function renderDocumentHtml(content: string, varValues: Record<string, string>):
   if (!content) return '';
   let md = content.replace(/\n\n<!-- SIGNATURE_DATA:.*?-->$/s, '');
 
-  // Replace {{firma_X}} before markdown processing so they don't get mangled
+  // Extract already-signed firma markers (inline images) before markdown processing
+  const inlineSigs: Record<string, string> = {};
+  md = md.replace(/<!-- SIGNATURE_INLINE:firma_(\d+):(data:.*?) -->/g, (_full, n, dataUrl) => {
+    inlineSigs[n] = dataUrl;
+    return `__FIRMASIGNED_${n}__`;
+  });
+
+  // Replace unsigned {{firma_X}} markers with zone token
   md = md.replace(/\{\{firma_(\d+)\}\}/g, (_full, n) => `__FIRMAZONE_${n}__`);
 
   // Replace {{variable}} with resolved value or a styled placeholder
@@ -214,7 +221,17 @@ function renderDocumentHtml(content: string, varValues: Record<string, string>):
 
   let html = markdownToHtml(md);
 
-  // Replace firma zone tokens with visual HTML blocks
+  // Replace signed firma tokens with inline signature image
+  html = html.replace(/__FIRMASIGNED_(\d+)__/g, (_full, n) => {
+    const dataUrl = inlineSigs[n];
+    if (!dataUrl) return '';
+    return `<div style="margin:16px 0;padding:12px 16px;border:1px solid #d1fae5;border-radius:10px;background:#f0fdf4;">`
+      + `<p style="font-size:11px;font-weight:600;color:#16a34a;margin:0 0 8px;">✓ Firmado digitalmente</p>`
+      + `<img src="${dataUrl}" style="max-width:240px;max-height:90px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;display:block;" alt="Firma" />`
+      + `</div>`;
+  });
+
+  // Replace unsigned firma zone tokens with visual placeholder
   html = html.replace(/__FIRMAZONE_(\d+)__/g, (_full, n) =>
     `<div style="margin:16px 0;border:2px dashed #818cf8;border-radius:12px;padding:20px 16px;
       display:flex;align-items:center;justify-content:center;gap:8px;background:#eef2ff;
