@@ -278,7 +278,10 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session: init
 
       const result = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
-        contents: fullPrompt
+        contents: fullPrompt,
+        config: {
+          systemInstruction: 'Eres un asistente clínico de apoyo para psicólogos. Responde siempre con una única anotación directa y definitiva, lista para usar. No ofrezcas opciones, alternativas ni variantes. No hagas preguntas. No uses listas numeradas para presentar distintas versiones. Escribe directamente el contenido solicitado.'
+        }
       });
 
       const summary = result.text || 'No se pudo generar la respuesta';

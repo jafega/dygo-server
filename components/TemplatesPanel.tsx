@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   FileText, Plus, Edit2, Trash2, Send, Eye, X,
   ChevronLeft, Save, Loader2, Award, User, CheckCircle, AlertCircle, Search,
-  Upload, GripHorizontal, PenLine
+  Upload, GripHorizontal, PenLine, Archive, ArchiveRestore
 } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
@@ -95,6 +95,7 @@ interface Template {
   template_name?: string;
   psych_user_id: string | null;
   master: boolean;
+  archived?: boolean;
 }
 
 interface Patient {
@@ -155,6 +156,9 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
   // Delete confirm
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteBlockedBySignatures, setDeleteBlockedBySignatures] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
 
   useEffect(() => {
     loadTemplates();
@@ -241,10 +245,15 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
 
   const handleDelete = async (id: number) => {
     setIsDeleting(true);
+    setDeleteBlockedBySignatures(false);
     try {
       const res = await apiFetch(`${API_URL}/templates/${id}?psych_user_id=${psychologistId}`, {
         method: 'DELETE'
       });
+      if (res.status === 409) {
+        setDeleteBlockedBySignatures(true);
+        return;
+      }
       if (!res.ok) throw new Error(await res.text());
       setDeletingId(null);
       await loadTemplates();
@@ -252,6 +261,39 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
       alert('Error eliminando template: ' + (e.message || e));
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handleArchive = async (id: number) => {
+    setIsArchiving(true);
+    try {
+      const res = await apiFetch(`${API_URL}/templates/${id}/archive`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ psych_user_id: psychologistId })
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setDeletingId(null);
+      setDeleteBlockedBySignatures(false);
+      await loadTemplates();
+    } catch (e: any) {
+      alert('Error archivando template: ' + (e.message || e));
+    } finally {
+      setIsArchiving(false);
+    }
+  };
+
+  const handleUnarchive = async (id: number) => {
+    try {
+      const res = await apiFetch(`${API_URL}/templates/${id}/unarchive`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ psych_user_id: psychologistId })
+      });
+      if (!res.ok) throw new Error(await res.text());
+      await loadTemplates();
+    } catch (e: any) {
+      alert('Error desarchivando template: ' + (e.message || e));
     }
   };
 
@@ -395,14 +437,16 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
   };
 
   // Filtered list
-  const filteredTemplates = templates.filter(t => {
+  const visibleTemplates = showArchived ? templates : templates.filter(t => !t.archived);
+  const filteredTemplates = visibleTemplates.filter(t => {
     if (activeFilter === 'mine') return !t.master;
     if (activeFilter === 'master') return t.master;
     return true;
   });
 
-  const myCount = templates.filter(t => !t.master).length;
-  const masterCount = templates.filter(t => t.master).length;
+  const myCount = visibleTemplates.filter(t => !t.master).length;
+  const masterCount = visibleTemplates.filter(t => t.master).length;
+  const archivedCount = templates.filter(t => !t.master && !!t.archived).length;
 
   // ─── Editor View ──────────────────────────────────────────────────────────
   if (showEditor) {
@@ -583,7 +627,7 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl p-1 shadow-sm">
           {[
-            { key: 'all', label: `Todos (${templates.length})` },
+            { key: 'all', label: `Todos (${visibleTemplates.length})` },
             { key: 'mine', label: `Míos (${myCount})` },
             { key: 'master', label: `Plantillas (${masterCount})` }
           ].map(item => (
@@ -600,13 +644,26 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
             </button>
           ))}
         </div>
-        <button
-          onClick={openCreateEditor}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors shadow-sm text-sm font-medium"
-        >
-          <Plus size={16} />
-          Nuevo Template
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowArchived(v => !v)}
+            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border transition-colors ${
+              showArchived
+                ? 'bg-slate-700 text-white border-slate-700'
+                : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            <Archive size={15} />
+            {showArchived ? 'Ocultar archivados' : `Ver archivados${archivedCount > 0 ? ` (${archivedCount})` : ''}`}
+          </button>
+          <button
+            onClick={openCreateEditor}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors shadow-sm text-sm font-medium"
+          >
+            <Plus size={16} />
+            Nuevo Template
+          </button>
+        </div>
       </div>
 
       {/* Templates grid */}
@@ -628,8 +685,10 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
               template={tpl}
               isOwn={!tpl.master}
               onEdit={() => openEditEditor(tpl)}
-              onDelete={() => setDeletingId(tpl.id)}
+              onDelete={() => { setDeletingId(tpl.id); setDeleteBlockedBySignatures(false); }}
               onSend={() => openSendModal(tpl)}
+              onArchive={() => handleArchive(tpl.id)}
+              onUnarchive={() => handleUnarchive(tpl.id)}
             />
           ))}
         </div>
@@ -639,24 +698,56 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
       {deletingId !== null && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full">
-            <h3 className="text-lg font-bold text-slate-900 mb-2">¿Eliminar template?</h3>
-            <p className="text-sm text-slate-500 mb-5">Esta acción no se puede deshacer.</p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setDeletingId(null)}
-                className="flex-1 px-4 py-2 border border-slate-200 rounded-xl text-sm font-medium text-slate-700 hover:bg-slate-50"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={() => handleDelete(deletingId)}
-                disabled={isDeleting}
-                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-xl text-sm font-medium hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {isDeleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                Eliminar
-              </button>
-            </div>
+            {deleteBlockedBySignatures ? (
+              <>
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="p-2 bg-amber-100 rounded-full flex-shrink-0">
+                    <AlertCircle size={20} className="text-amber-600" />
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-900">No se puede eliminar</h3>
+                </div>
+                <p className="text-sm text-slate-500 mb-5">
+                  Este template tiene documentos enviados o firmados asociados. No se puede eliminar, pero puedes <strong>archivarlo</strong> para ocultarlo de la vista sin perder los documentos existentes.
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => { setDeletingId(null); setDeleteBlockedBySignatures(false); }}
+                    className="flex-1 px-4 py-2 border border-slate-200 rounded-xl text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={() => handleArchive(deletingId)}
+                    disabled={isArchiving}
+                    className="flex-1 px-4 py-2 bg-amber-500 text-white rounded-xl text-sm font-medium hover:bg-amber-600 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {isArchiving ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
+                    Archivar
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h3 className="text-lg font-bold text-slate-900 mb-2">¿Eliminar template?</h3>
+                <p className="text-sm text-slate-500 mb-5">Esta acción no se puede deshacer.</p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setDeletingId(null)}
+                    className="flex-1 px-4 py-2 border border-slate-200 rounded-xl text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={() => handleDelete(deletingId)}
+                    disabled={isDeleting}
+                    className="flex-1 px-4 py-2 bg-red-600 text-white rounded-xl text-sm font-medium hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {isDeleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                    Eliminar
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -871,9 +962,11 @@ interface TemplateCardProps {
   onEdit: () => void;
   onDelete: () => void;
   onSend: () => void;
+  onArchive: () => void;
+  onUnarchive: () => void;
 }
 
-const TemplateCard: React.FC<TemplateCardProps> = ({ template, isOwn, onEdit, onDelete, onSend }) => {
+const TemplateCard: React.FC<TemplateCardProps> = ({ template, isOwn, onEdit, onDelete, onSend, onArchive, onUnarchive }) => {
   const [showPreview, setShowPreview] = useState(false);
 
   const title = template.template_name
@@ -911,6 +1004,12 @@ const TemplateCard: React.FC<TemplateCardProps> = ({ template, isOwn, onEdit, on
                   Firma
                 </span>
               )}
+              {template.archived && (
+                <span className="flex-shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200 flex items-center gap-1">
+                  <Archive size={9} />
+                  Archivado
+                </span>
+              )}
             </div>
             <span className="text-[10px] text-slate-400 flex-shrink-0">
               {new Date(template.created_at).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}
@@ -930,12 +1029,14 @@ const TemplateCard: React.FC<TemplateCardProps> = ({ template, isOwn, onEdit, on
           >
             <Eye size={13} /> Ver
           </button>
-          <button
-            onClick={onSend}
-            className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors border border-indigo-200"
-          >
-            <Send size={13} /> Enviar
-          </button>
+          {!template.archived && (
+            <button
+              onClick={onSend}
+              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors border border-indigo-200"
+            >
+              <Send size={13} /> Enviar
+            </button>
+          )}
           {isOwn && (
             <>
               <button
@@ -945,13 +1046,32 @@ const TemplateCard: React.FC<TemplateCardProps> = ({ template, isOwn, onEdit, on
               >
                 <Edit2 size={14} />
               </button>
-              <button
-                onClick={onDelete}
-                className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                title="Eliminar"
-              >
-                <Trash2 size={14} />
-              </button>
+              {template.archived ? (
+                <button
+                  onClick={onUnarchive}
+                  className="p-2 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                  title="Desarchivar"
+                >
+                  <ArchiveRestore size={14} />
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={onArchive}
+                    className="p-2 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                    title="Archivar"
+                  >
+                    <Archive size={14} />
+                  </button>
+                  <button
+                    onClick={onDelete}
+                    className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    title="Eliminar"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </>
+              )}
             </>
           )}
         </div>

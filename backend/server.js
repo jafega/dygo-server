@@ -4026,105 +4026,138 @@ app.post('/api/admin/purge-psychologist-data', authenticateRequest, async (req, 
       .select('id')
       .in('user_email', PURGE_PROTECTED_EMAILS);
     const protectedIds = new Set((protectedUsers || []).map(u => u.id).filter(Boolean));
-    // Also protect the psychologist's own account
     protectedIds.add(psychId);
 
-    // Collect patient IDs from care_relationships BEFORE deleting anything
+    // Collect all patient_user_ids from care_relationships of this psychologist
     const { data: careRels } = await supabaseAdmin
       .from('care_relationships')
       .select('patient_user_id')
       .eq('psychologist_user_id', psychId);
-    let patientIds = [...new Set(
+    const allPatientIds = [...new Set(
       (careRels || []).map(r => r.patient_user_id).filter(id => id && !protectedIds.has(id))
     )];
 
-    console.log(`[purge-psychologist-data] 🗑 Psicólogo: ${psychId} (${requesterEmail}), pacientes a eliminar: ${patientIds.length}`);
+    // Split patients into two groups based on whether they have a real auth account
+    const noAuthIds = [];  // managed patients (no auth_user_id) → delete user record + all data
+    const hasAuthIds = []; // real-account patients (has auth_user_id) → delete only psych-related data, keep user
+
+    if (allPatientIds.length > 0) {
+      const { data: patientUsers } = await supabaseAdmin
+        .from('users')
+        .select('id, auth_user_id')
+        .in('id', allPatientIds);
+      for (const u of (patientUsers || [])) {
+        if (u.auth_user_id) {
+          hasAuthIds.push(u.id);
+        } else {
+          noAuthIds.push(u.id);
+        }
+      }
+    }
+
+    console.log(`[purge-psychologist-data] 🗑 Psicólogo: ${psychId} (${requesterEmail}) | sin-auth: ${noAuthIds.length} | con-auth: ${hasAuthIds.length}`);
 
     const log = {};
 
-    // 1. Sessions — delete ALL for this psychologist (covers sessions with null/any patient_user_id)
+    // ── Sessions: delete ALL for this psychologist (covers null patient_user_id too)
+    // Must be deleted before bono and invoices due to FK references (sessions.bonus_id, sessions.invoice_id)
     { const { count } = await supabaseAdmin.from('sessions').delete({ count: 'exact' })
         .eq('psychologist_user_id', psychId);
       log.sessions = count; }
 
-    // 3. Bonos — delete ALL for this psychologist (FK references invoices, must go before invoices)
+    // ── Bonos: delete ALL for this psychologist (must go before invoices: bono.invoice_id FK)
     { const { count } = await supabaseAdmin.from('bono').delete({ count: 'exact' })
         .eq('psychologist_user_id', psychId);
       log.bonos = count; }
 
-    // 4. Invoices — delete ALL for this psychologist (patient_user_id can be null, so no patient filter)
+    // ── Invoices: delete ALL for this psychologist
     { const { count } = await supabaseAdmin.from('invoices').delete({ count: 'exact' })
         .eq('psychologist_user_id', psychId);
       log.invoices = count; }
 
-    if (patientIds.length > 0) {
-      // 2. Session entries
+    // ── GROUP A: Managed patients (no auth_user_id) — delete all their data and user record
+    if (noAuthIds.length > 0) {
+      // Session notes / entries
       { const { count } = await supabaseAdmin.from('session_entry').delete({ count: 'exact' })
-          .in('target_user_id', patientIds);
+          .in('target_user_id', noAuthIds);
         log.session_entries = count; }
 
-      // 5. Entries
+      // Entries (notes, feedbacks, internal notes written about these patients)
       { const { count } = await supabaseAdmin.from('entries').delete({ count: 'exact' })
-          .in('target_user_id', patientIds);
+          .in('target_user_id', noAuthIds);
         log.entries = count; }
 
-      // 6. Goals
+      // Goals
       { const { count } = await supabaseAdmin.from('goals').delete({ count: 'exact' })
-          .in('patient_user_id', patientIds);
+          .in('patient_user_id', noAuthIds);
         log.goals = count; }
 
-      // 7. Settings
+      // Settings
       { const { count } = await supabaseAdmin.from('settings').delete({ count: 'exact' })
-          .in('user_id', patientIds);
+          .in('user_id', noAuthIds);
         log.settings = count; }
 
-      // 8. Invitations
+      // Invitations
       { const { count } = await supabaseAdmin.from('invitations').delete({ count: 'exact' })
-          .in('patient_user_id', patientIds);
+          .in('patient_user_id', noAuthIds);
         log.invitations = count; }
+
+      // Signatures (patient_user_id side — must go before deleting the user)
+      { const { count } = await supabaseAdmin.from('signatures').delete({ count: 'exact' })
+          .in('patient_user_id', noAuthIds);
+        log.signatures_no_auth = count; }
+
+      // Care relationships (must go before deleting user due to FK constraint)
+      { const { count } = await supabaseAdmin.from('care_relationships').delete({ count: 'exact' })
+          .in('patient_user_id', noAuthIds);
+        log.care_relationships_no_auth = count; }
+
+      // Delete the managed patient user records
+      { const { count } = await supabaseAdmin.from('users').delete({ count: 'exact' })
+          .in('id', noAuthIds);
+        log.users_deleted = count; }
     }
 
-    // 9. Care relationships of this psychologist (ALL of them, regardless of patient)
-    // Note: patient accounts are protected via patientIds filtering above; we always
-    // want to remove the relationship rows themselves even with protected patients.
-    {
-      const { count } = await supabaseAdmin.from('care_relationships').delete({ count: 'exact' })
-        .eq('psychologist_user_id', psychId);
-      log.care_relationships = count;
+    // ── GROUP B: Real-account patients (has auth_user_id) — delete only data tied to this psychologist
+    if (hasAuthIds.length > 0) {
+      // Session notes created by this psychologist for these patients
+      { const { count } = await supabaseAdmin.from('session_entry').delete({ count: 'exact' })
+          .eq('creator_user_id', psychId)
+          .in('target_user_id', hasAuthIds);
+        log.session_entries_auth = count; }
+
+      // Entries (notes, feedbacks, internal notes) written by this psychologist
+      { const { count } = await supabaseAdmin.from('entries').delete({ count: 'exact' })
+          .eq('creator_user_id', psychId)
+          .in('target_user_id', hasAuthIds);
+        log.entries_auth = count; }
+
+      // Invitations from this psychologist to these patients
+      { const { count } = await supabaseAdmin.from('invitations').delete({ count: 'exact' })
+          .eq('psychologist_user_id', psychId)
+          .in('patient_user_id', hasAuthIds);
+        log.invitations_auth = count; }
+
+      // Care relationships between this psychologist and these patients
+      { const { count } = await supabaseAdmin.from('care_relationships').delete({ count: 'exact' })
+          .eq('psychologist_user_id', psychId)
+          .in('patient_user_id', hasAuthIds);
+        log.care_relationships_auth = count; }
     }
 
-    // 10. Signatures of this psychologist (must go before templates due to FK constraint)
-    {
-      const { count } = await supabaseAdmin.from('signatures').delete({ count: 'exact' })
+    // ── Psychologist's own remaining data
+    // Signatures where psych_user_id = psychId (covers hasAuth patients + any remaining)
+    { const { count } = await supabaseAdmin.from('signatures').delete({ count: 'exact' })
         .eq('psych_user_id', psychId);
-      log.signatures = count;
-    }
+      log.signatures = count; }
 
-    // 11. Own (non-master) templates of this psychologist
-    {
-      const { count } = await supabaseAdmin.from('templates').delete({ count: 'exact' })
+    // Own (non-master) templates
+    { const { count } = await supabaseAdmin.from('templates').delete({ count: 'exact' })
         .eq('psych_user_id', psychId)
         .eq('master', false);
-      log.templates = count;
-    }
+      log.templates = count; }
 
-    // 12. Delete patient users that no longer have any care_relationship
-    // IMPORTANT: never delete the psychologist accounts of Dani or Javi themselves.
-    if (patientIds.length > 0) {
-      const { data: stillLinked } = await supabaseAdmin
-        .from('care_relationships')
-        .select('patient_user_id')
-        .in('patient_user_id', patientIds);
-      const stillLinkedIds = new Set((stillLinked || []).map(r => r.patient_user_id));
-      const toDeleteIds = patientIds.filter(id => !stillLinkedIds.has(id) && !protectedIds.has(id));
-      if (toDeleteIds.length > 0) {
-        const { count } = await supabaseAdmin.from('users').delete({ count: 'exact' })
-          .in('id', toDeleteIds);
-        log.users = count;
-      }
-    }
-
-    auditLog('PURGE_PSYCHOLOGIST_DATA', { psychId, psychEmail: requesterEmail, patientCount: patientIds.length, log });
+    auditLog('PURGE_PSYCHOLOGIST_DATA', { psychId, psychEmail: requesterEmail, noAuthCount: noAuthIds.length, hasAuthCount: hasAuthIds.length, log });
     console.log('[purge-psychologist-data] ✅ Purge completado:', log);
     return res.json({ success: true, log });
 
@@ -14562,7 +14595,7 @@ app.post('/api/templates', authenticateRequest, async (req, res) => {
     if (supabaseAdmin) {
       const { data, error } = await supabaseAdmin
         .from('templates')
-        .insert({ psych_user_id, content, master: false, template_name: template_name || null })
+        .insert({ psych_user_id, content, master: false, template_name: template_name || '' })
         .select()
         .single();
 
@@ -14600,7 +14633,7 @@ app.put('/api/templates/:id', authenticateRequest, async (req, res) => {
       if (existing.psych_user_id !== psych_user_id) return res.status(403).json({ error: 'Sin permiso para editar este template' });
 
       const updatePayload = { content };
-      if (template_name !== undefined) updatePayload.template_name = template_name;
+      if (template_name !== undefined) updatePayload.template_name = template_name || '';
 
       const { data, error } = await supabaseAdmin
         .from('templates')
@@ -14639,6 +14672,17 @@ app.delete('/api/templates/:id', authenticateRequest, async (req, res) => {
       if (existing.master) return res.status(403).json({ error: 'No se pueden eliminar templates master' });
       if (existing.psych_user_id !== psych_user_id) return res.status(403).json({ error: 'Sin permiso para eliminar este template' });
 
+      // Block deletion if the template has associated signatures
+      const { data: sigs, error: sigsErr } = await supabaseAdmin
+        .from('signatures')
+        .select('id')
+        .eq('template_id', parseInt(id))
+        .limit(1);
+      if (sigsErr) throw sigsErr;
+      if (sigs && sigs.length > 0) {
+        return res.status(409).json({ error: 'Este template tiene documentos enviados o firmados asociados y no puede eliminarse. Puedes archivarlo para ocultarlo sin perder los documentos.' });
+      }
+
       const { error } = await supabaseAdmin.from('templates').delete().eq('id', id);
       if (error) throw error;
       return res.json({ success: true });
@@ -14648,6 +14692,80 @@ app.delete('/api/templates/:id', authenticateRequest, async (req, res) => {
   } catch (error) {
     console.error('[DELETE /api/templates/:id] Error:', error);
     res.status(500).json({ error: 'Error al eliminar template' });
+  }
+});
+
+// PATCH /api/templates/:id/archive  — soft-delete by setting archived=true
+app.patch('/api/templates/:id/archive', authenticateRequest, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { psych_user_id } = req.body;
+
+    if (!psych_user_id) return res.status(400).json({ error: 'Se requiere psych_user_id' });
+
+    if (supabaseAdmin) {
+      const { data: existing, error: fetchErr } = await supabaseAdmin
+        .from('templates')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+      if (fetchErr || !existing) return res.status(404).json({ error: 'Template no encontrado' });
+      if (existing.master) return res.status(403).json({ error: 'No se pueden archivar templates master' });
+      if (existing.psych_user_id !== psych_user_id) return res.status(403).json({ error: 'Sin permiso para archivar este template' });
+
+      const { data, error } = await supabaseAdmin
+        .from('templates')
+        .update({ archived: true })
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return res.json(data);
+    }
+
+    return res.status(501).json({ error: 'Solo disponible con Supabase' });
+  } catch (error) {
+    console.error('[PATCH /api/templates/:id/archive] Error:', error);
+    res.status(500).json({ error: 'Error al archivar template' });
+  }
+});
+
+// PATCH /api/templates/:id/unarchive  — restore archived template
+app.patch('/api/templates/:id/unarchive', authenticateRequest, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { psych_user_id } = req.body;
+
+    if (!psych_user_id) return res.status(400).json({ error: 'Se requiere psych_user_id' });
+
+    if (supabaseAdmin) {
+      const { data: existing, error: fetchErr } = await supabaseAdmin
+        .from('templates')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+      if (fetchErr || !existing) return res.status(404).json({ error: 'Template no encontrado' });
+      if (existing.master) return res.status(403).json({ error: 'No se pueden desarchivar templates master' });
+      if (existing.psych_user_id !== psych_user_id) return res.status(403).json({ error: 'Sin permiso para desarchivar este template' });
+
+      const { data, error } = await supabaseAdmin
+        .from('templates')
+        .update({ archived: false })
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return res.json(data);
+    }
+
+    return res.status(501).json({ error: 'Solo disponible con Supabase' });
+  } catch (error) {
+    console.error('[PATCH /api/templates/:id/unarchive] Error:', error);
+    res.status(500).json({ error: 'Error al desarchivar template' });
   }
 });
 

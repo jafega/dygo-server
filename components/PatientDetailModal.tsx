@@ -340,23 +340,23 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
             <div class="meta">
               <strong>Paciente:</strong> ${patient.name}<br>
               <strong>Fecha:</strong> ${dateStr} a las ${timeStr}
-              <span class="status ${entry.data?.status === 'done' ? 'done' : 'pending'}">
-                ${entry.data?.status === 'done' ? 'Completada' : 'Pendiente'}
+              <span class="status ${(entry.status || entry.data?.status) === 'done' ? 'done' : 'pending'}">
+                ${(entry.status || entry.data?.status) === 'done' ? 'Completada' : 'Pendiente'}
               </span>
             </div>
           </div>
           
-          ${entry.data?.summary ? `
+          ${(entry.summary || entry.data?.summary) ? `
             <div class="section">
               <div class="section-title">✨ Resumen con IA</div>
-              <div class="section-content">${entry.data.summary}</div>
+              <div class="section-content">${entry.summary || entry.data?.summary}</div>
             </div>
           ` : ''}
           
-          ${entry.data?.transcript ? `
+          ${(entry.transcript || entry.data?.transcript) ? `
             <div class="section">
               <div class="section-title">📝 Transcript de la sesión</div>
-              <div class="section-content">${entry.data.transcript}</div>
+              <div class="section-content">${entry.transcript || entry.data?.transcript}</div>
             </div>
           ` : ''}
           
@@ -595,28 +595,28 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
       const timeStr = entryDate.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
       
       return `
-        <div class="entry" style="${index > 0 ? 'page-break-before: always;' : ''}">
+        <div class="entry">
           <div class="entry-header">
             <h2>Sesión ${clinicalHistory.length - index} - ${dateStr}</h2>
             <div class="entry-meta">
               <strong>Hora:</strong> ${timeStr}
-              <span class="status ${entry.data?.status === 'done' ? 'done' : 'pending'}">
-                ${entry.data?.status === 'done' ? 'Completada' : 'Pendiente'}
+              <span class="status ${(entry.status || entry.data?.status) === 'done' ? 'done' : 'pending'}">
+                ${(entry.status || entry.data?.status) === 'done' ? 'Completada' : 'Pendiente'}
               </span>
             </div>
           </div>
           
-          ${entry.data?.summary ? `
+          ${(entry.summary || entry.data?.summary) ? `
             <div class="section">
               <div class="section-title">✨ Resumen con IA</div>
-              <div class="section-content">${entry.data.summary}</div>
+              <div class="section-content">${entry.summary || entry.data?.summary}</div>
             </div>
           ` : ''}
           
-          ${entry.data?.transcript ? `
+          ${(entry.transcript || entry.data?.transcript) ? `
             <div class="section">
               <div class="section-title">📝 Transcript de la sesión</div>
-              <div class="section-content">${entry.data.transcript}</div>
+              <div class="section-content">${entry.transcript || entry.data?.transcript}</div>
             </div>
           ` : ''}
           
@@ -711,8 +711,6 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
             }
             @media print {
               body { margin: 20px; }
-              .entry { page-break-after: always; }
-              .entry:last-child { page-break-after: auto; }
             }
           </style>
         </head>
@@ -2926,9 +2924,9 @@ tr:nth-child(even) td{background:#f8fafc}
                                 </span>
                               </div>
                               
-                              {entry.data?.summary && (
+                              {(entry.summary || entry.data?.summary) && (
                                 <p className="mt-2 text-xs sm:text-sm text-slate-600 line-clamp-2">
-                                  {entry.data.summary.substring(0, 150)}{entry.data.summary.length > 150 ? '...' : ''}
+                                  {(entry.summary || entry.data?.summary)!.substring(0, 150)}{(entry.summary || entry.data?.summary)!.length > 150 ? '...' : ''}
                                 </p>
                               )}
                             </div>
@@ -2950,27 +2948,27 @@ tr:nth-child(even) td{background:#f8fafc}
                         {isExpanded && (
                           <div className="border-t border-slate-200 p-4 sm:p-6 space-y-4 bg-slate-50">
                             {/* Resumen con IA */}
-                            {entry.data?.summary && (
+                            {(entry.summary || entry.data?.summary) && (
                               <div className="space-y-2">
                                 <div className="flex items-center gap-2">
                                   <Sparkles size={16} className="text-purple-600" />
                                   <h4 className="text-sm font-bold text-slate-900">Resumen con IA</h4>
                                 </div>
                                 <div className="bg-white rounded-lg p-4 border border-slate-200">
-                                  <p className="text-sm text-slate-700 whitespace-pre-wrap">{entry.data.summary}</p>
+                                  <p className="text-sm text-slate-700 whitespace-pre-wrap">{entry.summary || entry.data?.summary}</p>
                                 </div>
                               </div>
                             )}
 
                             {/* Transcript */}
-                            {entry.data?.transcript && (
+                            {(entry.transcript || entry.data?.transcript) && (
                               <div className="space-y-2">
                                 <div className="flex items-center gap-2">
                                   <FileText size={16} className="text-slate-600" />
                                   <h4 className="text-sm font-bold text-slate-900">Transcript de la sesión</h4>
                                 </div>
                                 <div className="bg-white rounded-lg p-4 border border-slate-200 max-h-96 overflow-y-auto">
-                                  <p className="text-sm text-slate-600 whitespace-pre-wrap">{entry.data.transcript}</p>
+                                  <p className="text-sm text-slate-600 whitespace-pre-wrap">{entry.transcript || entry.data?.transcript}</p>
                                 </div>
                               </div>
                             )}
