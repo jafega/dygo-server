@@ -188,7 +188,7 @@ function extractVarNames(content: string): string[] {
   const matches = content.matchAll(/\{\{([^}]+)\}\}/g);
   const names = new Set<string>();
   for (const m of matches) {
-    if (!/^firma_\d+$/.test(m[1]) && !m[1].startsWith('psicologo_')) names.add(m[1]);
+    if (!/^firma_\d+$/.test(m[1])) names.add(m[1]);
   }
   return Array.from(names);
 }
