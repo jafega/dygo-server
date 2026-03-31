@@ -17,6 +17,14 @@ import archiver from 'archiver';
 import PDFDocument from 'pdfkit';
 import { Resend } from 'resend';
 
+// --- CONFIGURACIÓN PARA ES MODULES ---
+// En ES Modules no existe __dirname, así que lo recreamos:
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Cargar variables desde el .env.local unificado en la raíz del proyecto
+dotenv.config({ path: path.resolve(__dirname, '../.env.local') });
+
 // bcrypt: prefer native, fall back to pure-JS bcryptjs in serverless
 let bcrypt;
 try {
@@ -31,8 +39,6 @@ try {
   }
 }
 
-dotenv.config();
-
 // Inicializar Google Generative AI (Gemini)
 const genAI = process.env.GEMINI_API_KEY ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY) : null;
 
@@ -40,12 +46,6 @@ const genAI = process.env.GEMINI_API_KEY ? new GoogleGenerativeAI(process.env.GE
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3001/api/google/callback';
-
-
-// --- CONFIGURACIÓN PARA ES MODULES ---
-// En ES Modules no existe __dirname, así que lo recreamos:
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // --- CONFIGURACIÓN BÁSICA ---
 const app = express();
@@ -5124,7 +5124,16 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
           sub.access_blocked = !['active', 'trialing'].includes(subscription.status);
           sub.cancel_at_period_end = subscription.cancel_at_period_end ?? false;
           sub.current_period_end = subscription.current_period_end ?? null;
-          if (subscription.metadata?.plan_id) sub.plan_id = subscription.metadata.plan_id;
+          // Resolve plan_id from actual price ID on the subscription (covers portal upgrades/downgrades)
+          const activePriceId = subscription.items.data[0]?.price?.id;
+          if (activePriceId) {
+            const resolvedPlanId = Object.entries(STRIPE_PRICE_IDS).find(([, pid]) => pid === activePriceId)?.[0];
+            if (resolvedPlanId && PSYCH_PLAN_IDS.includes(resolvedPlanId)) {
+              sub.plan_id = resolvedPlanId;
+            }
+          } else if (subscription.metadata?.plan_id && PSYCH_PLAN_IDS.includes(subscription.metadata.plan_id)) {
+            sub.plan_id = subscription.metadata.plan_id;
+          }
           saveDb(db);
           console.log(`[Webhook] subscription.updated: ${subscription.id} → status=${subscription.status}, plan=${sub.plan_id}`);
         } else {
