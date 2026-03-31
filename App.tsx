@@ -5,33 +5,38 @@ import * as AuthService from './services/authService';
 import { USE_BACKEND, API_URL } from './services/config';
 import { isTempEmail } from './services/textUtils';
 import { analyzeJournalEntry, analyzeGoalsProgress, generateWeeklyReport } from './services/genaiService';
-import VoiceSession from './components/VoiceSession';
-import PatientSessions from './components/PatientSessions';
-import PatientBillingPanel from './components/PatientBillingPanel';
-import CalendarView from './components/CalendarView';
-import InsightsPanel from './components/InsightsPanel';
-import GoalsPanel from './components/GoalsPanel';
-import EntryModal from './components/EntryModal';
-import WeeklyReportModal from './components/WeeklyReportModal';
-import SettingsModal from './components/SettingsModal';
-import PatientDashboard, { PatientDashboardHandle } from './components/PatientDashboard';
 import AuthScreen from './components/AuthScreen';
-import SuperAdmin from './components/SuperAdmin';
+import SettingsModal from './components/SettingsModal';
 import PsychologistSidebar from './components/PsychologistSidebar';
-import BillingPanel from './components/BillingPanel';
-import PsychologistProfilePanel from './components/PsychologistProfilePanel';
-import PatientProfilePanel from './components/PatientProfilePanel';
-import PsychologistSchedule from './components/PsychologistSchedule';
-import PsychologistDashboard from './components/PsychologistDashboard';
-import SessionsList from './components/SessionsList';
-import CentrosPanel, { CentrosPanelRef } from './components/CentrosPanel';
-import ConnectionsPanel from './components/ConnectionsPanel';
-import TemplatesPanel from './components/TemplatesPanel';
-import PsychologistMaterialsPanel from './components/PsychologistMaterialsPanel';
-import PatientDocumentsPanel from './components/PatientDocumentsPanel';
-import BulkImportPanel from './components/BulkImportPanel';
-import PsychologistAIChat from './components/PsychologistAIChat';
 import UpgradeModal from './components/UpgradeModal';
+import type { PatientDashboardHandle } from './components/PatientDashboard';
+import type { CentrosPanelRef } from './components/CentrosPanel';
+// Lazy-loaded: patient panels (not needed by psychologists on initial load)
+const VoiceSession = lazy(() => import('./components/VoiceSession'));
+const PatientSessions = lazy(() => import('./components/PatientSessions'));
+const PatientBillingPanel = lazy(() => import('./components/PatientBillingPanel'));
+const CalendarView = lazy(() => import('./components/CalendarView'));
+const InsightsPanel = lazy(() => import('./components/InsightsPanel'));
+const GoalsPanel = lazy(() => import('./components/GoalsPanel'));
+const PatientProfilePanel = lazy(() => import('./components/PatientProfilePanel'));
+const PatientDocumentsPanel = lazy(() => import('./components/PatientDocumentsPanel'));
+const EntryModal = lazy(() => import('./components/EntryModal'));
+const WeeklyReportModal = lazy(() => import('./components/WeeklyReportModal'));
+const PatientDashboard = lazy(() => import('./components/PatientDashboard'));
+// Lazy-loaded: psychologist panels (not needed by patients on initial load)
+const BillingPanel = lazy(() => import('./components/BillingPanel'));
+const PsychologistProfilePanel = lazy(() => import('./components/PsychologistProfilePanel'));
+const PsychologistSchedule = lazy(() => import('./components/PsychologistSchedule'));
+const PsychologistDashboard = lazy(() => import('./components/PsychologistDashboard'));
+const SessionsList = lazy(() => import('./components/SessionsList'));
+const CentrosPanel = lazy(() => import('./components/CentrosPanel'));
+const ConnectionsPanel = lazy(() => import('./components/ConnectionsPanel'));
+const TemplatesPanel = lazy(() => import('./components/TemplatesPanel'));
+const PsychologistMaterialsPanel = lazy(() => import('./components/PsychologistMaterialsPanel'));
+const BulkImportPanel = lazy(() => import('./components/BulkImportPanel'));
+const PsychologistAIChat = lazy(() => import('./components/PsychologistAIChat'));
+// Lazy-loaded: admin only
+const SuperAdmin = lazy(() => import('./components/SuperAdmin'));
 import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock, AlertCircle, Smile, Shield, Building2, LogOut, Upload, Bot, FolderOpen } from 'lucide-react';
 
 // Custom Mainds Logo Component
@@ -1252,18 +1257,18 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                       </div>
                     </header>
 
-                    {psychPanelView === 'dashboard' && <PsychologistDashboard psychologistId={currentUser.id} />}
-                    {psychPanelView === 'patients' && <PatientDashboard ref={patientDashboardRef} onImportClick={() => setPsychPanelView('import')} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} />}
-                    {psychPanelView === 'sessions' && <SessionsList psychologistId={currentUser.id} />}
-                    {psychPanelView === 'billing' && <BillingPanel psychologistId={currentUser.id} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} />}
-                    {psychPanelView === 'centros' && <CentrosPanel ref={centrosPanelRef} psychologistId={currentUser.id} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} />}
-                    {psychPanelView === 'profile' && <PsychologistProfilePanel userId={currentUser.id} userEmail={currentUser.email} onBadgeSettingChange={setShowPendingSessionsBadge} />}
-                    {psychPanelView === 'schedule' && <PsychologistSchedule psychologistId={currentUser.id} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} onOpenSettings={handleOpenSettings} />}
-                    {psychPanelView === 'ai-assistant' && <PsychologistAIChat psychologistId={currentUser.id} psychologistName={currentUser.name} />}
-                    {psychPanelView === 'connections' && <ConnectionsPanel currentUser={currentUser} />}
-                    {psychPanelView === 'templates' && <TemplatesPanel psychologistId={currentUser.id} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} />}
-                    {psychPanelView === 'materials' && <PsychologistMaterialsPanel psychologistId={currentUser.id} />}
-                    {psychPanelView === 'import' && <BulkImportPanel psychologistId={currentUser.id} currentUser={currentUser} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} onImportComplete={() => setPsychPanelView('patients')} />}
+                    {psychPanelView === 'dashboard' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><PsychologistDashboard psychologistId={currentUser.id} /></Suspense>}
+                    {psychPanelView === 'patients' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><PatientDashboard ref={patientDashboardRef} onImportClick={() => setPsychPanelView('import')} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} /></Suspense>}
+                    {psychPanelView === 'sessions' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><SessionsList psychologistId={currentUser.id} /></Suspense>}
+                    {psychPanelView === 'billing' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><BillingPanel psychologistId={currentUser.id} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} /></Suspense>}
+                    {psychPanelView === 'centros' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><CentrosPanel ref={centrosPanelRef} psychologistId={currentUser.id} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} /></Suspense>}
+                    {psychPanelView === 'profile' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><PsychologistProfilePanel userId={currentUser.id} userEmail={currentUser.email} onBadgeSettingChange={setShowPendingSessionsBadge} /></Suspense>}
+                    {psychPanelView === 'schedule' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><PsychologistSchedule psychologistId={currentUser.id} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} onOpenSettings={handleOpenSettings} /></Suspense>}
+                    {psychPanelView === 'ai-assistant' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><PsychologistAIChat psychologistId={currentUser.id} psychologistName={currentUser.name} /></Suspense>}
+                    {psychPanelView === 'connections' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><ConnectionsPanel currentUser={currentUser} /></Suspense>}
+                    {psychPanelView === 'templates' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><TemplatesPanel psychologistId={currentUser.id} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} /></Suspense>}
+                    {psychPanelView === 'materials' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><PsychologistMaterialsPanel psychologistId={currentUser.id} /></Suspense>}
+                    {psychPanelView === 'import' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><BulkImportPanel psychologistId={currentUser.id} currentUser={currentUser} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} onImportComplete={() => setPsychPanelView('patients')} /></Suspense>}
 
                     {showSettings && (
                          <SettingsModal 
@@ -1751,10 +1756,12 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   <CheckSquare className="text-purple-600" size={18} />
                   <h3 className="font-bold text-purple-800 text-sm uppercase tracking-wide">Plan</h3>
                 </div>
-                <GoalsPanel 
-                  title="" goals={assignedGoals} onAddGoal={() => {}} onToggleGoal={handleToggleGoal} onDeleteGoal={() => {}} 
-                  readOnly={true} showAdd={false}
-                />
+                <Suspense fallback={null}>
+                  <GoalsPanel 
+                    title="" goals={assignedGoals} onAddGoal={() => {}} onToggleGoal={handleToggleGoal} onDeleteGoal={() => {}} 
+                    readOnly={true} showAdd={false}
+                  />
+                </Suspense>
               </div>
             )}
 
@@ -1793,7 +1800,9 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                     </h3>
                   </div>
                   <div className="p-4 md:p-6">
-                    <GoalsPanel goals={personalGoals} onAddGoal={handleAddGoal} onToggleGoal={handleToggleGoal} onDeleteGoal={handleDeleteGoal} />
+                    <Suspense fallback={null}>
+                      <GoalsPanel goals={personalGoals} onAddGoal={handleAddGoal} onToggleGoal={handleToggleGoal} onDeleteGoal={handleDeleteGoal} />
+                    </Suspense>
                   </div>
                 </div>
 
@@ -1833,7 +1842,9 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                     <p className="text-xs text-slate-600 mt-1">Últimos 14 días</p>
                   </div>
                   <div className="p-4 md:p-6">
-                    <InsightsPanel entries={entries} />
+                    <Suspense fallback={null}>
+                      <InsightsPanel entries={entries} />
+                    </Suspense>
                   </div>
                 </div>
 
@@ -1929,50 +1940,62 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
             {/* Vista de Citas */}
             {activeTab === 'appointments' && (
               <div className="animate-in fade-in">
-                <PatientSessions />
+                <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}>
+                  <PatientSessions />
+                </Suspense>
               </div>
             )}
 
             {/* Vista de Calendario */}
             {activeTab === 'calendar' && (
               <div className="animate-in fade-in">
-                <CalendarView
-                  entries={entries}
-                  onSelectDate={(date) => { setSelectedDate(date); setSelectedEntryMode('day'); }}
-                  currentUserId={currentUser?.id}
-                />
+                <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}>
+                  <CalendarView
+                    entries={entries}
+                    onSelectDate={(date) => { setSelectedDate(date); setSelectedEntryMode('day'); }}
+                    currentUserId={currentUser?.id}
+                  />
+                </Suspense>
               </div>
             )}
 
             {/* Vista de Facturación */}
             {activeTab === 'billing' && (
               <div className="animate-in fade-in">
-                <PatientBillingPanel />
+                <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}>
+                  <PatientBillingPanel />
+                </Suspense>
               </div>
             )}
 
             {activeTab === 'profile' && currentUser && (
               <div className="animate-in fade-in">
-                <PatientProfilePanel userId={currentUser.id} />
+                <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}>
+                  <PatientProfilePanel userId={currentUser.id} />
+                </Suspense>
               </div>
             )}
 
             {activeTab === 'documents' && currentUser && (
               <div className="animate-in fade-in">
-                <PatientDocumentsPanel patientId={currentUser.id} />
+                <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}>
+                  <PatientDocumentsPanel patientId={currentUser.id} />
+                </Suspense>
               </div>
             )}
 
             {activeTab === 'admin' && currentUser?.email?.toLowerCase() === 'garryjavi@gmail.com' && (
               <div className="animate-in fade-in">
-                <SuperAdmin />
+                <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}>
+                  <SuperAdmin />
+                </Suspense>
               </div>
             )}
           </div>
         </main>
       </div>
 
-      {viewState === ViewState.VOICE_SESSION && <VoiceSession key={Date.now()} onSessionEnd={handleSessionEnd} onCancel={() => setViewState(ViewState.CALENDAR)} settings={settings} />}
+      {viewState === ViewState.VOICE_SESSION && <Suspense fallback={null}><VoiceSession key={Date.now()} onSessionEnd={handleSessionEnd} onCancel={() => setViewState(ViewState.CALENDAR)} settings={settings} /></Suspense>}
 
       {/* Patient upgrade modal */}
       {showPatientUpgradeModal && currentUser && (() => {
@@ -2027,17 +2050,19 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
         );
       })()}
       {selectedDate && (
-        <EntryModal 
-          entries={entriesForModal} 
-          dateStr={selectedDate} 
-          onClose={() => { setSelectedDate(null); setSelectedEntryId(null); setSelectedEntryMode('day'); }}
-          onStartSession={(dateStr) => handleStartSession(dateStr)} 
-          onDeleteEntry={handleDeleteEntry} 
-          onUpdateEntry={handleUpdateEntry}
-          currentUserId={currentUser?.id}
-        />
+        <Suspense fallback={null}>
+          <EntryModal 
+            entries={entriesForModal} 
+            dateStr={selectedDate} 
+            onClose={() => { setSelectedDate(null); setSelectedEntryId(null); setSelectedEntryMode('day'); }}
+            onStartSession={(dateStr) => handleStartSession(dateStr)} 
+            onDeleteEntry={handleDeleteEntry} 
+            onUpdateEntry={handleUpdateEntry}
+            currentUserId={currentUser?.id}
+          />
+        </Suspense>
       )}
-      {weeklyReport && <WeeklyReportModal report={weeklyReport} onClose={() => setWeeklyReport(null)} />}
+      {weeklyReport && <Suspense fallback={null}><WeeklyReportModal report={weeklyReport} onClose={() => setWeeklyReport(null)} /></Suspense>}
       {showSettings && currentUser && <SettingsModal settings={settings} onSave={handleSaveSettings} onClose={() => { setShowSettings(false); if(currentUser) checkInvitations(currentUser.email); }} onLogout={handleLogout} onUserUpdate={handleUserUpdate} />}
     </div>
   );

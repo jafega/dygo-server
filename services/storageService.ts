@@ -95,8 +95,6 @@ const fetchRelationships = async (filter: RelationshipFilter, skipCache = false)
       if (filter.includeEnded) {
         params.append('includeEnded', 'true');
       }
-      // Anti-caché: timestamp único en cada petición
-      params.append('_t', Date.now().toString());
       
       try {
           const res = await apiFetch(`${API_URL}/relationships?${params.toString()}`, {

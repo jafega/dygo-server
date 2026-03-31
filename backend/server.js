@@ -354,7 +354,11 @@ const validateSessionToken = async (token) => {
         if (supUser?.id) {
           // Find the app user: first by auth_user_id (fast), then by email (fallback for
           // users created before auth_user_id tracking was added).
-          const users = await readSupabaseTable('users');
+          // Use the in-memory cache when available (populated during initializeSupabase)
+          // to avoid a full SELECT * on every cross-instance token validation.
+          const users = (supabaseDbCache?.users?.length > 0)
+            ? supabaseDbCache.users
+            : await readSupabaseTable('users');
           let appUser = (users || []).find(u =>
             u.auth_user_id && String(u.auth_user_id) === String(supUser.id)
           );
@@ -1168,16 +1172,13 @@ async function initializeSupabase() {
       });
       console.log('✅ Supabase REST persistence enabled (service role)');
       
-      try {
-        console.log('🔄 Ensuring Supabase tables exist...');
-        await Promise.race([
-          ensureSupabaseTablesExist(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('ensureSupabaseTablesExist timeout')), 30000))
-        ]);
-        console.log('✅ Supabase tables verified');
-      } catch (schemaErr) {
-        console.error('❌ Error ensuring Supabase schema', schemaErr?.message || schemaErr);
-      }
+      // Run non-blocking — tables already exist in production. Fire-and-forget so the
+      // cold start of this Vercel serverless instance doesn't block on the schema check.
+      setImmediate(() => {
+        ensureSupabaseTablesExist()
+          .then(() => console.log('✅ Supabase tables verified'))
+          .catch(schemaErr => console.error('❌ Error ensuring Supabase schema', schemaErr?.message || schemaErr));
+      });
       
       try {
         console.log('🔄 Loading Supabase cache...');
@@ -1205,16 +1206,12 @@ async function initializeSupabase() {
         supabaseDbCache = ensureDbShape({});
       }
       
-      try {
-        console.log('🔄 Deduplicating Supabase users...');
-        await Promise.race([
-          dedupeSupabaseUsers(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('dedupeSupabaseUsers timeout')), 30000))
-        ]);
-        console.log('✅ Supabase users deduplicated');
-      } catch (err) {
-        console.error('❌ Supabase dedupe failed', err?.message || err);
-      }
+      // Run non-blocking — deduplication is a best-effort background task.
+      setImmediate(() => {
+        dedupeSupabaseUsers()
+          .then(() => console.log('✅ Supabase users deduplicated'))
+          .catch(err => console.error('❌ Supabase dedupe failed', err?.message || err));
+      });
     } catch (err) {
       console.error('❌ Unable to enable Supabase REST persistence', err?.message || err, err?.stack);
       supabaseAdmin = null;
@@ -1895,8 +1892,9 @@ async function loadEntriesForUser(userId) {
       setTimeout(() => reject(new Error(`Timeout loading entries for user ${userId}`)), 10000)
     );
     
-    // Buscar por target_user_id (la persona sobre quien es la entrada)
-    const readPromise = supabaseAdmin.from('entries').select('*').eq('target_user_id', userId);
+    // Buscar por target_user_id (la persona sobre quien es la entrada),
+    // ordenando por created_at DESC en la DB para evitar sort en memoria.
+    const readPromise = supabaseAdmin.from('entries').select('*').eq('target_user_id', userId).order('created_at', { ascending: false });
     const { data, error } = await Promise.race([readPromise, timeoutPromise]);
     
     if (error) {
