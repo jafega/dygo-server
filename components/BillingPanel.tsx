@@ -682,12 +682,24 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
       
       // Extraer los números de secuencia y buscar el siguiente
       const numbers = invoicesThisYear.map((inv: any) => {
-        const numPart = inv.invoiceNumber.replace(defaultPrefix, '');
+        const numPart = inv.invoiceNumber.slice(defaultPrefix.length);
         return parseInt(numPart || '0', 10);
       });
       
       const maxNumber = Math.max(...numbers, 0);
-      return `${defaultPrefix}${String(maxNumber + 1).padStart(6, '0')}`;
+
+      // Detectar formato por mayoría: si la mayoría de facturas usan formato corto
+      // (sin ceros a la izquierda), mantener ese formato aunque alguna sea larga.
+      // Esto evita que una factura mal generada (ej: F26000003) contamine la serie.
+      const shortFormatCount = invoicesThisYear.filter((inv: any) => {
+        const numPart = inv.invoiceNumber.slice(defaultPrefix.length);
+        return !(numPart.length >= 6 && numPart.startsWith('0'));
+      }).length;
+      const usePadding = shortFormatCount < invoicesThisYear.length / 2;
+
+      return usePadding
+        ? `${defaultPrefix}${String(maxNumber + 1).padStart(6, '0')}`
+        : `${defaultPrefix}${maxNumber + 1}`;
     } catch (error) {
       console.error('Error generating invoice number:', error);
       const year = new Date().getFullYear();

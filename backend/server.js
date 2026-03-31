@@ -9118,7 +9118,8 @@ app.get('/api/invoices/:id/pdf', authenticateRequest, async (req, res) => {
     phone: '',
     postalCode: invoice.billing_client_postal_code || '',
     country: invoice.billing_client_country || '',
-    city: ''
+    city: invoice.billing_client_city || '',
+    province: invoice.billing_client_province || ''
   };
   
   console.log('👤 [PDF] patientData construido:', patientData);
@@ -9668,7 +9669,7 @@ app.get('/api/invoices/:id/pdf', authenticateRequest, async (req, res) => {
           <span class="info-label">Email:</span>
           <span class="info-value">${patientData.email}</span>
         </div>
-        ` : ''}}
+        ` : ''}
         ${patientData.phone ? `
         <div class="info-row">
           <span class="info-label">Teléfono:</span>
