@@ -8219,6 +8219,8 @@ app.post('/api/invoices/:id/rectify', authenticateRequest, async (req, res) => {
           billing_client_tax_id: originalInvoice.billing_client_tax_id,
           billing_client_postal_code: originalInvoice.billing_client_postal_code,
           billing_client_country: originalInvoice.billing_client_country,
+          billing_client_city: originalInvoice.billing_client_city,
+          billing_client_province: originalInvoice.billing_client_province,
           billing_psychologist_name: originalInvoice.billing_psychologist_name,
           billing_psychologist_address: originalInvoice.billing_psychologist_address,
           billing_psychologist_tax_id: originalInvoice.billing_psychologist_tax_id,
@@ -9649,6 +9651,12 @@ app.get('/api/invoices/:id/pdf', authenticateRequest, async (req, res) => {
           <span class="info-value">${patientData.postalCode || ''} ${patientData.city || ''}</span>
         </div>
         ` : ''}
+        ${patientData.province ? `
+        <div class="info-row">
+          <span class="info-label"></span>
+          <span class="info-value">${patientData.province}</span>
+        </div>
+        ` : ''}
         ${patientData.country ? `
         <div class="info-row">
           <span class="info-label"></span>
@@ -9660,7 +9668,7 @@ app.get('/api/invoices/:id/pdf', authenticateRequest, async (req, res) => {
           <span class="info-label">Email:</span>
           <span class="info-value">${patientData.email}</span>
         </div>
-        ` : ''}
+        ` : ''}}
         ${patientData.phone ? `
         <div class="info-row">
           <span class="info-label">Teléfono:</span>
@@ -9823,7 +9831,8 @@ async function prepareAndBuildInvoiceHTML(invoice, supabase) {
     email: '', phone: '',
     postalCode: invoice.billing_client_postal_code || '',
     country: invoice.billing_client_country || '',
-    city: ''
+    city: invoice.billing_client_city || '',
+    province: invoice.billing_client_province || ''
   };
 
   const subtotal = parseFloat(invoice.amount) || 0;
@@ -10041,6 +10050,7 @@ function buildInvoiceHTML(invoice, psychProfile, patientData, subtotal, iva, irp
         ${patientData.taxId || patientData.dni ? `<div class="info-row"><span class="info-label">DNI/NIF:</span><span class="info-value">${escapeHtml(patientData.taxId || patientData.dni)}</span></div>` : ''}
         ${patientData.address ? `<div class="info-row"><span class="info-label">Dirección:</span><span class="info-value">${escapeHtml(patientData.address)}</span></div>` : ''}
         ${patientData.postalCode || patientData.city ? `<div class="info-row"><span class="info-label"></span><span class="info-value">${escapeHtml(patientData.postalCode || '')} ${escapeHtml(patientData.city || '')}</span></div>` : ''}
+        ${patientData.province ? `<div class="info-row"><span class="info-label"></span><span class="info-value">${escapeHtml(patientData.province)}</span></div>` : ''}
         ${patientData.country ? `<div class="info-row"><span class="info-label"></span><span class="info-value">${escapeHtml(patientData.country)}</span></div>` : ''}
         ${patientData.email ? `<div class="info-row"><span class="info-label">Email:</span><span class="info-value">${escapeHtml(patientData.email)}</span></div>` : ''}
         ${patientData.phone ? `<div class="info-row"><span class="info-label">Teléfono:</span><span class="info-value">${escapeHtml(patientData.phone)}</span></div>` : ''}
@@ -10205,7 +10215,8 @@ app.get('/api/invoices/zip', authenticateRequest, async (req, res) => {
           email: '', phone: '',
           postalCode: invoice.billing_client_postal_code || '',
           country: invoice.billing_client_country || '',
-          city: ''
+          city: invoice.billing_client_city || '',
+          province: invoice.billing_client_province || ''
         };
 
         const subtotal = parseFloat(invoice.amount) || 0;
@@ -14786,6 +14797,8 @@ app.get('/api/psychologist/:psychologistId/patients', authenticateRequest, async
           billing_tax_id: u.billing_tax_id || u.tax_id || u.dni || u.data?.dni || '',
           postalCode: u.postalCode || u.postal_code || u.data?.postalCode || '',
           country: u.country || u.data?.country || '',
+          city: u.city || u.data?.city || '',
+          province: u.province || u.data?.province || '',
           tags: rel?.data?.tags || rel?.tags || [],
           active: rel?.active !== false, // Leer de la columna directa (por defecto true)
           patientNumber: rel?.patientnumber || 0, // Leer del campo directo patientnumber

@@ -104,6 +104,20 @@ CREATE TABLE public.invoices (
   CONSTRAINT invoices_psychologist_user_id_fkey FOREIGN KEY (psychologist_user_id) REFERENCES public.users(id),
   CONSTRAINT invoices_patient_user_id_fkey FOREIGN KEY (patient_user_id) REFERENCES public.users(id)
 );
+CREATE TABLE public.patient_subscriptions (
+  id text NOT NULL,
+  patient_user_id text NOT NULL,
+  stripe_customer_id text,
+  stripe_subscription_id text,
+  stripe_status text,
+  plan_id text NOT NULL DEFAULT 'patient_premium'::text,
+  access_blocked boolean NOT NULL DEFAULT false,
+  cancel_at_period_end boolean NOT NULL DEFAULT false,
+  current_period_end bigint,
+  created_at timestamp with time zone NOT NULL DEFAULT timezone('utc'::text, now()),
+  CONSTRAINT patient_subscriptions_pkey PRIMARY KEY (id),
+  CONSTRAINT patient_subscriptions_patient_user_id_fkey FOREIGN KEY (patient_user_id) REFERENCES public.users(id)
+);
 CREATE TABLE public.psychologist_materials (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   created_at timestamp with time zone NOT NULL DEFAULT now(),
@@ -187,21 +201,6 @@ CREATE TABLE public.subscriptions (
   data jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamp with time zone NOT NULL DEFAULT timezone('utc'::text, now()),
   CONSTRAINT subscriptions_pkey PRIMARY KEY (id)
-);
--- Patient premium subscriptions (AI voice diary, €4.99/month with 14-day trial)
-CREATE TABLE public.patient_subscriptions (
-  id text NOT NULL,
-  patient_user_id text NOT NULL,
-  stripe_customer_id text,
-  stripe_subscription_id text,
-  stripe_status text,
-  plan_id text NOT NULL DEFAULT 'patient_premium',
-  access_blocked boolean NOT NULL DEFAULT false,
-  cancel_at_period_end boolean NOT NULL DEFAULT false,
-  current_period_end bigint,
-  created_at timestamp with time zone NOT NULL DEFAULT timezone('utc'::text, now()),
-  CONSTRAINT patient_subscriptions_pkey PRIMARY KEY (id),
-  CONSTRAINT patient_subscriptions_patient_user_id_fkey FOREIGN KEY (patient_user_id) REFERENCES public.users(id)
 );
 CREATE TABLE public.templates (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,

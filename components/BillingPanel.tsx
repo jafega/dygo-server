@@ -36,6 +36,8 @@ interface Invoice {
   billing_client_tax_id?: string;
   billing_client_postal_code?: string;
   billing_client_country?: string;
+  billing_client_city?: string;
+  billing_client_province?: string;
   
   // Datos de facturación del psicólogo
   billing_psychologist_name?: string;
@@ -114,6 +116,8 @@ interface Patient {
   billing_tax_id?: string;
   postalCode?: string;
   country?: string;
+  city?: string;
+  province?: string;
 }
 
 interface Center {
@@ -197,6 +201,8 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
     billing_client_tax_id: '',
     billing_client_postal_code: '',
     billing_client_country: '',
+    billing_client_city: '',
+    billing_client_province: '',
     billing_psychologist_name: '',
     billing_psychologist_address: '',
     billing_psychologist_tax_id: '',
@@ -359,7 +365,9 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
         billing_client_address: patient.billing_address || '',
         billing_client_tax_id: patient.billing_tax_id || '',
         billing_client_postal_code: patient.postalCode || '',
-        billing_client_country: patient.country || ''
+        billing_client_country: patient.country || '',
+        billing_client_city: patient.city || '',
+        billing_client_province: patient.province || ''
       }));
       console.log('[BillingPanel] Datos de facturación del cliente precargados:', {
         billing_client_name: patient.billing_name || patient.name,
@@ -826,6 +834,8 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
         billing_client_tax_id: formData.billing_client_tax_id,
         billing_client_postal_code: resolvedPostalCode,
         billing_client_country: resolvedCountry,
+        billing_client_city: formData.billing_client_city,
+        billing_client_province: formData.billing_client_province,
         billing_psychologist_name: formData.billing_psychologist_name,
         billing_psychologist_address: formData.billing_psychologist_address,
         billing_psychologist_tax_id: formData.billing_psychologist_tax_id,
@@ -1101,6 +1111,8 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
       billing_client_tax_id: invoice.billing_client_tax_id || '',
       billing_client_postal_code: invoice.billing_client_postal_code || '',
       billing_client_country: invoice.billing_client_country || '',
+      billing_client_city: (invoice as any).billing_client_city || '',
+      billing_client_province: (invoice as any).billing_client_province || '',
       billing_psychologist_name: invoice.billing_psychologist_name || '',
       billing_psychologist_address: invoice.billing_psychologist_address || '',
       billing_psychologist_tax_id: invoice.billing_psychologist_tax_id || '',
@@ -1161,6 +1173,10 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
       billing_client_name: '',
       billing_client_address: '',
       billing_client_tax_id: '',
+      billing_client_postal_code: '',
+      billing_client_country: '',
+      billing_client_city: '',
+      billing_client_province: '',
       show_signature: false,
       ...psychData
     });
@@ -1181,7 +1197,9 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
       billing_client_address: '',
       billing_client_tax_id: '',
       billing_client_postal_code: '',
-      billing_client_country: ''
+      billing_client_country: '',
+      billing_client_city: '',
+      billing_client_province: ''
     };
     
     // Si estamos dentro del detalle de un paciente, preseleccionarlo automáticamente
@@ -1204,7 +1222,9 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
           billing_client_address: patient.billing_address || '',
           billing_client_tax_id: patient.billing_tax_id || '',
           billing_client_postal_code: patient.postalCode || '',
-          billing_client_country: patient.country || ''
+          billing_client_country: patient.country || '',
+          billing_client_city: patient.city || '',
+          billing_client_province: patient.province || ''
         };
         console.log('[BillingPanel] Manteniendo datos del paciente seleccionado:', clientData);
       }
@@ -2047,6 +2067,8 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                         billing_client_address: sel.streetAddress,
                         billing_client_postal_code: sel.postalCode,
                         billing_client_country: sel.country,
+                        billing_client_city: sel.city,
+                        billing_client_province: sel.province,
                       }))}
                       placeholder="Escribe la dirección del cliente…"
                     />

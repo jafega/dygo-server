@@ -147,6 +147,10 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
           address: data.data?.address || data.address || '',
           portal: data.data?.portal || data.portal || '',
           piso: data.data?.piso || data.piso || '',
+          city: data.data?.city || data.city || '',
+          postalCode: data.data?.postalCode || data.postalCode || '',
+          province: data.data?.province || data.province || '',
+          country: data.data?.country || data.country || '',
           birthDate: data.data?.birthDate || data.birthDate || '',
           notes: data.data?.notes || data.notes || ''
         });
@@ -1279,6 +1283,10 @@ tr:nth-child(even) td{background:#f8fafc}
             address: editedPatientData.address,
             portal: editedPatientData.portal || '',
             piso: editedPatientData.piso || '',
+            city: editedPatientData.city || '',
+            postalCode: editedPatientData.postalCode || '',
+            province: editedPatientData.province || '',
+            country: editedPatientData.country || '',
             birthDate: editedPatientData.birthDate,
             notes: editedPatientData.notes
           }
@@ -2201,7 +2209,14 @@ tr:nth-child(even) td{background:#f8fafc}
                       <AddressAutocomplete
                         value={editedPatientData.address}
                         onChange={(val) => setEditedPatientData({ ...editedPatientData, address: val })}
-                        onSelect={(sel) => setEditedPatientData((prev: any) => ({ ...prev, address: sel.streetAddress }))}
+                        onSelect={(sel) => setEditedPatientData((prev: any) => ({
+                          ...prev,
+                          address: sel.streetAddress,
+                          city: sel.city || prev.city,
+                          postalCode: sel.postalCode || prev.postalCode,
+                          province: sel.province || prev.province,
+                          country: sel.country || prev.country,
+                        }))}
                         placeholder="Calle Mayor, 15"
                         className="w-full"
                       />
@@ -2242,6 +2257,77 @@ tr:nth-child(even) td{background:#f8fafc}
                       ) : (
                         <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-4 bg-white border-2 border-slate-200 rounded-lg sm:rounded-xl">
                           <span className={`text-xs sm:text-sm md:text-base font-medium ${editedPatientData.piso ? 'text-slate-900' : 'text-slate-400'}`}>{editedPatientData.piso || 'No especificado'}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Localidad, CP, Provincia, País */}
+                  <div className="grid grid-cols-2 gap-3 sm:gap-4 md:col-span-2">
+                    <div className="space-y-2 sm:space-y-3">
+                      <label className="text-xs sm:text-sm font-bold text-slate-700">Ciudad</label>
+                      {isEditingInfo ? (
+                        <input
+                          type="text"
+                          value={editedPatientData.city || ''}
+                          onChange={(e) => setEditedPatientData({ ...editedPatientData, city: e.target.value })}
+                          className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-white border-2 border-slate-300 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all text-sm"
+                          placeholder="Madrid"
+                        />
+                      ) : (
+                        <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-4 bg-white border-2 border-slate-200 rounded-lg sm:rounded-xl">
+                          <span className={`text-xs sm:text-sm md:text-base font-medium ${editedPatientData.city ? 'text-slate-900' : 'text-slate-400'}`}>{editedPatientData.city || 'No especificado'}</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="space-y-2 sm:space-y-3">
+                      <label className="text-xs sm:text-sm font-bold text-slate-700">Código Postal</label>
+                      {isEditingInfo ? (
+                        <input
+                          type="text"
+                          value={editedPatientData.postalCode || ''}
+                          onChange={(e) => setEditedPatientData({ ...editedPatientData, postalCode: e.target.value })}
+                          className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-white border-2 border-slate-300 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all text-sm"
+                          placeholder="28001"
+                        />
+                      ) : (
+                        <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-4 bg-white border-2 border-slate-200 rounded-lg sm:rounded-xl">
+                          <span className={`text-xs sm:text-sm md:text-base font-medium ${editedPatientData.postalCode ? 'text-slate-900' : 'text-slate-400'}`}>{editedPatientData.postalCode || 'No especificado'}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 sm:gap-4 md:col-span-2">
+                    <div className="space-y-2 sm:space-y-3">
+                      <label className="text-xs sm:text-sm font-bold text-slate-700">Provincia / Comunidad</label>
+                      {isEditingInfo ? (
+                        <input
+                          type="text"
+                          value={editedPatientData.province || ''}
+                          onChange={(e) => setEditedPatientData({ ...editedPatientData, province: e.target.value })}
+                          className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-white border-2 border-slate-300 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all text-sm"
+                          placeholder="Madrid"
+                        />
+                      ) : (
+                        <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-4 bg-white border-2 border-slate-200 rounded-lg sm:rounded-xl">
+                          <span className={`text-xs sm:text-sm md:text-base font-medium ${editedPatientData.province ? 'text-slate-900' : 'text-slate-400'}`}>{editedPatientData.province || 'No especificado'}</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="space-y-2 sm:space-y-3">
+                      <label className="text-xs sm:text-sm font-bold text-slate-700">País</label>
+                      {isEditingInfo ? (
+                        <input
+                          type="text"
+                          value={editedPatientData.country || ''}
+                          onChange={(e) => setEditedPatientData({ ...editedPatientData, country: e.target.value })}
+                          className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-white border-2 border-slate-300 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all text-sm"
+                          placeholder="España"
+                        />
+                      ) : (
+                        <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-4 bg-white border-2 border-slate-200 rounded-lg sm:rounded-xl">
+                          <span className={`text-xs sm:text-sm md:text-base font-medium ${editedPatientData.country ? 'text-slate-900' : 'text-slate-400'}`}>{editedPatientData.country || 'No especificado'}</span>
                         </div>
                       )}
                     </div>
