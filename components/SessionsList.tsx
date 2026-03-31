@@ -1338,8 +1338,8 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                       </div>
                     </div>
                     
-                    {/* Session Details Button for completed sessions - Mobile top right */}
-                    {isCompleted && (
+                    {/* Session Details Button for completed/scheduled sessions - Mobile top right */}
+                    {(isCompleted || session.status === 'scheduled') && (
                       <button
                         onClick={(e) => handleOpenSessionDetails(session, e)}
                         className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border-2 transition-all group flex-shrink-0 text-[10px] font-semibold ${
@@ -1430,8 +1430,8 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                   
                   {/* Right: Financial Info */}
                   <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 sm:gap-2 pl-0 sm:pl-0">
-                    {/* Session Details Button for completed sessions - Desktop only */}
-                    {isCompleted && (
+                    {/* Session Details Button for completed/scheduled sessions - Desktop only */}
+                    {(isCompleted || session.status === 'scheduled') && (
                       <button
                         onClick={(e) => handleOpenSessionDetails(session, e)}
                         className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border-2 transition-all group flex-shrink-0 text-xs font-semibold ${

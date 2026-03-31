@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Calendar as CalendarIcon, Clock, Plus, X, Users, Video, MapPin, ChevronLeft, ChevronRight, MessageCircle, Trash2, Save, Copy, Send, ExternalLink, CheckCircle, XCircle, Ticket, Receipt, Globe, ChevronDown, Mail, AlertTriangle } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, Plus, X, Users, Video, MapPin, ChevronLeft, ChevronRight, MessageCircle, Trash2, Save, Copy, Send, ExternalLink, CheckCircle, XCircle, Ticket, Receipt, Globe, ChevronDown, Mail, AlertTriangle, FileText } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser, apiFetch } from '../services/authService';
 import { includesNormalized, isTempEmail } from '../services/textUtils';
+import SessionDetailsModal from './SessionDetailsModal';
 
 interface Session {
   id: string;
@@ -25,6 +26,7 @@ interface Session {
   tags?: string[]; // Tags heredadas de la relación
   invoice_id?: string;
   bonus_id?: string;
+  session_entry_id?: string;
   starts_on?: string;
   ends_on?: string;
   schedule_timezone?: string; // Zona horaria del psicólogo cuando se creó la sesión
@@ -123,6 +125,10 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
   const [assignedBono, setAssignedBono] = useState<Bono | null>(null);
   const [isLoadingBonos, setIsLoadingBonos] = useState(false);
   const [isAssigningBono, setIsAssigningBono] = useState(false);
+
+  // Estados para notas de sesión desde el modal de edición
+  const [scheduleSessionDetailsOpen, setScheduleSessionDetailsOpen] = useState(false);
+  const [scheduleEntryStatus, setScheduleEntryStatus] = useState<'none' | 'pending' | 'done'>('none');
   
   // Estados para bonos en nueva sesión
   const [newSessionBonos, setNewSessionBonos] = useState<Bono[]>([]);
@@ -185,6 +191,31 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
       loadSessions();
     }
   }, [currentDate]);
+
+  // Cargar el estado de la entrada de sesión cuando se selecciona una sesión para editar
+  useEffect(() => {
+    if (!selectedSession) {
+      setScheduleEntryStatus('none');
+      return;
+    }
+    if (!selectedSession.session_entry_id) {
+      setScheduleEntryStatus('none');
+      return;
+    }
+    (async () => {
+      try {
+        const res = await apiFetch(`${API_URL}/session-entries/${selectedSession.session_entry_id}`);
+        if (res.ok) {
+          const entry = await res.json();
+          setScheduleEntryStatus(entry.data?.status || entry.status || 'pending');
+        } else {
+          setScheduleEntryStatus('pending');
+        }
+      } catch {
+        setScheduleEntryStatus('pending');
+      }
+    })();
+  }, [selectedSession?.id, selectedSession?.session_entry_id]);
 
   // Auto-guardar la zona horaria en el perfil cuando cambia (pero no en la carga inicial)
   useEffect(() => {
@@ -2799,6 +2830,32 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                 />
               </div>
 
+              {/* Tomar notas de sesión */}
+              {(editedSession.status === 'scheduled' || editedSession.status === 'completed') && (
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Tomar notas</label>
+                  <button
+                    type="button"
+                    onClick={() => setScheduleSessionDetailsOpen(true)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full border-2 transition-all text-sm font-semibold ${
+                      !editedSession.session_entry_id
+                        ? 'border-red-300 bg-red-50 hover:border-red-500 hover:bg-red-100 text-red-600'
+                        : scheduleEntryStatus === 'done'
+                        ? 'border-green-500 bg-green-50 hover:bg-green-100 text-green-700'
+                        : 'border-orange-400 bg-orange-50 hover:border-orange-500 hover:bg-orange-100 text-orange-600'
+                    }`}
+                  >
+                    {!editedSession.session_entry_id ? (
+                      <><FileText size={14} className="text-red-500 flex-shrink-0" /><span>Completar sesión</span></>
+                    ) : scheduleEntryStatus === 'done' ? (
+                      <><CheckCircle size={14} className="text-green-600 flex-shrink-0" /><span>Sesión completada</span></>
+                    ) : (
+                      <><FileText size={14} className="text-orange-500 flex-shrink-0" /><span>Completar sesión</span></>
+                    )}
+                  </button>
+                </div>
+              )}
+
               {/* Zona horaria de la sesión */}
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-2">Zona horaria</label>
@@ -4298,6 +4355,38 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
             </button>
           </div>
         </div>
+      )}
+
+      {/* Session Notes Modal (from schedule edit modal) */}
+      {scheduleSessionDetailsOpen && selectedSession && (
+        <SessionDetailsModal
+          session={selectedSession}
+          onClose={() => setScheduleSessionDetailsOpen(false)}
+          onSave={async () => {
+            setScheduleSessionDetailsOpen(false);
+            await loadSessions();
+            // Refresh selectedSession and editedSession with updated data
+            try {
+              const res = await apiFetch(`${API_URL}/sessions/${selectedSession.id}`);
+              if (res.ok) {
+                const freshSession = await res.json();
+                setSelectedSession(freshSession);
+                setEditedSession(freshSession);
+                if (freshSession.session_entry_id) {
+                  const eRes = await apiFetch(`${API_URL}/session-entries/${freshSession.session_entry_id}`);
+                  if (eRes.ok) {
+                    const entry = await eRes.json();
+                    setScheduleEntryStatus(entry.data?.status || entry.status || 'pending');
+                  }
+                } else {
+                  setScheduleEntryStatus('none');
+                }
+              }
+            } catch (error) {
+              console.error('Error refreshing session after notes save:', error);
+            }
+          }}
+        />
       )}
     </div>
   );

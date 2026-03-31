@@ -2,60 +2,43 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { MapPin, Loader2 } from 'lucide-react';
 
 declare global {
-  interface Window { google?: any; __mapsReady?: () => void; }
+  interface Window { google?: any; __mapsBootstrapCb?: () => void; }
 }
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string;
 
-// Bootstrap: carga el script una sola vez usando el nuevo loader "loading=async"
-let bootstrapPromise: Promise<void> | null = null;
+let scriptPromise: Promise<void> | null = null;
 
-function bootstrap(): Promise<void> {
-  if (bootstrapPromise) return bootstrapPromise;
-  bootstrapPromise = new Promise((resolve, reject) => {
-    if (window.google?.maps?.importLibrary) { resolve(); return; }
-    window.__mapsReady = resolve;
+/** Carga el SDK de Google Maps una sola vez (v=weekly da acceso a la nueva Places API) */
+function loadMapsScript(): Promise<void> {
+  if (scriptPromise) return scriptPromise;
+  scriptPromise = new Promise((resolve, reject) => {
+    // Ya cargado
+    if (window.google?.maps?.places?.AutocompleteSuggestion) { resolve(); return; }
+    window.__mapsBootstrapCb = resolve;
     const s = document.createElement('script');
-    s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}&loading=async&language=es&callback=__mapsReady`;
+    s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}&libraries=places&v=weekly&language=es&callback=__mapsBootstrapCb`;
     s.async = true;
     s.defer = true;
-    s.onerror = () => reject(new Error('Error al cargar Google Maps'));
+    s.onerror = () => { scriptPromise = null; reject(new Error('Error al cargar Google Maps')); };
     document.head.appendChild(s);
   });
-  return bootstrapPromise;
-}
-
-// Carga la librería "places" (nueva Places API)
-let placesLibPromise: Promise<any> | null = null;
-
-async function loadPlacesLib(): Promise<any> {
-  await bootstrap();
-  if (!placesLibPromise) {
-    placesLibPromise = window.google.maps.importLibrary('places');
-  }
-  return placesLibPromise;
+  return scriptPromise;
 }
 
 export interface AddressSelection {
-  /** Calle + número */
   streetAddress: string;
-  /** Localidad / municipio */
   city: string;
-  /** Provincia */
   province: string;
-  /** Código postal */
   postalCode: string;
-  /** País en español */
   country: string;
-  /** Dirección completa formateada por Google */
   fullAddress: string;
 }
 
 interface Prediction {
-  place_id: string;
+  placeId: string;
   description: string;
-  /** referencia interna de la nueva API para llamar toPlace() */
-  _placePrediction: any;
+  _raw: any; // PlacePrediction object
 }
 
 interface AddressAutocompleteProps {
@@ -66,10 +49,9 @@ interface AddressAutocompleteProps {
   className?: string;
 }
 
-/** Extrae el longText del primer address_component que tenga alguno de los types dados */
 function getComp(components: any[], ...types: string[]): string {
   for (const t of types) {
-    const found = components.find((c: any) => c.types.includes(t));
+    const found = components.find((c: any) => c.types?.includes(t));
     if (found) return found.longText ?? found.long_name ?? '';
   }
   return '';
@@ -85,64 +67,66 @@ export const AddressAutocomplete: React.FC<AddressAutocompleteProps> = ({
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
-  const [libReady, setLibReady] = useState(false);
+  const [ready, setReady] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const libRef = useRef<any>(null);  // { AutocompleteSuggestion, AutocompleteSessionToken, Place }
   const sessionTokenRef = useRef<any>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!GOOGLE_MAPS_API_KEY) return;
-    loadPlacesLib()
-      .then((lib) => {
-        libRef.current = lib;
-        setLibReady(true);
-      })
+    if (!GOOGLE_MAPS_API_KEY) {
+      console.warn('[AddressAutocomplete] VITE_GOOGLE_MAPS_API_KEY no está definida');
+      return;
+    }
+    loadMapsScript()
+      .then(() => setReady(true))
       .catch(console.error);
   }, []);
 
-  /** Crea un nuevo session token (agrupa autocomplete + fetchFields = 1 transacción) */
-  const ensureSessionToken = useCallback(() => {
-    if (!sessionTokenRef.current && libRef.current?.AutocompleteSessionToken) {
-      sessionTokenRef.current = new libRef.current.AutocompleteSessionToken();
+  const ensureToken = () => {
+    const Token = window.google?.maps?.places?.AutocompleteSessionToken;
+    if (Token && !sessionTokenRef.current) {
+      sessionTokenRef.current = new Token();
     }
-  }, []);
+  };
 
   const search = useCallback(async (query: string) => {
-    if (!libReady || !libRef.current || query.trim().length < 3) {
+    const AC = window.google?.maps?.places?.AutocompleteSuggestion;
+    if (!AC || query.trim().length < 3) {
       setPredictions([]);
       setShowDropdown(false);
       return;
     }
-    ensureSessionToken();
+    ensureToken();
     setIsLoading(true);
     try {
-      const { suggestions } = await libRef.current.AutocompleteSuggestion.fetchAutocompleteSuggestions({
+      const { suggestions } = await AC.fetchAutocompleteSuggestions({
         input: query,
         language: 'es',
         includedPrimaryTypes: ['address'],
         sessionToken: sessionTokenRef.current,
       });
       if (suggestions?.length) {
-        const preds: Prediction[] = suggestions.map((s: any) => ({
-          place_id: s.placePrediction.placeId,
-          description: s.placePrediction.text.text,
-          _placePrediction: s.placePrediction,
-        }));
-        setPredictions(preds);
+        setPredictions(
+          suggestions.map((s: any) => ({
+            placeId: s.placePrediction.placeId,
+            description: s.placePrediction.text.text,
+            _raw: s.placePrediction,
+          }))
+        );
         setShowDropdown(true);
       } else {
         setPredictions([]);
         setShowDropdown(false);
       }
     } catch (err) {
-      console.error('Places autocomplete error:', err);
+      console.error('[AddressAutocomplete] fetchAutocompleteSuggestions:', err);
       setPredictions([]);
       setShowDropdown(false);
     } finally {
       setIsLoading(false);
     }
-  }, [libReady, ensureSessionToken]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
@@ -155,41 +139,38 @@ export const AddressAutocomplete: React.FC<AddressAutocompleteProps> = ({
     setPredictions([]);
     setShowDropdown(false);
 
-    if (!pred._placePrediction) {
+    if (!pred._raw) {
       onChange(pred.description);
       onSelect({ streetAddress: pred.description, city: '', province: '', postalCode: '', country: '', fullAddress: pred.description });
       return;
     }
 
     try {
-      const place = pred._placePrediction.toPlace();
-      // fetchFields consume el session token → autocomplete + details = 1 transacción
-      await place.fetchFields({ fields: ['addressComponents', 'formattedAddress'], language: 'es' });
-      // Invalidar el token tras usarlo
-      sessionTokenRef.current = null;
+      const place = pred._raw.toPlace();
+      // fetchFields consume el session token → autocomplete + details = 1 llamada facturada
+      await place.fetchFields({ fields: ['addressComponents', 'formattedAddress'] });
+      sessionTokenRef.current = null; // invalidar tras usar
 
       const comps: any[] = place.addressComponents ?? [];
-
-      const route        = getComp(comps, 'route');
-      const streetNumber = getComp(comps, 'street_number');
-      const city         = getComp(comps, 'locality', 'sublocality_level_1', 'administrative_area_level_3', 'administrative_area_level_2');
-      const province     = getComp(comps, 'administrative_area_level_2', 'administrative_area_level_1');
-      const postalCode   = getComp(comps, 'postal_code');
-      const country      = getComp(comps, 'country');
-      const fullAddress  = place.formattedAddress ?? pred.description;
+      const route         = getComp(comps, 'route');
+      const streetNumber  = getComp(comps, 'street_number');
+      const city          = getComp(comps, 'locality', 'sublocality_level_1', 'administrative_area_level_3');
+      const province      = getComp(comps, 'administrative_area_level_2', 'administrative_area_level_1');
+      const postalCode    = getComp(comps, 'postal_code');
+      const country       = getComp(comps, 'country');
+      const fullAddress   = place.formattedAddress ?? pred.description;
       const streetAddress = [route, streetNumber].filter(Boolean).join(', ');
 
       onChange(streetAddress || pred.description);
       onSelect({ streetAddress: streetAddress || pred.description, city, province, postalCode, country, fullAddress });
     } catch (err) {
-      console.error('Place details error:', err);
+      console.error('[AddressAutocomplete] fetchFields:', err);
       onChange(pred.description);
       onSelect({ streetAddress: pred.description, city: '', province: '', postalCode: '', country: '', fullAddress: pred.description });
       sessionTokenRef.current = null;
     }
   };
 
-  // Cierra el dropdown al hacer clic fuera
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
@@ -225,7 +206,7 @@ export const AddressAutocomplete: React.FC<AddressAutocompleteProps> = ({
         <ul className="absolute z-50 w-full bg-white border border-slate-200 rounded-lg shadow-xl mt-1 max-h-64 overflow-y-auto divide-y divide-slate-100">
           {predictions.map((p) => (
             <li
-              key={p.place_id}
+              key={p.placeId}
               onMouseDown={() => handleSelect(p)}
               className="flex items-start gap-2 px-3 py-2.5 hover:bg-indigo-50 cursor-pointer text-sm text-slate-700 transition-colors"
             >

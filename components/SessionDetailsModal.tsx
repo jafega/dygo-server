@@ -572,6 +572,20 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session: init
     }
   };
 
+  const handleMarkSessionCompleted = async (currentUserId: string) => {
+    if (session.status === 'completed') return;
+    try {
+      await apiFetch(`${API_URL}/sessions/${session.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': currentUserId },
+        body: JSON.stringify({ status: 'completed' })
+      });
+      setSession(prev => ({ ...prev, status: 'completed' }));
+    } catch (error) {
+      console.error('Error marking session as completed:', error);
+    }
+  };
+
   const handleSave = async () => {
     if (!transcript.trim() && !uploadedFile && !audioBlob && !existingEntry) {
       alert('Por favor, proporciona contenido para la sesión');
@@ -622,6 +636,7 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session: init
         });
 
         if (response.ok) {
+          if (status === 'done') await handleMarkSessionCompleted(currentUser.id);
           alert('Entrada de sesión actualizada correctamente');
           onSave();
           onClose();
@@ -667,7 +682,7 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session: init
                 },
                 body: JSON.stringify({ session_entry_id: existingEntry.id })
               });
-              
+              if (status === 'done') await handleMarkSessionCompleted(currentUser.id);
               alert('Entrada de sesión actualizada correctamente');
               onSave();
               onClose();
@@ -714,7 +729,7 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session: init
             },
             body: JSON.stringify({ session_entry_id: savedEntry.id })
           });
-          
+          if (status === 'done') await handleMarkSessionCompleted(currentUser.id);
           alert('Entrada de sesión guardada correctamente');
           onSave();
           onClose();
