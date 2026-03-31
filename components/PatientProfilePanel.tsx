@@ -18,6 +18,7 @@ interface PatientProfile {
   portal: string;
   piso: string;
   city: string;
+  province: string;
   postalCode: string;
   country: string;
 }
@@ -44,6 +45,7 @@ const PatientProfilePanel: React.FC<PatientProfilePanelProps> = ({ userId }) => 
     portal: '',
     piso: '',
     city: '',
+    province: '',
     postalCode: '',
     country: 'España'
   });
@@ -214,6 +216,7 @@ const PatientProfilePanel: React.FC<PatientProfilePanelProps> = ({ userId }) => 
                   ...prev,
                   address: sel.streetAddress,
                   city: sel.city || prev.city,
+                  province: sel.province || prev.province,
                   postalCode: sel.postalCode || prev.postalCode,
                   country: sel.country || prev.country,
                 }));
@@ -268,6 +271,17 @@ const PatientProfilePanel: React.FC<PatientProfilePanelProps> = ({ userId }) => 
                 placeholder="28001"
               />
             </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Provincia</label>
+            <input
+              type="text"
+              value={profile.province}
+              onChange={(e) => handleChange('province', e.target.value)}
+              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              placeholder="Madrid"
+            />
           </div>
 
           <div>

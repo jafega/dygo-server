@@ -8,7 +8,7 @@ import UpgradeModal from './UpgradeModal';
 import { Users, Clock, Loader2, ToggleLeft, ToggleRight, Search, Filter, X, UserPlus, Mail, AlertCircle, Download, Upload, CheckCircle, Send } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { normalizePhone, detectDefaultPrefix } from '../services/phoneUtils';
-import { includesNormalized } from '../services/textUtils';
+import { includesNormalized, isTempEmail } from '../services/textUtils';
 
 // Mainds logo SVG — used in the invite button
 const MaindsLogoMini: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
@@ -471,7 +471,7 @@ const PatientDashboard = forwardRef<PatientDashboardHandle, PatientDashboardProp
                                 </div>
                                 
                                 {/* Email - solo mostrar si no es temporal */}
-                                {patient.email && !patient.email.includes('@noemail.mainds.local') && (
+                                {!isTempEmail(patient.email) && (
                                     <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-slate-500 mt-0.5">
                                         <Mail size={12} className="shrink-0" />
                                         <span className="truncate">{patient.email}</span>
@@ -514,7 +514,7 @@ const PatientDashboard = forwardRef<PatientDashboardHandle, PatientDashboardProp
                                 {/* Mainds invite button — only for non-self patients */}
                                 {!patient.isSelf && (() => {
                                     const hasAccount = !!patient.auth_user_id;
-                                    const hasEmail = patient.email && !patient.email.includes('@noemail.mainds.local');
+                                    const hasRealEmail = !isTempEmail(patient.email);
                                     if (hasAccount) {
                                         return (
                                             <div
@@ -526,14 +526,13 @@ const PatientDashboard = forwardRef<PatientDashboardHandle, PatientDashboardProp
                                             </div>
                                         );
                                     }
-                                    if (!hasEmail) return null;
                                     return (
                                         <button
                                           title="Invitar a mainds"
                                           onClick={(e) => {
                                             e.stopPropagation();
                                             setInvitePatient(patient);
-                                            setInviteEmailInput(patient.email || '');
+                                            setInviteEmailInput(hasRealEmail ? patient.email! : '');
                                           }}
                                           className="w-8 h-8 rounded-full flex items-center justify-center transition-all bg-slate-200 hover:bg-slate-300 cursor-pointer"
                                         >

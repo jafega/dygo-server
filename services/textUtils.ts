@@ -17,11 +17,11 @@ export function includesNormalized(haystack: string, needle: string): boolean {
 }
 
 /**
- * Returns true if the email is a temporary placeholder (e.g. temp_xxx@noemail.mainds.local).
+ * Returns true if the email is a temporary placeholder (e.g. temp_xxx@noemail.mainds.local, temp_xxx@noemail.dygo.local).
  * These emails are not real and should never be shown to users.
  */
 export function isTempEmail(email: string | null | undefined): boolean {
-  return !email || email.includes('@noemail.mainds.local');
+  return !email || email.includes('@noemail.mainds.local') || email.includes('@noemail.dygo.local');
 }
 
 /**

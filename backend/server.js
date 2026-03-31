@@ -77,6 +77,9 @@ let supabaseTablesEnsured = false;
 
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
 
+/** Returns true if the email is a temporary internal placeholder that should never be shown or used externally. */
+const isTempEmail = (email) => !email || email.includes('@noemail.mainds.local') || email.includes('@noemail.dygo.local');
+
 // Función para enviar email de bienvenida al paciente
 async function sendWelcomeEmail(toEmail, firstName, lastName, psychologistName) {
   console.log(`📧 [sendWelcomeEmail] Preparando email para ${firstName} ${lastName} (${toEmail})`);
@@ -3645,9 +3648,9 @@ app.post('/api/users/:patientId/invite-to-mainds', authenticateRequest, async (r
     }
 
     // Use email from request body if provided and valid; otherwise fall back to stored email
-    const normalizedBodyEmail = bodyEmail && !bodyEmail.includes('@noemail.mainds.local') ? bodyEmail.trim().toLowerCase() : null;
+    const normalizedBodyEmail = bodyEmail && !isTempEmail(bodyEmail) ? bodyEmail.trim().toLowerCase() : null;
     const storedEmail = patientRow.user_email || patientRow.data?.email;
-    const storedEmailValid = storedEmail && !storedEmail.includes('@noemail.mainds.local') ? storedEmail : null;
+    const storedEmailValid = storedEmail && !isTempEmail(storedEmail) ? storedEmail : null;
     const patientEmail = normalizedBodyEmail || storedEmailValid;
 
     if (!patientEmail) {
@@ -5537,7 +5540,7 @@ app.patch('/api/users/:id', authenticateRequest, async (req, res) => {
       if (idx === -1) return res.status(404).json({ error: 'Usuario no encontrado' });
       
       const currentUser = db.users[idx];
-      const hasTempEmail = currentUser.has_temp_email || (currentUser.email && currentUser.email.includes('@noemail.mainds.local'));
+      const hasTempEmail = currentUser.has_temp_email || isTempEmail(currentUser.email);
       
       // Permitir cambiar email solo si es temporal o si el nuevo email coincide con el actual
       if (req.body?.email && req.body.email !== currentUser.email && !hasTempEmail) {
@@ -5546,7 +5549,7 @@ app.patch('/api/users/:id', authenticateRequest, async (req, res) => {
       
       // Si se está cambiando desde un email temporal a uno real, actualizar la bandera
       let updatedFields = { ...req.body };
-      if (hasTempEmail && req.body?.email && !req.body.email.includes('@noemail.mainds.local')) {
+      if (hasTempEmail && req.body?.email && !isTempEmail(req.body.email)) {
         const newEmail = normalizeEmail(req.body.email);
         
         // 🔍 Verificar si ya existe un usuario con ese email
@@ -5677,7 +5680,7 @@ app.patch('/api/users/:id', authenticateRequest, async (req, res) => {
     }
 
     const currentEmail = existingUser.user_email || existingUser.email;
-    const hasTempEmail = existingUser.has_temp_email || (currentEmail && currentEmail.includes('@noemail.mainds.local'));
+    const hasTempEmail = existingUser.has_temp_email || isTempEmail(currentEmail);
     
     // Permitir cambiar email solo si es temporal o si el nuevo email coincide con el actual
     if (req.body?.email && normalizeEmail(req.body.email) !== normalizeEmail(currentEmail) && !hasTempEmail) {
@@ -5691,7 +5694,7 @@ app.patch('/api/users/:id', authenticateRequest, async (req, res) => {
     const updateFields = {};
     
     // Si se está cambiando desde un email temporal a uno real
-    if (hasTempEmail && req.body?.email && !req.body.email.includes('@noemail.mainds.local')) {
+    if (hasTempEmail && req.body?.email && !isTempEmail(req.body.email)) {
       const newEmail = normalizeEmail(req.body.email);
       
       // 🔍 Verificar si ya existe un usuario con ese email
@@ -8399,7 +8402,7 @@ app.post('/api/invoices/:id/send-email', authenticateRequest, async (req, res) =
 
     // Construir lista de destinatarios (psicólogo + gestores), sin duplicados ni placeholders
     const allRecipients = [...new Set([psychEmail, ...gestorEmails])]
-      .filter(e => e && !e.endsWith('@noemail.mainds.local'));
+      .filter(e => e && !isTempEmail(e));
 
     if (allRecipients.length === 0) {
       return res.status(400).json({ error: 'No hay destinatarios configurados' });
@@ -13116,7 +13119,7 @@ app.post('/api/sessions/:sessionId/send-reminder', authenticateRequest, async (r
     }
 
     const patientEmail = patient?.user_email || patient?.email;
-    if (!patientEmail || patientEmail.includes('@noemail.mainds.local')) {
+    if (isTempEmail(patientEmail)) {
       return res.status(400).json({ error: 'El paciente no tiene un email válido' });
     }
 
@@ -14792,7 +14795,8 @@ app.get('/api/psychologist/:psychologistId/patients', authenticateRequest, async
           relationship_created_at: rel?.created_at || null,
           // Campos de registro en mainds
           auth_user_id: u.auth_user_id || null,
-          invitation_token: u.invitation_token || null
+          invitation_token: u.invitation_token || null,
+          avatarUrl: u.avatarUrl || null
         };
       });
     
@@ -15612,7 +15616,7 @@ app.post('/api/signatures/:id/send-email', authenticateRequest, async (req, res)
     if (patientErr || !patient) return res.status(404).json({ error: 'Paciente no encontrado' });
 
     const patientEmail = patient.user_email || patient.data?.email;
-    if (!patientEmail || patientEmail.includes('@noemail.mainds.local')) {
+    if (isTempEmail(patientEmail)) {
       return res.status(400).json({ error: 'El paciente no tiene un email válido' });
     }
 

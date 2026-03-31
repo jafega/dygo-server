@@ -2,6 +2,8 @@ import { createClient } from '@supabase/supabase-js';
 import { Resend } from 'resend';
 import twilio from 'twilio';
 
+const isTempEmail = (email) => !email || email.includes('@noemail.mainds.local') || email.includes('@noemail.dygo.local');
+
 export const config = {
   api: { bodyParser: true }
 };
@@ -101,7 +103,7 @@ export default async function handler(req, res) {
     const patientEmail = patient?.user_email;
     const patientPhone  = patient?.data?.phone || null;
     // Skip if there's nothing to send to
-    if ((!patientEmail || patientEmail.includes('@noemail.mainds.local')) && !patientPhone) continue;
+    if (isTempEmail(patientEmail) && !patientPhone) continue;
 
     const tz = session.data?.schedule_timezone || 'Europe/Madrid';
     const sessionDateStr = new Date(session.starts_on).toLocaleDateString('es-ES', {
@@ -120,7 +122,7 @@ export default async function handler(req, res) {
     try {
       // --- EMAIL CHANNEL ---
       const emailSentKey = isTodaySession ? 'reminder_today_sent_at' : 'reminder_tomorrow_sent_at';
-      if (emailReminderEnabled && psychEmailEnabled && patientEmail && !patientEmail.includes('@noemail.mainds.local') && !session.data?.[emailSentKey]) {
+      if (emailReminderEnabled && psychEmailEnabled && !isTempEmail(patientEmail) && !session.data?.[emailSentKey]) {
         await resend.emails.send({
           from: 'mainds <no-reply@mainds.app>',
           to: patientEmail,
