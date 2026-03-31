@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { ViewState, JournalEntry, Goal, UserSettings, WeeklyReport, User } from './types';
 import * as StorageService from './services/storageService';
 import * as AuthService from './services/authService';
@@ -276,31 +276,9 @@ const App: React.FC = () => {
     }
   }, [currentUser?.is_psychologist, psychViewMode]);
   
-  // Refrescar usuario cada vez que cambia de pantalla (psychViewMode)
-  useEffect(() => {
-    const refreshOnViewChange = async () => {
-      if (currentUser?.id) {
-        try {
-          const freshUser = await AuthService.getUserById(currentUser.id);
-          if (freshUser) {
-            // Never downgrade is_psychologist — if current state says true, keep it true
-            const mergedIsPsych = currentUser.is_psychologist === true || freshUser.is_psychologist === true;
-            const merged = { ...freshUser, is_psychologist: mergedIsPsych, isPsychologist: mergedIsPsych };
-            setCurrentUser(merged);
-            console.log('🔄 Usuario refrescado al cambiar de vista:', {
-              email: merged.email,
-              is_psychologist: merged.is_psychologist,
-              psychViewMode
-            });
-          }
-        } catch (err) {
-          console.warn('Error refrescando usuario al cambiar vista:', err);
-        }
-      }
-    };
-    
-    refreshOnViewChange();
-  }, [psychViewMode]);
+  // Removed: API call on every psychViewMode change was unnecessary — the user object
+  // is already in state and updated on login / explicit actions. The is_psychologist
+  // guard effect above already handles the only valid reason to re-check on view change.
 
   const loadUserData = async (userId: string) => {
     try {
