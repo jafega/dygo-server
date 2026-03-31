@@ -3,6 +3,7 @@ import { ViewState, JournalEntry, Goal, UserSettings, WeeklyReport, User } from 
 import * as StorageService from './services/storageService';
 import * as AuthService from './services/authService';
 import { USE_BACKEND, API_URL } from './services/config';
+import { isTempEmail } from './services/textUtils';
 import { analyzeJournalEntry, analyzeGoalsProgress, generateWeeklyReport } from './services/genaiService';
 import VoiceSession from './components/VoiceSession';
 import PatientSessions from './components/PatientSessions';
@@ -127,6 +128,7 @@ const App: React.FC = () => {
   } | null>(null);
 
   const [showAppUpgradeModal, setShowAppUpgradeModal] = useState(false);
+  const [showPendingSessionsBadge, setShowPendingSessionsBadge] = useState(true);
 
   // Deep-link: ?sign_document=<signatureId> — patient arriving from email to sign a document
   const [pendingSignDocumentId, setPendingSignDocumentId] = useState<string | null>(() => {
@@ -482,6 +484,9 @@ const App: React.FC = () => {
         
         const isIncomplete = requiredFields.some(field => !field || String(field).trim() === '');
         setIsProfileIncomplete(isIncomplete);
+        if (userToCheck.is_psychologist === true) {
+          setShowPendingSessionsBadge(profile.show_pending_sessions_badge ?? true);
+        }
       }
     } catch (error) {
       console.error('Error checking profile completeness:', error);
@@ -1123,6 +1128,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   subscriptionInfo={psychSubscriptionInfo}
                   psychologistId={currentUser.id}
                   onNeedUpgrade={() => setShowAppUpgradeModal(true)}
+                  showPendingBadge={showPendingSessionsBadge}
                />
                
                {/* Main Content */}
@@ -1251,7 +1257,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                     {psychPanelView === 'sessions' && <SessionsList psychologistId={currentUser.id} />}
                     {psychPanelView === 'billing' && <BillingPanel psychologistId={currentUser.id} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} />}
                     {psychPanelView === 'centros' && <CentrosPanel ref={centrosPanelRef} psychologistId={currentUser.id} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} />}
-                    {psychPanelView === 'profile' && <PsychologistProfilePanel userId={currentUser.id} userEmail={currentUser.email} />}
+                    {psychPanelView === 'profile' && <PsychologistProfilePanel userId={currentUser.id} userEmail={currentUser.email} onBadgeSettingChange={setShowPendingSessionsBadge} />}
                     {psychPanelView === 'schedule' && <PsychologistSchedule psychologistId={currentUser.id} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} onOpenSettings={handleOpenSettings} />}
                     {psychPanelView === 'ai-assistant' && <PsychologistAIChat psychologistId={currentUser.id} psychologistName={currentUser.name} />}
                     {psychPanelView === 'connections' && <ConnectionsPanel currentUser={currentUser} />}
@@ -1593,7 +1599,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
               </div>
               <div className="flex-1 min-w-0 text-left">
                 <p className="text-sm font-medium text-slate-900 truncate">{currentUser?.name}</p>
-                <p className="text-xs text-slate-500 truncate">{currentUser?.email}</p>
+                <p className="text-xs text-slate-500 truncate">{!isTempEmail(currentUser?.email) ? currentUser?.email : ''}</p>
               </div>
             </button>
 

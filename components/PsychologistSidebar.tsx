@@ -42,6 +42,7 @@ interface PsychologistSidebarProps {
   subscriptionInfo?: SubscriptionInfo | null;
   psychologistId?: string;
   onNeedUpgrade?: () => void;
+  showPendingBadge?: boolean;
 }
 
 const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({ 
@@ -57,7 +58,8 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
   isProfileIncomplete = false,
   subscriptionInfo = null,
   psychologistId = '',
-  onNeedUpgrade
+  onNeedUpgrade,
+  showPendingBadge = true
 }) => {
   const menuItems = [
     { id: 'schedule' as const, label: 'Agenda', icon: Calendar },
@@ -398,7 +400,7 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
               >
                 <Icon size={18} />
                 <span className="flex-1 text-left">{item.label}</span>
-                {item.id === 'sessions' && pendingEntriesCount > 0 && (
+                {item.id === 'sessions' && showPendingBadge && pendingEntriesCount > 0 && (
                   <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-indigo-600 text-white text-[11px] font-bold leading-none">
                     {pendingEntriesCount}
                   </span>

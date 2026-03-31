@@ -28,14 +28,16 @@ interface PsychologistProfile {
   currency: string;
   email_reminders_enabled?: boolean;
   whatsapp_reminders_enabled?: boolean;
+  show_pending_sessions_badge?: boolean;
 }
 
 interface PsychologistProfileProps {
   userId: string;
   userEmail: string;
+  onBadgeSettingChange?: (value: boolean) => void;
 }
 
-const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, userEmail }) => {
+const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, userEmail, onBadgeSettingChange }) => {
   const [profile, setProfile] = useState<PsychologistProfile>({
     name: '',
     professionalId: '',
@@ -52,7 +54,8 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
     sessionPrice: 0,
     currency: 'EUR',
     email_reminders_enabled: false,
-    whatsapp_reminders_enabled: false
+    whatsapp_reminders_enabled: false,
+    show_pending_sessions_badge: true
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -161,7 +164,8 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
           sessionPrice: data.sessionPrice || 0,
           currency: data.currency || 'EUR',
           email_reminders_enabled: data.email_reminders_enabled ?? false,
-          whatsapp_reminders_enabled: data.whatsapp_reminders_enabled ?? false
+          whatsapp_reminders_enabled: data.whatsapp_reminders_enabled ?? false,
+          show_pending_sessions_badge: data.show_pending_sessions_badge ?? true
         });
         setGestorEmails(Array.isArray(data.gestor_emails) ? data.gestor_emails : []);
       }
@@ -196,8 +200,12 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
     setIsSaving(false);
   };
 
-  const handleChange = (field: keyof PsychologistProfile, value: string | number) => {
-    setProfile({ ...profile, [field]: value });
+  const handleChange = (field: keyof PsychologistProfile, value: string | number | boolean) => {
+    const updated = { ...profile, [field]: value };
+    setProfile(updated);
+    if (field === 'show_pending_sessions_badge' && onBadgeSettingChange) {
+      onBadgeSettingChange(value as boolean);
+    }
   };
 
   if (isLoading) {
@@ -512,6 +520,20 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
                     <div className="font-semibold text-green-700">Recordatorios automáticos por WhatsApp</div>
                     <div className="text-xs text-green-600">
                       Envía un WhatsApp a tus pacientes el día antes y el mismo día de la sesión (requiere Twilio configurado y que el paciente tenga teléfono registrado).
+                    </div>
+                  </div>
+                </label>
+                <label className="flex items-center gap-3 px-4 py-3 bg-indigo-50 border border-indigo-200 rounded-lg cursor-pointer hover:bg-indigo-100 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={profile.show_pending_sessions_badge ?? true}
+                    onChange={(e) => handleChange('show_pending_sessions_badge' as any, e.target.checked as any)}
+                    className="w-5 h-5 rounded border-indigo-300 text-indigo-600 focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <div>
+                    <div className="font-semibold text-indigo-700">Mostrar contador de sesiones pendientes</div>
+                    <div className="text-xs text-indigo-600">
+                      Muestra un número en el menú de sesiones indicando cuántas sesiones completadas aún no tienen notas de sesión registradas.
                     </div>
                   </div>
                 </label>

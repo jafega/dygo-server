@@ -3,6 +3,7 @@ import { FileText, Plus, DollarSign, Check, Clock, ExternalLink, Download, Eye, 
 import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
 import { AddressAutocomplete } from './AddressAutocomplete';
+import { includesNormalized, isTempEmail } from '../services/textUtils';
 
 interface Invoice {
   id: string;
@@ -1321,8 +1322,8 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
   const filteredInvoices = draftFilteredInvoices.filter(invoice => {
     // Filtro de búsqueda por nombre de paciente o número de factura
     const matchesSearch = searchTerm === '' || 
-      invoice.patientName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      invoice.invoiceNumber?.toLowerCase().includes(searchTerm.toLowerCase());
+      (invoice.patientName ? includesNormalized(invoice.patientName, searchTerm) : false) ||
+      (invoice.invoiceNumber ? includesNormalized(invoice.invoiceNumber, searchTerm) : false);
     
     // Filtro de estado
     const matchesStatus = statusFilter === 'all' || invoice.status === statusFilter;
@@ -1719,7 +1720,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                     <User size={20} className="text-indigo-600 shrink-0" />
                     <div>
                       <div className="font-semibold text-slate-900">{contextPatient.name}</div>
-                      <div className="text-sm text-slate-500">{contextPatient.email}</div>
+                      <div className="text-sm text-slate-500">{!isTempEmail(contextPatient.email) ? contextPatient.email : ''}</div>
                     </div>
                   </div>
                 ) : invoiceType === 'patient' ? (
@@ -1747,8 +1748,8 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                       <div className="absolute z-50 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
                         {patients
                           .filter(patient => 
-                            patient.name.toLowerCase().includes(patientSearchTerm.toLowerCase()) ||
-                            patient.email.toLowerCase().includes(patientSearchTerm.toLowerCase())
+                            includesNormalized(patient.name, patientSearchTerm) ||
+                            includesNormalized(patient.email, patientSearchTerm)
                           )
                           .map((patient) => (
                             <div
@@ -1764,12 +1765,12 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                               }`}
                             >
                               <div className="font-medium text-slate-900">{patient.name}</div>
-                              <div className="text-sm text-slate-500">{patient.email}</div>
+                              <div className="text-sm text-slate-500">{!isTempEmail(patient.email) ? patient.email : ''}</div>
                             </div>
                           ))}
                         {patients.filter(patient => 
-                          patient.name.toLowerCase().includes(patientSearchTerm.toLowerCase()) ||
-                          patient.email.toLowerCase().includes(patientSearchTerm.toLowerCase())
+                          includesNormalized(patient.name, patientSearchTerm) ||
+                          includesNormalized(patient.email, patientSearchTerm)
                         ).length === 0 && (
                           <div className="px-4 py-3 text-slate-500 text-center">
                             No se encontraron pacientes
@@ -1819,7 +1820,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                       <div className="absolute z-50 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
                         {centers
                           .filter(center => 
-                            (center.nombre_comercial || center.center_name).toLowerCase().includes(centerSearchTerm.toLowerCase())
+                            includesNormalized(center.nombre_comercial || center.center_name, centerSearchTerm)
                           )
                           .map((center) => (
                             <div
@@ -1838,7 +1839,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                             </div>
                           ))}
                         {centers.filter(center => 
-                          (center.nombre_comercial || center.center_name).toLowerCase().includes(centerSearchTerm.toLowerCase())
+                          includesNormalized(center.nombre_comercial || center.center_name, centerSearchTerm)
                         ).length === 0 && (
                           <div className="px-4 py-3 text-slate-500 text-center">
                             No se encontraron centros

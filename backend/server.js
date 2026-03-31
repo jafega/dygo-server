@@ -4101,6 +4101,16 @@ const STRIPE_PRICE_IDS = {
   patient_premium: process.env.STRIPE_PRICE_ID_PATIENT_PREMIUM || 'price_patient_premium_placeholder'
 };
 
+// Warn at startup if any price ID is a placeholder (means env var is missing)
+{
+  const missing = Object.entries(STRIPE_PRICE_IDS).filter(([, v]) => v.includes('placeholder')).map(([k]) => k);
+  if (missing.length > 0) {
+    console.warn(`[stripe] ⚠️  Missing price ID env vars for plans: ${missing.join(', ')}. Checkout will fail for these plans.`);
+  } else {
+    console.log(`[stripe] ✅ All price IDs configured: starter=${STRIPE_PRICE_IDS.starter} mainder=${STRIPE_PRICE_IDS.mainder} supermainder=${STRIPE_PRICE_IDS.supermainder} patient_premium=${STRIPE_PRICE_IDS.patient_premium}`);
+  }
+}
+
 /**
  * Gets or creates a patient subscription record (for patient premium plan).
  */

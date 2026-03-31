@@ -18,6 +18,7 @@ import {
 import { Shield, Loader2, Search, X, UserPlus, UserCheck, Trash2, Mail, Link2, Send } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
+import { isTempEmail } from '../services/textUtils';
 import UpgradeModal from './UpgradeModal';
 
 interface ConnectionsPanelProps {
@@ -758,7 +759,7 @@ ${currentUser.name || 'Tu psicólogo/a'}
                         <div key={patient.id} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border border-green-100 bg-green-50/30 rounded-lg sm:rounded-xl p-2 sm:p-4">
                           <div className="min-w-0">
                             <p className="text-xs sm:text-sm font-semibold text-slate-900 truncate">{patient.name}</p>
-                            <p className="text-[11px] sm:text-xs text-slate-500 truncate">{patient.email}</p>
+                            <p className="text-[11px] sm:text-xs text-slate-500 truncate">{!isTempEmail(patient.email) ? patient.email : ''}</p>
                           </div>
                           <button 
                             onClick={() => handleRevoke(patient.id)} 

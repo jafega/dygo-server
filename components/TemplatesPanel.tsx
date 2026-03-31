@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { includesNormalized, isTempEmail } from '../services/textUtils';
 import {
   FileText, Plus, Edit2, Trash2, Send, Eye, X,
   ChevronLeft, Save, Loader2, Award, CheckCircle, AlertCircle, Search,
@@ -882,8 +883,8 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
                         <div className="absolute z-20 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-52 overflow-y-auto">
                           {(() => {
                             const filtered = patients.filter(p =>
-                              p.name.toLowerCase().includes(patientSearch.toLowerCase()) ||
-                              (p.email && p.email.toLowerCase().includes(patientSearch.toLowerCase()))
+                              includesNormalized(p.name, patientSearch) ||
+                              (p.email ? includesNormalized(p.email, patientSearch) : false)
                             );
                             return filtered.length === 0 ? (
                               <p className="text-sm text-slate-400 py-4 text-center">Sin resultados</p>
@@ -906,7 +907,7 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
                                 </div>
                                 <div className="flex-1 min-w-0">
                                   <p className="font-medium truncate">{p.name}</p>
-                                  {p.email && <p className="text-xs text-slate-400 truncate">{p.email}</p>}
+                                  {p.email && !isTempEmail(p.email) && <p className="text-xs text-slate-400 truncate">{p.email}</p>}
                                 </div>
                                 {selectedPatient?.id === p.id && (
                                   <CheckCircle size={15} className="text-indigo-600 flex-shrink-0" />

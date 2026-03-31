@@ -275,12 +275,25 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
 
     // If session is still pending, offer to delete all future recurring sessions at same time
     let deleteFuture = false;
-    if (editedSession.status === 'scheduled' && editedSession.startTime) {
-      deleteFuture = confirm(
-        `¿Deseas también eliminar todas las sesiones futuras programadas de ${editedSession.patientName} a las ${editedSession.startTime} (misma hora, mismo día de la semana)?\n\n` +
-        `• Pulsa "Aceptar" para eliminar esta sesión y las siguientes semanas a esa hora.\n` +
-        `• Pulsa "Cancelar" para eliminar solo esta sesión.`
-      );
+    if (editedSession.status === 'scheduled' && editedSession.startTime && editedSession.date) {
+      const sessionWeekday = new Date(editedSession.date + 'T12:00:00').getDay();
+      const editedPatientId = (editedSession as any).patient_user_id || editedSession.patientId;
+      const hasFutureSessions = sessions.some(s => {
+        if (s.id === editedSession.id) return false;
+        if (s.status !== 'scheduled') return false;
+        if (s.startTime !== editedSession.startTime) return false;
+        const sPatientId = (s as any).patient_user_id || s.patientId;
+        if (sPatientId !== editedPatientId) return false;
+        if (!s.date || s.date <= editedSession.date!) return false;
+        return new Date(s.date + 'T12:00:00').getDay() === sessionWeekday;
+      });
+      if (hasFutureSessions) {
+        deleteFuture = confirm(
+          `¿Deseas también eliminar todas las sesiones futuras programadas de ${editedSession.patientName} a las ${editedSession.startTime} (misma hora, mismo día de la semana)?\n\n` +
+          `• Pulsa "Aceptar" para eliminar esta sesión y las siguientes semanas a esa hora.\n` +
+          `• Pulsa "Cancelar" para eliminar solo esta sesión.`
+        );
+      }
     }
 
     setIsSaving(true);

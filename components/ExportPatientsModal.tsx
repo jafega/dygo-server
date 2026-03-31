@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { X, Download, CheckSquare, Square, FileSpreadsheet, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
+import { isTempEmail } from '../services/textUtils';
 
 interface PatientExportData {
   id: string;
@@ -31,7 +32,7 @@ interface ColumnDef {
 const PATIENT_COLUMNS: ColumnDef[] = [
   { key: 'patientNumber', label: 'Nº Paciente', getValue: p => p.patientNumber != null ? String(p.patientNumber) : '' },
   { key: 'name', label: 'Nombre', getValue: p => p.name || '' },
-  { key: 'email', label: 'Email', getValue: p => p.email || '' },
+  { key: 'email', label: 'Email', getValue: p => (!isTempEmail(p.email) ? p.email : '') || '' },
   { key: 'phone', label: 'Teléfono', getValue: p => p.phone || '' },
   { key: 'active', label: 'Estado', getValue: p => p.active === false ? 'Inactivo' : 'Activo' },
   { key: 'tags', label: 'Tags', getValue: p => (p.tags || []).join(', ') },

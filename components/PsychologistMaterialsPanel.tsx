@@ -3,6 +3,7 @@ import {
   FolderOpen, Upload, Search, Trash2, Send, X, FileText,
   Image, File, Loader2, Plus, User, ChevronDown, AlertCircle, CheckCircle2
 } from 'lucide-react';
+import { includesNormalized, isTempEmail } from '../services/textUtils';
 import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
 
@@ -267,13 +268,13 @@ const PsychologistMaterialsPanel: React.FC<PsychologistMaterialsPanelProps> = ({
   // ─── Filter ──────────────────────────────────────────────────────────────────
 
   const filteredMaterials = materials.filter(m =>
-    m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    m.file_name.toLowerCase().includes(searchQuery.toLowerCase())
+    includesNormalized(m.name, searchQuery) ||
+    includesNormalized(m.file_name, searchQuery)
   );
 
   const filteredPatients = patients.filter(p =>
-    p.name?.toLowerCase().includes(patientSearch.toLowerCase()) ||
-    p.email?.toLowerCase().includes(patientSearch.toLowerCase())
+    (p.name ? includesNormalized(p.name, patientSearch) : false) ||
+    (p.email ? includesNormalized(p.email, patientSearch) : false)
   );
 
   // ─── Render ──────────────────────────────────────────────────────────────────
@@ -520,7 +521,7 @@ const PsychologistMaterialsPanel: React.FC<PsychologistMaterialsPanelProps> = ({
                               <User size={14} className="text-slate-400 flex-shrink-0" />
                               <div>
                                 <span className="font-medium">{p.name}</span>
-                                {p.email && <span className="text-slate-400 ml-1 text-xs">{p.email}</span>}
+                                {p.email && !isTempEmail(p.email) && <span className="text-slate-400 ml-1 text-xs">{p.email}</span>}
                               </div>
                             </button>
                           ))

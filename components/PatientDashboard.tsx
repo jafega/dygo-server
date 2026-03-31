@@ -8,6 +8,7 @@ import UpgradeModal from './UpgradeModal';
 import { Users, Clock, Loader2, ToggleLeft, ToggleRight, Search, Filter, X, UserPlus, Mail, AlertCircle, Download, Upload, CheckCircle, Send } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { normalizePhone, detectDefaultPrefix } from '../services/phoneUtils';
+import { includesNormalized } from '../services/textUtils';
 
 // Mainds logo SVG — used in the invite button
 const MaindsLogoMini: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
@@ -88,9 +89,8 @@ const PatientDashboard = forwardRef<PatientDashboardHandle, PatientDashboardProp
     let result = patients.filter(patient => {
       // Filtro por búsqueda (nombre y email)
       if (searchTerm) {
-        const searchLower = searchTerm.toLowerCase();
-        const matchesName = patient.name.toLowerCase().includes(searchLower);
-        const matchesEmail = patient.email?.toLowerCase().includes(searchLower) || false;
+        const matchesName = includesNormalized(patient.name, searchTerm);
+        const matchesEmail = patient.email ? includesNormalized(patient.email, searchTerm) : false;
         if (!matchesName && !matchesEmail) return false;
       }
       

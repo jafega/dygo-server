@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { includesNormalized } from '../services/textUtils';
 import { X, User, Calendar, Phone, Mail, FileText, DollarSign, Settings, Tag, Trash2, Save, Edit2, CreditCard, MapPin, Cake, Clock as ClockIcon, BookOpen, Sparkles, CheckCircle, AlertCircle, Download, Loader2, Ticket, Building2, TrendingUp, BarChart3, Upload, File, XCircle, Send, Scroll, Eye, Award, Shield, Lock, ClipboardList, Link, ExternalLink } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser, apiFetch } from '../services/authService';
@@ -1236,9 +1237,8 @@ tr:nth-child(even) td{background:#f8fafc}
   const getFilteredSuggestions = () => {
     if (!tagInput.trim()) return allPsychologistTags;
     
-    const searchTerm = tagInput.toLowerCase();
     return allPsychologistTags.filter(tag => 
-      tag.toLowerCase().includes(searchTerm) && 
+      includesNormalized(tag, tagInput) && 
       !relationshipSettings.tags.includes(tag)
     );
   };
@@ -2921,7 +2921,7 @@ tr:nth-child(even) td{background:#f8fafc}
                     <h4 className="text-sm sm:text-base font-bold text-purple-900">Instrucciones para la IA de voz</h4>
                   </div>
                   <div className="p-3 sm:p-4">
-                    <p className="text-xs text-slate-500 mb-2">Indica a dygo qué temas tratar, qué preguntar o cómo enfocar las conversaciones de voz con este paciente. Estas instrucciones se incluyen en cada llamada de IA del paciente.</p>
+                    <p className="text-xs text-slate-500 mb-2">Indica a mainds qué temas tratar, qué preguntar o cómo enfocar las conversaciones de voz con este paciente. Estas instrucciones se incluyen en cada llamada de IA del paciente.</p>
                     <textarea
                       value={relationshipSettings.aiInstructions}
                       onChange={(e) => setRelationshipSettings({ ...relationshipSettings, aiInstructions: e.target.value })}

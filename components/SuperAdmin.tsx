@@ -3,6 +3,7 @@ import { User } from '../types';
 import * as AuthService from '../services/authService';
 import { Trash2, RefreshCcw, Shield, Users, Search, AlertTriangle, UserX, ArrowRightLeft } from 'lucide-react';
 import { API_URL } from '../services/config';
+import { includesNormalized, isTempEmail } from '../services/textUtils';
 import { apiFetch } from '../services/authService';
 
 // Panel de administración integrado como pestaña
@@ -31,8 +32,8 @@ const SuperAdmin: React.FC = () => {
 
   const filtered = users.filter(u => 
     !query || 
-    u.name?.toLowerCase().includes(query.toLowerCase()) || 
-    u.email?.toLowerCase().includes(query.toLowerCase())
+    (u.name ? includesNormalized(u.name, query) : false) || 
+    (u.email ? includesNormalized(u.email, query) : false)
   );
 
   const totalUsers = users.length;
@@ -185,7 +186,7 @@ const SuperAdmin: React.FC = () => {
                             </span>
                           )}
                         </div>
-                        <p className="text-sm text-slate-500 truncate">{u.email}</p>
+                        <p className="text-sm text-slate-500 truncate">{!isTempEmail(u.email) ? u.email : <span className="italic text-slate-400">Sin email</span>}</p>
                         <p className="text-xs text-slate-400 font-mono">ID: {u.id.slice(0, 8)}...</p>
                       </div>
                     </div>
@@ -228,7 +229,7 @@ const SuperAdmin: React.FC = () => {
             </div>
             
             <p className="text-slate-600 mb-6">
-              Estás a punto de eliminar a <strong className="text-slate-900">{confirmingUser.name}</strong> ({confirmingUser.email}).
+              Estás a punto de eliminar a <strong className="text-slate-900">{confirmingUser.name}</strong>{!isTempEmail(confirmingUser.email) && ` (${confirmingUser.email})`}.
             </p>
 
             <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">

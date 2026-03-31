@@ -3,6 +3,7 @@ import { UserSettings, User } from '../types';
 import { getCurrentUser, updateUser, uploadAvatar, apiFetch } from '../services/authService';
 import { X, Clock, Shield, LogOut, Globe, Mic, Camera, UserCheck, Calendar, CheckCircle, AlertCircle } from 'lucide-react';
 import * as AuthService from '../services/authService';
+import { isTempEmail } from '../services/textUtils';
 import { API_URL } from '../services/config';
 import UpgradeModal from './UpgradeModal';
 
@@ -225,7 +226,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                             </div>
                             <div className="min-w-0">
                                 <h3 className="text-lg font-bold text-slate-800 truncate">{currentUser?.name}</h3>
-                                <p className="text-sm text-slate-500 truncate">{currentUser?.email}</p>
+                                <p className="text-sm text-slate-500 truncate">{!isTempEmail(currentUser?.email) ? currentUser?.email : ''}</p>
                                 <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-white/70 border border-slate-200 px-3 py-1 text-xs text-slate-600">
                                     <Shield size={12} /> Acceso gestionado por Google
                                 </div>

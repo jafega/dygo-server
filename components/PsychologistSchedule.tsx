@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Calendar as CalendarIcon, Clock, Plus, X, Users, Video, MapPin, ChevronLeft, ChevronRight, MessageCircle, Trash2, Save, Copy, Send, ExternalLink, CheckCircle, XCircle, Ticket, Receipt, Globe, ChevronDown, Mail, AlertTriangle } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser, apiFetch } from '../services/authService';
+import { includesNormalized, isTempEmail } from '../services/textUtils';
 
 interface Session {
   id: string;
@@ -1197,12 +1198,25 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
 
     // If session is still pending, offer to delete all future recurring sessions at same time
     let deleteFuture = false;
-    if (editedSession.status === 'scheduled' && editedSession.startTime) {
-      deleteFuture = confirm(
-        `¿Deseas también eliminar todas las sesiones futuras programadas de ${editedSession.patientName} a las ${editedSession.startTime} (misma hora, mismo día de la semana)?\n\n` +
-        `• Pulsa "Aceptar" para eliminar esta sesión y las siguientes semanas a esa hora.\n` +
-        `• Pulsa "Cancelar" para eliminar solo esta sesión.`
-      );
+    if (editedSession.status === 'scheduled' && editedSession.startTime && editedSession.date) {
+      const sessionWeekday = new Date(editedSession.date + 'T12:00:00').getDay();
+      const editedPatientId = (editedSession as any).patient_user_id || editedSession.patientId;
+      const hasFutureSessions = sessions.some(s => {
+        if (s.id === editedSession.id) return false;
+        if (s.status !== 'scheduled') return false;
+        if (s.startTime !== editedSession.startTime) return false;
+        const sPatientId = (s as any).patient_user_id || s.patientId;
+        if (sPatientId !== editedPatientId) return false;
+        if (!s.date || s.date <= editedSession.date!) return false;
+        return new Date(s.date + 'T12:00:00').getDay() === sessionWeekday;
+      });
+      if (hasFutureSessions) {
+        deleteFuture = confirm(
+          `¿Deseas también eliminar todas las sesiones futuras programadas de ${editedSession.patientName} a las ${editedSession.startTime} (misma hora, mismo día de la semana)?\n\n` +
+          `• Pulsa "Aceptar" para eliminar esta sesión y las siguientes semanas a esa hora.\n` +
+          `• Pulsa "Cancelar" para eliminar solo esta sesión.`
+        );
+      }
     }
 
     setIsSaving(true);
@@ -3388,7 +3402,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                                    rel.active !== false
                           );
                           // Filtrar por nombre solamente
-                          const matchesSearch = patient.name.toLowerCase().includes(patientSearchQuery.toLowerCase());
+                          const matchesSearch = includesNormalized(patient.name, patientSearchQuery);
                           return hasActiveRelationship && matchesSearch;
                         })
                         .map(patient => (
@@ -3419,7 +3433,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                             className="px-3 sm:px-4 py-2 hover:bg-slate-100 cursor-pointer"
                           >
                             <div className="font-medium text-slate-900 text-xs sm:text-sm">{patient.name}</div>
-                            {patient.email && (
+                            {patient.email && !isTempEmail(patient.email) && (
                               <div className="text-xs text-slate-500">{patient.email}</div>
                             )}
                           </div>
@@ -4106,7 +4120,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                                    rel.active !== false
                           );
                           // Filtrar por nombre solamente
-                          const matchesSearch = patient.name.toLowerCase().includes(assignPatientSearchQuery.toLowerCase());
+                          const matchesSearch = includesNormalized(patient.name, assignPatientSearchQuery);
                           return hasActiveRelationship && matchesSearch;
                         })
                         .map(patient => (
@@ -4120,7 +4134,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                             className="px-4 py-2 hover:bg-slate-100 cursor-pointer"
                           >
                             <div className="font-medium text-slate-900">{patient.name}</div>
-                            {patient.email && (
+                            {patient.email && !isTempEmail(patient.email) && (
                               <div className="text-sm text-slate-500">{patient.email}</div>
                             )}
                           </div>

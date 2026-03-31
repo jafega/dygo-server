@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Save, Phone, Mail, MapPin, User as UserIcon, Heart } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
+import { isTempEmail } from '../services/textUtils';
 import { AddressAutocomplete, AddressSelection } from './AddressAutocomplete';
 import { normalizePhone, detectDefaultPrefix } from '../services/phoneUtils';
 
@@ -188,7 +189,7 @@ const PatientProfilePanel: React.FC<PatientProfilePanelProps> = ({ userId }) => 
             </label>
             <input
               type="email"
-              value={profile.email}
+              value={isTempEmail(profile.email) ? '' : profile.email}
               onChange={(e) => handleChange('email', e.target.value)}
               className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
               placeholder="correo@ejemplo.com"
@@ -212,6 +213,7 @@ const PatientProfilePanel: React.FC<PatientProfilePanelProps> = ({ userId }) => 
                 setProfile((prev) => ({
                   ...prev,
                   address: sel.streetAddress,
+                  city: sel.city || prev.city,
                   postalCode: sel.postalCode || prev.postalCode,
                   country: sel.country || prev.country,
                 }));
