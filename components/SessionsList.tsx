@@ -726,11 +726,19 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
         setShowBulkDeleteConfirm(false);
 
         if (skippedCount > 0) {
-          alert(`Se eliminaron ${deletedIds.length} sesiones. ${skippedCount} no pudieron eliminarse (tienen factura o no se encontraron).`);
+          const hasInvoiceCount = (result.skipped || []).filter((s: any) => s.reason === 'has_invoice').length;
+          const notFoundCount = (result.skipped || []).filter((s: any) => s.reason === 'not_found').length;
+          const parts: string[] = [];
+          if (hasInvoiceCount > 0) parts.push(`${hasInvoiceCount} con factura asignada`);
+          if (notFoundCount > 0) parts.push(`${notFoundCount} no encontradas`);
+          const rest = skippedCount - hasInvoiceCount - notFoundCount;
+          if (rest > 0) parts.push(`${rest} con error`);
+          alert(`Se eliminaron ${deletedIds.length} sesiones. ${skippedCount} no pudieron eliminarse: ${parts.join(', ')}.`);
         }
 
-        // Sync with server in background to pick up any side-effects
-        loadData();
+        // Delay the background sync to avoid Supabase replication-lag bringing
+        // the just-deleted sessions back before the delete propagates.
+        setTimeout(() => loadData(), 1500);
       } else {
         const err = await response.json().catch(() => ({}));
         alert('Error al eliminar sesiones: ' + (err.error || 'Error desconocido'));

@@ -13958,7 +13958,7 @@ app.delete('/api/sessions/future-pending', authenticateRequest, async (req, res)
       // Fetch candidates first so we can apply JS-side filters (startTime in JSONB, weekday)
       let query = supabaseAdmin
         .from('sessions')
-        .select('id, data, starts_on')
+        .select('id, data, starts_on, google_calendar_event_id, psychologist_user_id')
         .eq('patient_user_id', patient_user_id)
         .eq('status', 'scheduled')
         .gte('starts_on', fromDate + 'T00:00:00.000Z');
@@ -13976,7 +13976,7 @@ app.delete('/api/sessions/future-pending', authenticateRequest, async (req, res)
         return res.status(500).json({ error: 'Error al eliminar sesiones futuras' });
       }
 
-      const matchingIds = (candidates || []).filter(s => {
+      const matchingSessions = (candidates || []).filter(s => {
         // Filter by same LOCAL start time — compare against frontend's local startTime
         if (startTime) {
           const sessionTz = (s.data && s.data.schedule_timezone) || 'Europe/Madrid';
@@ -13989,7 +13989,8 @@ app.delete('/api/sessions/future-pending', authenticateRequest, async (req, res)
           if (candidateLocalTime !== startTime) return false;
         }
         return true;
-      }).map(s => s.id);
+      });
+      const matchingIds = matchingSessions.map(s => s.id);
 
       if (matchingIds.length > 0) {
         const { data: deleted, error: delError } = await supabaseAdmin
@@ -14002,6 +14003,15 @@ app.delete('/api/sessions/future-pending', authenticateRequest, async (req, res)
           return res.status(500).json({ error: 'Error al eliminar sesiones futuras' });
         }
         deletedCount = deleted?.length || 0;
+
+        // Google Calendar: eliminar eventos de las sesiones eliminadas
+        for (const s of matchingSessions) {
+          if (s.google_calendar_event_id && s.psychologist_user_id) {
+            deleteCalendarEventById(s.psychologist_user_id, s.google_calendar_event_id).catch(e =>
+              console.error('[DELETE /future-pending] Error Google Calendar delete:', e?.message)
+            );
+          }
+        }
       }
       console.log(`✅ [DELETE /future-pending] Eliminadas ${deletedCount} sesiones de Supabase`);
     }
@@ -14086,23 +14096,30 @@ app.delete('/api/sessions/bulk', authenticateRequest, async (req, res) => {
             .eq('id', sessionData.invoice_id)
             .maybeSingle();
 
-          if (!invRow || invRow.status !== 'draft') {
+          if (invRow && invRow.status !== 'draft') {
+            // Invoice exists and is NOT a draft — block deletion
             skipped.push({ id, reason: 'has_invoice' });
             continue;
           }
 
-          // Delete the draft invoice (unassign from other sessions/bonos first)
-          const remainingSessions = (invRow.session_ids || []).filter(sid => sid !== id);
-          if (remainingSessions.length > 0) {
-            await supabaseAdmin.from('sessions').update({ invoice_id: null }).in('id', remainingSessions);
+          if (invRow && invRow.status === 'draft') {
+            // Delete the draft invoice (unassign from other sessions/bonos first)
+            const remainingSessions = (invRow.session_ids || []).filter(sid => sid !== id);
+            if (remainingSessions.length > 0) {
+              await supabaseAdmin.from('sessions').update({ invoice_id: null }).in('id', remainingSessions);
+            }
+            // Clear invoice_id on current session too before deleting the invoice (avoids FK violation)
+            await supabaseAdmin.from('sessions').update({ invoice_id: null }).eq('id', id);
+            if (invRow.bono_ids && invRow.bono_ids.length > 0) {
+              await supabaseAdmin.from('bono').update({ invoice_id: null }).eq('invoice_id', sessionData.invoice_id);
+            }
+            await supabaseAdmin.from('invoices').delete().eq('id', sessionData.invoice_id);
+            console.log(`🗑️ [bulk delete] Borrador de factura ${sessionData.invoice_id} eliminado junto con sesión ${id}`);
+          } else {
+            // invRow is null: dangling invoice reference — just clear it and proceed
+            console.warn(`⚠️ [bulk delete] Sesión ${id} tenía invoice_id=${sessionData.invoice_id} pero la factura no existe. Limpiando referencia.`);
+            await supabaseAdmin.from('sessions').update({ invoice_id: null }).eq('id', id);
           }
-          // Clear invoice_id on current session too before deleting the invoice (avoids FK violation)
-          await supabaseAdmin.from('sessions').update({ invoice_id: null }).eq('id', id);
-          if (invRow.bono_ids && invRow.bono_ids.length > 0) {
-            await supabaseAdmin.from('bono').update({ invoice_id: null }).eq('invoice_id', sessionData.invoice_id);
-          }
-          await supabaseAdmin.from('invoices').delete().eq('id', sessionData.invoice_id);
-          console.log(`🗑️ [bulk delete] Borrador de factura ${sessionData.invoice_id} eliminado junto con sesión ${id}`);
         }
 
         // Delete session_entry if exists (null out FK first to avoid constraint violation)
@@ -14154,6 +14171,12 @@ app.delete('/api/sessions/bulk', authenticateRequest, async (req, res) => {
 
         if (session.session_entry_id) {
           db.sessionEntries = db.sessionEntries.filter(e => e.id !== session.session_entry_id);
+        }
+        // Google Calendar: eliminar evento si existe
+        const localGcEventId = session.google_calendar_event_id || session.data?.google_calendar_event_id;
+        const localPsychUserId = session.psychologist_user_id || session.psychologistId;
+        if (localGcEventId && localPsychUserId) {
+          deleteCalendarEventById(localPsychUserId, localGcEventId).catch(() => {});
         }
         db.sessions.splice(sessionIdx, 1);
         deleted.push(id);
@@ -14291,6 +14314,16 @@ app.delete('/api/sessions/:id', authenticateRequest, async (req, res) => {
         const entryIdx = db.sessionEntries.findIndex(e => e.id === localSession.session_entry_id);
         if (entryIdx !== -1) {
           db.sessionEntries.splice(entryIdx, 1);
+        }
+      }
+      // Google Calendar: eliminar evento si existe (para sesiones no encontradas en Supabase)
+      if (!session) {
+        const localGcEventId = localSession.google_calendar_event_id || localSession.data?.google_calendar_event_id;
+        const localPsychUserId = localSession.psychologist_user_id || localSession.psychologistId;
+        if (localGcEventId && localPsychUserId) {
+          deleteCalendarEventById(localPsychUserId, localGcEventId).catch(e =>
+            console.error('[DELETE /api/sessions] Error Google Calendar delete (local):', e?.message)
+          );
         }
       }
       db.sessions.splice(idx, 1);
