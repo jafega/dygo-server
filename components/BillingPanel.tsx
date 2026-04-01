@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { FileText, Plus, DollarSign, Check, Clock, ExternalLink, Download, Eye, Edit, Trash2, Send, CheckSquare, Square, Search, Building, User, X, ArrowUpDown, Archive } from 'lucide-react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
+import { FileText, Plus, DollarSign, Check, Clock, ExternalLink, Download, Eye, Edit, Trash2, Send, CheckSquare, Square, Search, Building, User, X, ArrowUpDown, Archive, Layers, Loader2 as BulkLoader } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
 import { AddressAutocomplete } from './AddressAutocomplete';
 import { includesNormalized, isTempEmail } from '../services/textUtils';
+const BulkBillingPanel = lazy(() => import('./BulkBillingPanel'));
 
 interface Invoice {
   id: string;
@@ -148,6 +149,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [showDrafts, setShowDrafts] = useState(false);
   const [showRectificativas, setShowRectificativas] = useState(false);
+  const [showBulkBilling, setShowBulkBilling] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [invoiceToCancel, setInvoiceToCancel] = useState<Invoice | null>(null);
   const [rectificationType, setRectificationType] = useState('R4');
@@ -708,6 +710,28 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
     }
   };
 
+  const generateDraftNumber = async (): Promise<string> => {
+    try {
+      const response = await apiFetch(`${API_URL}/invoices?psychologist_user_id=${psychologistId}`);
+      if (!response.ok) throw new Error('Failed to fetch invoices for draft numbering');
+      const allInvoices = await response.json();
+      const prefix = 'BORR';
+      const draftInvoices = allInvoices.filter((inv: any) =>
+        inv.invoiceNumber && inv.invoiceNumber.startsWith(prefix)
+      );
+      if (draftInvoices.length === 0) return `${prefix}000001`;
+      const numbers = draftInvoices.map((inv: any) => {
+        const numPart = inv.invoiceNumber.slice(prefix.length);
+        return parseInt(numPart || '0', 10);
+      });
+      const maxNumber = Math.max(...numbers, 0);
+      return `${prefix}${String(maxNumber + 1).padStart(6, '0')}`;
+    } catch (error) {
+      console.error('Error generating draft number:', error);
+      return `BORR${String(Date.now()).slice(-6)}`;
+    }
+  };
+
   const geocodeAddress = async (address: string): Promise<{ postalCode: string; country: string } | null> => {
     try {
       const res = await apiFetch(
@@ -796,10 +820,21 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
     setIsSubmitting(true);
     
     try {
-      const invoiceNumber = await generateInvoiceNumber();
+      // Los borradores nuevos usan la serie BORR (ej: BORR000001).
+      // Las facturas reales y las conversiones de borrador a factura usan la serie normal.
+      let invoiceNumber: string | null = null;
+      if (isDraft && !editingInvoice) {
+        // Nuevo borrador: número BORR
+        invoiceNumber = await generateDraftNumber();
+      } else if (!isDraft) {
+        // Factura nueva, o conversión de borrador existente a factura real
+        invoiceNumber = await generateInvoiceNumber();
+      }
+      // Si se edita un borrador y se sigue guardando como borrador,
+      // invoiceNumber permanece null y se mantiene editingInvoice.invoiceNumber.
       
-      // Si invoiceNumber es null, significa que es la primera factura del año y necesitamos preguntar
-      if (invoiceNumber === null && !editingInvoice) {
+      // Si invoiceNumber es null para una factura real (primera del año sin configurar)
+      if (invoiceNumber === null && !isDraft) {
         setIsSubmitting(false);
         setPendingInvoiceData({ isDraft });
         // Pre-rellenar la serie por defecto (F26) como sugerencia
@@ -826,7 +861,9 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
       // Datos base de la factura
       const newInvoice: any = {
         id: editingInvoice?.id || Date.now().toString(),
-        invoiceNumber: editingInvoice?.invoiceNumber || invoiceNumber,
+        // Al convertir un borrador en factura real se genera un número nuevo de la serie;
+        // en el resto de casos se mantiene el número ya asignado (BORR o factura en edición).
+        invoiceNumber: isDraftConversion ? invoiceNumber : (editingInvoice?.invoiceNumber || invoiceNumber),
         amount: totals.subtotal,
         date: effectiveDate,
         invoice_date: effectiveDate,
@@ -1442,17 +1479,18 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
         </div>
       </div>
 
-      {/* Toggles Facturas/Borradores/Rectificativas y Botón Nueva Factura */}
+      {/* Toggles Facturas/Borradores/Rectificativas/Facturación Masiva y Botón Nueva Factura */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-        <div className="flex w-full sm:w-auto">
+        <div className="flex w-full sm:w-auto overflow-x-auto">
           <button
             onClick={() => {
               setShowDrafts(false);
               setShowRectificativas(false);
+              setShowBulkBilling(false);
               setStatusFilter('all');
             }}
-            className={`flex-1 sm:flex-none px-3 py-2 rounded-l-lg text-sm transition-colors font-medium border border-r-0 border-slate-200 ${
-              !showDrafts && !showRectificativas ? 'bg-indigo-600 text-white shadow-sm border-indigo-600' : 'bg-white text-slate-700 hover:bg-slate-50'
+            className={`flex-none px-3 py-2 rounded-l-lg text-sm transition-colors font-medium border border-r-0 border-slate-200 ${
+              !showDrafts && !showRectificativas && !showBulkBilling ? 'bg-indigo-600 text-white shadow-sm border-indigo-600' : 'bg-white text-slate-700 hover:bg-slate-50'
             }`}
           >
             Facturas
@@ -1461,9 +1499,10 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
             onClick={() => {
               setShowDrafts(true);
               setShowRectificativas(false);
+              setShowBulkBilling(false);
               setStatusFilter('all');
             }}
-            className={`flex-1 sm:flex-none px-3 py-2 text-sm transition-colors font-medium border border-r-0 border-slate-200 ${
+            className={`flex-none px-3 py-2 text-sm transition-colors font-medium border border-r-0 border-slate-200 ${
               showDrafts ? 'bg-indigo-600 text-white shadow-sm border-indigo-600' : 'bg-white text-slate-700 hover:bg-slate-50'
             }`}
           >
@@ -1473,29 +1512,62 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
             onClick={() => {
               setShowDrafts(false);
               setShowRectificativas(true);
+              setShowBulkBilling(false);
               setStatusFilter('all');
             }}
-            className={`flex-1 sm:flex-none px-3 py-2 rounded-r-lg text-sm transition-colors font-medium border border-slate-200 ${
+            className={`flex-none px-3 py-2 text-sm transition-colors font-medium border border-slate-200 ${!patientId ? 'border-r-0' : 'rounded-r-lg'} ${
               showRectificativas ? 'bg-indigo-600 text-white shadow-sm border-indigo-600' : 'bg-white text-slate-700 hover:bg-slate-50'
             }`}
           >
             Rectificativas
           </button>
+          {!patientId && (
+            <button
+              onClick={() => {
+                setShowDrafts(false);
+                setShowRectificativas(false);
+                setShowBulkBilling(true);
+                setStatusFilter('all');
+              }}
+              className={`flex-none px-3 py-2 rounded-r-lg text-sm transition-colors font-medium border border-slate-200 flex items-center gap-1.5 ${
+                showBulkBilling ? 'bg-indigo-600 text-white shadow-sm border-indigo-600' : 'bg-white text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <Layers size={14} />
+              Fac. Masiva
+            </button>
+          )}
         </div>
-        <button
-          onClick={() => {
-            if (!canCreate) { onNeedUpgrade?.(); return; }
-            handleOpenNewInvoice();
-          }}
-          className="w-full sm:w-auto px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2 shadow-md font-medium text-sm"
-        >
-          <Plus size={18} />
-          Nueva Factura
-        </button>
+        {!showBulkBilling && (
+          <button
+            onClick={() => {
+              if (!canCreate) { onNeedUpgrade?.(); return; }
+              handleOpenNewInvoice();
+            }}
+            className="w-full sm:w-auto px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2 shadow-md font-medium text-sm"
+          >
+            <Plus size={18} />
+            Nueva Factura
+          </button>
+        )}
       </div>
 
+      {/* Facturación Masiva */}
+      {showBulkBilling && (
+        <Suspense fallback={<div className="flex items-center justify-center h-32 text-slate-400"><BulkLoader className="animate-spin mr-2" size={22} />Cargando…</div>}>
+          <BulkBillingPanel
+            psychologistId={psychologistId}
+            onDraftsCreated={() => {
+              setShowBulkBilling(false);
+              setShowDrafts(true);
+              loadInvoices();
+            }}
+          />
+        </Suspense>
+      )}
+
       {/* Filtros de búsqueda y estado */}
-      {!showDrafts && !showRectificativas && (
+      {!showDrafts && !showRectificativas && !showBulkBilling && (
         <div className="bg-white rounded-lg shadow p-4 border border-slate-200">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
             {/* Búsqueda */}
@@ -1551,7 +1623,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
       )}
 
       {/* ZIP Download Panel */}
-      {!showDrafts && !showRectificativas && (
+      {!showDrafts && !showRectificativas && !showBulkBilling && (
         <div className="bg-white rounded-lg shadow border border-slate-200 overflow-hidden">
           <button
             onClick={() => setShowZipPanel(!showZipPanel)}
@@ -1611,7 +1683,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
       )}
 
       {/* Sort order toggle */}
-      <div className="flex justify-end">
+      {!showBulkBilling && <div className="flex justify-end">
         <button
           onClick={() => setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')}
           className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
@@ -1620,10 +1692,10 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
           <ArrowUpDown size={15} />
           {sortOrder === 'desc' ? '↓ Mayor número primero' : '↑ Menor número primero'}
         </button>
-      </div>
+      </div>}
 
-      {/* Invoices List */}
-      <div className="grid gap-4">
+      {/* Invoices List — hidden when bulk billing is shown */}
+      {!showBulkBilling && <div className="grid gap-4">
         {isLoading ? (
           <div className="text-center py-8">Cargando...</div>
         ) : sortedFilteredInvoices.length === 0 ? (
@@ -1689,7 +1761,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
             </div>
           ))
         )}
-      </div>
+      </div>}
 
       {/* New/Edit Invoice Modal */}
       {showNewInvoice && (

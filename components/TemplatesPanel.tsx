@@ -3,7 +3,7 @@ import { includesNormalized, isTempEmail } from '../services/textUtils';
 import {
   FileText, Plus, Edit2, Trash2, Send, Eye, X,
   ChevronLeft, Save, Loader2, Award, CheckCircle, AlertCircle, Search,
-  Upload, GripHorizontal, PenLine, Archive, ArchiveRestore
+  Upload, GripHorizontal, PenLine, Archive, ArchiveRestore, User
 } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';

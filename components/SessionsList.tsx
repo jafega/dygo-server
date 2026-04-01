@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Calendar, CheckCircle, XCircle, Clock, DollarSign, User, Filter, Edit2, Save, X as XIcon, FileText, Trash2, Receipt, Ticket, Copy, Send, ExternalLink, Globe, ChevronDown } from 'lucide-react';
+import { Calendar, CheckCircle, XCircle, Clock, DollarSign, User, Filter, Edit2, Save, X as XIcon, FileText, Trash2, Receipt, Ticket, Copy, Send, ExternalLink, Globe, ChevronDown, Square, CheckSquare, AlertTriangle } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser, apiFetch } from '../services/authService';
 import { normalizePhone } from '../services/phoneUtils';
@@ -78,6 +78,12 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
   const [availableBonos, setAvailableBonos] = useState<any[]>([]);
   const [isLoadingBonos, setIsLoadingBonos] = useState(false);
   const [isAssigningBono, setIsAssigningBono] = useState(false);
+
+  // Estados para selección múltiple / eliminación en bloque
+  const [bulkSelectMode, setBulkSelectMode] = useState(false);
+  const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(new Set());
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   
   // Filter states
   const [filterPatient, setFilterPatient] = useState<string>('all');
@@ -662,6 +668,62 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
     }
   };
 
+  const handleToggleBulkSelectMode = () => {
+    setBulkSelectMode(v => !v);
+    setSelectedSessionIds(new Set());
+  };
+
+  const handleToggleSessionSelection = (sessionId: string, hasInvoice: boolean, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (hasInvoice) return;
+    setSelectedSessionIds(prev => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) next.delete(sessionId);
+      else next.add(sessionId);
+      return next;
+    });
+  };
+
+  const handleSelectAllDeletable = () => {
+    const deletable = displayedSessions.filter(s => !s.invoice_id).map(s => s.id);
+    if (selectedSessionIds.size === deletable.length) {
+      setSelectedSessionIds(new Set());
+    } else {
+      setSelectedSessionIds(new Set(deletable));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedSessionIds.size === 0) return;
+    setIsBulkDeleting(true);
+    try {
+      const currentUser = await getCurrentUser();
+      if (!currentUser) {
+        alert('Error: Usuario no autenticado');
+        return;
+      }
+      const response = await apiFetch(`${API_URL}/sessions/bulk`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': currentUser.id },
+        body: JSON.stringify({ sessionIds: Array.from(selectedSessionIds) })
+      });
+      if (response.ok) {
+        await loadData();
+        setSelectedSessionIds(new Set());
+        setBulkSelectMode(false);
+        setShowBulkDeleteConfirm(false);
+      } else {
+        const err = await response.json();
+        alert('Error al eliminar sesiones: ' + (err.error || 'Error desconocido'));
+      }
+    } catch (error) {
+      console.error('Error en eliminación masiva:', error);
+      alert('Error al eliminar las sesiones');
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  };
+
   const handleSaveSession = async () => {
     if (!editedSession) return;
 
@@ -918,6 +980,17 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                 )}
                 Total: <span className="font-bold text-slate-800">{sessions.length}</span>
               </div>
+              <button
+                onClick={handleToggleBulkSelectMode}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                  bulkSelectMode
+                    ? 'bg-red-50 border-red-300 text-red-700 hover:bg-red-100'
+                    : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                {bulkSelectMode ? <XIcon size={13} /> : <CheckSquare size={13} />}
+                <span className="hidden sm:inline">{bulkSelectMode ? 'Cancelar' : 'Seleccionar'}</span>
+              </button>
             </div>
           </div>
           
@@ -1283,6 +1356,37 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
         </div>
       )}
 
+      {/* Bulk selection action bar */}
+      {bulkSelectMode && (
+        <div className="bg-red-50 border border-red-200 rounded-lg sm:rounded-xl p-2 sm:p-3 flex flex-wrap items-center gap-2 justify-between">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={handleSelectAllDeletable}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+            >
+              {selectedSessionIds.size > 0 && selectedSessionIds.size === displayedSessions.filter(s => !s.invoice_id).length
+                ? <><CheckSquare size={13} className="text-purple-600" /> Deseleccionar todas</>
+                : <><Square size={13} /> Seleccionar todas</>
+              }
+            </button>
+            <span className="text-xs text-slate-600">
+              <span className="font-bold text-slate-800">{selectedSessionIds.size}</span> seleccionadas
+              {displayedSessions.some(s => !!s.invoice_id) && (
+                <span className="text-slate-400 ml-1">(las facturadas no se pueden eliminar)</span>
+              )}
+            </span>
+          </div>
+          <button
+            onClick={() => setShowBulkDeleteConfirm(true)}
+            disabled={selectedSessionIds.size === 0}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <Trash2 size={13} />
+            Eliminar {selectedSessionIds.size > 0 ? selectedSessionIds.size : ''} sesiones
+          </button>
+        </div>
+      )}
+
       {/* Sessions List */}
       {displayedSessions.length === 0 ? (
         <div className="bg-white rounded-lg sm:rounded-xl border border-slate-200 p-4 sm:p-6 md:p-8 text-center">
@@ -1319,13 +1423,38 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                   ? 'hover:border-orange-300'
                   : 'hover:border-red-300'
               : 'hover:border-purple-300';
+            const isSelected = selectedSessionIds.has(session.id);
+            const isDeletable = !session.invoice_id;
             
             return (
               <div
                 key={session.id}
-                onClick={() => handleOpenSession(session)}
-                className={`${cardBg} rounded-lg sm:rounded-xl border border-slate-200 p-2 sm:p-3 md:p-4 hover:shadow-md transition-all cursor-pointer ${cardHoverBorder}`}
+                onClick={() => bulkSelectMode ? handleToggleSessionSelection(session.id, !isDeletable, { stopPropagation: () => {} } as React.MouseEvent) : handleOpenSession(session)}
+                className={`${cardBg} rounded-lg sm:rounded-xl border transition-all ${
+                  bulkSelectMode
+                    ? isSelected
+                      ? 'border-red-400 shadow-md ring-2 ring-red-200 cursor-pointer'
+                      : isDeletable
+                        ? 'border-slate-200 hover:border-red-300 cursor-pointer'
+                        : 'border-slate-200 opacity-60 cursor-not-allowed'
+                    : `border-slate-200 p-2 sm:p-3 md:p-4 hover:shadow-md cursor-pointer ${cardHoverBorder}`
+                } ${bulkSelectMode ? 'p-2 sm:p-3 md:p-4' : ''}`}
               >
+                {/* Bulk select row */}
+                {bulkSelectMode && (
+                  <div className="flex items-center gap-2 mb-2" onClick={e => handleToggleSessionSelection(session.id, !isDeletable, e)}>
+                    {isDeletable ? (
+                      isSelected
+                        ? <CheckSquare size={18} className="text-red-600 flex-shrink-0" />
+                        : <Square size={18} className="text-slate-400 flex-shrink-0" />
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[10px] text-slate-400 font-medium">
+                        <Receipt size={12} className="text-emerald-500" />
+                        Facturada – no eliminable
+                      </span>
+                    )}
+                  </div>
+                )}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3">
                   {/* Top row in mobile: Date + Session Details Button */}
                   <div className="flex items-start justify-between gap-2 sm:hidden">

@@ -2088,7 +2088,12 @@ async function autoCompletePassedSessions() {
         localUpdated.forEach(s => {
           s.status = 'completed';
         });
-        saveDb(db, { awaitPersistence: false });
+        // When Supabase is active, the direct update above already persisted the changes.
+        // Calling saveDb here would trigger a full bulk upsert that can re-insert
+        // concurrently-deleted sessions via stale cache snapshots.
+        if (!supabaseAdmin) {
+          saveDb(db, { awaitPersistence: false });
+        }
         console.log(`✅ [autoCompletePassedSessions] ${localUpdated.length} sesiones actualizadas en db.json local`);
       }
     }
@@ -10544,9 +10549,13 @@ app.put('/api/patient/:userId/profile', authenticateRequest, async (req, res) =>
         phone: req.body.phone,
         email: req.body.email,
         address: req.body.address,
+        portal: req.body.portal || '',
+        piso: req.body.piso || '',
         city: req.body.city,
+        province: req.body.province || '',
         postalCode: req.body.postalCode,
-        country: req.body.country
+        country: req.body.country,
+        dni: req.body.dni || ''
       };
 
       const updateFields = {
@@ -10598,9 +10607,13 @@ app.put('/api/patient/:userId/profile', authenticateRequest, async (req, res) =>
           lastName: req.body.lastName,
           phone: req.body.phone,
           address: req.body.address,
+          portal: req.body.portal || '',
+          piso: req.body.piso || '',
           city: req.body.city,
+          province: req.body.province || '',
           postalCode: req.body.postalCode,
-          country: req.body.country
+          country: req.body.country,
+          dni: req.body.dni || ''
         }
       };
       
@@ -14158,9 +14171,15 @@ app.delete('/api/sessions/:id', authenticateRequest, async (req, res) => {
       db.dispo.splice(dispoIdx, 1);
     }
     
-    // Limpiar sesiones de disponibilidad
+    // Limpiar sesiones de disponibilidad del caché local
     db.sessions = db.sessions.filter(s => s.patient_user_id || s.patientId);
-    await saveDb(db, { awaitPersistence: true });
+
+    // When Supabase is active, the direct DELETE above already persisted the change.
+    // A full saveDb bulk upsert here is redundant and can re-insert concurrent deletes
+    // if a stale sessionsRows snapshot from a background autoComplete is still pending.
+    if (!supabaseAdmin) {
+      await saveDb(db, { awaitPersistence: true });
+    }
     
     if (!session && idx === -1 && dispoIdx === -1) {
       console.log(`⚠️ Sesión ${id} no encontrada en ninguna parte`);
@@ -14825,6 +14844,227 @@ app.get('/api/psychologist/:psychologistId/patients', authenticateRequest, async
   } catch (error) {
     console.error(`[GET /api/psychologist/${psychologistId}/patients] ERROR:`, error);
     res.status(500).json({ error: error.message || 'Error interno del servidor' });
+  }
+});
+
+// GET /api/psychologist/:psychId/bulk-unbilled — agrega todas las sesiones y bonos sin facturar
+// agrupados por centro (invoice_type='center') o paciente individual
+app.get('/api/psychologist/:psychId/bulk-unbilled', authenticateRequest, async (req, res) => {
+  try {
+    const { psychId } = req.params;
+
+    if (req.authenticatedUserId !== psychId) {
+      return res.status(403).json({ error: 'No autorizado' });
+    }
+
+    if (!supabaseAdmin) {
+      return res.json({ centers: [], patients: [] });
+    }
+
+    // 1. Relaciones de cuidado para este psicólogo (paciente + centro opcional)
+    const { data: relationships, error: relError } = await supabaseAdmin
+      .from('care_relationships')
+      .select('patient_user_id, center_id')
+      .eq('psychologist_user_id', psychId);
+
+    if (relError) throw relError;
+    if (!relationships || relationships.length === 0) {
+      return res.json({ centers: [], patients: [] });
+    }
+
+    const patientIds = [...new Set(relationships.map(r => r.patient_user_id).filter(Boolean))];
+
+    // Primer center_id encontrado por paciente (puede ser null si no tiene centro)
+    const patientCenterMap = {};
+    relationships.forEach(r => {
+      const pid = r.patient_user_id;
+      if (!pid) return;
+      if (patientCenterMap[pid] === undefined) {
+        patientCenterMap[pid] = r.center_id || null;
+      } else if (!patientCenterMap[pid] && r.center_id) {
+        patientCenterMap[pid] = r.center_id;
+      }
+    });
+
+    // 2. IDs de sesiones y bonos ya referenciados en borradores existentes
+    const { data: draftInvoiceRows } = await supabaseAdmin
+      .from('invoices')
+      .select('data')
+      .eq('psychologist_user_id', psychId)
+      .eq('status', 'draft');
+
+    const draftSessionIds = new Set();
+    const draftBonoIds = new Set();
+    (draftInvoiceRows || []).forEach(row => {
+      const inv = normalizeSupabaseRow(row);
+      (inv.sessionIds || []).forEach(id => draftSessionIds.add(String(id)));
+      (inv.bonoIds || []).forEach(id => draftBonoIds.add(String(id)));
+    });
+
+    // 3. Sesiones completadas sin facturar, sin bono y no incluidas en borrador
+    const { data: sessions, error: sessionsError } = await supabaseAdmin
+      .from('sessions')
+      .select('*')
+      .in('patient_user_id', patientIds)
+      .eq('psychologist_user_id', psychId)
+      .is('invoice_id', null)
+      .is('bonus_id', null)
+      .eq('status', 'completed')
+      .order('starts_on', { ascending: false });
+
+    if (sessionsError) throw sessionsError;
+
+    // 4. Bonos sin facturar y no incluidos en borrador
+    const { data: bonos, error: bonosError } = await supabaseAdmin
+      .from('bono')
+      .select('*')
+      .in('pacient_user_id', patientIds)
+      .eq('psychologist_user_id', psychId)
+      .is('invoice_id', null)
+      .order('created_at', { ascending: false });
+
+    if (bonosError) throw bonosError;
+
+    // Excluir los que ya están en un borrador
+    const filteredSessions = (sessions || []).filter(s => !draftSessionIds.has(String(s.id)));
+    const filteredBonos = (bonos || []).filter(b => !draftBonoIds.has(String(b.id)));
+
+    if (filteredSessions.length === 0 && filteredBonos.length === 0) {
+      return res.json({ centers: [], patients: [] });
+    }
+
+    // 4. Info de pacientes
+    const { data: usersData } = await supabaseAdmin
+      .from('users')
+      .select('id, data')
+      .in('id', patientIds);
+
+    const patientInfoMap = {};
+    (usersData || []).forEach(u => {
+      const n = normalizeSupabaseRow(u);
+      // Compose full address from parts
+      const streetAddr = n.address || '';
+      const portal = n.portal || '';
+      const piso = n.piso || '';
+      const addressParts = [streetAddr, portal, piso].filter(Boolean).join(', ');
+      patientInfoMap[u.id] = {
+        id: u.id,
+        name: n.name || n.displayName || n.username || u.id,
+        email: n.email || '',
+        billing_name: n.billing_name || n.name || '',
+        billing_address: n.billing_address || addressParts || '',
+        billing_tax_id: n.billing_tax_id || n.tax_id || n.dni || '',
+        dni: n.dni || '',
+        postalCode: n.postalCode || n.postal_code || '',
+        country: n.country || '',
+        city: n.city || '',
+        province: n.province || '',
+        portal: portal,
+        piso: piso
+      };
+    });
+
+    // 5. Info de centros
+    const centerIds = [...new Set(Object.values(patientCenterMap).filter(Boolean))];
+    let centerInfoMap = {};
+    if (centerIds.length > 0) {
+      const { data: centersData } = await supabaseAdmin
+        .from('center')
+        .select('*')
+        .in('id', centerIds);
+      (centersData || []).forEach(c => {
+        const n = normalizeSupabaseRow(c);
+        centerInfoMap[c.id] = n;
+      });
+    }
+
+    // 6. used_sessions para bonos
+    const bonoIds = filteredBonos.map(b => b.id);
+    const bonoSessionsMap = {};
+    if (bonoIds.length > 0) {
+      const { data: bonoSessions } = await supabaseAdmin
+        .from('sessions')
+        .select('id, bonus_id')
+        .in('bonus_id', bonoIds);
+      (bonoSessions || []).forEach(s => {
+        bonoSessionsMap[s.bonus_id] = (bonoSessionsMap[s.bonus_id] || 0) + 1;
+      });
+    }
+
+    // 7. Enriquecer con nombres
+    const sessionsEnriched = filteredSessions.map(s => ({
+      ...s,
+      patientName: patientInfoMap[s.patient_user_id]?.name || null
+    }));
+
+    const bonosEnriched = filteredBonos.map(b => ({
+      ...b,
+      used_sessions: bonoSessionsMap[b.id] || 0,
+      remaining_sessions: (b.total_sessions_amount || 0) - (bonoSessionsMap[b.id] || 0),
+      patientName: patientInfoMap[b.pacient_user_id]?.name || null
+    }));
+
+    // 8. Agrupar por centro vs paciente individual
+    const centersMap = {};
+    const patientsMap = {};
+
+    const ensureCenter = (centerId) => {
+      if (!centersMap[centerId]) {
+        const ci = centerInfoMap[centerId] || {};
+        centersMap[centerId] = {
+          centerId,
+          centerName: ci.center_name || centerId,
+          cif: ci.cif || '',
+          address: ci.address || '',
+          nombre_comercial: ci.nombre_comercial || '',
+          sessions: [],
+          bonos: [],
+          patientIds: []
+        };
+      }
+    };
+
+    const ensurePatient = (patientId) => {
+      if (!patientsMap[patientId]) {
+        patientsMap[patientId] = { ...(patientInfoMap[patientId] || { id: patientId, name: patientId }), sessions: [], bonos: [] };
+      }
+    };
+
+    sessionsEnriched.forEach(session => {
+      const centerId = patientCenterMap[session.patient_user_id];
+      if (centerId) {
+        ensureCenter(centerId);
+        centersMap[centerId].sessions.push(session);
+        if (!centersMap[centerId].patientIds.includes(session.patient_user_id)) {
+          centersMap[centerId].patientIds.push(session.patient_user_id);
+        }
+      } else {
+        ensurePatient(session.patient_user_id);
+        patientsMap[session.patient_user_id].sessions.push(session);
+      }
+    });
+
+    bonosEnriched.forEach(bono => {
+      const centerId = patientCenterMap[bono.pacient_user_id];
+      if (centerId) {
+        ensureCenter(centerId);
+        centersMap[centerId].bonos.push(bono);
+        if (!centersMap[centerId].patientIds.includes(bono.pacient_user_id)) {
+          centersMap[centerId].patientIds.push(bono.pacient_user_id);
+        }
+      } else {
+        ensurePatient(bono.pacient_user_id);
+        patientsMap[bono.pacient_user_id].bonos.push(bono);
+      }
+    });
+
+    const centers = Object.values(centersMap).filter((c) => c.sessions.length > 0 || c.bonos.length > 0);
+    const patients = Object.values(patientsMap).filter((p) => p.sessions.length > 0 || p.bonos.length > 0);
+
+    return res.json({ centers, patients });
+  } catch (error) {
+    console.error('Error in GET /api/psychologist/:psychId/bulk-unbilled:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 

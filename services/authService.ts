@@ -732,7 +732,7 @@ export const uploadAvatar = async (userId: string, base64Image: string): Promise
         try {
             const res = await fetch(`${API_URL}/upload-avatar`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders(),
                 body: JSON.stringify({ userId, base64Image })
             });
             
