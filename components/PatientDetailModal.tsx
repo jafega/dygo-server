@@ -1256,7 +1256,16 @@ tr:nth-child(even) td{background:#f8fafc}
 
   const savePatientData = async () => {
     if (!patientUserId) return;
-    
+
+    if (!editedPatientData.firstName?.trim()) {
+      alert('El nombre del paciente es obligatorio.');
+      return;
+    }
+    if (!editedPatientData.lastName?.trim()) {
+      alert('Los apellidos del paciente son obligatorios.');
+      return;
+    }
+
     setIsSaving(true);
     try {
       const currentUser = await getCurrentUser();

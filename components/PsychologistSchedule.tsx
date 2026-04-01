@@ -1230,8 +1230,28 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
     // If session is still pending, offer to delete all future recurring sessions at same time
     let deleteFuture = false;
     if (editedSession.status === 'scheduled' && editedSession.startTime && editedSession.date) {
-      const sessionWeekday = new Date(editedSession.date + 'T12:00:00').getDay();
+      // Use UTC values from starts_on for comparisons — editedSession.startTime/date are LOCAL
+      // (converted by convertSessionToTz), but sessions returned by the API have UTC-based values.
+      const editedStartsOnTime = editedSession.starts_on
+        ? editedSession.starts_on.substring(11, 16) // "HH:MM" in UTC
+        : null;
+      const editedDateRef = editedSession.starts_on
+        ? editedSession.starts_on.substring(0, 10)  // UTC date
+        : editedSession.date;
+      const sessionWeekday = new Date(editedDateRef + 'T12:00:00').getDay();
       const editedPatientId = (editedSession as any).patient_user_id || editedSession.patientId;
+
+      // Helper: compare same UTC time-of-day and same weekday, strictly after editedDateRef
+      const isFutureRecurring = (s: Session) => {
+        if (s.id === editedSession.id) return false;
+        // Compare UTC start time via starts_on (avoids UTC vs local mismatch)
+        const sTime = s.starts_on ? s.starts_on.substring(11, 16) : s.startTime;
+        if (editedStartsOnTime && sTime !== editedStartsOnTime) return false;
+        const sDate = s.starts_on ? s.starts_on.substring(0, 10) : s.date;
+        if (!sDate || sDate <= editedDateRef) return false;
+        return new Date(sDate + 'T12:00:00').getDay() === sessionWeekday;
+      };
+
       let hasFutureSessions = false;
       try {
         // Query backend for all future scheduled sessions for this patient-psychologist pair
@@ -1239,30 +1259,22 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
         const params = new URLSearchParams({
           psychologistId,
           patientId: String(editedPatientId),
-          startDate: editedSession.date,
+          startDate: editedDateRef,
           status: 'scheduled'
         });
         const futureResp = await apiFetch(`${API_URL}/sessions?${params.toString()}`);
         if (futureResp.ok) {
           const allSessions: Session[] = await futureResp.json();
-          hasFutureSessions = allSessions.some(s => {
-            if (s.id === editedSession.id) return false;
-            if (s.startTime !== editedSession.startTime) return false;
-            if (!s.date || s.date <= editedSession.date!) return false;
-            return new Date(s.date + 'T12:00:00').getDay() === sessionWeekday;
-          });
+          hasFutureSessions = allSessions.some(isFutureRecurring);
         }
       } catch (err) {
         console.error('Error checking future sessions:', err);
         // Fall back to local sessions state
         hasFutureSessions = sessions.some(s => {
-          if (s.id === editedSession.id) return false;
           if (s.status !== 'scheduled') return false;
-          if (s.startTime !== editedSession.startTime) return false;
           const sPatientId = (s as any).patient_user_id || s.patientId;
           if (sPatientId !== editedPatientId) return false;
-          if (!s.date || s.date <= editedSession.date!) return false;
-          return new Date(s.date + 'T12:00:00').getDay() === sessionWeekday;
+          return isFutureRecurring(s);
         });
       }
       if (hasFutureSessions) {

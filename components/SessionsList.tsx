@@ -364,10 +364,11 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
       const params = new URLSearchParams({
         psychologistId,
         startDate: dateRange.start,
-        endDate: dateRange.end
+        endDate: dateRange.end,
+        _t: Date.now().toString()  // cache-bust
       });
       
-      const sessionsResponse = await apiFetch(`${API_URL}/sessions?${params.toString()}`);
+      const sessionsResponse = await apiFetch(`${API_URL}/sessions?${params.toString()}`, { cache: 'no-store' });
       if (sessionsResponse.ok) {
         const sessionsData = await sessionsResponse.json();
         // Filter out 'available' slots (those without patient)
@@ -711,12 +712,27 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
         body: JSON.stringify({ sessionIds: Array.from(selectedSessionIds) })
       });
       if (response.ok) {
-        await loadData();
+        const result = await response.json();
+        const deletedIds: string[] = result.deleted || [];
+        const skippedCount: number = (result.skipped || []).length;
+
+        // Optimistic: remove confirmed-deleted sessions from state immediately
+        if (deletedIds.length > 0) {
+          setSessions(prev => prev.filter(s => !deletedIds.includes(s.id)));
+        }
+
         setSelectedSessionIds(new Set());
         setBulkSelectMode(false);
         setShowBulkDeleteConfirm(false);
+
+        if (skippedCount > 0) {
+          alert(`Se eliminaron ${deletedIds.length} sesiones. ${skippedCount} no pudieron eliminarse (tienen factura o no se encontraron).`);
+        }
+
+        // Sync with server in background to pick up any side-effects
+        loadData();
       } else {
-        const err = await response.json();
+        const err = await response.json().catch(() => ({}));
         alert('Error al eliminar sesiones: ' + (err.error || 'Error desconocido'));
       }
     } catch (error) {

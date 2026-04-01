@@ -14096,6 +14096,8 @@ app.delete('/api/sessions/bulk', authenticateRequest, async (req, res) => {
           if (remainingSessions.length > 0) {
             await supabaseAdmin.from('sessions').update({ invoice_id: null }).in('id', remainingSessions);
           }
+          // Clear invoice_id on current session too before deleting the invoice (avoids FK violation)
+          await supabaseAdmin.from('sessions').update({ invoice_id: null }).eq('id', id);
           if (invRow.bono_ids && invRow.bono_ids.length > 0) {
             await supabaseAdmin.from('bono').update({ invoice_id: null }).eq('invoice_id', sessionData.invoice_id);
           }
@@ -14103,8 +14105,9 @@ app.delete('/api/sessions/bulk', authenticateRequest, async (req, res) => {
           console.log(`🗑️ [bulk delete] Borrador de factura ${sessionData.invoice_id} eliminado junto con sesión ${id}`);
         }
 
-        // Delete session_entry if exists
+        // Delete session_entry if exists (null out FK first to avoid constraint violation)
         if (sessionData.session_entry_id) {
+          await supabaseAdmin.from('sessions').update({ session_entry_id: null }).eq('id', id);
           await supabaseAdmin.from('session_entry').delete().eq('id', sessionData.session_entry_id);
         }
 
