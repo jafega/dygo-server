@@ -14070,11 +14070,12 @@ app.delete('/api/sessions/bulk', authenticateRequest, async (req, res) => {
       if (supabaseAdmin) {
         const { data: sessionData, error: sessionError } = await supabaseAdmin
           .from('sessions')
-          .select('id, invoice_id, session_entry_id, psychologist_user_id, patient_user_id, google_calendar_event_id')
+          .select('id, data, invoice_id, session_entry_id, psychologist_user_id, patient_user_id')
           .eq('id', id)
           .maybeSingle();
 
         if (sessionError || !sessionData) {
+          console.warn(`[bulk delete] Sesión ${id} no encontrada. error:`, sessionError?.message || 'null data');
           skipped.push({ id, reason: 'not_found' });
           continue;
         }
@@ -14092,7 +14093,7 @@ app.delete('/api/sessions/bulk', authenticateRequest, async (req, res) => {
         if (sessionData.invoice_id) {
           const { data: invRow } = await supabaseAdmin
             .from('invoices')
-            .select('id, status, session_ids, bono_ids')
+            .select('id, data, status')
             .eq('id', sessionData.invoice_id)
             .maybeSingle();
 
@@ -14104,13 +14105,16 @@ app.delete('/api/sessions/bulk', authenticateRequest, async (req, res) => {
 
           if (invRow && invRow.status === 'draft') {
             // Delete the draft invoice (unassign from other sessions/bonos first)
-            const remainingSessions = (invRow.session_ids || []).filter(sid => sid !== id);
+            const invData = invRow.data || {};
+            const sessionIdsInInvoice = invData.sessionIds || [];
+            const bonoIdsInInvoice = invData.bonoIds || [];
+            const remainingSessions = sessionIdsInInvoice.filter(sid => sid !== id);
             if (remainingSessions.length > 0) {
               await supabaseAdmin.from('sessions').update({ invoice_id: null }).in('id', remainingSessions);
             }
             // Clear invoice_id on current session too before deleting the invoice (avoids FK violation)
             await supabaseAdmin.from('sessions').update({ invoice_id: null }).eq('id', id);
-            if (invRow.bono_ids && invRow.bono_ids.length > 0) {
+            if (bonoIdsInInvoice.length > 0) {
               await supabaseAdmin.from('bono').update({ invoice_id: null }).eq('invoice_id', sessionData.invoice_id);
             }
             await supabaseAdmin.from('invoices').delete().eq('id', sessionData.invoice_id);
@@ -14137,8 +14141,9 @@ app.delete('/api/sessions/bulk', authenticateRequest, async (req, res) => {
         }
 
         // Google Calendar cleanup (fire-and-forget)
-        if (sessionData.google_calendar_event_id && sessionData.psychologist_user_id) {
-          deleteCalendarEventById(sessionData.psychologist_user_id, sessionData.google_calendar_event_id).catch(() => {});
+        const gcEventId = sessionData.data?.google_calendar_event_id;
+        if (gcEventId && sessionData.psychologist_user_id) {
+          deleteCalendarEventById(sessionData.psychologist_user_id, gcEventId).catch(() => {});
         }
 
         deleted.push(id);
