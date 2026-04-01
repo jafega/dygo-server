@@ -14043,6 +14043,133 @@ app.delete('/api/sessions/future-pending', authenticateRequest, async (req, res)
   }
 });
 
+// Bulk delete sessions (sessions without invoice, or with a draft invoice that gets deleted too)
+app.delete('/api/sessions/bulk', authenticateRequest, async (req, res) => {
+  try {
+    const { sessionIds } = req.body;
+    if (!Array.isArray(sessionIds) || sessionIds.length === 0) {
+      return res.status(400).json({ error: 'sessionIds debe ser un array no vacío' });
+    }
+
+    const requesterId = req.authenticatedUserId;
+    const deleted = [];
+    const skipped = [];
+
+    for (const id of sessionIds) {
+      // --- Supabase path ---
+      if (supabaseAdmin) {
+        const { data: sessionData, error: sessionError } = await supabaseAdmin
+          .from('sessions')
+          .select('id, invoice_id, session_entry_id, psychologist_user_id, patient_user_id, google_calendar_event_id')
+          .eq('id', id)
+          .maybeSingle();
+
+        if (sessionError || !sessionData) {
+          skipped.push({ id, reason: 'not_found' });
+          continue;
+        }
+
+        // Authorization: only the psychologist of that session or superadmin
+        if (requesterId !== sessionData.psychologist_user_id) {
+          const requesterRow = await readSupabaseRowById('users', requesterId);
+          if (!requesterRow || !isSuperAdmin(requesterRow.user_email || requesterRow.email)) {
+            skipped.push({ id, reason: 'forbidden' });
+            continue;
+          }
+        }
+
+        // If the session has an invoice, only allow deletion if the invoice is a draft
+        if (sessionData.invoice_id) {
+          const { data: invRow } = await supabaseAdmin
+            .from('invoices')
+            .select('id, status, session_ids, bono_ids')
+            .eq('id', sessionData.invoice_id)
+            .maybeSingle();
+
+          if (!invRow || invRow.status !== 'draft') {
+            skipped.push({ id, reason: 'has_invoice' });
+            continue;
+          }
+
+          // Delete the draft invoice (unassign from other sessions/bonos first)
+          const remainingSessions = (invRow.session_ids || []).filter(sid => sid !== id);
+          if (remainingSessions.length > 0) {
+            await supabaseAdmin.from('sessions').update({ invoice_id: null }).in('id', remainingSessions);
+          }
+          if (invRow.bono_ids && invRow.bono_ids.length > 0) {
+            await supabaseAdmin.from('bono').update({ invoice_id: null }).eq('invoice_id', sessionData.invoice_id);
+          }
+          await supabaseAdmin.from('invoices').delete().eq('id', sessionData.invoice_id);
+          console.log(`🗑️ [bulk delete] Borrador de factura ${sessionData.invoice_id} eliminado junto con sesión ${id}`);
+        }
+
+        // Delete session_entry if exists
+        if (sessionData.session_entry_id) {
+          await supabaseAdmin.from('session_entry').delete().eq('id', sessionData.session_entry_id);
+        }
+
+        // Delete the session
+        const { error: delError } = await supabaseAdmin.from('sessions').delete().eq('id', id);
+        if (delError) {
+          console.error(`[bulk delete] Error eliminando sesión ${id}:`, delError);
+          skipped.push({ id, reason: 'delete_error' });
+          continue;
+        }
+
+        // Google Calendar cleanup (fire-and-forget)
+        if (sessionData.google_calendar_event_id && sessionData.psychologist_user_id) {
+          deleteCalendarEventById(sessionData.psychologist_user_id, sessionData.google_calendar_event_id).catch(() => {});
+        }
+
+        deleted.push(id);
+      } else {
+        // --- Local DB path ---
+        const db = getDb();
+        if (!db.sessions) db.sessions = [];
+        if (!db.sessionEntries) db.sessionEntries = [];
+        if (!db.invoices) db.invoices = [];
+
+        const sessionIdx = db.sessions.findIndex(s => s.id === id);
+        if (sessionIdx === -1) { skipped.push({ id, reason: 'not_found' }); continue; }
+
+        const session = db.sessions[sessionIdx];
+        if (requesterId !== session.psychologist_user_id && requesterId !== session.psychologistId) {
+          skipped.push({ id, reason: 'forbidden' }); continue;
+        }
+
+        // Block if a non-draft invoice is linked
+        if (session.invoice_id) {
+          const inv = db.invoices.find(i => i.id === session.invoice_id);
+          if (!inv || inv.status !== 'draft') {
+            skipped.push({ id, reason: 'has_invoice' }); continue;
+          }
+          // Delete the draft invoice and unassign from other sessions
+          db.sessions.forEach(s => { if (s.invoice_id === session.invoice_id && s.id !== id) s.invoice_id = null; });
+          db.invoices = db.invoices.filter(i => i.id !== session.invoice_id);
+          console.log(`🗑️ [bulk delete] Borrador de factura ${session.invoice_id} eliminado junto con sesión ${id}`);
+        }
+
+        if (session.session_entry_id) {
+          db.sessionEntries = db.sessionEntries.filter(e => e.id !== session.session_entry_id);
+        }
+        db.sessions.splice(sessionIdx, 1);
+        deleted.push(id);
+      }
+    }
+
+    if (!supabaseAdmin && deleted.length > 0) {
+      const db = getDb();
+      await saveDb(db, { awaitPersistence: true });
+    }
+
+    console.log(`✅ [DELETE /api/sessions/bulk] Eliminadas: ${deleted.length}, omitidas: ${skipped.length}`);
+    return res.json({ success: true, deleted, skipped });
+  } catch (err) {
+    console.error('❌ [DELETE /api/sessions/bulk] Error:', err);
+    return res.status(500).json({ error: err?.message || 'Error al eliminar sesiones' });
+  }
+});
+
 app.delete('/api/sessions/:id', authenticateRequest, async (req, res) => {
   try {
     const { id } = req.params;

@@ -38,7 +38,7 @@ interface Invoice {
   id: string;
   sessionId?: string;
   sessionIds?: string[];
-  status: 'paid' | 'pending' | 'cancelled';
+  status: 'paid' | 'pending' | 'cancelled' | 'draft';
 }
 
 interface Patient {
@@ -685,7 +685,10 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
   };
 
   const handleSelectAllDeletable = () => {
-    const deletable = displayedSessions.filter(s => !s.invoice_id).map(s => s.id);
+    const deletable = displayedSessions.filter(s => {
+      const linkedInvoice = s.invoice_id ? invoices.find(inv => inv.id === s.invoice_id) : null;
+      return !s.invoice_id || linkedInvoice?.status === 'draft';
+    }).map(s => s.id);
     if (selectedSessionIds.size === deletable.length) {
       setSelectedSessionIds(new Set());
     } else {
@@ -1364,14 +1367,17 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
               onClick={handleSelectAllDeletable}
               className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
             >
-              {selectedSessionIds.size > 0 && selectedSessionIds.size === displayedSessions.filter(s => !s.invoice_id).length
+              {selectedSessionIds.size > 0 && selectedSessionIds.size === displayedSessions.filter(s => {
+                const inv = s.invoice_id ? invoices.find(i => i.id === s.invoice_id) : null;
+                return !s.invoice_id || inv?.status === 'draft';
+              }).length
                 ? <><CheckSquare size={13} className="text-purple-600" /> Deseleccionar todas</>
                 : <><Square size={13} /> Seleccionar todas</>
               }
             </button>
             <span className="text-xs text-slate-600">
               <span className="font-bold text-slate-800">{selectedSessionIds.size}</span> seleccionadas
-              {displayedSessions.some(s => !!s.invoice_id) && (
+              {displayedSessions.some(s => { const inv = s.invoice_id ? invoices.find(i => i.id === s.invoice_id) : null; return s.invoice_id && inv?.status !== 'draft'; }) && (
                 <span className="text-slate-400 ml-1">(las facturadas no se pueden eliminar)</span>
               )}
             </span>
@@ -1424,7 +1430,8 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                   : 'hover:border-red-300'
               : 'hover:border-purple-300';
             const isSelected = selectedSessionIds.has(session.id);
-            const isDeletable = !session.invoice_id;
+            const linkedInvoice = session.invoice_id ? invoices.find(inv => inv.id === session.invoice_id) : null;
+            const isDeletable = !session.invoice_id || linkedInvoice?.status === 'draft';
             
             return (
               <div
@@ -1453,6 +1460,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                         Facturada – no eliminable
                       </span>
                     )}
+
                   </div>
                 )}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3">
@@ -2093,6 +2101,54 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
           onClose={handleCloseSessionDetails}
           onSave={handleSaveSessionDetails}
         />
+      )}
+
+      {/* Bulk delete confirmation modal */}
+      {showBulkDeleteConfirm && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0 w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+                <AlertTriangle size={20} className="text-red-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-slate-800">Eliminar sesiones</h3>
+                <p className="text-sm text-slate-600 mt-1">
+                  Vas a eliminar <span className="font-bold text-red-600">{selectedSessionIds.size} sesión{selectedSessionIds.size !== 1 ? 'es' : ''}</span> junto con sus notas asociadas.
+                  {Array.from(selectedSessionIds).some(sid => {
+                    const s = sessions.find(x => x.id === sid);
+                    const inv = s?.invoice_id ? invoices.find(i => i.id === s.invoice_id) : null;
+                    return inv?.status === 'draft';
+                  }) && (
+                    <><br /><span className="text-amber-700 font-medium">Los borradores de factura asociados también serán eliminados.</span></>
+                  )}
+                  <br />
+                  <span className="font-semibold text-slate-700">Esta acción no se puede deshacer.</span>
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-3 justify-end pt-2">
+              <button
+                onClick={() => setShowBulkDeleteConfirm(false)}
+                disabled={isBulkDeleting}
+                className="px-4 py-2 text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl font-medium text-sm transition-colors disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleBulkDelete}
+                disabled={isBulkDeleting}
+                className="px-4 py-2 bg-red-600 text-white rounded-xl font-semibold text-sm hover:bg-red-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+              >
+                {isBulkDeleting ? (
+                  <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Eliminando...</>
+                ) : (
+                  <><Trash2 size={15} />Sí, eliminar</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

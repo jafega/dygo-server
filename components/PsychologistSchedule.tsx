@@ -1232,15 +1232,39 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
     if (editedSession.status === 'scheduled' && editedSession.startTime && editedSession.date) {
       const sessionWeekday = new Date(editedSession.date + 'T12:00:00').getDay();
       const editedPatientId = (editedSession as any).patient_user_id || editedSession.patientId;
-      const hasFutureSessions = sessions.some(s => {
-        if (s.id === editedSession.id) return false;
-        if (s.status !== 'scheduled') return false;
-        if (s.startTime !== editedSession.startTime) return false;
-        const sPatientId = (s as any).patient_user_id || s.patientId;
-        if (sPatientId !== editedPatientId) return false;
-        if (!s.date || s.date <= editedSession.date!) return false;
-        return new Date(s.date + 'T12:00:00').getDay() === sessionWeekday;
-      });
+      let hasFutureSessions = false;
+      try {
+        // Query backend for all future scheduled sessions for this patient-psychologist pair
+        // (do not rely on local sessions state which only covers a ±2 week window)
+        const params = new URLSearchParams({
+          psychologistId,
+          patientId: String(editedPatientId),
+          startDate: editedSession.date,
+          status: 'scheduled'
+        });
+        const futureResp = await apiFetch(`${API_URL}/sessions?${params.toString()}`);
+        if (futureResp.ok) {
+          const allSessions: Session[] = await futureResp.json();
+          hasFutureSessions = allSessions.some(s => {
+            if (s.id === editedSession.id) return false;
+            if (s.startTime !== editedSession.startTime) return false;
+            if (!s.date || s.date <= editedSession.date!) return false;
+            return new Date(s.date + 'T12:00:00').getDay() === sessionWeekday;
+          });
+        }
+      } catch (err) {
+        console.error('Error checking future sessions:', err);
+        // Fall back to local sessions state
+        hasFutureSessions = sessions.some(s => {
+          if (s.id === editedSession.id) return false;
+          if (s.status !== 'scheduled') return false;
+          if (s.startTime !== editedSession.startTime) return false;
+          const sPatientId = (s as any).patient_user_id || s.patientId;
+          if (sPatientId !== editedPatientId) return false;
+          if (!s.date || s.date <= editedSession.date!) return false;
+          return new Date(s.date + 'T12:00:00').getDay() === sessionWeekday;
+        });
+      }
       if (hasFutureSessions) {
         deleteFuture = confirm(
           `¿Deseas también eliminar todas las sesiones futuras programadas de ${editedSession.patientName} a las ${editedSession.startTime} (misma hora, mismo día de la semana)?\n\n` +
