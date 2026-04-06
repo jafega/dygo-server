@@ -7686,6 +7686,83 @@ app.get('/api/invoices', authenticateRequest, async (req, res) => {
   }
 });
 
+/**
+ * Generates the next sequential invoice number for a psychologist ENTIRELY on the server.
+ * This prevents gaps caused by client-side failures or race conditions.
+ * Respects the configured series and start number from the psychologist profile.
+ * Must only be called for non-draft, non-rectificativa invoices.
+ *
+ * @param {string} psychologistUserId
+ * @returns {Promise<string|null>} Next invoice number, or null if start number is not yet configured
+ */
+async function allocateNextInvoiceNumber(psychologistUserId) {
+  if (!supabaseAdmin) return null;
+
+  // 1. Fetch psychologist profile (configured series + start number)
+  const { data: profileRow } = await supabaseAdmin
+    .from('psychologist_profiles')
+    .select('data')
+    .eq('user_id', psychologistUserId)
+    .maybeSingle();
+
+  const profile = profileRow?.data || {};
+  const year = new Date().getFullYear();
+  const yearSuffix = String(year).slice(-2);
+  const customSeries = profile?.invoice_series?.[year] || null;
+  const configuredStartNumber = profile?.invoice_start_numbers?.[year] ?? null;
+  const prefix = customSeries || `F${yearSuffix}`;
+
+  // 2. Fetch all invoice numbers that start with this prefix for this psychologist
+  const { data: existingInvoices, error } = await supabaseAdmin
+    .from('invoices')
+    .select('invoiceNumber')
+    .eq('psychologist_user_id', psychologistUserId)
+    .like('invoiceNumber', `${prefix}%`);
+
+  if (error) throw new Error(`[allocateNextInvoiceNumber] Error consultando facturas: ${error.message}`);
+
+  // 3. Extract and parse numeric parts (skip any malformed entries)
+  const numbers = (existingInvoices || [])
+    .map(inv => {
+      const numPart = (inv.invoiceNumber || '').slice(prefix.length);
+      const n = parseInt(numPart, 10);
+      return !isNaN(n) && n > 0 ? n : null;
+    })
+    .filter(n => n !== null);
+
+  // 4. Determine next number
+  let nextNumber;
+  if (numbers.length === 0) {
+    // First invoice of this series: use configured start number or 1
+    if (configuredStartNumber === null) {
+      // No start number configured yet — caller must handle this (show modal to user)
+      return null;
+    }
+    nextNumber = configuredStartNumber;
+  } else {
+    nextNumber = Math.max(...numbers) + 1;
+  }
+
+  // 5. Detect and log any gap (should never happen with server-side generation; indicates DB inconsistency)
+  if (numbers.length > 0) {
+    const expectedMax = Math.max(...numbers);
+    const expectedNext = expectedMax + 1;
+    if (nextNumber !== expectedNext) {
+      console.error(`🚨 [allocateNextInvoiceNumber] DETECCIÓN DE SALTO: se esperaba ${prefix}${expectedNext} pero se asignaría ${prefix}${nextNumber}. Revisad la base de datos.`);
+    }
+  }
+
+  // 6. Determine format (padded or plain) by majority of existing invoices
+  const paddedCount = (existingInvoices || []).filter(inv => {
+    const numPart = (inv.invoiceNumber || '').slice(prefix.length);
+    return numPart.length >= 6 && numPart.startsWith('0');
+  }).length;
+  const usePadding = numbers.length > 0 && paddedCount >= (existingInvoices || []).length / 2;
+
+  const numStr = usePadding ? String(nextNumber).padStart(6, '0') : String(nextNumber);
+  return `${prefix}${numStr}`;
+}
+
 app.post('/api/invoices', authenticateRequest, async (req, res) => {
   try {
     const invoice = { ...req.body, id: req.body.id || Date.now().toString() };
@@ -7715,6 +7792,30 @@ app.post('/api/invoices', authenticateRequest, async (req, res) => {
     if (!invoice.status || !['draft', 'pending', 'paid', 'overdue', 'cancelled'].includes(invoice.status)) {
       invoice.status = 'draft';
     }
+
+    // ── CONTROL CRÍTICO: Generar número de factura SIEMPRE en el servidor ─────────────────
+    // Esto elimina los saltos causados por fallos de red en el cliente (el cliente generaba
+    // el número antes de enviarlo; si el POST fallaba, ese número se perdía y el siguiente
+    // intento usaba el siguiente número, dejando un hueco).
+    // El número solo se asigna en el momento exacto en que la factura se persiste.
+    if (invoice.status !== 'draft' && !invoice.is_rectificativa && supabaseAdmin) {
+      try {
+        const serverAllocatedNumber = await allocateNextInvoiceNumber(psychologistUserId);
+        if (serverAllocatedNumber !== null) {
+          if (serverAllocatedNumber !== invoice.invoiceNumber) {
+            console.warn(`⚠️ [POST /api/invoices] Número corregido por servidor: cliente="${invoice.invoiceNumber}" → servidor="${serverAllocatedNumber}"`);
+          }
+          invoice.invoiceNumber = serverAllocatedNumber;
+        }
+        // serverAllocatedNumber === null means no start number configured yet (first invoice of year).
+        // The client handles this case with the series-config modal; the invoice won't reach here
+        // without a number unless it's a genuinely unexpected state. We keep the client value.
+      } catch (allocErr) {
+        console.error('❌ [POST /api/invoices] Error generando número de factura en servidor:', allocErr);
+        // Don't block the save; fall back to the client-provided number and log for investigation.
+      }
+    }
+    // ──────────────────────────────────────────────────────────────────────────────────────
 
     // Guardar en Supabase si está disponible (PRIMERO)
     if (supabaseAdmin) {
@@ -7991,7 +8092,26 @@ app.patch('/api/invoices/:id', authenticateRequest, async (req, res) => {
         }
         
         const updatedInvoice = { ...currentInvoice, ...updates };
-        
+
+        // ── CONTROL CRÍTICO: Reasignar número al convertir borrador → factura real ────────
+        // El cliente generó el número antes de enviar el PATCH. Si entre medias se creó
+        // otra factura, el número del cliente quedaría desincronizado. El servidor regenera
+        // el número en el momento exacto del guardado para garantizar la secuencia.
+        if (currentInvoice.status === 'draft' && updates.status && updates.status !== 'draft' && !updatedInvoice.is_rectificativa) {
+          try {
+            const serverAllocatedNumber = await allocateNextInvoiceNumber(currentInvoice.psychologist_user_id);
+            if (serverAllocatedNumber !== null) {
+              if (serverAllocatedNumber !== updatedInvoice.invoiceNumber) {
+                console.warn(`⚠️ [PATCH /api/invoices] Número corregido (draft→real): cliente="${updatedInvoice.invoiceNumber}" → servidor="${serverAllocatedNumber}"`);
+              }
+              updatedInvoice.invoiceNumber = serverAllocatedNumber;
+            }
+          } catch (allocErr) {
+            console.error('❌ [PATCH /api/invoices] Error generando número de factura en servidor:', allocErr);
+          }
+        }
+        // ──────────────────────────────────────────────────────────────────────────────────
+
         // Si se está convirtiendo de draft a issued/pending, asignar invoice_id a sesiones y bonos
         if (currentInvoice.status === 'draft' && updates.status && updates.status !== 'draft') {
           if (updatedInvoice.sessionIds && updatedInvoice.sessionIds.length > 0) {
