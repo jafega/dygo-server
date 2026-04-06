@@ -4108,6 +4108,320 @@ app.post('/api/admin/cleanup-user-data', authenticateRequest, async (req, res) =
   }
 });
 
+// --- SUPERADMIN STATS DASHBOARD ---
+app.get('/api/admin/stats', authenticateRequest, async (req, res) => {
+  try {
+    const requesterId = req.authenticatedUserId;
+
+    // Superadmin check
+    let requesterEmail = '';
+    if (supabaseAdmin) {
+      const { data: reqUser } = await supabaseAdmin.from('users')
+        .select('user_email, data')
+        .eq('id', requesterId)
+        .maybeSingle();
+      requesterEmail = reqUser?.user_email || (reqUser?.data || {}).email || '';
+    } else {
+      const db = getDb();
+      const reqUser = (db.users || []).find(u => u.id === String(requesterId));
+      requesterEmail = reqUser?.email || '';
+    }
+    if (!isSuperAdmin(requesterEmail)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const db = getDb();
+    const now = Date.now();
+
+    let allUsers = [];
+    let subsByPsychId = {};
+    let relCounts = {};
+
+    if (supabaseAdmin) {
+      const [usersRes, subsRes, relRes] = await Promise.all([
+        supabaseAdmin.from('users').select('id, data, is_psychologist, user_email, auth_user_id, master'),
+        supabaseAdmin.from('subscriptions').select('id, data'),
+        supabaseAdmin.from('care_relationships').select('psychologist_user_id').or('active.is.null,active.eq.true'),
+      ]);
+      if (usersRes.error) throw usersRes.error;
+      allUsers = (usersRes.data || []).map(normalizeSupabaseRow);
+      for (const row of subsRes.data || []) {
+        const d = row.data || {};
+        subsByPsychId[row.id] = {
+          stripe_status: d.stripe_status || null,
+          plan_id: d.plan_id || DEFAULT_PSYCH_PLAN,
+          access_blocked: d.access_blocked || false,
+        };
+      }
+      for (const rel of relRes.data || []) {
+        relCounts[rel.psychologist_user_id] = (relCounts[rel.psychologist_user_id] || 0) + 1;
+      }
+    } else {
+      allUsers = db.users || [];
+      for (const sub of db.subscriptions || []) {
+        subsByPsychId[sub.psychologist_user_id] = sub;
+      }
+      for (const rel of (db.careRelationships || [])) {
+        if (rel.active === false) continue;
+        relCounts[rel.psychologist_user_id] = (relCounts[rel.psychologist_user_id] || 0) + 1;
+      }
+    }
+
+    const getCreatedAt = (u) => {
+      if (u.createdAt && typeof u.createdAt === 'number') return u.createdAt;
+      if (u.created_at) { const t = new Date(u.created_at).getTime(); if (!isNaN(t)) return t; }
+      if (u.registeredAt) { const t = typeof u.registeredAt === 'number' ? u.registeredAt : new Date(u.registeredAt).getTime(); if (!isNaN(t)) return t; }
+      return null;
+    };
+
+    // Weekly new psychologist registrations (last 8 weeks)
+    const weeklyData = [];
+    for (let i = 7; i >= 0; i--) {
+      const weekStart = now - (i + 1) * 7 * 24 * 60 * 60 * 1000;
+      const weekEnd = now - i * 7 * 24 * 60 * 60 * 1000;
+      const label = new Date(weekEnd - 1).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
+      const count = allUsers.filter(u => {
+        if (!u.is_psychologist) return false;
+        const ca = getCreatedAt(u);
+        return ca && ca >= weekStart && ca < weekEnd;
+      }).length;
+      weeklyData.push({ semana: label, psicologos: count });
+    }
+
+    const psychUsers = allUsers.filter(u => u.is_psychologist === true);
+    let trialCount = 0, paidCount = 0, blockedCount = 0, mrr = 0;
+
+    const psychDetails = psychUsers.map(u => {
+      const sub = subsByPsychId[u.id] || { plan_id: DEFAULT_PSYCH_PLAN, stripe_status: null, access_blocked: false };
+      const createdAt = getCreatedAt(u);
+      const isMaster = u.master === true;
+      const plan = PSYCH_PLANS[sub.plan_id] || PSYCH_PLANS[DEFAULT_PSYCH_PLAN];
+
+      let access;
+      if (isMaster) {
+        access = { allowed: true, isSubscribed: true, trialActive: false, trialDaysLeft: 0, isMaster: true };
+      } else {
+        access = computeAccess(sub, createdAt);
+      }
+
+      if (isMaster || access.isSubscribed) {
+        paidCount++;
+        if (!isMaster) mrr += plan.price;
+      } else if (access.trialActive) {
+        trialCount++;
+      } else {
+        blockedCount++;
+      }
+
+      const name = u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Sin nombre';
+      return {
+        id: u.id,
+        name,
+        email: u.email || u.user_email || '',
+        phone: u.phone || '',
+        firstName: u.firstName || '',
+        lastName: u.lastName || '',
+        plan: plan.id,
+        planName: plan.name,
+        planPrice: plan.price,
+        stripeStatus: sub.stripe_status || null,
+        accessBlocked: sub.access_blocked || false,
+        trialActive: access.trialActive || false,
+        trialDaysLeft: access.trialDaysLeft || 0,
+        isSubscribed: access.isSubscribed || false,
+        isMaster,
+        createdAt,
+        careRelationshipsCount: relCounts[u.id] || 0,
+      };
+    });
+
+    const psychsWithPatients = psychDetails.filter(p => p.careRelationshipsCount > 0);
+    const avgPatients = psychsWithPatients.length > 0
+      ? psychsWithPatients.reduce((sum, p) => sum + p.careRelationshipsCount, 0) / psychsWithPatients.length
+      : 0;
+
+    return res.json({
+      overview: {
+        totalPsychologists: psychUsers.length,
+        totalPatients: allUsers.filter(u => !u.is_psychologist).length,
+        totalUsers: allUsers.length,
+        trialCount,
+        paidCount,
+        blockedCount,
+        mrr: Math.round(mrr * 100) / 100,
+        avgPatientsPerPsych: Math.round(avgPatients * 10) / 10,
+      },
+      weeklyRegistrations: weeklyData,
+      psychologists: psychDetails,
+    });
+  } catch (err) {
+    console.error('[admin/stats] Error:', err);
+    return res.status(500).json({ error: err?.message || 'Error interno' });
+  }
+});
+
+// --- SUPERADMIN USER DETAIL ---
+app.get('/api/admin/user-detail/:id', authenticateRequest, async (req, res) => {
+  try {
+    const requesterId = req.authenticatedUserId;
+    const targetId = req.params.id;
+
+    // Superadmin check
+    let requesterEmail = '';
+    if (supabaseAdmin) {
+      const { data: reqUser } = await supabaseAdmin.from('users')
+        .select('user_email, data')
+        .eq('id', requesterId)
+        .maybeSingle();
+      requesterEmail = reqUser?.user_email || (reqUser?.data || {}).email || '';
+    } else {
+      const db = getDb();
+      requesterEmail = (db.users || []).find(u => u.id === requesterId)?.email || '';
+    }
+    if (!isSuperAdmin(requesterEmail)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    if (supabaseAdmin) {
+      const [
+        sessionsRes,
+        invoicesRes,
+        entriesRes,
+        relRes,
+        lastSessionRes,
+        lastEntryRes,
+      ] = await Promise.all([
+        // Session counts and revenue by status
+        supabaseAdmin.from('sessions')
+          .select('status, price, paid, starts_on')
+          .eq('psychologist_user_id', targetId),
+        // Invoices issued and revenue
+        supabaseAdmin.from('invoices')
+          .select('status, total, created_at')
+          .eq('psychologist_user_id', targetId),
+        // Entries created by this psych (clinical notes, voice sessions)
+        supabaseAdmin.from('entries')
+          .select('entry_type, created_at')
+          .eq('creator_user_id', targetId),
+        // All care relationships (active + inactive)
+        supabaseAdmin.from('care_relationships')
+          .select('active, created_at')
+          .eq('psychologist_user_id', targetId),
+        // Last completed session date
+        supabaseAdmin.from('sessions')
+          .select('starts_on')
+          .eq('psychologist_user_id', targetId)
+          .eq('status', 'completed')
+          .order('starts_on', { ascending: false })
+          .limit(1),
+        // Last entry created by psych
+        supabaseAdmin.from('entries')
+          .select('created_at')
+          .eq('creator_user_id', targetId)
+          .order('created_at', { ascending: false })
+          .limit(1),
+      ]);
+
+      const sessions = sessionsRes.data || [];
+      const invoices = invoicesRes.data || [];
+      const entries = entriesRes.data || [];
+      const rels = relRes.data || [];
+
+      const sessionsCompleted = sessions.filter(s => s.status === 'completed').length;
+      const sesionsScheduled = sessions.filter(s => s.status === 'scheduled').length;
+      const sessionsCancelled = sessions.filter(s => s.status === 'cancelled').length;
+      const sessionRevenueTotal = sessions
+        .filter(s => s.status === 'completed')
+        .reduce((acc, s) => acc + (s.price || 0), 0);
+      const sessionRevenuePaid = sessions
+        .filter(s => s.status === 'completed' && s.paid)
+        .reduce((acc, s) => acc + (s.price || 0), 0);
+
+      const invoicesPaid = invoices.filter(i => i.status === 'paid').length;
+      const invoicesPending = invoices.filter(i => i.status === 'pending' || i.status === 'issued').length;
+      const invoiceRevenue = invoices
+        .filter(i => i.status === 'paid')
+        .reduce((acc, i) => acc + (i.total || 0), 0);
+
+      const activeRels = rels.filter(r => r.active !== false).length;
+      const inactiveRels = rels.filter(r => r.active === false).length;
+
+      const entryTypes = entries.reduce((acc, e) => {
+        const t = e.entry_type || 'unknown';
+        acc[t] = (acc[t] || 0) + 1;
+        return acc;
+      }, {});
+
+      const lastSession = lastSessionRes.data?.[0]?.starts_on || null;
+      const lastEntry = lastEntryRes.data?.[0]?.created_at || null;
+      const lastActivity = [lastSession, lastEntry].filter(Boolean).sort().at(-1) || null;
+
+      return res.json({
+        sessions: {
+          total: sessions.length,
+          completed: sessionsCompleted,
+          scheduled: sesionsScheduled,
+          cancelled: sessionsCancelled,
+          revenueTotal: Math.round(sessionRevenueTotal * 100) / 100,
+          revenuePaid: Math.round(sessionRevenuePaid * 100) / 100,
+        },
+        invoices: {
+          total: invoices.length,
+          paid: invoicesPaid,
+          pending: invoicesPending,
+          revenue: Math.round(invoiceRevenue * 100) / 100,
+        },
+        entries: {
+          total: entries.length,
+          byType: entryTypes,
+        },
+        relationships: {
+          active: activeRels,
+          inactive: inactiveRels,
+          total: rels.length,
+        },
+        lastActivity,
+      });
+    } else {
+      // Local db fallback
+      const db = getDb();
+      const sessions = (db.sessions || []).filter(s => s.psychologist_user_id === targetId);
+      const invoices = (db.invoices || []).filter(i => i.psychologist_user_id === targetId);
+      const entries = (db.entries || []).filter(e => e.creator_user_id === targetId);
+      const rels = (db.careRelationships || []).filter(r => r.psychologist_user_id === targetId);
+      return res.json({
+        sessions: {
+          total: sessions.length,
+          completed: sessions.filter(s => s.status === 'completed').length,
+          scheduled: sessions.filter(s => s.status === 'scheduled').length,
+          cancelled: sessions.filter(s => s.status === 'cancelled').length,
+          revenueTotal: sessions.filter(s => s.status === 'completed').reduce((a, s) => a + (s.price || 0), 0),
+          revenuePaid: sessions.filter(s => s.status === 'completed' && s.paid).reduce((a, s) => a + (s.price || 0), 0),
+        },
+        invoices: {
+          total: invoices.length,
+          paid: invoices.filter(i => i.status === 'paid').length,
+          pending: invoices.filter(i => i.status === 'pending' || i.status === 'issued').length,
+          revenue: invoices.filter(i => i.status === 'paid').reduce((a, i) => a + (i.total || 0), 0),
+        },
+        entries: {
+          total: entries.length,
+          byType: entries.reduce((acc, e) => { const t = e.entryType || e.entry_type || 'unknown'; acc[t] = (acc[t] || 0) + 1; return acc; }, {}),
+        },
+        relationships: {
+          active: rels.filter(r => r.active !== false).length,
+          inactive: rels.filter(r => r.active === false).length,
+          total: rels.length,
+        },
+        lastActivity: null,
+      });
+    }
+  } catch (err) {
+    console.error('[admin/user-detail] Error:', err);
+    return res.status(500).json({ error: err?.message || 'Error interno' });
+  }
+});
+
 // --- STRIPE: Tiered subscription billing for psychologists + patient premium ---
 // Psych plans: starter (€9.99), mainder (€19.99), supermainder (€29.99)
 // Patient premium: €4.99/month with 14-day trial
