@@ -4145,6 +4145,36 @@ app.get('/api/admin/stats', authenticateRequest, async (req, res) => {
       ]);
       if (usersRes.error) throw usersRes.error;
       allUsers = (usersRes.data || []).map(normalizeSupabaseRow);
+
+      // Enrich createdAt for psychologists that don't have it in JSONB data
+      // (creation date lives in auth.users, accessed via auth_user_id)
+      const psychRows = (usersRes.data || []).filter(r => r.is_psychologist);
+      const missingAuthIds = psychRows
+        .filter(r => {
+          const d = r.data || {};
+          return !d.createdAt && !d.created_at && !d.registeredAt;
+        })
+        .map(r => r.auth_user_id)
+        .filter(Boolean);
+
+      if (missingAuthIds.length > 0) {
+        const authCreatedMap = {};
+        await Promise.all(missingAuthIds.map(async (authId) => {
+          try {
+            const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(authId);
+            if (authUser?.user?.created_at) {
+              authCreatedMap[authId] = new Date(authUser.user.created_at).getTime();
+            }
+          } catch (e) { /* ignore */ }
+        }));
+        // Patch allUsers with fetched dates
+        for (const u of allUsers) {
+          if (!u.createdAt && !u.registeredAt && u.auth_user_id && authCreatedMap[u.auth_user_id]) {
+            u.createdAt = authCreatedMap[u.auth_user_id];
+          }
+        }
+      }
+
       for (const row of subsRes.data || []) {
         const d = row.data || {};
         subsByPsychId[row.id] = {
@@ -4240,6 +4270,41 @@ app.get('/api/admin/stats', authenticateRequest, async (req, res) => {
       ? psychsWithPatients.reduce((sum, p) => sum + p.careRelationshipsCount, 0) / psychsWithPatients.length
       : 0;
 
+    // Weekly active paid psychologists (not trial) – last 8 weeks, by registration date
+    const weeklyPaidData = [];
+    for (let i = 7; i >= 0; i--) {
+      const weekStart = now - (i + 1) * 7 * 24 * 60 * 60 * 1000;
+      const weekEnd   = now - i * 7 * 24 * 60 * 60 * 1000;
+      const label = new Date(weekEnd - 1).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
+      const count = psychDetails.filter(p => {
+        if (!p.isSubscribed && !p.isMaster) return false;
+        const ca = p.createdAt;
+        return ca && ca >= weekStart && ca < weekEnd;
+      }).length;
+      weeklyPaidData.push({ semana: label, pagantes: count });
+    }
+
+    // Monthly MRR contribution – last 12 months, by registration date of currently-paid psychologists
+    const monthlyMrrData = [];
+    const todayMidnight = new Date(now);
+    todayMidnight.setDate(1);
+    todayMidnight.setHours(0, 0, 0, 0);
+    for (let i = 11; i >= 0; i--) {
+      const monthStart = new Date(todayMidnight);
+      monthStart.setMonth(todayMidnight.getMonth() - i);
+      const monthEnd = new Date(monthStart);
+      monthEnd.setMonth(monthStart.getMonth() + 1);
+      const label = monthStart.toLocaleDateString('es-ES', { month: 'short', year: '2-digit' });
+      const monthMrr = psychDetails
+        .filter(p => {
+          if (!p.isSubscribed && !p.isMaster) return false;
+          const ca = p.createdAt;
+          return ca && ca >= monthStart.getTime() && ca < monthEnd.getTime();
+        })
+        .reduce((sum, p) => sum + (p.isMaster ? 0 : p.planPrice), 0);
+      monthlyMrrData.push({ mes: label, mrr: Math.round(monthMrr * 100) / 100 });
+    }
+
     return res.json({
       overview: {
         totalPsychologists: psychUsers.length,
@@ -4252,6 +4317,8 @@ app.get('/api/admin/stats', authenticateRequest, async (req, res) => {
         avgPatientsPerPsych: Math.round(avgPatients * 10) / 10,
       },
       weeklyRegistrations: weeklyData,
+      weeklyPaidPsychs: weeklyPaidData,
+      monthlyMrr: monthlyMrrData,
       psychologists: psychDetails,
     });
   } catch (err) {

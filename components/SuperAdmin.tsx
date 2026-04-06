@@ -122,8 +122,7 @@ const KpiCard: React.FC<KpiCardProps> = ({ label, value, sub, icon, from, to, bo
 );
 
 // Panel de administración integrado como pestaña
-const SuperAdmin: React.FC = () => {
-  const [tab, setTab] = useState<Tab>('dashboard');
+const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
   const [users, setUsers] = useState<User[]>([]);
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [loading, setLoading] = useState(false);
@@ -163,6 +162,8 @@ const SuperAdmin: React.FC = () => {
   };
 
   const handleRefresh = () => { loadStats(); loadUsers(); };
+
+  const isLoading = statsLoading || loading;
 
   const filtered = users.filter(u => {
     const matchesQuery = !query ||
@@ -205,37 +206,18 @@ const SuperAdmin: React.FC = () => {
     }
   };
 
-  // ── Tabs ──────────────────────────────────────
-  const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
-    { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={16} /> },
-    { id: 'users',     label: 'Usuarios',  icon: <Users size={16} /> },
-    { id: 'tools',     label: 'Herramientas', icon: <Wrench size={16} /> },
-  ];
-
   return (
     <div className="space-y-5">
-      {/* Tab bar */}
-      <div className="flex gap-1 bg-slate-100 rounded-xl p-1 w-fit">
-        {tabs.map(t => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-              tab === t.id
-                ? 'bg-white text-indigo-700 shadow-sm'
-                : 'text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            {t.icon}{t.label}
-          </button>
-        ))}
+      {/* Refresh button */}
+      <div className="flex justify-end">
         <button
           onClick={handleRefresh}
-          disabled={statsLoading || loading}
-          className="ml-2 px-3 py-2 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-white transition-all"
+          disabled={isLoading}
+          className="flex items-center gap-2 px-3 py-2 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-slate-100 transition-all text-xs font-medium"
           title="Refrescar todo"
         >
-          <RefreshCcw size={15} className={(statsLoading || loading) ? 'animate-spin' : ''} />
+          <RefreshCcw size={14} className={isLoading ? 'animate-spin' : ''} />
+          Refrescar
         </button>
       </div>
 
@@ -413,13 +395,15 @@ const SuperAdmin: React.FC = () => {
             ) : (
               <>
                 {/* Header row */}
-                <div className="hidden lg:grid grid-cols-[2fr_2fr_1fr_1.5fr_1.5fr_1fr_28px] gap-3 px-5 py-2.5 bg-slate-50 border-b border-slate-100 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                <div className="hidden lg:grid grid-cols-[2fr_2fr_1fr_1.5fr_1.5fr_1fr_1fr_1fr_28px] gap-3 px-5 py-2.5 bg-slate-50 border-b border-slate-100 text-xs font-semibold uppercase tracking-wide text-slate-400">
                   <span>Nombre</span>
                   <span>Email</span>
                   <span>Tipo</span>
                   <span>Plan</span>
                   <span>Estado</span>
                   <span>Relaciones</span>
+                  <span>Registro</span>
+                  <span>Prueba</span>
                   <span />
                 </div>
                 <div className="divide-y divide-slate-100">
@@ -429,7 +413,7 @@ const SuperAdmin: React.FC = () => {
                     return (
                       <div
                         key={u.id}
-                        className={`grid grid-cols-1 lg:grid-cols-[2fr_2fr_1fr_1.5fr_1.5fr_1fr_28px] gap-3 items-center px-5 py-3 hover:bg-slate-50 transition-colors ${isPsych && pStat ? 'cursor-pointer' : ''}`}
+                        className={`grid grid-cols-1 lg:grid-cols-[2fr_2fr_1fr_1.5fr_1.5fr_1fr_1fr_1fr_28px] gap-3 items-center px-5 py-3 hover:bg-slate-50 transition-colors ${isPsych && pStat ? 'cursor-pointer' : ''}`}
                         onClick={() => isPsych && pStat && openPsychDrawer(pStat)}
                       >
                         {/* Name */}
@@ -488,7 +472,41 @@ const SuperAdmin: React.FC = () => {
                             <span className="text-xs text-slate-300">—</span>
                           )}
                         </div>
+                        {/* Registration date */}
+                        <div>
+                          {isPsych && pStat?.createdAt ? (
+                            <span className="text-xs text-slate-500">
+                              {new Date(pStat.createdAt).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: '2-digit' })}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-slate-300">—</span>
+                          )}
+                        </div>
 
+                        {/* Trial days left */}
+                        <div>
+                          {isPsych && pStat ? (
+                            pStat.isMaster || pStat.isSubscribed ? (
+                              <span className="text-xs text-slate-300">—</span>
+                            ) : pStat.createdAt ? (() => {
+                              const daysElapsed = Math.floor((Date.now() - pStat.createdAt) / 86400000);
+                              const daysLeft = Math.max(0, 14 - daysElapsed);
+                              return daysLeft > 0 ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-sky-100 text-sky-700">
+                                  <Clock size={10} />{daysLeft}d
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-600">
+                                  Expirado
+                                </span>
+                              );
+                            })() : (
+                              <span className="text-xs text-slate-300">—</span>
+                            )
+                          ) : (
+                            <span className="text-xs text-slate-300">—</span>
+                          )}
+                        </div>
                         {/* Arrow */}
                         <div>
                           {isPsych && pStat && <ChevronRight size={15} className="text-slate-300" />}

@@ -37,7 +37,7 @@ const BulkImportPanel = lazy(() => import('./components/BulkImportPanel'));
 const PsychologistAIChat = lazy(() => import('./components/PsychologistAIChat'));
 // Lazy-loaded: admin only
 const SuperAdmin = lazy(() => import('./components/SuperAdmin'));
-import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock, AlertCircle, Smile, Shield, Building2, LogOut, Upload, Bot, FolderOpen } from 'lucide-react';
+import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock, AlertCircle, Smile, Shield, Building2, LogOut, Upload, Bot, FolderOpen, Wrench } from 'lucide-react';
 
 // Custom Mainds Logo Component
 const MaindsLogo: React.FC<{ className?: string }> = ({ className = "w-12 h-12" }) => (
@@ -54,6 +54,7 @@ const App: React.FC = () => {
   const [showFirstTimeRoleModal, setShowFirstTimeRoleModal] = useState(false);
   
   const [psychViewMode, setPsychViewMode] = useState<'DASHBOARD' | 'PERSONAL' | 'ADMIN'>('DASHBOARD');
+  const [adminTab, setAdminTab] = useState<'dashboard' | 'users' | 'tools'>('dashboard');
   const [psychPanelView, setPsychPanelView] = useState<'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule' | 'centros' | 'templates' | 'import' | 'ai-assistant' | 'materials'>('schedule');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   
@@ -1088,12 +1089,24 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
 
           {/* Navigation */}
           <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-            <button
-              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium bg-red-900/40 text-red-300 shadow-sm"
-            >
-              <Users size={18} />
-              <span>Usuarios</span>
-            </button>
+            {([
+              { id: 'dashboard' as const, label: 'Dashboard',     icon: <LayoutDashboard size={18} /> },
+              { id: 'users'     as const, label: 'Usuarios',      icon: <Users size={18} /> },
+              { id: 'tools'     as const, label: 'Herramientas',  icon: <Wrench size={18} /> },
+            ] as { id: 'dashboard' | 'users' | 'tools'; label: string; icon: React.ReactNode }[]).map(item => (
+              <button
+                key={item.id}
+                onClick={() => setAdminTab(item.id)}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium ${
+                  adminTab === item.id
+                    ? 'bg-red-900/40 text-red-300 shadow-sm'
+                    : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                }`}
+              >
+                {item.icon}
+                <span>{item.label}</span>
+              </button>
+            ))}
           </nav>
 
           {/* Footer */}
@@ -1111,7 +1124,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
         {/* Main Content */}
         <main className="flex-1 overflow-y-auto px-4 md:px-8 py-6">
           <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}>
-            <SuperAdmin />
+            <SuperAdmin tab={adminTab} />
           </Suspense>
         </main>
       </div>
