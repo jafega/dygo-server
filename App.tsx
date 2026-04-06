@@ -53,7 +53,7 @@ const App: React.FC = () => {
   const [pendingRole, setPendingRole] = useState<'PATIENT' | 'PSYCHOLOGIST' | null>(null);
   const [showFirstTimeRoleModal, setShowFirstTimeRoleModal] = useState(false);
   
-  const [psychViewMode, setPsychViewMode] = useState<'DASHBOARD' | 'PERSONAL'>('DASHBOARD');
+  const [psychViewMode, setPsychViewMode] = useState<'DASHBOARD' | 'PERSONAL' | 'ADMIN'>('DASHBOARD');
   const [psychPanelView, setPsychPanelView] = useState<'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule' | 'centros' | 'templates' | 'import' | 'ai-assistant' | 'materials'>('schedule');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   
@@ -1066,6 +1066,58 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
     </button>
   );
 
+  // Superadmin View - Solo para garryjavi@gmail.com y daniel.m.mendezv@gmail.com
+  const SUPERADMIN_EMAILS_FRONTEND = ['garryjavi@gmail.com', 'daniel.m.mendezv@gmail.com'];
+  const isSuperAdminUser = SUPERADMIN_EMAILS_FRONTEND.includes(currentUser?.email?.toLowerCase() || '');
+
+  if (psychViewMode === 'ADMIN' && isSuperAdminUser) {
+    const goBackFromAdmin = () => setPsychViewMode(currentUser?.is_psychologist === true ? 'DASHBOARD' : 'PERSONAL');
+    return (
+      <div className="h-screen bg-slate-50 text-slate-900 flex overflow-hidden">
+        {/* Admin Sidebar */}
+        <aside className="w-64 bg-slate-900 flex flex-col flex-shrink-0">
+          {/* Header */}
+          <div className="p-4 border-b border-slate-700">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 bg-red-600 rounded-lg flex items-center justify-center flex-shrink-0">
+                <Shield size={18} className="text-white" />
+              </div>
+              <span className="font-bold text-white text-lg">Superadmin</span>
+            </div>
+          </div>
+
+          {/* Navigation */}
+          <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+            <button
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium bg-red-900/40 text-red-300 shadow-sm"
+            >
+              <Users size={18} />
+              <span>Usuarios</span>
+            </button>
+          </nav>
+
+          {/* Footer */}
+          <div className="p-3 border-t border-slate-700">
+            <button
+              onClick={goBackFromAdmin}
+              className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+            >
+              <ArrowLeftRight size={16} />
+              <span>{currentUser?.is_psychologist === true ? 'Volver a mainds pro' : 'Volver a mi diario'}</span>
+            </button>
+          </div>
+        </aside>
+
+        {/* Main Content */}
+        <main className="flex-1 overflow-y-auto px-4 md:px-8 py-6">
+          <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}>
+            <SuperAdmin />
+          </Suspense>
+        </main>
+      </div>
+    );
+  }
+
   // Psychologist View - Solo accesible si is_psychologist es true
   if (currentUser?.is_psychologist === true && psychViewMode === 'DASHBOARD') {
       console.log('✅ [App] Mostrando vista de psicólogo - is_psychologist:', currentUser.is_psychologist);
@@ -1107,6 +1159,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   avatarUrl={currentUser.avatarUrl}
                   onSwitchToPersonal={() => { setPsychViewMode('PERSONAL'); setActiveTab('calendar'); }}
                   onOpenSettings={handleOpenSettings}
+                  onSwitchToAdmin={() => setPsychViewMode('ADMIN')}
                   isProfileIncomplete={isProfileIncomplete}
                   subscriptionInfo={psychSubscriptionInfo}
                   psychologistId={currentUser.id}
@@ -1552,18 +1605,18 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
           </nav>
 
           <div className={`${sidebarOpen ? 'block' : 'hidden'} md:block p-3 border-t border-slate-200 space-y-2`}>
-            {/* Admin tab - solo para garryjavi@gmail.com */}
-            {currentUser?.email?.toLowerCase() === 'garryjavi@gmail.com' && (
+            {/* Admin tab - solo para superadmins */}
+            {SUPERADMIN_EMAILS_FRONTEND.includes(currentUser?.email?.toLowerCase() || '') && (
               <button
-                onClick={() => { setActiveTab('admin'); if (window.innerWidth < 768) setSidebarOpen(false); }}
+                onClick={() => { setPsychViewMode('ADMIN'); if (window.innerWidth < 768) setSidebarOpen(false); }}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium mb-2 ${
-                  activeTab === 'admin'
+                  false
                     ? 'bg-red-50 text-red-700 shadow-sm'
                     : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                 }`}
               >
                 <Shield size={18} />
-                <span className={`${sidebarOpen ? 'inline' : 'hidden'} md:inline`}>Admin</span>
+                <span className={`${sidebarOpen ? 'inline' : 'hidden'} md:inline`}>Superadmin</span>
               </button>
             )}
             
@@ -1958,14 +2011,6 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
               <div className="animate-in fade-in">
                 <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}>
                   <PatientDocumentsPanel patientId={currentUser.id} />
-                </Suspense>
-              </div>
-            )}
-
-            {activeTab === 'admin' && currentUser?.email?.toLowerCase() === 'garryjavi@gmail.com' && (
-              <div className="animate-in fade-in">
-                <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}>
-                  <SuperAdmin />
                 </Suspense>
               </div>
             )}

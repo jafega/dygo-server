@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Building, User, ChevronDown, ChevronRight, CheckSquare, Square,
   Loader2, RefreshCw, FileText, AlertCircle, CheckCircle2, Layers
@@ -289,6 +289,33 @@ const BulkBillingPanel: React.FC<BulkBillingPanelProps> = ({ psychologistId, onD
 
   const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(new Set());
   const [selectedBonoIds, setSelectedBonoIds] = useState<Set<string>>(new Set());
+  const [filterFrom, setFilterFrom] = useState('');
+  const [filterTo, setFilterTo] = useState('');
+
+  const filteredBulkData = useMemo<BulkData | null>(() => {
+    if (!bulkData) return null;
+    const inRange = (dateStr: string) => {
+      const d = dateStr.slice(0, 10);
+      if (filterFrom && d < filterFrom) return false;
+      if (filterTo && d > filterTo) return false;
+      return true;
+    };
+    const centers = bulkData.centers
+      .map(c => ({
+        ...c,
+        sessions: c.sessions.filter(s => inRange(s.starts_on)),
+        bonos: c.bonos.filter(b => inRange(b.created_at))
+      }))
+      .filter(c => c.sessions.length > 0 || c.bonos.length > 0);
+    const patients = bulkData.patients
+      .map(p => ({
+        ...p,
+        sessions: p.sessions.filter(s => inRange(s.starts_on)),
+        bonos: p.bonos.filter(b => inRange(b.created_at))
+      }))
+      .filter(p => p.sessions.length > 0 || p.bonos.length > 0);
+    return { centers, patients };
+  }, [bulkData, filterFrom, filterTo]);
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -345,14 +372,14 @@ const BulkBillingPanel: React.FC<BulkBillingPanelProps> = ({ psychologistId, onD
   };
 
   const selectAllGlobal = () => {
-    if (!bulkData) return;
+    if (!filteredBulkData) return;
     const allSessions = new Set<string>([
-      ...bulkData.centers.flatMap(c => c.sessions.map(s => s.id)),
-      ...bulkData.patients.flatMap(p => p.sessions.map(s => s.id))
+      ...filteredBulkData.centers.flatMap(c => c.sessions.map(s => s.id)),
+      ...filteredBulkData.patients.flatMap(p => p.sessions.map(s => s.id))
     ]);
     const allBonos = new Set<string>([
-      ...bulkData.centers.flatMap(c => c.bonos.map(b => b.id)),
-      ...bulkData.patients.flatMap(p => p.bonos.map(b => b.id))
+      ...filteredBulkData.centers.flatMap(c => c.bonos.map(b => b.id)),
+      ...filteredBulkData.patients.flatMap(p => p.bonos.map(b => b.id))
     ]);
     setSelectedSessionIds(allSessions);
     setSelectedBonoIds(allBonos);
@@ -485,6 +512,8 @@ const BulkBillingPanel: React.FC<BulkBillingPanelProps> = ({ psychologistId, onD
         if (res.ok) {
           created++;
           setCreationProgress(prev => [...prev, `✓ Borrador creado para ${label}`]);
+        } else if (res.status === 409) {
+          setCreationProgress(prev => [...prev, `⚠ Ya existe un borrador para ${label} — se ha omitido`]);
         } else {
           const err = await res.json().catch(() => ({}));
           const msg = `Error en ${label}: ${err.error || res.statusText}`;
@@ -559,6 +588,8 @@ const BulkBillingPanel: React.FC<BulkBillingPanelProps> = ({ psychologistId, onD
         if (res.ok) {
           created++;
           setCreationProgress(prev => [...prev, `✓ Borrador creado para ${patient.name}`]);
+        } else if (res.status === 409) {
+          setCreationProgress(prev => [...prev, `⚠ Ya existe un borrador para ${patient.name} — se ha omitido`]);
         } else {
           const err = await res.json().catch(() => ({}));
           const msg = `Error en ${patient.name}: ${err.error || res.statusText}`;
@@ -607,6 +638,34 @@ const BulkBillingPanel: React.FC<BulkBillingPanelProps> = ({ psychologistId, onD
             Selecciona las sesiones y bonos pendientes y crea todos los borradores de un solo clic.
           </p>
         </div>
+
+        {/* Filtro por rango de fechas */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <label className="text-xs text-slate-500 font-medium">Desde:</label>
+          <input
+            type="date"
+            value={filterFrom}
+            onChange={e => { setFilterFrom(e.target.value); setSelectedSessionIds(new Set()); setSelectedBonoIds(new Set()); }}
+            className="text-xs px-2 py-1.5 rounded-lg border border-slate-200 text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+          />
+          <label className="text-xs text-slate-500 font-medium">Hasta:</label>
+          <input
+            type="date"
+            value={filterTo}
+            onChange={e => { setFilterTo(e.target.value); setSelectedSessionIds(new Set()); setSelectedBonoIds(new Set()); }}
+            className="text-xs px-2 py-1.5 rounded-lg border border-slate-200 text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+          />
+          {(filterFrom || filterTo) && (
+            <button
+              type="button"
+              onClick={() => { setFilterFrom(''); setFilterTo(''); setSelectedSessionIds(new Set()); setSelectedBonoIds(new Set()); }}
+              className="text-xs px-2 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"
+            >
+              Limpiar filtro
+            </button>
+          )}
+        </div>
+
         <div className="flex items-center gap-2 flex-wrap">
           {hasData && (
             <>
@@ -681,14 +740,23 @@ const BulkBillingPanel: React.FC<BulkBillingPanelProps> = ({ psychologistId, onD
         </div>
       )}
 
+      {/* Sin resultados tras filtrar */}
+      {hasData && filteredBulkData && filteredBulkData.centers.length === 0 && filteredBulkData.patients.length === 0 && (
+        <div className="text-center py-12 text-slate-400">
+          <FileText size={36} className="mx-auto mb-3 opacity-40" />
+          <p className="font-medium">No hay elementos en el rango de fechas seleccionado.</p>
+          <p className="text-sm mt-1">Ajusta el filtro o limpia las fechas para ver todos los pendientes.</p>
+        </div>
+      )}
+
       {/* Grupos por centro */}
-      {bulkData && bulkData.centers.length > 0 && (
+      {filteredBulkData && filteredBulkData.centers.length > 0 && (
         <section className="space-y-3">
           <h3 className="text-sm font-semibold text-slate-600 uppercase tracking-wider flex items-center gap-2">
             <Building size={15} />
-            Centros ({bulkData.centers.length})
+            Centros ({filteredBulkData.centers.length})
           </h3>
-          {bulkData.centers.map(center => (
+          {filteredBulkData.centers.map(center => (
             <GroupCard
               key={center.centerId}
               icon={<Building size={18} className="text-indigo-600" />}
@@ -709,13 +777,13 @@ const BulkBillingPanel: React.FC<BulkBillingPanelProps> = ({ psychologistId, onD
       )}
 
       {/* Grupos por paciente individual */}
-      {bulkData && bulkData.patients.length > 0 && (
+      {filteredBulkData && filteredBulkData.patients.length > 0 && (
         <section className="space-y-3">
           <h3 className="text-sm font-semibold text-slate-600 uppercase tracking-wider flex items-center gap-2">
             <User size={15} />
-            Pacientes individuales ({bulkData.patients.length})
+            Pacientes individuales ({filteredBulkData.patients.length})
           </h3>
-          {bulkData.patients.map(patient => (
+          {filteredBulkData.patients.map(patient => (
             <GroupCard
               key={patient.id}
               icon={<User size={18} className="text-violet-600" />}

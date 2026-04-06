@@ -379,6 +379,17 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session: init
 
         console.log('✓ Respuesta de Gemini recibida');
         transcriptText = result.text || '';
+      } else if (
+        fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+        fileType === 'application/msword'
+      ) {
+        // Extraer texto de Word con mammoth (browser-compatible)
+        console.log('📄 Procesando archivo Word con mammoth...');
+        const { default: mammoth } = await import('mammoth');
+        const arrayBuffer = await uploadedFile.arrayBuffer();
+        const result = await mammoth.extractRawText({ arrayBuffer });
+        transcriptText = result.value || '';
+        console.log('✓ Texto extraído del Word, longitud:', transcriptText.length);
       }
 
       if (!transcriptText) {
@@ -451,6 +462,17 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session: init
 
         console.log('✓ Respuesta de Gemini recibida');
         transcriptText = result.text || '';
+      } else if (
+        fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+        fileType === 'application/msword'
+      ) {
+        // Extraer texto de Word con mammoth (browser-compatible)
+        console.log('📄 Procesando archivo Word con mammoth...');
+        const { default: mammoth } = await import('mammoth');
+        const arrayBuffer = await uploadedFile.arrayBuffer();
+        const result = await mammoth.extractRawText({ arrayBuffer });
+        transcriptText = result.value || '';
+        console.log('✓ Texto extraído del Word, longitud:', transcriptText.length);
       }
 
       if (!transcriptText) {

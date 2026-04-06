@@ -1040,6 +1040,46 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
     setSelectedSession(null);
     setEditedSession(null);
   };
+
+  const handleQuickCompleteSession = async () => {
+    if (!editedSession) return;
+    const currentUser = await getCurrentUser();
+    if (!currentUser) return;
+    try {
+      const response = await apiFetch(`${API_URL}/session-entries`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': currentUser.id },
+        body: JSON.stringify({
+          session_id: editedSession.id,
+          creator_user_id: currentUser.id,
+          target_user_id: editedSession.patient_user_id || editedSession.patientId,
+          transcript: '',
+          summary: '',
+          status: 'done',
+          entry_type: 'session_note'
+        })
+      });
+      if (!response.ok) {
+        const err = await response.json();
+        alert(err.error || 'Error al completar la sesión');
+        return;
+      }
+      const savedEntry = await response.json();
+      if (editedSession.status !== 'completed') {
+        await apiFetch(`${API_URL}/sessions/${editedSession.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'x-user-id': currentUser.id },
+          body: JSON.stringify({ status: 'completed' })
+        });
+      }
+      setEditedSession(prev => prev ? { ...prev, session_entry_id: savedEntry.id, status: 'completed' } : prev);
+      setScheduleEntryStatus('done');
+      await loadSessions();
+    } catch (error) {
+      console.error('Error al completar sesión rápida:', error);
+      alert('Error al completar la sesión');
+    }
+  };
   
   const loadAssignedBono = async (bonoId: string) => {
     try {
@@ -1227,96 +1267,12 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
       return;
     }
 
-    // If session is still pending, offer to delete all future recurring sessions at same time
-    let deleteFuture = false;
-    if (editedSession.status === 'scheduled' && editedSession.startTime && editedSession.date) {
-      // Use UTC values from starts_on for comparisons — editedSession.startTime/date are LOCAL
-      // (converted by convertSessionToTz), but sessions returned by the API have UTC-based values.
-      const editedStartsOnTime = editedSession.starts_on
-        ? editedSession.starts_on.substring(11, 16) // "HH:MM" in UTC
-        : null;
-      const editedDateRef = editedSession.starts_on
-        ? editedSession.starts_on.substring(0, 10)  // UTC date
-        : editedSession.date;
-      const sessionWeekday = new Date(editedDateRef + 'T12:00:00').getDay();
-      const editedPatientId = (editedSession as any).patient_user_id || editedSession.patientId;
-
-      // Helper: compare same UTC time-of-day and same weekday, strictly after editedDateRef
-      const isFutureRecurring = (s: Session) => {
-        if (s.id === editedSession.id) return false;
-        // Compare UTC start time via starts_on (avoids UTC vs local mismatch)
-        const sTime = s.starts_on ? s.starts_on.substring(11, 16) : s.startTime;
-        if (editedStartsOnTime && sTime !== editedStartsOnTime) return false;
-        const sDate = s.starts_on ? s.starts_on.substring(0, 10) : s.date;
-        if (!sDate || sDate <= editedDateRef) return false;
-        return new Date(sDate + 'T12:00:00').getDay() === sessionWeekday;
-      };
-
-      let hasFutureSessions = false;
-      try {
-        // Query backend for all future scheduled sessions for this patient-psychologist pair
-        // (do not rely on local sessions state which only covers a ±2 week window)
-        const params = new URLSearchParams({
-          psychologistId,
-          patientId: String(editedPatientId),
-          startDate: editedDateRef,
-          status: 'scheduled'
-        });
-        const futureResp = await apiFetch(`${API_URL}/sessions?${params.toString()}`);
-        if (futureResp.ok) {
-          const allSessions: Session[] = await futureResp.json();
-          hasFutureSessions = allSessions.some(isFutureRecurring);
-        }
-      } catch (err) {
-        console.error('Error checking future sessions:', err);
-        // Fall back to local sessions state
-        hasFutureSessions = sessions.some(s => {
-          if (s.status !== 'scheduled') return false;
-          const sPatientId = (s as any).patient_user_id || s.patientId;
-          if (sPatientId !== editedPatientId) return false;
-          return isFutureRecurring(s);
-        });
-      }
-      if (hasFutureSessions) {
-        deleteFuture = confirm(
-          `¿Deseas también eliminar todas las sesiones futuras programadas de ${editedSession.patientName} a las ${editedSession.startTime} (misma hora, mismo día de la semana)?\n\n` +
-          `• Pulsa "Aceptar" para eliminar esta sesión y las siguientes semanas a esa hora.\n` +
-          `• Pulsa "Cancelar" para eliminar solo esta sesión.`
-        );
-      }
-    }
-
     setIsSaving(true);
     try {
       const currentUser = await getCurrentUser();
       if (!currentUser) {
         alert('Error: Usuario no autenticado');
         return;
-      }
-
-      // First, delete all future recurring sessions at same time if requested
-      if (deleteFuture) {
-        const patientUserId = editedSession.patient_user_id || editedSession.patientId;
-        const sessionWeekday = editedSession.date ? new Date(editedSession.date + 'T12:00:00').getDay() : undefined;
-        try {
-          await apiFetch(`${API_URL}/sessions/future-pending`, {
-            method: 'DELETE',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-user-id': currentUser.id
-            },
-            body: JSON.stringify({
-              patient_user_id: patientUserId,
-              fromDate: editedSession.date,
-              excludeId: editedSession.id,
-              psychologistId,
-              startTime: editedSession.startTime,
-              weekday: sessionWeekday
-            })
-          });
-        } catch (err) {
-          console.error('Error deleting future sessions:', err);
-        }
       }
 
       const response = await apiFetch(`${API_URL}/sessions/${editedSession.id}`, {
@@ -2870,25 +2826,37 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
               {(editedSession.status === 'scheduled' || editedSession.status === 'completed') && (
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">Tomar notas</label>
-                  <button
-                    type="button"
-                    onClick={() => setScheduleSessionDetailsOpen(true)}
-                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full border-2 transition-all text-sm font-semibold ${
-                      !editedSession.session_entry_id
-                        ? 'border-red-300 bg-red-50 hover:border-red-500 hover:bg-red-100 text-red-600'
-                        : scheduleEntryStatus === 'done'
-                        ? 'border-green-500 bg-green-50 hover:bg-green-100 text-green-700'
-                        : 'border-orange-400 bg-orange-50 hover:border-orange-500 hover:bg-orange-100 text-orange-600'
-                    }`}
-                  >
-                    {!editedSession.session_entry_id ? (
-                      <><FileText size={14} className="text-red-500 flex-shrink-0" /><span>Completar sesión</span></>
-                    ) : scheduleEntryStatus === 'done' ? (
-                      <><CheckCircle size={14} className="text-green-600 flex-shrink-0" /><span>Sesión completada</span></>
-                    ) : (
-                      <><FileText size={14} className="text-orange-500 flex-shrink-0" /><span>Completar sesión</span></>
+                  <div className="flex items-center gap-1.5">
+                    {(!editedSession.session_entry_id || scheduleEntryStatus !== 'done') && (
+                      <button
+                        type="button"
+                        onClick={handleQuickCompleteSession}
+                        className="inline-flex items-center justify-center w-8 h-8 rounded-full border-2 border-emerald-400 bg-emerald-50 hover:bg-emerald-100 hover:border-emerald-600 text-emerald-600 transition-all flex-shrink-0"
+                        title="Marcar sesión como completada (sin notas)"
+                      >
+                        <CheckCircle size={14} />
+                      </button>
                     )}
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => setScheduleSessionDetailsOpen(true)}
+                      className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full border-2 transition-all text-sm font-semibold ${
+                        !editedSession.session_entry_id
+                          ? 'border-red-300 bg-red-50 hover:border-red-500 hover:bg-red-100 text-red-600'
+                          : scheduleEntryStatus === 'done'
+                          ? 'border-green-500 bg-green-50 hover:bg-green-100 text-green-700'
+                          : 'border-orange-400 bg-orange-50 hover:border-orange-500 hover:bg-orange-100 text-orange-600'
+                      }`}
+                    >
+                      {!editedSession.session_entry_id ? (
+                        <><FileText size={14} className="text-red-500 flex-shrink-0" /><span>Completar sesión</span></>
+                      ) : scheduleEntryStatus === 'done' ? (
+                        <><CheckCircle size={14} className="text-green-600 flex-shrink-0" /><span>Sesión completada</span></>
+                      ) : (
+                        <><FileText size={14} className="text-orange-500 flex-shrink-0" /><span>Completar sesión</span></>
+                      )}
+                    </button>
+                  </div>
                 </div>
               )}
 

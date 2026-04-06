@@ -163,6 +163,17 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
   const [rectStartNumber, setRectStartNumber] = useState<string>('');
   const [pendingRectData, setPendingRectData] = useState<{ rectificationType: string; rectificationReason: string } | null>(null);
 
+  // Número de factura personalizado (override manual)
+  const [customInvoiceNumber, setCustomInvoiceNumber] = useState<string>('');
+  const [showCustomNumberField, setShowCustomNumberField] = useState(false);
+
+  // Modal para renombrar facturas ya emitidas
+  const [showRenameInvoiceModal, setShowRenameInvoiceModal] = useState(false);
+  const [renameInvoiceTarget, setRenameInvoiceTarget] = useState<Invoice | null>(null);
+  const [renameInvoiceValue, setRenameInvoiceValue] = useState('');
+  const [renameWarningAcknowledged, setRenameWarningAcknowledged] = useState(false);
+  const [isRenamingInvoice, setIsRenamingInvoice] = useState(false);
+
   // Estado para advertencia de fecha retroactiva
   const [showBackdateWarning, setShowBackdateWarning] = useState(false);
   const [backdateWarningInfo, setBackdateWarningInfo] = useState<{ isDraft: boolean; lastInvoiceDate: string; lastInvoiceNumber: string } | null>(null);
@@ -213,6 +224,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
   
   const [psychologistProfile, setPsychologistProfile] = useState<any>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formErrors, setFormErrors] = useState<Record<string, boolean>>({});
   
   // Estado para búsqueda de pacientes/centros
   const [patientSearchTerm, setPatientSearchTerm] = useState('');
@@ -322,9 +334,11 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
     }
   };
 
-  const loadUnbilledItems = async (patId: string) => {
+  const loadUnbilledItems = async (patId: string, editingDraftId?: string) => {
     try {
-      const response = await apiFetch(`${API_URL}/patient/${patId}/unbilled?psychologistId=${psychologistId}`);
+      const params = new URLSearchParams({ psychologistId });
+      if (editingDraftId) params.set('editingDraftId', editingDraftId);
+      const response = await apiFetch(`${API_URL}/patient/${patId}/unbilled?${params}`);
       if (response.ok) {
         const data = await response.json();
         // Deduplicar por ID por seguridad
@@ -338,9 +352,11 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
     }
   };
 
-  const loadCenterUnbilledSessions = async (centerId: string) => {
+  const loadCenterUnbilledSessions = async (centerId: string, editingDraftId?: string) => {
     try {
-      const response = await apiFetch(`${API_URL}/center/${centerId}/unbilled?psychologistId=${psychologistId}`);
+      const params = new URLSearchParams({ psychologistId });
+      if (editingDraftId) params.set('editingDraftId', editingDraftId);
+      const response = await apiFetch(`${API_URL}/center/${centerId}/unbilled?${params}`);
       if (response.ok) {
         const data = await response.json();
         // Deduplicar por ID por seguridad
@@ -357,6 +373,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
   const handlePatientSelect = async (patId: string) => {
     setSelectedPatientId(patId);
     setPatientCenterWarning(null);
+    if (patId) setFormErrors(prev => ({ ...prev, patient: false, sessions: false }));
     const patient = patients.find(p => p.id === patId);
     console.log('[BillingPanel] Paciente seleccionado:', patient);
     if (patient) {
@@ -402,6 +419,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
 
   const handleCenterSelect = async (centerId: string) => {
     setSelectedCenterId(centerId);
+    if (centerId) setFormErrors(prev => ({ ...prev, center: false, sessions: false }));
     const center = centers.find(c => c.id === centerId);
     console.log('[BillingPanel] Centro seleccionado:', center);
     if (center) {
@@ -429,6 +447,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
       newSet.delete(sessionId);
     } else {
       newSet.add(sessionId);
+      setFormErrors(prev => ({ ...prev, sessions: false }));
     }
     setSelectedSessionIds(newSet);
   };
@@ -439,6 +458,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
       newSet.delete(bonoId);
     } else {
       newSet.add(bonoId);
+      setFormErrors(prev => ({ ...prev, sessions: false }));
     }
     setSelectedBonoIds(newSet);
   };
@@ -648,7 +668,8 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
       if (customSeries) {
         // --- Serie personalizada (sin padding fijo) ---
         const invoicesThisSeries = allInvoices.filter((inv: any) =>
-          inv.invoiceNumber && inv.invoiceNumber.startsWith(customSeries)
+          inv.invoiceNumber && inv.invoiceNumber.startsWith(customSeries) &&
+          inv.status !== 'draft' && inv.status !== 'cancelled'
         );
 
         if (invoicesThisSeries.length === 0) {
@@ -666,8 +687,10 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
       }
 
       // --- Sin serie personalizada: usar prefijo por defecto (F26 + 6 dígitos) ---
+      // Excluir borradores y facturas canceladas: solo las facturas activas definen la secuencia.
       const invoicesThisYear = allInvoices.filter((inv: any) => 
-        inv.invoiceNumber && inv.invoiceNumber.startsWith(defaultPrefix)
+        inv.invoiceNumber && inv.invoiceNumber.startsWith(defaultPrefix) &&
+        inv.status !== 'draft' && inv.status !== 'cancelled'
       );
       
       // Si es la primera factura del año, verificar si hay un número inicial configurado
@@ -754,26 +777,25 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
     
     // Validar según el tipo de factura
     if (invoiceType === 'patient') {
-      if (!selectedPatientId || !formData.date) {
-        alert('Por favor completa todos los campos requeridos');
-        return;
-      }
-
-      if (selectedSessionIds.size === 0 && selectedBonoIds.size === 0) {
-        alert('Debes seleccionar al menos una sesión o un bono');
+      const errors: Record<string, boolean> = {};
+      if (!selectedPatientId) errors.patient = true;
+      if (!formData.date) errors.date = true;
+      if (selectedSessionIds.size === 0 && selectedBonoIds.size === 0) errors.sessions = true;
+      if (Object.keys(errors).length > 0) {
+        setFormErrors(errors);
         return;
       }
     } else { // center
-      if (!selectedCenterId || !formData.date) {
-        alert('Por favor completa todos los campos requeridos');
-        return;
-      }
-      
-      if (selectedSessionIds.size === 0 && selectedBonoIds.size === 0) {
-        alert('Debes seleccionar al menos una sesión o un bono del centro');
+      const errors: Record<string, boolean> = {};
+      if (!selectedCenterId) errors.center = true;
+      if (!formData.date) errors.date = true;
+      if (selectedSessionIds.size === 0 && selectedBonoIds.size === 0) errors.sessions = true;
+      if (Object.keys(errors).length > 0) {
+        setFormErrors(errors);
         return;
       }
     }
+    setFormErrors({});
 
     const today = new Date().toISOString().split('T')[0];
     // Al convertir un borrador en factura real, usar siempre la fecha de hoy
@@ -890,6 +912,13 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
         billing_psychologist_tax_id: formData.billing_psychologist_tax_id,
         show_signature: formData.show_signature
       };
+
+      // Si el usuario introdujo un número manual, usarlo y marcar como override explícito
+      // El servidor respetará este número sin reasignar el siguiente de la serie automática.
+      if (customInvoiceNumber.trim() && customInvoiceNumber.trim() !== editingInvoice?.invoiceNumber) {
+        newInvoice.invoiceNumber = customInvoiceNumber.trim();
+        newInvoice.forceInvoiceNumber = true;
+      }
 
       // Añadir IRPF solo para facturas a centros
       if (invoiceType === 'center') {
@@ -1034,6 +1063,37 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
     }
   };
 
+  const handleRenameInvoice = async () => {
+    if (!renameInvoiceTarget || !renameInvoiceValue.trim()) return;
+    setIsRenamingInvoice(true);
+    try {
+      const response = await apiFetch(`${API_URL}/invoices/${renameInvoiceTarget.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invoiceNumber: renameInvoiceValue.trim(), forceInvoiceNumber: true })
+      });
+      if (response.ok) {
+        const savedData = await response.json();
+        await loadInvoices();
+        if (selectedInvoice?.id === renameInvoiceTarget.id) {
+          setSelectedInvoice(prev => prev ? { ...prev, invoiceNumber: savedData.invoiceNumber || renameInvoiceValue.trim() } : null);
+        }
+        setShowRenameInvoiceModal(false);
+        setRenameInvoiceTarget(null);
+        setRenameInvoiceValue('');
+        setRenameWarningAcknowledged(false);
+      } else {
+        const err = await response.json();
+        alert('Error: ' + (err.error || 'Error desconocido'));
+      }
+    } catch (error) {
+      console.error('Error renaming invoice:', error);
+      alert('Error al cambiar el número de factura');
+    } finally {
+      setIsRenamingInvoice(false);
+    }
+  };
+
   const handleStatusChange = async (invoiceId: string, newStatus: 'paid' | 'pending') => {
     try {
       const response = await apiFetch(`${API_URL}/invoices/${invoiceId}`, {
@@ -1147,14 +1207,18 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
     setShowNewInvoice(true);
     setInvoiceType(invoice.invoice_type || 'patient');
     
+    // Precargar número actual para posible edición manual
+    setCustomInvoiceNumber(invoice.invoiceNumber || '');
+    setShowCustomNumberField(false);
+
     // Cargar datos del formulario
     setFormData({
       date: invoice.date,
       dueDate: invoice.dueDate,
       description: invoice.description || '',
       notes: (invoice as any).notes || '',
-      taxRate: invoice.taxRate || 21,
-      irpf: invoice.irpf || 15,
+      taxRate: invoice.taxRate ?? 21,
+      irpf: invoice.irpf ?? 15,
       billing_client_name: invoice.billing_client_name || '',
       billing_client_address: invoice.billing_client_address || '',
       billing_client_tax_id: invoice.billing_client_tax_id || '',
@@ -1175,7 +1239,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
       if (center) {
         setCenterSearchTerm(center.nombre_comercial || center.center_name);
       }
-      await loadCenterUnbilledSessions((invoice as any).centerId);
+      await loadCenterUnbilledSessions((invoice as any).centerId, invoice.status === 'draft' ? invoice.id : undefined);
     } else {
       const patientId = invoice.patient_user_id || invoice.patientId || '';
       setSelectedPatientId(patientId);
@@ -1183,7 +1247,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
       if (patient) {
         setPatientSearchTerm(patient.name);
       }
-      await loadUnbilledItems(patientId);
+      await loadUnbilledItems(patientId, invoice.status === 'draft' ? invoice.id : undefined);
     }
     
     setSelectedSessionIds(new Set(invoice.sessionIds || []));
@@ -1204,7 +1268,10 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
     setAvailableSessions([]);
     setAvailableBonos([]);
     setSelectedSessionIds(new Set());
+    setCustomInvoiceNumber('');
+    setShowCustomNumberField(false);
     setSelectedBonoIds(new Set());
+    setFormErrors({});
     // Resetear con datos del psicólogo precargados
     const psychData = {
       billing_psychologist_name: psychologistProfile?.businessName || psychologistProfile?.name || '',
@@ -1259,7 +1326,11 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
       clientData = {
         billing_client_name: contextPatient.billing_name || contextPatient.name || '',
         billing_client_address: contextPatient.billing_address || '',
-        billing_client_tax_id: contextPatient.billing_tax_id || ''
+        billing_client_tax_id: contextPatient.billing_tax_id || '',
+        billing_client_postal_code: (contextPatient as any).postalCode || '',
+        billing_client_country: (contextPatient as any).country || '',
+        billing_client_city: (contextPatient as any).city || '',
+        billing_client_province: (contextPatient as any).province || ''
       };
       console.log('[BillingPanel] Paciente preseleccionado desde contexto:', contextPatient.name);
       await loadUnbilledItems(patientId);
@@ -1283,7 +1354,11 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
         clientData = {
           billing_client_name: center.center_name || '',
           billing_client_address: center.address || '',
-          billing_client_tax_id: center.cif || ''
+          billing_client_tax_id: center.cif || '',
+          billing_client_postal_code: '',
+          billing_client_country: '',
+          billing_client_city: '',
+          billing_client_province: ''
         };
         console.log('[BillingPanel] Manteniendo datos del centro seleccionado:', clientData);
       }
@@ -1844,7 +1919,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                         onFocus={() => setShowPatientDropdown(true)}
                         placeholder="Buscar paciente por nombre..."
                         disabled={!!editingInvoice}
-                        className="w-full px-4 py-2 pr-10 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                        className={`w-full px-4 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed ${formErrors.patient ? 'border-red-500 bg-red-50' : 'border-slate-300'}`}
                       />
                       <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
                     </div>
@@ -1898,6 +1973,9 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                         </div>
                       </div>
                     )}
+                    {formErrors.patient && (
+                      <p className="mt-1 text-xs text-red-600">Debes seleccionar un paciente</p>
+                    )}
                   </div>
                 ) : (
                   <div className="relative">
@@ -1916,7 +1994,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                         onFocus={() => setShowCenterDropdown(true)}
                         placeholder="Buscar centro..."
                         disabled={!!editingInvoice}
-                        className="w-full px-4 py-2 pr-10 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                        className={`w-full px-4 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed ${formErrors.center ? 'border-red-500 bg-red-50' : 'border-slate-300'}`}
                       />
                       <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
                     </div>
@@ -1957,6 +2035,9 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                         className="fixed inset-0 z-40" 
                         onClick={() => setShowCenterDropdown(false)}
                       />
+                    )}
+                    {formErrors.center && (
+                      <p className="mt-1 text-xs text-red-600">Debes seleccionar un centro</p>
                     )}
                   </div>
                 )}
@@ -2119,6 +2200,13 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                 </div>
               )}
 
+              {/* Error de sesiones/bonos cuando no hay ninguno seleccionado */}
+              {formErrors.sessions && (
+                <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                  Debes seleccionar al menos una sesión o un bono para crear la factura
+                </p>
+              )}
+
               {/* Datos de facturación del cliente */}
               <div className="space-y-4 p-4 bg-slate-50 rounded-lg">
                 <h4 className="font-semibold text-slate-900">Datos de Facturación del Cliente</h4>
@@ -2142,7 +2230,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                     />
                   </div>
                   <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Dirección</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Dirección (calle y número)</label>
                     <AddressAutocomplete
                       value={formData.billing_client_address}
                       onChange={(val) => setFormData({ ...formData, billing_client_address: val })}
@@ -2155,6 +2243,46 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                         billing_client_province: sel.province,
                       }))}
                       placeholder="Escribe la dirección del cliente…"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Ciudad</label>
+                    <input
+                      type="text"
+                      value={formData.billing_client_city}
+                      onChange={(e) => setFormData({ ...formData, billing_client_city: e.target.value })}
+                      placeholder="Ej: Madrid"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Comunidad Autónoma / Provincia</label>
+                    <input
+                      type="text"
+                      value={formData.billing_client_province}
+                      onChange={(e) => setFormData({ ...formData, billing_client_province: e.target.value })}
+                      placeholder="Ej: Comunidad de Madrid"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Código Postal</label>
+                    <input
+                      type="text"
+                      value={formData.billing_client_postal_code}
+                      onChange={(e) => setFormData({ ...formData, billing_client_postal_code: e.target.value })}
+                      placeholder="Ej: 28001"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">País</label>
+                    <input
+                      type="text"
+                      value={formData.billing_client_country}
+                      onChange={(e) => setFormData({ ...formData, billing_client_country: e.target.value })}
+                      placeholder="Ej: España"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                     />
                   </div>
                 </div>
@@ -2197,6 +2325,55 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                 </div>
               </div>
 
+              {/* Número de factura personalizado */}
+              <div className="border border-slate-200 rounded-lg overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setShowCustomNumberField(v => !v)}
+                  className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 hover:bg-slate-100 transition-colors text-sm font-medium text-slate-700"
+                >
+                  <span>
+                    Número de factura
+                    {customInvoiceNumber.trim() && (
+                      <span className="ml-2 font-mono text-indigo-600 font-semibold">{customInvoiceNumber}</span>
+                    )}
+                    {!customInvoiceNumber.trim() && (
+                      <span className="ml-2 text-slate-400 font-normal">(asignado automáticamente)</span>
+                    )}
+                  </span>
+                  <span className="text-xs text-slate-400">{showCustomNumberField ? '▲ Ocultar' : '▼ Personalizar'}</span>
+                </button>
+                {showCustomNumberField && (
+                  <div className="p-4 space-y-3">
+                    <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+                      <span className="text-amber-500 mt-0.5 shrink-0">⚠️</span>
+                      <span>
+                        Cambiar el número de factura manualmente puede <strong>romper la secuencia</strong> de tu serie de facturación y generar problemas contables o fiscales. Solo hazlo si sabes exactamente lo que estás haciendo.
+                      </span>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Número personalizado</label>
+                      <input
+                        type="text"
+                        value={customInvoiceNumber}
+                        onChange={(e) => setCustomInvoiceNumber(e.target.value)}
+                        placeholder="Ej: F262630 o déjalo vacío para asignación automática"
+                        className="w-full px-3 py-2 border border-amber-300 rounded-lg focus:ring-2 focus:ring-amber-400 font-mono text-sm"
+                      />
+                      {customInvoiceNumber.trim() && (
+                        <button
+                          type="button"
+                          onClick={() => { setCustomInvoiceNumber(''); }}
+                          className="mt-1 text-xs text-slate-500 hover:text-red-600 underline"
+                        >
+                          ✕ Borrar y usar numeración automática
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Fechas */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -2206,8 +2383,11 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                     value={formData.date}
                     max={new Date().toISOString().split('T')[0]}
                     onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                    className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${formErrors.date ? 'border-red-500 bg-red-50' : 'border-slate-300'}`}
                   />
+                  {formErrors.date && (
+                    <p className="mt-1 text-xs text-red-600">La fecha de factura es obligatoria</p>
+                  )}
                   {editingInvoice?.status === 'draft' && (
                     <p className="mt-1 text-xs text-indigo-500">
                       Al emitir el borrador como factura real, la fecha se actualizará automáticamente a hoy.
@@ -2744,6 +2924,22 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                     </button>
                   </>
                 )}
+                {/* Cambiar número — disponible para cualquier factura no cancelada */}
+                {selectedInvoice.status !== 'cancelled' && (
+                  <button
+                    onClick={() => {
+                      setRenameInvoiceTarget(selectedInvoice);
+                      setRenameInvoiceValue(selectedInvoice.invoiceNumber || '');
+                      setRenameWarningAcknowledged(false);
+                      setShowRenameInvoiceModal(true);
+                    }}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-500 border border-slate-200 shadow-sm transition-all duration-150"
+                    title="Cambiar el número de esta factura"
+                  >
+                    <Edit size={14} strokeWidth={2} />
+                    Cambiar número
+                  </button>
+                )}
               </div>
               <div className="flex gap-2">
                 {selectedInvoice.status !== 'draft' && selectedInvoice.status !== 'cancelled' && (
@@ -2762,6 +2958,66 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                   Cerrar
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para renombrar número de factura */}
+      {showRenameInvoiceModal && renameInvoiceTarget && (
+        <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => { setShowRenameInvoiceModal(false); setRenameWarningAcknowledged(false); }}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6 border-b border-slate-200">
+              <h3 className="text-xl font-bold text-slate-900">Cambiar número de factura</h3>
+              <p className="text-sm text-slate-500 mt-1">Factura actual: <strong>{renameInvoiceTarget.invoiceNumber}</strong></p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-300 rounded-xl">
+                <span className="text-amber-500 text-lg shrink-0">⚠️</span>
+                <div className="text-sm text-amber-900 space-y-1">
+                  <p className="font-semibold">Advertencia: acción con impacto contable</p>
+                  <ul className="list-disc list-inside space-y-1 text-amber-800">
+                    <li>Puede <strong>romper la secuencia</strong> de tu serie de facturación.</li>
+                    <li>Si el número ya ha sido enviado al cliente o a Hacienda, deberías emitir una <strong>factura rectificativa</strong> en su lugar.</li>
+                    <li>La numeración correlativa es un <strong>requisito legal</strong> en España.</li>
+                  </ul>
+                  <label className="flex items-center gap-2 mt-3 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={renameWarningAcknowledged}
+                      onChange={(e) => setRenameWarningAcknowledged(e.target.checked)}
+                      className="w-4 h-4 rounded border-amber-400 text-amber-600 cursor-pointer"
+                    />
+                    <span className="font-medium">Entiendo los riesgos y quiero continuar</span>
+                  </label>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Nuevo número de factura</label>
+                <input
+                  type="text"
+                  value={renameInvoiceValue}
+                  onChange={(e) => setRenameInvoiceValue(e.target.value)}
+                  disabled={!renameWarningAcknowledged}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 font-mono text-sm disabled:bg-slate-100 disabled:text-slate-400"
+                  placeholder="Ej: F262631"
+                />
+              </div>
+            </div>
+            <div className="p-4 border-t border-slate-100 flex justify-end gap-3">
+              <button
+                onClick={() => { setShowRenameInvoiceModal(false); setRenameWarningAcknowledged(false); }}
+                className="px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 rounded-lg transition-colors font-medium"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleRenameInvoice}
+                disabled={!renameWarningAcknowledged || !renameInvoiceValue.trim() || isRenamingInvoice}
+                className="px-4 py-2 text-sm bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors font-medium shadow disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {isRenamingInvoice ? 'Guardando...' : 'Guardar nuevo número'}
+              </button>
             </div>
           </div>
         </div>

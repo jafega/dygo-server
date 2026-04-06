@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Users, FileText, User as UserIcon, Calendar, Menu, X, ArrowLeftRight, ShieldCheck, Link2, BarChart3, AlertCircle, ClipboardList, Building2, Scroll, Upload, Bot, Zap, RefreshCw, FolderOpen } from 'lucide-react';
+import { Users, FileText, User as UserIcon, Calendar, Menu, X, ArrowLeftRight, ShieldCheck, Shield, Link2, BarChart3, AlertCircle, ClipboardList, Building2, Scroll, Upload, Bot, Zap, RefreshCw, FolderOpen } from 'lucide-react';
 import { createCheckoutSession, createBillingPortalSession, apiFetch } from '../services/authService';
 import { API_URL } from '../services/config';
 
@@ -38,6 +38,7 @@ interface PsychologistSidebarProps {
   avatarUrl?: string;
   onSwitchToPersonal: () => void;
   onOpenSettings: () => void;
+  onSwitchToAdmin?: () => void;
   isProfileIncomplete?: boolean;
   subscriptionInfo?: SubscriptionInfo | null;
   psychologistId?: string;
@@ -55,6 +56,7 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
   avatarUrl = '',
   onSwitchToPersonal,
   onOpenSettings,
+  onSwitchToAdmin,
   isProfileIncomplete = false,
   subscriptionInfo = null,
   psychologistId = '',
@@ -441,6 +443,18 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
             <ArrowLeftRight size={16} />
             <span>Mi Diario Personal</span>
           </button>
+          {onSwitchToAdmin && [
+            'garryjavi@gmail.com',
+            'daniel.m.mendezv@gmail.com'
+          ].includes(userEmail?.toLowerCase() || '') && (
+            <button
+              onClick={onSwitchToAdmin}
+              className="w-full px-3 py-2 text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors text-left flex items-center gap-2 border border-red-100"
+            >
+              <Shield size={16} />
+              <span>Superadmin</span>
+            </button>
+          )}
         </div>
       </aside>
     </>

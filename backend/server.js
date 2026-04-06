@@ -39,6 +39,14 @@ try {
   }
 }
 
+// mammoth: extract text from .docx files
+let mammoth = null;
+try {
+  mammoth = (await import('mammoth')).default;
+} catch {
+  console.warn('⚠️ mammoth not available - .docx text extraction disabled');
+}
+
 // Inicializar Google Generative AI (Gemini)
 const genAI = process.env.GEMINI_API_KEY ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY) : null;
 
@@ -2315,8 +2323,12 @@ async function saveSupabaseDb(data, prevCache = null) {
   await upsertTable('goals', goalsRows);
   await upsertTable('invitations', invitationsRows);
   await upsertTable('settings', settingsRows);
-  await upsertTable('sessions', sessionsRows);
-  await upsertTable('session_entry', sessionEntriesRows);
+  // Sessions and session_entry are managed exclusively via direct Supabase calls
+  // (POST/PATCH/PUT/DELETE all go directly to Supabase). Upserting from the in-memory
+  // cache here is dangerous in serverless environments where multiple instances each
+  // hold a stale supabaseDbCache — a stale instance would re-insert deleted sessions.
+  // await upsertTable('sessions', sessionsRows);
+  // await upsertTable('session_entry', sessionEntriesRows);
   await upsertTable('care_relationships', relationshipsRows);
   
   if (invoicesRows.length === 0) {
@@ -2347,8 +2359,10 @@ async function saveSupabaseDb(data, prevCache = null) {
     await deleteMissing('goals', (prevCache.goals || []).map(g => g.id), goalsRows.map(r => r.id));
     await deleteMissing('invitations', (prevCache.invitations || []).map(i => i.id), invitationsRows.map(r => r.id));
     await deleteMissing('settings', Object.keys(prevCache.settings || {}), settingsRows.map(r => r.id));
-    await deleteMissing('sessions', (prevCache.sessions || []).map(s => s.id), sessionsRows.map(r => r.id));
-    await deleteMissing('session_entry', (prevCache.sessionEntries || []).map(se => se.id), sessionEntriesRows.map(r => r.id));
+    // Sessions/session_entry deletions go through direct Supabase calls — skip here to
+    // prevent stale-cache instances from re-deleting records that were just created.
+    // await deleteMissing('sessions', ...);
+    // await deleteMissing('session_entry', ...);
     await deleteMissing('care_relationships', (prevCache.careRelationships || []).map(rel => rel.id), relationshipsRows.map(r => r.id));
     await deleteMissing('invoices', (prevCache.invoices || []).map(inv => inv.id), invoicesRows.map(r => r.id));
     await deleteMissing('psychologist_profiles', Object.keys(prevCache.psychologistProfiles || {}), profilesRows.map(r => r.id));
@@ -7713,11 +7727,14 @@ async function allocateNextInvoiceNumber(psychologistUserId) {
   const prefix = customSeries || `F${yearSuffix}`;
 
   // 2. Fetch all invoice numbers that start with this prefix for this psychologist
+  // Exclude draft and cancelled invoices: only real, active invoices count towards the sequence.
   const { data: existingInvoices, error } = await supabaseAdmin
     .from('invoices')
     .select('invoiceNumber')
     .eq('psychologist_user_id', psychologistUserId)
-    .like('invoiceNumber', `${prefix}%`);
+    .like('invoiceNumber', `${prefix}%`)
+    .neq('status', 'draft')
+    .neq('status', 'cancelled');
 
   if (error) throw new Error(`[allocateNextInvoiceNumber] Error consultando facturas: ${error.message}`);
 
@@ -7798,23 +7815,48 @@ app.post('/api/invoices', authenticateRequest, async (req, res) => {
     // el número antes de enviarlo; si el POST fallaba, ese número se perdía y el siguiente
     // intento usaba el siguiente número, dejando un hueco).
     // El número solo se asigna en el momento exacto en que la factura se persiste.
+    //
+    // Excepción: si el cliente envía forceInvoiceNumber=true, el psicólogo está sobreescribiendo
+    // manualmente el número (ha confirmado la advertencia en la UI). En ese caso se respeta
+    // el número enviado pero se verifica que no esté duplicado.
     if (invoice.status !== 'draft' && !invoice.is_rectificativa && supabaseAdmin) {
-      try {
-        const serverAllocatedNumber = await allocateNextInvoiceNumber(psychologistUserId);
-        if (serverAllocatedNumber !== null) {
-          if (serverAllocatedNumber !== invoice.invoiceNumber) {
-            console.warn(`⚠️ [POST /api/invoices] Número corregido por servidor: cliente="${invoice.invoiceNumber}" → servidor="${serverAllocatedNumber}"`);
+      if (invoice.forceInvoiceNumber) {
+        // Override manual: verificar unicidad
+        const forcedNum = (invoice.invoiceNumber || '').trim();
+        if (forcedNum) {
+          const { data: dupCheck } = await supabaseAdmin
+            .from('invoices')
+            .select('id')
+            .eq('psychologist_user_id', psychologistUserId)
+            .eq('invoiceNumber', forcedNum)
+            .neq('status', 'cancelled')
+            .limit(1);
+          if (dupCheck && dupCheck.length > 0) {
+            return res.status(409).json({ error: `El número de factura "${forcedNum}" ya existe en otra factura activa.` });
           }
-          invoice.invoiceNumber = serverAllocatedNumber;
+          console.warn(`⚠️ [POST /api/invoices] Número forzado manualmente por psicólogo: "${forcedNum}"`);
+          invoice.invoiceNumber = forcedNum;
         }
-        // serverAllocatedNumber === null means no start number configured yet (first invoice of year).
-        // The client handles this case with the series-config modal; the invoice won't reach here
-        // without a number unless it's a genuinely unexpected state. We keep the client value.
-      } catch (allocErr) {
-        console.error('❌ [POST /api/invoices] Error generando número de factura en servidor:', allocErr);
-        // Don't block the save; fall back to the client-provided number and log for investigation.
+      } else {
+        try {
+          const serverAllocatedNumber = await allocateNextInvoiceNumber(psychologistUserId);
+          if (serverAllocatedNumber !== null) {
+            if (serverAllocatedNumber !== invoice.invoiceNumber) {
+              console.warn(`⚠️ [POST /api/invoices] Número corregido por servidor: cliente="${invoice.invoiceNumber}" → servidor="${serverAllocatedNumber}"`);
+            }
+            invoice.invoiceNumber = serverAllocatedNumber;
+          }
+          // serverAllocatedNumber === null means no start number configured yet (first invoice of year).
+          // The client handles this case with the series-config modal; the invoice won't reach here
+          // without a number unless it's a genuinely unexpected state. We keep the client value.
+        } catch (allocErr) {
+          console.error('❌ [POST /api/invoices] Error generando número de factura en servidor:', allocErr);
+          // Don't block the save; fall back to the client-provided number and log for investigation.
+        }
       }
     }
+    // Limpiar el flag antes de persistir (no debe almacenarse en la BD)
+    delete invoice.forceInvoiceNumber;
     // ──────────────────────────────────────────────────────────────────────────────────────
 
     // Guardar en Supabase si está disponible (PRIMERO)
@@ -7938,7 +7980,83 @@ app.post('/api/invoices', authenticateRequest, async (req, res) => {
             }
           }
         }
-        
+
+        // ── CONTROL: Sesiones en borradores activos ──────────────────────────────────────
+        // `invoice_id` solo se asigna a sesiones para facturas NO borrador, por lo que
+        // el check anterior no detecta sesiones que ya están en otro borrador.
+        // Aquí buscamos facturas con status='draft' cuyo data.sessionIds solape con los
+        // sessionIds solicitados. Ningún caso está permitido: ni dos borradores con la
+        // misma sesión, ni un borrador y una factura nueva con la misma sesión.
+        if (invoice.sessionIds && invoice.sessionIds.length > 0) {
+          const { data: existingDrafts, error: draftScanErr } = await supabaseAdmin
+            .from('invoices')
+            .select('id, data')
+            .eq('psychologist_user_id', psychologistUserId)
+            .eq('status', 'draft')
+            .neq('id', invoice.id);
+
+          if (draftScanErr) {
+            console.error('❌ Error escaneando borradores:', draftScanErr);
+            throw draftScanErr;
+          }
+
+          const sessionSet = new Set(invoice.sessionIds);
+          const conflictingDrafts = (existingDrafts || []).filter(inv => {
+            const invSessionIds = (inv.data && inv.data.sessionIds) || [];
+            return invSessionIds.some(sid => sessionSet.has(sid));
+          });
+
+          if (conflictingDrafts.length > 0) {
+            console.error('[POST /api/invoices] Sesiones ya presentes en borradores activos:', conflictingDrafts.map(d => d.id));
+            return res.status(400).json({
+              error: 'Algunas sesiones ya están incluidas en un borrador activo. Elimina o modifica ese borrador primero.',
+              draftIds: conflictingDrafts.map(d => d.id)
+            });
+          }
+        }
+        // ─────────────────────────────────────────────────────────────────────────────────
+
+        // ── CONTROL: Un solo borrador por paciente/centro ────────────────────────────────
+        // Evita que se creen dos borradores activos para el mismo paciente o centro.
+        if (invoice.status === 'draft') {
+          if (invoice.patient_user_id) {
+            const { data: patientDrafts } = await supabaseAdmin
+              .from('invoices')
+              .select('id')
+              .eq('psychologist_user_id', psychologistUserId)
+              .eq('patient_user_id', invoice.patient_user_id)
+              .eq('status', 'draft')
+              .neq('id', invoice.id);
+
+            if (patientDrafts && patientDrafts.length > 0) {
+              console.error('[POST /api/invoices] Ya existe un borrador para este paciente:', invoice.patient_user_id);
+              return res.status(409).json({
+                error: 'Ya existe un borrador activo para este paciente. Elimínalo antes de crear uno nuevo.',
+                existingDraftId: patientDrafts[0].id
+              });
+            }
+          } else if (invoice.centerId) {
+            const { data: allPsychDrafts } = await supabaseAdmin
+              .from('invoices')
+              .select('id, data')
+              .eq('psychologist_user_id', psychologistUserId)
+              .eq('status', 'draft')
+              .neq('id', invoice.id);
+
+            const dupCenterDraft = (allPsychDrafts || []).find(d =>
+              d.data && d.data.centerId === invoice.centerId
+            );
+            if (dupCenterDraft) {
+              console.error('[POST /api/invoices] Ya existe un borrador para este centro:', invoice.centerId);
+              return res.status(409).json({
+                error: 'Ya existe un borrador activo para este centro. Elimínalo antes de crear uno nuevo.',
+                existingDraftId: dupCenterDraft.id
+              });
+            }
+          }
+        }
+        // ─────────────────────────────────────────────────────────────────────────────────
+
         const supabasePayload = buildSupabaseInvoiceRow(invoice);
         console.log('📦 [POST /api/invoices] Payload para Supabase:', JSON.stringify(supabasePayload, null, 2));
         await trySupabaseUpsert('invoices', [supabasePayload]);
@@ -8085,31 +8203,150 @@ app.patch('/api/invoices/:id', authenticateRequest, async (req, res) => {
         const isStatusOnlyUpdate = Object.keys(updates).length === 1 && 
                                     updates.status && 
                                     (updates.status === 'paid' || updates.status === 'pending');
+
+        // Si el psicólogo está forzando un cambio de número (confirmó la advertencia en la UI)
+        const isInvoiceNumberOnlyUpdate = updates.forceInvoiceNumber === true &&
+                                           updates.invoiceNumber &&
+                                           Object.keys(updates).filter(k => k !== 'forceInvoiceNumber').length === 1;
         
-        // Solo permitir editar completamente si es draft, pero permitir cambio de estado siempre
-        if (currentInvoice.status !== 'draft' && !isStatusOnlyUpdate) {
+        // Solo permitir editar completamente si es draft, pero permitir cambio de estado/número siempre
+        if (currentInvoice.status !== 'draft' && !isStatusOnlyUpdate && !isInvoiceNumberOnlyUpdate) {
           return res.status(403).json({ error: 'Solo se pueden editar facturas en estado borrador' });
+        }
+
+        // Validar unicidad al cambiar número de factura en una factura emitida
+        if (isInvoiceNumberOnlyUpdate) {
+          const newNum = (updates.invoiceNumber || '').trim();
+          if (!newNum) return res.status(400).json({ error: 'El número de factura no puede estar vacío.' });
+          const { data: dupCheck } = await supabaseAdmin
+            .from('invoices')
+            .select('id')
+            .eq('psychologist_user_id', currentInvoice.psychologist_user_id)
+            .eq('invoiceNumber', newNum)
+            .neq('id', id)
+            .neq('status', 'cancelled')
+            .limit(1);
+          if (dupCheck && dupCheck.length > 0) {
+            return res.status(409).json({ error: `El número de factura "${newNum}" ya existe en otra factura activa.` });
+          }
+          console.warn(`⚠️ [PATCH /api/invoices] Renombrado manual de factura ${id}: "${currentInvoice.invoiceNumber}" → "${newNum}"`);
+          // Para este tipo de update, eliminar el flag antes de continuar
+          delete updates.forceInvoiceNumber;
         }
         
         const updatedInvoice = { ...currentInvoice, ...updates };
+
+        // ── CONTROL: Verificar unicidad de sesiones al editar/convertir borrador ─────────
+        // Se ejecuta solo cuando el borrador tiene sessionIds que podrían solapar con
+        // otra factura o borrador.
+        if (currentInvoice.status === 'draft') {
+          const targetSessionIds = updatedInvoice.sessionIds || [];
+          if (targetSessionIds.length > 0) {
+            const convertingTofinal = !!(updates.status && updates.status !== 'draft');
+
+            // 1. Al convertir: verificar que las sesiones no tienen invoice_id en otra factura activa
+            if (convertingTofinal) {
+              const { data: sessionRows, error: sessionChkErr } = await supabaseAdmin
+                .from('sessions')
+                .select('id, invoice_id, bonus_id')
+                .in('id', targetSessionIds);
+              if (sessionChkErr) throw sessionChkErr;
+
+              const sessionsBlocked = (sessionRows || []).filter(s => s.invoice_id && s.invoice_id !== id && !s.bonus_id);
+              if (sessionsBlocked.length > 0) {
+                const otherInvIds = [...new Set(sessionsBlocked.map(s => s.invoice_id))];
+                const { data: otherInvs } = await supabaseAdmin.from('invoices').select('id, status').in('id', otherInvIds);
+                const activeOther = (otherInvs || []).filter(i => i.status !== 'cancelled' && i.status !== 'draft');
+                const blockedByActive = sessionsBlocked.filter(s => activeOther.some(i => i.id === s.invoice_id));
+                if (blockedByActive.length > 0) {
+                  console.error('[PATCH /api/invoices] Sesiones ya facturadas en factura activa:', blockedByActive.map(s => s.id));
+                  return res.status(400).json({
+                    error: 'No se puede convertir el borrador: algunas sesiones ya están facturadas en otra factura activa.',
+                    sessionIds: blockedByActive.map(s => s.id)
+                  });
+                }
+              }
+            }
+
+            // 2. Verificar que las sesiones no están en otros borradores
+            const { data: otherDrafts, error: otherDraftErr } = await supabaseAdmin
+              .from('invoices')
+              .select('id, data')
+              .eq('psychologist_user_id', currentInvoice.psychologist_user_id)
+              .eq('status', 'draft')
+              .neq('id', id);
+            if (otherDraftErr) throw otherDraftErr;
+
+            const targetSessionSet = new Set(targetSessionIds);
+            const conflictingDrafts = (otherDrafts || []).filter(inv => {
+              const invSids = (inv.data && inv.data.sessionIds) || [];
+              return invSids.some(sid => targetSessionSet.has(sid));
+            });
+
+            if (conflictingDrafts.length > 0) {
+              if (convertingTofinal) {
+                // Convirtiendo a factura real: eliminar borradores en conflicto (duplicados)
+                console.log(`[PATCH /api/invoices] Eliminando ${conflictingDrafts.length} borradores duplicados al convertir:`, conflictingDrafts.map(d => d.id));
+                for (const draft of conflictingDrafts) {
+                  await supabaseAdmin.from('invoices').delete().eq('id', draft.id);
+                  const localDb = getDb();
+                  if (localDb.invoices) {
+                    localDb.invoices = localDb.invoices.filter(inv => inv.id !== draft.id);
+                    saveDb(localDb);
+                  }
+                }
+              } else {
+                // Editando borrador: bloquear si hay otro borrador con las mismas sesiones
+                console.error('[PATCH /api/invoices] Sesiones ya en otro borrador activo:', conflictingDrafts.map(d => d.id));
+                return res.status(400).json({
+                  error: 'Algunas sesiones ya están incluidas en otro borrador activo. Elimina ese borrador primero.',
+                  draftIds: conflictingDrafts.map(d => d.id)
+                });
+              }
+            }
+          }
+        }
+        // ─────────────────────────────────────────────────────────────────────────────────
 
         // ── CONTROL CRÍTICO: Reasignar número al convertir borrador → factura real ────────
         // El cliente generó el número antes de enviar el PATCH. Si entre medias se creó
         // otra factura, el número del cliente quedaría desincronizado. El servidor regenera
         // el número en el momento exacto del guardado para garantizar la secuencia.
         if (currentInvoice.status === 'draft' && updates.status && updates.status !== 'draft' && !updatedInvoice.is_rectificativa) {
-          try {
-            const serverAllocatedNumber = await allocateNextInvoiceNumber(currentInvoice.psychologist_user_id);
-            if (serverAllocatedNumber !== null) {
-              if (serverAllocatedNumber !== updatedInvoice.invoiceNumber) {
-                console.warn(`⚠️ [PATCH /api/invoices] Número corregido (draft→real): cliente="${updatedInvoice.invoiceNumber}" → servidor="${serverAllocatedNumber}"`);
+          if (updatedInvoice.forceInvoiceNumber) {
+            // El psicólogo forzó manualmente un número al convertir el borrador; verificar unicidad
+            const forcedNum = (updatedInvoice.invoiceNumber || '').trim();
+            if (forcedNum) {
+              const { data: dupCheck } = await supabaseAdmin
+                .from('invoices')
+                .select('id')
+                .eq('psychologist_user_id', currentInvoice.psychologist_user_id)
+                .eq('invoiceNumber', forcedNum)
+                .neq('id', id)
+                .neq('status', 'cancelled')
+                .limit(1);
+              if (dupCheck && dupCheck.length > 0) {
+                return res.status(409).json({ error: `El número de factura "${forcedNum}" ya existe en otra factura activa.` });
               }
-              updatedInvoice.invoiceNumber = serverAllocatedNumber;
+              console.warn(`⚠️ [PATCH /api/invoices] Número forzado al convertir borrador ${id}: "${forcedNum}"`);
+              updatedInvoice.invoiceNumber = forcedNum;
             }
-          } catch (allocErr) {
-            console.error('❌ [PATCH /api/invoices] Error generando número de factura en servidor:', allocErr);
+          } else {
+            try {
+              const serverAllocatedNumber = await allocateNextInvoiceNumber(currentInvoice.psychologist_user_id);
+              if (serverAllocatedNumber !== null) {
+                if (serverAllocatedNumber !== updatedInvoice.invoiceNumber) {
+                  console.warn(`⚠️ [PATCH /api/invoices] Número corregido (draft→real): cliente="${updatedInvoice.invoiceNumber}" → servidor="${serverAllocatedNumber}"`);
+                }
+                updatedInvoice.invoiceNumber = serverAllocatedNumber;
+              }
+            } catch (allocErr) {
+              console.error('❌ [PATCH /api/invoices] Error generando número de factura en servidor:', allocErr);
+            }
           }
         }
+        // Limpiar flag antes de persistir
+        delete updatedInvoice.forceInvoiceNumber;
         // ──────────────────────────────────────────────────────────────────────────────────
 
         // Si se está convirtiendo de draft a issued/pending, asignar invoice_id a sesiones y bonos
@@ -8704,6 +8941,8 @@ app.get('/api/patient/:patientId/unbilled', authenticateRequest, async (req, res
     
     if (supabaseAdmin) {
       try {
+        const { editingDraftId } = req.query;
+
         // Obtener sesiones sin facturar y sin bono asignado
         let sessionQuery = supabaseAdmin
           .from('sessions')
@@ -8743,12 +8982,33 @@ app.get('/api/patient/:patientId/unbilled', authenticateRequest, async (req, res
           console.error('❌ Error obteniendo bonos sin facturar:', bonosError);
           throw bonosError;
         }
+
+        // Excluir sesiones/bonos que ya están en otro borrador activo
+        // (los borradores no asignan invoice_id a las sesiones, así que el filtro
+        //  .is('invoice_id', null) no los descarta; hay que hacerlo manualmente)
+        const psychIdForDrafts = psychologistId || req.authenticatedUserId;
+        const { data: activeDrafts } = await supabaseAdmin
+          .from('invoices')
+          .select('id, data')
+          .eq('psychologist_user_id', psychIdForDrafts)
+          .eq('status', 'draft');
+
+        const sessionIdsInOtherDrafts = new Set();
+        const bonoIdsInOtherDrafts = new Set();
+        (activeDrafts || []).forEach(inv => {
+          if (editingDraftId && inv.id === editingDraftId) return; // no excluir el borrador que se está editando
+          ((inv.data && inv.data.sessionIds) || []).forEach(sid => sessionIdsInOtherDrafts.add(sid));
+          ((inv.data && inv.data.bonoIds) || []).forEach(bid => bonoIdsInOtherDrafts.add(bid));
+        });
+
+        const filteredSessions = (sessions || []).filter(s => !sessionIdsInOtherDrafts.has(s.id));
+        const filteredBonos = (bonos || []).filter(b => !bonoIdsInOtherDrafts.has(b.id));
         
-        console.log(`✅ Encontradas ${sessions?.length || 0} sesiones y ${bonos?.length || 0} bonos sin facturar`);
+        console.log(`✅ Encontradas ${filteredSessions.length} sesiones y ${filteredBonos.length} bonos sin facturar (excluidas ${sessionIdsInOtherDrafts.size} sesiones y ${bonoIdsInOtherDrafts.size} bonos en otros borradores)`);
         
         return res.json({
-          sessions: sessions || [],
-          bonos: bonos || []
+          sessions: filteredSessions,
+          bonos: filteredBonos
         });
         
       } catch (err) {
@@ -12022,6 +12282,25 @@ app.post('/api/relationships/:id/historical-documents/generate-summary', authent
               console.error(`⚠️ Error extrayendo contenido de ${doc.fileName}:`, extractError.message);
               content = '[No se pudo extraer el contenido del documento]';
             }
+          } else if (
+            doc.fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+            doc.fileType === 'application/msword'
+          ) {
+            // Para archivos Word (.docx/.doc), extraer texto con mammoth
+            if (mammoth) {
+              try {
+                const buffer = Buffer.from(base64Data, 'base64');
+                const result = await mammoth.extractRawText({ buffer });
+                content = result.value || '';
+                console.log(`✓ Contenido extraído del Word: ${doc.fileName} (${content.length} caracteres)`);
+              } catch (extractError) {
+                console.error(`⚠️ Error extrayendo contenido Word de ${doc.fileName}:`, extractError.message);
+                content = '[No se pudo extraer el contenido del documento Word]';
+              }
+            } else {
+              console.warn(`⚠️ mammoth no disponible para ${doc.fileName}`);
+              content = '[Extracción de Word no disponible]';
+            }
           } else if (doc.fileType.startsWith('text/')) {
             // Para archivos de texto plano, decodificar directamente
             content = Buffer.from(base64Data, 'base64').toString('utf-8');
@@ -12938,33 +13217,37 @@ app.post('/api/sessions', authenticateRequest, async (req, res) => {
       // Solo bloquear solapamiento si es el MISMO paciente (diferente paciente está permitido)
       const newPatientId = sessionData.patient_user_id || sessionData.patientId || null;
 
-      const overlappingSession = db.sessions.find(s => {
-        // Ignorar sesiones canceladas o disponibilidades
-        if (s.status === 'cancelled' || s.status === 'available') return false;
-        // Solo verificar sesiones del mismo psicólogo
-        if (s.psychologist_user_id !== psychologistUserId) return false;
-        // Permitir solapamiento si es un paciente diferente
-        const existingPatientId = s.patient_user_id || s.patientId || null;
-        if (newPatientId && existingPatientId && newPatientId !== existingPatientId) return false;
-        
-        const existingStarts = s.starts_on || dateTimeToISO(s.date, s.startTime);
-        const existingEnds = s.ends_on || dateTimeToISO(s.date, s.endTime);
-        
-        if (!existingStarts || !existingEnds) return false;
-        
-        // Verificar solapamiento: (newStart < existingEnd) && (newEnd > existingStart)
-        return (newStarts < existingEnds) && (newEnds > existingStarts);
-      });
-      
-      if (overlappingSession) {
-        console.error('❌ Session overlap detected (same patient) with session:', overlappingSession.id);
-        return res.status(409).json({ 
-          error: `Ya existe una sesión programada para este paciente en este horario (${overlappingSession.date} ${overlappingSession.startTime}-${overlappingSession.endTime}). Por favor elige otro horario.` 
+      // Solo usar la caché local si Supabase NO está disponible.
+      // Si Supabase está activo, él es la fuente de verdad y la caché local puede estar obsoleta
+      // (puede contener sesiones que ya fueron eliminadas), lo que causaría falsos positivos.
+      if (!supabaseAdmin) {
+        const overlappingSession = db.sessions.find(s => {
+          // Ignorar sesiones canceladas o disponibilidades
+          if (s.status === 'cancelled' || s.status === 'available') return false;
+          // Solo verificar sesiones del mismo psicólogo
+          if (s.psychologist_user_id !== psychologistUserId) return false;
+          // Permitir solapamiento si es un paciente diferente
+          const existingPatientId = s.patient_user_id || s.patientId || null;
+          if (newPatientId && existingPatientId && newPatientId !== existingPatientId) return false;
+          
+          const existingStarts = s.starts_on || dateTimeToISO(s.date, s.startTime);
+          const existingEnds = s.ends_on || dateTimeToISO(s.date, s.endTime);
+          
+          if (!existingStarts || !existingEnds) return false;
+          
+          // Verificar solapamiento: (newStart < existingEnd) && (newEnd > existingStart)
+          return (newStarts < existingEnds) && (newEnds > existingStarts);
         });
+        
+        if (overlappingSession) {
+          console.error('❌ Session overlap detected (same patient) with session:', overlappingSession.id);
+          return res.status(409).json({ 
+            error: `Ya existe una sesión programada para este paciente en este horario (${overlappingSession.date} ${overlappingSession.startTime}-${overlappingSession.endTime}). Por favor elige otro horario.` 
+          });
+        }
       }
 
-      // También verificar contra Supabase (fuente de verdad principal) para evitar duplicados
-      // aunque la db en memoria esté vacía o desactualizada
+      // Verificar contra Supabase (fuente de verdad principal) para evitar duplicados
       if (supabaseAdmin) {
         try {
           let dupQuery = supabaseAdmin
@@ -13167,8 +13450,12 @@ app.post('/api/sessions', authenticateRequest, async (req, res) => {
       console.error('[POST /api/sessions] Error Google Calendar:', calErr?.message);
     }
     
-    // Guardar también en db.json como fallback (no await - en background)
-    saveDb(db, { awaitPersistence: false });
+    // Guardar en db.json solo si no hay Supabase activo. Con Supabase la sesión ya fue
+    // insertada directamente arriba; llamar a saveDb aquí haría un upsert masivo de toda
+    // la caché y podría re-insertar sesiones eliminadas en instancias serverless paralelas.
+    if (!supabaseAdmin) {
+      saveDb(db, { awaitPersistence: false });
+    }
     
     return res.json(session);
   } catch (err) {
@@ -13209,7 +13496,10 @@ app.post('/api/sessions/:sessionId/generate-meet', authenticateRequest, async (r
         .catch(e => console.error('[generate-meet] Error updating Supabase:', e?.message));
     }
 
-    saveDb(db, { awaitPersistence: false });
+    // Solo guardar en DB local si no hay Supabase activo (la sesión ya fue actualizada arriba).
+    if (!supabaseAdmin) {
+      saveDb(db, { awaitPersistence: false });
+    }
     return res.json({ meetLink: calResult.meetLink, eventId: calResult.eventId });
   } catch (err) {
     console.error('❌ Error generating Meet link:', err?.message);
@@ -13601,8 +13891,12 @@ app.post('/api/sessions/availability', authenticateRequest, async (req, res) => 
       }
     }
     
-    // Guardar en db.json en background
-    saveDb(db, { awaitPersistence: false });
+    // Guardar en db.json solo si no hay Supabase activo. Con Supabase los slots ya fueron
+    // insertados directamente en la tabla dispo; llamar a saveDb aquí puede re-insertar
+    // sesiones eliminadas en instancias serverless paralelas con caché obsoleta.
+    if (!supabaseAdmin) {
+      saveDb(db, { awaitPersistence: false });
+    }
     
     console.log('✅ Availability slots created successfully in dispo table:', newSlots.length);
     res.json({ success: true, count: newSlots.length, slots: newSlots });
@@ -14161,7 +14455,10 @@ app.delete('/api/sessions/future-pending', authenticateRequest, async (req, res)
     });
     const localDeleted = before - db.sessions.length;
 
-    if (localDeleted > 0 || !supabaseAdmin) {
+    // Persistir solo si no hay Supabase: con Supabase las sesiones ya fueron eliminadas
+    // directamente arriba. Llamar a saveDb con supabaseAdmin activo haría un upsert masivo
+    // que puede re-insertar sesiones borradas desde instancias serverless con caché obsoleta.
+    if (!supabaseAdmin) {
       await saveDb(db, { awaitPersistence: true });
     }
 
@@ -15592,6 +15889,8 @@ app.get('/api/center/:centerId/unbilled', authenticateRequest, async (req, res) 
         const patientIds = [...new Set(relationships.map(r => r.patient_user_id).filter(Boolean))];
         console.log(`📋 Pacientes del centro: ${patientIds.length}`);
         
+        const { editingDraftId } = req.query;
+
         // Obtener sesiones completadas sin facturar de estos pacientes
         const { data: sessions, error: sessionsError } = await supabaseAdmin
           .from('sessions')
@@ -15625,9 +15924,27 @@ app.get('/api/center/:centerId/unbilled', authenticateRequest, async (req, res) 
         }
         
         console.log(`✅ Encontrados ${bonos?.length || 0} bonos sin facturar para el centro`);
+
+        // Excluir sesiones/bonos que ya están en otro borrador activo
+        const { data: activeDraftsCenter } = await supabaseAdmin
+          .from('invoices')
+          .select('id, data')
+          .eq('psychologist_user_id', psychologistId)
+          .eq('status', 'draft');
+
+        const sessionIdsInOtherDrafts = new Set();
+        const bonoIdsInOtherDrafts = new Set();
+        (activeDraftsCenter || []).forEach(inv => {
+          if (editingDraftId && inv.id === editingDraftId) return;
+          ((inv.data && inv.data.sessionIds) || []).forEach(sid => sessionIdsInOtherDrafts.add(sid));
+          ((inv.data && inv.data.bonoIds) || []).forEach(bid => bonoIdsInOtherDrafts.add(bid));
+        });
+
+        const filteredSessions = (sessions || []).filter(s => !sessionIdsInOtherDrafts.has(s.id));
+        const filteredBonos = (bonos || []).filter(b => !bonoIdsInOtherDrafts.has(b.id));
         
         // Calcular used_sessions y remaining_sessions para cada bono (igual que /api/bonos)
-        const bonosWithCounts = await Promise.all((bonos || []).map(async (bono) => {
+        const bonosWithCounts = await Promise.all(filteredBonos.map(async (bono) => {
           const { data: bonoSessions } = await supabaseAdmin
             .from('sessions')
             .select('id')
@@ -15653,7 +15970,7 @@ app.get('/api/center/:centerId/unbilled', authenticateRequest, async (req, res) 
           console.log('[unbilled] patientNamesMap:', patientNamesMap);
         }
         
-        const enrichedSessions = (sessions || []).map(s => ({
+        const enrichedSessions = filteredSessions.map(s => ({
           ...s,
           patientName: patientNamesMap[s.patient_user_id] || null
         }));

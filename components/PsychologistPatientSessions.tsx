@@ -183,6 +183,43 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
     }
   };
 
+  const handleQuickCompleteSession = async (session: Session, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const currentUser = await getCurrentUser();
+    if (!currentUser) return;
+    try {
+      const response = await apiFetch(`${API_URL}/session-entries`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': currentUser.id },
+        body: JSON.stringify({
+          session_id: session.id,
+          creator_user_id: currentUser.id,
+          target_user_id: session.patient_user_id || session.patientId,
+          transcript: '',
+          summary: '',
+          status: 'done',
+          entry_type: 'session_note'
+        })
+      });
+      if (!response.ok) {
+        const err = await response.json();
+        alert(err.error || 'Error al completar la sesión');
+        return;
+      }
+      if (session.status !== 'completed') {
+        await apiFetch(`${API_URL}/sessions/${session.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'x-user-id': currentUser.id },
+          body: JSON.stringify({ status: 'completed' })
+        });
+      }
+      await loadSessions();
+    } catch (error) {
+      console.error('Error al completar sesión rápida:', error);
+      alert('Error al completar la sesión');
+    }
+  };
+
   const handleOpenSessionDetails = async (session: Session, e: React.MouseEvent) => {
     e.stopPropagation();
     
@@ -273,59 +310,12 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
       return;
     }
 
-    // If session is still pending, offer to delete all future recurring sessions at same time
-    let deleteFuture = false;
-    if (editedSession.status === 'scheduled' && editedSession.startTime && editedSession.date) {
-      const sessionWeekday = new Date(editedSession.date + 'T12:00:00').getDay();
-      const editedPatientId = (editedSession as any).patient_user_id || editedSession.patientId;
-      const hasFutureSessions = sessions.some(s => {
-        if (s.id === editedSession.id) return false;
-        if (s.status !== 'scheduled') return false;
-        if (s.startTime !== editedSession.startTime) return false;
-        const sPatientId = (s as any).patient_user_id || s.patientId;
-        if (sPatientId !== editedPatientId) return false;
-        if (!s.date || s.date <= editedSession.date!) return false;
-        return new Date(s.date + 'T12:00:00').getDay() === sessionWeekday;
-      });
-      if (hasFutureSessions) {
-        deleteFuture = confirm(
-          `¿Deseas también eliminar todas las sesiones futuras programadas de ${editedSession.patientName} a las ${editedSession.startTime} (misma hora, mismo día de la semana)?\n\n` +
-          `• Pulsa "Aceptar" para eliminar esta sesión y las siguientes semanas a esa hora.\n` +
-          `• Pulsa "Cancelar" para eliminar solo esta sesión.`
-        );
-      }
-    }
-
     setIsSaving(true);
     try {
       const currentUser = await getCurrentUser();
       if (!currentUser) {
         alert('Error: Usuario no autenticado');
         return;
-      }
-
-      // Delete all future recurring sessions at same time if requested
-      if (deleteFuture) {
-        const patientUserId = (editedSession as any).patient_user_id || editedSession.patientId;
-        const sessionWeekday = editedSession.date ? new Date(editedSession.date + 'T12:00:00').getDay() : undefined;
-        try {
-          await apiFetch(`${API_URL}/sessions/future-pending`, {
-            method: 'DELETE',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-user-id': currentUser.id
-            },
-            body: JSON.stringify({
-              patient_user_id: patientUserId,
-              fromDate: editedSession.date,
-              excludeId: editedSession.id,
-              startTime: editedSession.startTime,
-              weekday: sessionWeekday
-            })
-          });
-        } catch (err) {
-          console.error('Error deleting future sessions:', err);
-        }
       }
 
       const response = await apiFetch(`${API_URL}/sessions/${editedSession.id}`, {
@@ -725,31 +715,42 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
 
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {isCompleted && (
-                      <button
-                        onClick={(e) => handleOpenSessionDetails(session, e)}
-                        className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full border-2 transition-all group text-[11px] sm:text-xs font-semibold ${
-                          !session.session_entry_id
-                            ? 'border-red-300 bg-red-50 hover:border-red-500 hover:bg-red-100 text-red-600'
-                            : sessionEntries.get(session.session_entry_id)?.status === 'done'
-                            ? 'border-green-500 bg-green-50 hover:bg-green-100 text-green-700'
-                            : 'border-orange-400 bg-orange-50 hover:border-orange-500 hover:bg-orange-100 text-orange-600'
-                        }`}
-                        title={
-                          !session.session_entry_id
-                            ? 'Rellenar detalles de sesión'
-                            : sessionEntries.get(session.session_entry_id)?.status === 'done'
-                            ? 'Detalles completados - Click para editar'
-                            : 'Detalles pendientes - Click para completar'
-                        }
-                      >
-                        {!session.session_entry_id ? (
-                          <><FileText size={13} className="text-red-500 group-hover:text-red-600 flex-shrink-0" /><span>Completar sesión</span></>
-                        ) : sessionEntries.get(session.session_entry_id)?.status === 'done' ? (
-                          <><CheckCircle size={13} className="text-green-600 flex-shrink-0" /><span>Sesión completada</span></>
-                        ) : (
-                          <><FileText size={13} className="text-orange-500 group-hover:text-orange-600 flex-shrink-0" /><span>Completar sesión</span></>
+                      <div className="flex items-center gap-1.5">
+                        {(!session.session_entry_id || sessionEntries.get(session.session_entry_id)?.status !== 'done') && (
+                          <button
+                            onClick={(e) => handleQuickCompleteSession(session, e)}
+                            className="inline-flex items-center justify-center w-7 h-7 rounded-full border-2 border-emerald-400 bg-emerald-50 hover:bg-emerald-100 hover:border-emerald-600 text-emerald-600 transition-all flex-shrink-0"
+                            title="Marcar sesión como completada (sin notas)"
+                          >
+                            <CheckCircle size={13} />
+                          </button>
                         )}
-                      </button>
+                        <button
+                          onClick={(e) => handleOpenSessionDetails(session, e)}
+                          className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full border-2 transition-all group text-[11px] sm:text-xs font-semibold ${
+                            !session.session_entry_id
+                              ? 'border-red-300 bg-red-50 hover:border-red-500 hover:bg-red-100 text-red-600'
+                              : sessionEntries.get(session.session_entry_id)?.status === 'done'
+                              ? 'border-green-500 bg-green-50 hover:bg-green-100 text-green-700'
+                              : 'border-orange-400 bg-orange-50 hover:border-orange-500 hover:bg-orange-100 text-orange-600'
+                          }`}
+                          title={
+                            !session.session_entry_id
+                              ? 'Rellenar detalles de sesión'
+                              : sessionEntries.get(session.session_entry_id)?.status === 'done'
+                              ? 'Detalles completados - Click para editar'
+                              : 'Detalles pendientes - Click para completar'
+                          }
+                        >
+                          {!session.session_entry_id ? (
+                            <><FileText size={13} className="text-red-500 group-hover:text-red-600 flex-shrink-0" /><span>Completar sesión</span></>
+                          ) : sessionEntries.get(session.session_entry_id)?.status === 'done' ? (
+                            <><CheckCircle size={13} className="text-green-600 flex-shrink-0" /><span>Sesión completada</span></>
+                          ) : (
+                            <><FileText size={13} className="text-orange-500 group-hover:text-orange-600 flex-shrink-0" /><span>Completar sesión</span></>
+                          )}
+                        </button>
+                      </div>
                     )}
                     <div className="text-right">
                       <div className="text-base sm:text-lg font-bold text-purple-900">{earnings.toFixed(2)} €</div>
