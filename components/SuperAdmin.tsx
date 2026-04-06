@@ -3,12 +3,13 @@ import { User } from '../types';
 import * as AuthService from '../services/authService';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  AreaChart, Area,
 } from 'recharts';
 import {
   RefreshCcw, Shield, Users, Search, ArrowRightLeft,
   LayoutDashboard, X, Phone, Mail, Calendar, TrendingUp,
   BadgeEuro, Activity, CreditCard, ChevronRight, UserX,
-  AlertCircle, Wrench, FileText, CheckCircle2, Clock, Ban,
+  AlertCircle, FileText, CheckCircle2, Clock, Ban,
   Euro, BarChart2, BookOpen, Mic, Zap,
 } from 'lucide-react';
 import { API_URL } from '../services/config';
@@ -48,6 +49,8 @@ interface AdminStats {
     avgPatientsPerPsych: number;
   };
   weeklyRegistrations: { semana: string; psicologos: number }[];
+  weeklyPaidPsychs: { semana: string; pagantes: number }[];
+  monthlyMrr: { mes: string; mrr: number }[];
   psychologists: PsychologistStat[];
 }
 
@@ -78,7 +81,7 @@ interface UserDetail {
   lastActivity: string | null;
 }
 
-type Tab = 'dashboard' | 'users' | 'tools';
+type Tab = 'dashboard' | 'users';
 
 // ─────────────────── Helpers ───────────────────
 const PLAN_COLORS: Record<string, string> = {
@@ -128,7 +131,6 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
   const [loading, setLoading] = useState(false);
   const [statsLoading, setStatsLoading] = useState(false);
   const [query, setQuery] = useState('');
-  const [migrateStatus, setMigrateStatus] = useState<{ running: boolean; result?: string }>({ running: false });
   const [selectedPsych, setSelectedPsych] = useState<PsychologistStat | null>(null);
   const [userDetail, setUserDetail] = useState<UserDetail | null>(null);
   const [userDetailLoading, setUserDetailLoading] = useState(false);
@@ -188,22 +190,6 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
       console.error('Error loading user detail:', e);
     }
     setUserDetailLoading(false);
-  };
-
-  const handleMigrateNames = async () => {
-    if (!window.confirm('Esto migrará nombre y apellido para todos los usuarios que solo tienen nombre completo. ¿Continuar?')) return;
-    setMigrateStatus({ running: true });
-    try {
-      const res = await apiFetch(`${API_URL}/admin/migrate-names`, { method: 'POST' });
-      const data = await res.json();
-      if (res.ok) {
-        setMigrateStatus({ running: false, result: `✅ ${data.updated} actualizados, ${data.skipped} omitidos${data.errors?.length ? `, ${data.errors.length} errores` : ''}` });
-      } else {
-        setMigrateStatus({ running: false, result: `❌ Error: ${data.error}` });
-      }
-    } catch (err: any) {
-      setMigrateStatus({ running: false, result: `❌ ${err?.message || 'Error desconocido'}` });
-    }
   };
 
   return (
@@ -304,6 +290,52 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                     />
                     <Bar dataKey="psicologos" fill="#6366f1" radius={[6, 6, 0, 0]} maxBarSize={48} />
                   </BarChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Weekly paid psychologists chart */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+                <h3 className="text-sm font-semibold text-slate-700 mb-1 uppercase tracking-wide">
+                  Psicólogos con plan activo por semana · últimas 8 semanas
+                </h3>
+                <p className="text-xs text-slate-400 mb-4">Registros de psicólogos actualmente de pago, agrupados por semana de alta</p>
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={stats.weeklyPaidPsychs} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                    <XAxis dataKey="semana" tick={{ fontSize: 11, fill: '#94a3b8' }} />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#94a3b8' }} />
+                    <Tooltip
+                      contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }}
+                      formatter={(v: number) => [v, 'Psicólogos de pago']}
+                    />
+                    <Bar dataKey="pagantes" fill="#10b981" radius={[6, 6, 0, 0]} maxBarSize={48} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Monthly MRR chart */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+                <h3 className="text-sm font-semibold text-slate-700 mb-1 uppercase tracking-wide">
+                  Ingresos por suscripciones de psicólogos · últimos 12 meses
+                </h3>
+                <p className="text-xs text-slate-400 mb-4">MRR acumulado por mes de alta de suscriptores activos</p>
+                <ResponsiveContainer width="100%" height={220}>
+                  <AreaChart data={stats.monthlyMrr} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="mrrGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.03} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                    <XAxis dataKey="mes" tick={{ fontSize: 11, fill: '#94a3b8' }} />
+                    <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} tickFormatter={(v: number) => `€${v}`} />
+                    <Tooltip
+                      contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }}
+                      formatter={(v: number) => [`€${v.toFixed(2)}`, 'Ingresos']}
+                    />
+                    <Area dataKey="mrr" stroke="#f59e0b" strokeWidth={2} fill="url(#mrrGradient)" dot={{ r: 3, fill: '#f59e0b' }} />
+                  </AreaChart>
                 </ResponsiveContainer>
               </div>
 
@@ -516,31 +548,6 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                   })}
                 </div>
               </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ── HERRAMIENTAS TAB ──────────────────────── */}
-      {tab === 'tools' && (
-        <div className="space-y-4 max-w-xl">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-            <h3 className="font-semibold text-slate-800 mb-1 flex items-center gap-2">
-              <ArrowRightLeft size={16} className="text-amber-600" /> Migrar nombres
-            </h3>
-            <p className="text-sm text-slate-500 mb-4">
-              Divide el nombre completo en firstName y lastName para los usuarios que sólo tienen nombre completo.
-            </p>
-            <button
-              className="px-5 py-2.5 bg-amber-600 text-white rounded-xl flex items-center gap-2 shadow-sm hover:bg-amber-700 transition-colors disabled:opacity-50 text-sm font-medium"
-              onClick={handleMigrateNames}
-              disabled={migrateStatus.running}
-            >
-              <ArrowRightLeft size={15} className={migrateStatus.running ? 'animate-spin' : ''} />
-              {migrateStatus.running ? 'Migrando…' : 'Migrar nombres'}
-            </button>
-            {migrateStatus.result && (
-              <p className="mt-3 text-sm text-slate-600 bg-slate-50 rounded-xl px-4 py-2.5">{migrateStatus.result}</p>
             )}
           </div>
         </div>

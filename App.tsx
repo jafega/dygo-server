@@ -37,7 +37,7 @@ const BulkImportPanel = lazy(() => import('./components/BulkImportPanel'));
 const PsychologistAIChat = lazy(() => import('./components/PsychologistAIChat'));
 // Lazy-loaded: admin only
 const SuperAdmin = lazy(() => import('./components/SuperAdmin'));
-import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock, AlertCircle, Smile, Shield, Building2, LogOut, Upload, Bot, FolderOpen, Wrench } from 'lucide-react';
+import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock, AlertCircle, Smile, Shield, Building2, LogOut, Upload, Bot, FolderOpen } from 'lucide-react';
 
 // Custom Mainds Logo Component
 const MaindsLogo: React.FC<{ className?: string }> = ({ className = "w-12 h-12" }) => (
@@ -54,7 +54,7 @@ const App: React.FC = () => {
   const [showFirstTimeRoleModal, setShowFirstTimeRoleModal] = useState(false);
   
   const [psychViewMode, setPsychViewMode] = useState<'DASHBOARD' | 'PERSONAL' | 'ADMIN'>('DASHBOARD');
-  const [adminTab, setAdminTab] = useState<'dashboard' | 'users' | 'tools'>('dashboard');
+  const [adminTab, setAdminTab] = useState<'dashboard' | 'users'>('dashboard');
   const [psychPanelView, setPsychPanelView] = useState<'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule' | 'centros' | 'templates' | 'import' | 'ai-assistant' | 'materials'>('schedule');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   
@@ -1092,8 +1092,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
             {([
               { id: 'dashboard' as const, label: 'Dashboard',     icon: <LayoutDashboard size={18} /> },
               { id: 'users'     as const, label: 'Usuarios',      icon: <Users size={18} /> },
-              { id: 'tools'     as const, label: 'Herramientas',  icon: <Wrench size={18} /> },
-            ] as { id: 'dashboard' | 'users' | 'tools'; label: string; icon: React.ReactNode }[]).map(item => (
+            ] as { id: 'dashboard' | 'users'; label: string; icon: React.ReactNode }[]).map(item => (
               <button
                 key={item.id}
                 onClick={() => setAdminTab(item.id)}
