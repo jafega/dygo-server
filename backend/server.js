@@ -5698,10 +5698,23 @@ app.get('/api/users', authenticateRequest, async (req, res) => {
       }
     } else {
       // Email lookup or full user list: restricted to psychologists and superadmins
-      const allUsers = (supabaseDbCache?.users?.length ? supabaseDbCache.users : null)
-        || getDb().users || [];
-      const requester = allUsers.find(u => u.id === authedId);
-      if (!requester?.is_psychologist && !isSuperAdmin(requester?.email || requester?.user_email)) {
+      let requesterIsPsych = false;
+      let requesterEmail = '';
+      if (supabaseAdmin) {
+        // Always query Supabase directly to avoid cold-start cache misses
+        const { data: reqUser } = await supabaseAdmin.from('users')
+          .select('id, is_psychologist, user_email, data')
+          .eq('id', authedId)
+          .maybeSingle();
+        requesterIsPsych = !!(reqUser?.is_psychologist);
+        requesterEmail = reqUser?.user_email || (reqUser?.data || {}).email || '';
+      } else {
+        const allUsers = getDb().users || [];
+        const requester = allUsers.find(u => u.id === authedId);
+        requesterIsPsych = !!(requester?.is_psychologist);
+        requesterEmail = requester?.email || requester?.user_email || '';
+      }
+      if (!requesterIsPsych && !isSuperAdmin(requesterEmail)) {
         return res.status(403).json({ error: 'Acceso denegado' });
       }
     }
