@@ -3,6 +3,7 @@ import { ViewState, JournalEntry, Goal, UserSettings, WeeklyReport, User } from 
 import * as StorageService from './services/storageService';
 import * as AuthService from './services/authService';
 import { USE_BACKEND, API_URL } from './services/config';
+import { detectDefaultPrefix } from './services/phoneUtils';
 import { isTempEmail } from './services/textUtils';
 import { analyzeJournalEntry, analyzeGoalsProgress, generateWeeklyReport } from './services/genaiService';
 import AuthScreen from './components/AuthScreen';
@@ -37,7 +38,7 @@ const BulkImportPanel = lazy(() => import('./components/BulkImportPanel'));
 const PsychologistAIChat = lazy(() => import('./components/PsychologistAIChat'));
 // Lazy-loaded: admin only
 const SuperAdmin = lazy(() => import('./components/SuperAdmin'));
-import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock, AlertCircle, Smile, Shield, Building2, LogOut, Upload, Bot, FolderOpen } from 'lucide-react';
+import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock, AlertCircle, Smile, Shield, Building2, LogOut, Upload, Bot, FolderOpen, Phone } from 'lucide-react';
 
 // Custom Mainds Logo Component
 const MaindsLogo: React.FC<{ className?: string }> = ({ className = "w-12 h-12" }) => (
@@ -52,6 +53,10 @@ const App: React.FC = () => {
   const [showRolePrompt, setShowRolePrompt] = useState(false);
   const [pendingRole, setPendingRole] = useState<'PATIENT' | 'PSYCHOLOGIST' | null>(null);
   const [showFirstTimeRoleModal, setShowFirstTimeRoleModal] = useState(false);
+  const [showPhonePrompt, setShowPhonePrompt] = useState(false);
+  const [phonePromptPrefix, setPhonePromptPrefix] = useState<string>(() => detectDefaultPrefix());
+  const [phonePromptNumber, setPhonePromptNumber] = useState('');
+  const [phonePromptSaving, setPhonePromptSaving] = useState(false);
   
   const [psychViewMode, setPsychViewMode] = useState<'DASHBOARD' | 'PERSONAL' | 'ADMIN'>('DASHBOARD');
   const [adminTab, setAdminTab] = useState<'dashboard' | 'users'>('dashboard');
@@ -553,6 +558,11 @@ const App: React.FC = () => {
           if (!localStorage.getItem(rolePromptKey) && user.is_psychologist !== true) {
             setShowFirstTimeRoleModal(true);
           }
+
+          // Pedir teléfono si es psicólogo y no tiene número guardado
+          if (canAccessPsychologistView && !user.phone) {
+            setShowPhonePrompt(true);
+          }
           
           // Cargar datos del usuario EN SEGUNDO PLANO
           // Esto permite que la UI se muestre inmediatamente
@@ -658,6 +668,29 @@ const App: React.FC = () => {
     const handleConfirmRole = async () => {
       if (!pendingRole) return;
       await handleSetRole(pendingRole);
+    };
+
+    const handleSavePhone = async () => {
+      if (!currentUser || !phonePromptNumber.trim()) return;
+      setPhonePromptSaving(true);
+      try {
+        const digits = phonePromptNumber.trim().replace(/^0/, '');
+        const fullPhone = `${phonePromptPrefix}${digits}`;
+        const res = await AuthService.apiFetch(`${API_URL}/users/${currentUser.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: fullPhone }),
+        });
+        if (res.ok) {
+          setCurrentUser(prev => prev ? { ...prev, phone: fullPhone } : prev);
+          setShowPhonePrompt(false);
+          setPhonePromptNumber('');
+        }
+      } catch (err) {
+        console.error('Error guardando teléfono:', err);
+      } finally {
+        setPhonePromptSaving(false);
+      }
     };
 
   useEffect(() => {
@@ -1145,6 +1178,75 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
       
       return (
           <div className="h-screen bg-slate-50 text-slate-900 flex overflow-hidden">
+               {/* Phone prompt modal for psychologists without a phone number */}
+               {showPhonePrompt && (
+                 <div className="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+                   <div className="w-full max-w-sm bg-white rounded-2xl shadow-xl p-6">
+                     <div className="flex items-center gap-3 mb-4">
+                       <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                         <Phone size={20} className="text-indigo-600" />
+                       </div>
+                       <div>
+                         <h2 className="text-lg font-bold text-slate-800">Añade tu teléfono</h2>
+                         <p className="text-xs text-slate-500">Lo necesitamos para tu perfil profesional.</p>
+                       </div>
+                     </div>
+                     <div className="flex gap-2 mb-4">
+                       <select
+                         value={phonePromptPrefix}
+                         onChange={e => setPhonePromptPrefix(e.target.value)}
+                         className="border border-slate-200 rounded-xl px-2 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-slate-50 w-28 flex-shrink-0"
+                       >
+                         <option value="+34">🇪🇸 +34</option>
+                         <option value="+52">🇲🇽 +52</option>
+                         <option value="+54">🇦🇷 +54</option>
+                         <option value="+57">🇨🇴 +57</option>
+                         <option value="+56">🇨🇱 +56</option>
+                         <option value="+51">🇵🇪 +51</option>
+                         <option value="+58">🇻🇪 +58</option>
+                         <option value="+593">🇪🇨 +593</option>
+                         <option value="+591">🇧🇴 +591</option>
+                         <option value="+598">🇺🇾 +598</option>
+                         <option value="+595">🇵🇾 +595</option>
+                         <option value="+55">🇧🇷 +55</option>
+                         <option value="+351">🇵🇹 +351</option>
+                         <option value="+1">🇺🇸 +1</option>
+                         <option value="+44">🇬🇧 +44</option>
+                         <option value="+49">🇩🇪 +49</option>
+                         <option value="+33">🇫🇷 +33</option>
+                         <option value="+39">🇮🇹 +39</option>
+                       </select>
+                       <input
+                         type="tel"
+                         placeholder="600 000 000"
+                         value={phonePromptNumber}
+                         onChange={e => setPhonePromptNumber(e.target.value)}
+                         onKeyDown={e => { if (e.key === 'Enter' && phonePromptNumber.trim()) handleSavePhone(); }}
+                         className="flex-1 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                         autoFocus
+                       />
+                     </div>
+                     <div className="flex gap-2">
+                       <button
+                         type="button"
+                         onClick={() => setShowPhonePrompt(false)}
+                         className="flex-1 py-3 rounded-xl text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50 transition"
+                       >
+                         Ahora no
+                       </button>
+                       <button
+                         type="button"
+                         onClick={handleSavePhone}
+                         disabled={!phonePromptNumber.trim() || phonePromptSaving}
+                         className="flex-1 py-3 rounded-xl text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 transition flex items-center justify-center gap-2"
+                       >
+                         {phonePromptSaving ? <Loader2 size={15} className="animate-spin" /> : null}
+                         Guardar
+                       </button>
+                     </div>
+                   </div>
+                 </div>
+               )}
                {/* Stripe payment notification banner */}
                {stripeNotification === 'success' && (
                  <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-3 bg-emerald-600 text-white px-6 py-3 rounded-2xl shadow-2xl animate-in fade-in slide-in-from-top-2 duration-300" role="alert">
