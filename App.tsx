@@ -465,7 +465,8 @@ const App: React.FC = () => {
               profile.email,
               profile.businessName,
               profile.taxId,
-              profile.iban
+              profile.iban,
+              profile.address
             ]
           : [
               profile.name,

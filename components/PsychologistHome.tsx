@@ -49,7 +49,7 @@ interface OnboardingStep {
   actionLabel: string;
 }
 
-const ONBOARDING_DISMISS_KEY = 'mainds_onboarding_dismissed';
+const getOnboardingDismissKey = (userId: string) => `mainds_onboarding_dismissed_${userId}`;
 
 const PsychologistHome: React.FC<PsychologistHomeProps> = ({
   psychologistId,
@@ -64,10 +64,12 @@ const PsychologistHome: React.FC<PsychologistHomeProps> = ({
   const [invoices, setInvoices] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [onboardingDismissed, setOnboardingDismissed] = useState(() => 
-    localStorage.getItem(ONBOARDING_DISMISS_KEY) === 'true'
+    sessionStorage.getItem(getOnboardingDismissKey(psychologistId)) === 'true'
   );
 
   useEffect(() => {
+    // Re-read the dismiss state when the user changes (e.g. switching accounts)
+    setOnboardingDismissed(sessionStorage.getItem(getOnboardingDismissKey(psychologistId)) === 'true');
     loadData();
   }, [psychologistId]);
 
@@ -117,6 +119,20 @@ const PsychologistHome: React.FC<PsychologistHomeProps> = ({
     })
     .reduce((sum: number, inv: any) => sum + Math.max(0, inv.total ?? inv.amount ?? 0), 0);
 
+  const thisMonthCompletedRevenue = sessions
+    .filter(s => {
+      const d = new Date(s.date);
+      return s.status === 'completed' && d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
+    })
+    .reduce((sum, s) => sum + Math.max(0, s.price ?? 0), 0);
+
+  const thisMonthPotentialRevenue = sessions
+    .filter(s => {
+      const d = new Date(s.date);
+      return (s.status === 'completed' || s.status === 'scheduled') && d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
+    })
+    .reduce((sum, s) => sum + Math.max(0, s.price ?? 0), 0);
+
   const hasAvailability = sessions.some(s => s.status === 'available');
 
   // --- Onboarding checklist ---
@@ -136,14 +152,6 @@ const PsychologistHome: React.FC<PsychologistHomeProps> = ({
       done: patients.length > 0,
       action: () => onNavigate('patients'),
       actionLabel: 'Añadir paciente'
-    },
-    {
-      id: 'availability',
-      label: 'Configura tu disponibilidad',
-      description: 'Define tus horarios de consulta para que los pacientes puedan reservar',
-      done: hasAvailability,
-      action: () => onNavigate('schedule'),
-      actionLabel: 'Ir a la agenda'
     },
     {
       id: 'session',
@@ -169,7 +177,7 @@ const PsychologistHome: React.FC<PsychologistHomeProps> = ({
   const progressPercent = Math.round((completedSteps / onboardingSteps.length) * 100);
 
   const handleDismissOnboarding = () => {
-    localStorage.setItem(ONBOARDING_DISMISS_KEY, 'true');
+    sessionStorage.setItem(getOnboardingDismissKey(psychologistId), 'true');
     setOnboardingDismissed(true);
   };
 
@@ -210,18 +218,30 @@ const PsychologistHome: React.FC<PsychologistHomeProps> = ({
             ? `Tienes ${upcomingSessions.length} ${upcomingSessions.length === 1 ? 'sesión programada' : 'sesiones programadas'} próximamente`
             : 'No tienes sesiones programadas próximamente'}
         </p>
-        {subscriptionInfo?.trial_active && (
-          <div className="mt-3 inline-flex items-center gap-2 bg-white/15 backdrop-blur-sm rounded-lg px-3 py-1.5 text-sm">
-            <Clock size={14} />
-            <span>
-              Te quedan <span className="font-semibold">{subscriptionInfo.trial_days_left} días</span> de prueba gratuita
-            </span>
-            <button onClick={onNeedUpgrade} className="ml-2 underline font-semibold hover:text-white/90">
-              Ver planes
-            </button>
-          </div>
-        )}
       </div>
+
+      {/* Trial banner */}
+      {subscriptionInfo?.trial_active && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-amber-100 rounded-lg shrink-0">
+              <Clock className="text-amber-600" size={18} />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-amber-900">
+                Te quedan <span className="text-amber-600">{subscriptionInfo.trial_days_left} {subscriptionInfo.trial_days_left === 1 ? 'día' : 'días'}</span> de prueba gratuita
+              </p>
+              <p className="text-xs text-amber-700">Suscríbete para no perder el acceso cuando expire</p>
+            </div>
+          </div>
+          <button
+            onClick={onNeedUpgrade}
+            className="shrink-0 bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
+          >
+            Suscribirme
+          </button>
+        </div>
+      )}
 
       {/* Onboarding Checklist */}
       {showOnboarding && (
@@ -443,6 +463,14 @@ const PsychologistHome: React.FC<PsychologistHomeProps> = ({
             <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
               <span className="text-sm text-slate-600">Facturas pendientes</span>
               <span className="text-lg font-bold text-amber-600">{pendingInvoices.length}</span>
+            </div>
+            <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+              <span className="text-sm text-slate-600">Generado este mes</span>
+              <span className="text-lg font-bold text-emerald-600">{thisMonthCompletedRevenue.toFixed(0)}€</span>
+            </div>
+            <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+              <span className="text-sm text-slate-600">Potencial este mes</span>
+              <span className="text-lg font-bold text-indigo-600">{thisMonthPotentialRevenue.toFixed(0)}€</span>
             </div>
           </div>
         </div>
