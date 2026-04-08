@@ -5082,7 +5082,7 @@ async function updateCalendarEventForSession(userId, eventId, session) {
 // =============================================================================
 
 // GET /api/google/auth-url — generates the OAuth consent URL
-app.get('/api/google/auth-url', authenticateRequest, (req, res) => {
+app.get('/api/google/auth-url', authenticateRequest, async (req, res) => {
   const userId = req.query.userId || req.authenticatedUserId;
   const email = req.query.email || null;
   if (!userId) return res.status(400).json({ error: 'userId requerido' });
@@ -5242,7 +5242,7 @@ async function saveGmailTokensForUser(userId, tokens) {
 }
 
 // GET /api/gmail/auth-url — generates Gmail OAuth consent URL
-app.get('/api/gmail/auth-url', authenticateRequest, (req, res) => {
+app.get('/api/gmail/auth-url', authenticateRequest, async (req, res) => {
   const userId = req.query.userId || req.authenticatedUserId;
   const email = req.query.email || null;
   if (!userId) return res.status(400).json({ error: 'userId requerido' });
@@ -12730,7 +12730,7 @@ app.post('/api/relationships/:id/historical-documents/generate-summary', authent
       return res.status(400).json({ error: 'Relationship ID requerido' });
     }
 
-    if (!genAI) {
+    if (!(await getGenAI())) {
       return res.status(503).json({ error: 'Servicio de IA no disponible. Configure GEMINI_API_KEY.' });
     }
 
@@ -15353,7 +15353,7 @@ app.post('/api/transcribe', authenticateRequest, async (req, res) => {
   try {
     console.log('📝 Procesando solicitud de transcripción...');
 
-    if (!genAI) {
+    if (!(await getGenAI())) {
       console.error('❌ GEMINI_API_KEY no configurada');
       return res.status(500).json({ 
         error: 'API de transcripción no configurada. Por favor, configura GEMINI_API_KEY en las variables de entorno.' 
