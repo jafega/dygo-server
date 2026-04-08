@@ -29,6 +29,7 @@ const BillingPanel = lazy(() => import('./components/BillingPanel'));
 const PsychologistProfilePanel = lazy(() => import('./components/PsychologistProfilePanel'));
 const PsychologistSchedule = lazy(() => import('./components/PsychologistSchedule'));
 const PsychologistDashboard = lazy(() => import('./components/PsychologistDashboard'));
+const PsychologistHome = lazy(() => import('./components/PsychologistHome'));
 const SessionsList = lazy(() => import('./components/SessionsList'));
 const CentrosPanel = lazy(() => import('./components/CentrosPanel'));
 const ConnectionsPanel = lazy(() => import('./components/ConnectionsPanel'));
@@ -38,7 +39,7 @@ const BulkImportPanel = lazy(() => import('./components/BulkImportPanel'));
 const PsychologistAIChat = lazy(() => import('./components/PsychologistAIChat'));
 // Lazy-loaded: admin only
 const SuperAdmin = lazy(() => import('./components/SuperAdmin'));
-import { Mic, LayoutDashboard, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock, AlertCircle, Smile, Shield, Building2, LogOut, Upload, Bot, FolderOpen, Phone } from 'lucide-react';
+import { Mic, LayoutDashboard, Home, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock, AlertCircle, Smile, Shield, Building2, LogOut, Upload, Bot, FolderOpen, Phone } from 'lucide-react';
 
 // Custom Mainds Logo Component
 const MaindsLogo: React.FC<{ className?: string }> = ({ className = "w-12 h-12" }) => (
@@ -61,7 +62,7 @@ const App: React.FC = () => {
   const [psychViewMode, setPsychViewMode] = useState<'DASHBOARD' | 'PERSONAL' | 'ADMIN'>('DASHBOARD');
   const [adminTab, setAdminTab] = useState<'dashboard' | 'users'>('dashboard');
   const [adminSidebarOpen, setAdminSidebarOpen] = useState(false);
-  const [psychPanelView, setPsychPanelView] = useState<'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule' | 'centros' | 'templates' | 'import' | 'ai-assistant' | 'materials'>('schedule');
+  const [psychPanelView, setPsychPanelView] = useState<'home' | 'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule' | 'centros' | 'templates' | 'import' | 'ai-assistant' | 'materials'>('home');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   
   // State for draggable menu button position (unified across personal/professional)
@@ -751,7 +752,7 @@ const App: React.FC = () => {
       setStripeNotification('success');
       // Restore the panel the user was on before going to Stripe
       const returnPanel = localStorage.getItem('mainds_stripe_return_panel');
-      const validPanels = ['patients', 'billing', 'profile', 'dashboard', 'sessions', 'schedule', 'centros', 'templates', 'import', 'ai-assistant', 'connections', 'materials'];
+      const validPanels = ['home', 'patients', 'billing', 'profile', 'dashboard', 'sessions', 'schedule', 'centros', 'templates', 'import', 'ai-assistant', 'connections', 'materials'];
       if (returnPanel && validPanels.includes(returnPanel)) {
         setPsychPanelView(returnPanel as any);
       }
@@ -1327,6 +1328,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                     {/* Mobile Header with page titles, icon and description */}
                     <header className="lg:hidden mb-3">
                       <div className="flex items-center gap-3 mb-2">
+                        {psychPanelView === 'home' && <Home className="w-6 h-6 text-indigo-600" />}
                         {psychPanelView === 'dashboard' && <LayoutDashboard className="w-6 h-6 text-indigo-600" />}
                         {psychPanelView === 'patients' && <Users className="w-6 h-6 text-indigo-600" />}
                         {psychPanelView === 'billing' && <FileText className="w-6 h-6 text-indigo-600" />}
@@ -1340,6 +1342,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                         {psychPanelView === 'import' && <Upload className="w-6 h-6 text-indigo-600" />}
                         {psychPanelView === 'ai-assistant' && <Bot className="w-6 h-6 text-violet-600" />}
                         <h1 className="text-2xl font-bold text-slate-900">
+                          {psychPanelView === 'home' && 'Home'}
                           {psychPanelView === 'dashboard' && 'Métricas'}
                           {psychPanelView === 'patients' && 'Pacientes'}
                           {psychPanelView === 'billing' && 'Facturación'}
@@ -1355,6 +1358,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                         </h1>
                       </div>
                       <p className="text-sm text-slate-500">
+                        {psychPanelView === 'home' && 'Panel de control y primeros pasos'}
                         {psychPanelView === 'dashboard' && 'Métricas y resumen de actividad'}
                         {psychPanelView === 'patients' && 'Gestiona tu lista de pacientes'}
                         {psychPanelView === 'billing' && 'Gestiona facturas y pagos'}
@@ -1373,6 +1377,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                     <header className="hidden lg:flex justify-between items-center mb-3">
                       <div>
                         <h1 className="text-3xl font-bold text-slate-900">
+                          {psychPanelView === 'home' && 'Home'}
                           {psychPanelView === 'dashboard' && 'Dashboard'}
                           {psychPanelView === 'patients' && 'Pacientes'}
                           {psychPanelView === 'billing' && 'Facturación'}
@@ -1387,6 +1392,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                           {psychPanelView === 'ai-assistant' && 'Asistente IA'}
                         </h1>
                         <p className="text-slate-500 mt-1">
+                          {psychPanelView === 'home' && 'Panel de control y primeros pasos'}
                           {psychPanelView === 'dashboard' && 'Resumen completo de tu actividad profesional'}
                           {psychPanelView === 'patients' && 'Gestiona tu lista de pacientes y su progreso'}
                           {psychPanelView === 'billing' && 'Gestiona facturas y pagos de tus servicios'}
@@ -1443,6 +1449,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                       </div>
                     </header>
 
+                    {psychPanelView === 'home' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><PsychologistHome psychologistId={currentUser.id} userName={currentUser.name} subscriptionInfo={psychSubscriptionInfo} isProfileIncomplete={isProfileIncomplete} onNavigate={(view) => setPsychPanelView(view as any)} onNeedUpgrade={() => setShowAppUpgradeModal(true)} /></Suspense>}
                     {psychPanelView === 'dashboard' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><PsychologistDashboard psychologistId={currentUser.id} /></Suspense>}
                     {psychPanelView === 'patients' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><PatientDashboard ref={patientDashboardRef} onImportClick={() => setPsychPanelView('import')} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} /></Suspense>}
                     {psychPanelView === 'sessions' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><SessionsList psychologistId={currentUser.id} /></Suspense>}

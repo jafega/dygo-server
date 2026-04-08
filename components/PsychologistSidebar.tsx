@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Users, FileText, User as UserIcon, Calendar, Menu, X, ArrowLeftRight, ShieldCheck, Shield, Link2, BarChart3, AlertCircle, ClipboardList, Building2, Scroll, Upload, Bot, Zap, RefreshCw, FolderOpen } from 'lucide-react';
+import { Home, Users, FileText, User as UserIcon, Calendar, Menu, X, ArrowLeftRight, ShieldCheck, Shield, Link2, BarChart3, AlertCircle, ClipboardList, Building2, Scroll, Upload, Bot, Zap, RefreshCw, FolderOpen } from 'lucide-react';
 import { createCheckoutSession, createBillingPortalSession, apiFetch } from '../services/authService';
 import { API_URL } from '../services/config';
 
@@ -29,8 +29,8 @@ interface SubscriptionInfo {
 }
 
 interface PsychologistSidebarProps {
-  activeView: 'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule' | 'centros' | 'templates' | 'import' | 'ai-assistant' | 'materials';
-  onViewChange: (view: 'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule' | 'centros' | 'templates' | 'import' | 'ai-assistant' | 'materials') => void;
+  activeView: 'home' | 'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule' | 'centros' | 'templates' | 'import' | 'ai-assistant' | 'materials';
+  onViewChange: (view: 'home' | 'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule' | 'centros' | 'templates' | 'import' | 'ai-assistant' | 'materials') => void;
   isOpen: boolean;
   onToggle: () => void;
   userName?: string;
@@ -64,6 +64,7 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
   showPendingBadge = true
 }) => {
   const menuItems = [
+    { id: 'home' as const, label: 'Home', icon: Home },
     { id: 'schedule' as const, label: 'Agenda', icon: Calendar },
     { id: 'sessions' as const, label: 'Sesiones', icon: ClipboardList },
     { id: 'patients' as const, label: 'Pacientes', icon: Users },
