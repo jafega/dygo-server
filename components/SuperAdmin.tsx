@@ -436,15 +436,15 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
             ) : (
               <>
                 {/* Header row */}
-                <div className="hidden lg:grid grid-cols-[2fr_2fr_1fr_1.5fr_1.5fr_1fr_1fr_1fr_28px] gap-3 px-5 py-2.5 bg-slate-50 border-b border-slate-100 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                <div className="hidden lg:grid grid-cols-[2fr_2fr_1fr_1fr_1.5fr_1.5fr_1fr_1fr_28px] gap-3 px-5 py-2.5 bg-slate-50 border-b border-slate-100 text-xs font-semibold uppercase tracking-wide text-slate-400">
                   <span>Nombre</span>
                   <span>Email</span>
+                  <span>Teléfono</span>
                   <span>Tipo</span>
                   <span>Plan</span>
                   <span>Estado</span>
                   <span>Relaciones</span>
                   <span>Registro</span>
-                  <span>Prueba</span>
                   <span />
                 </div>
                 <div className="divide-y divide-slate-100">
@@ -499,7 +499,7 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                         </div>
 
                         {/* ── Desktop table row ─────────────────── */}
-                        <div className="hidden lg:grid grid-cols-[2fr_2fr_1fr_1.5fr_1.5fr_1fr_1fr_1fr_28px] gap-3 items-center px-5 py-3">
+                        <div className="hidden lg:grid grid-cols-[2fr_2fr_1fr_1fr_1.5fr_1.5fr_1fr_1fr_28px] gap-3 items-center px-5 py-3">
                           {/* Name */}
                           <div className="flex items-center gap-3 min-w-0">
                             <div className="flex-shrink-0 w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-white text-xs font-bold">
@@ -511,6 +511,11 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                           {/* Email */}
                           <span className="text-sm text-slate-500 truncate">
                             {!isTempEmail(u.email) ? u.email : <span className="italic text-slate-300">Sin email</span>}
+                          </span>
+
+                          {/* Phone */}
+                          <span className="text-sm text-slate-500 truncate">
+                            {u.phone || <span className="text-slate-300">—</span>}
                           </span>
 
                           {/* Role */}
@@ -563,31 +568,6 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                               <span className="text-xs text-slate-500">
                                 {new Date(pStat.createdAt).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: '2-digit' })}
                               </span>
-                            ) : (
-                              <span className="text-xs text-slate-300">—</span>
-                            )}
-                          </div>
-
-                          {/* Trial days left */}
-                          <div>
-                            {isPsych && pStat ? (
-                              pStat.isMaster || pStat.isSubscribed ? (
-                                <span className="text-xs text-slate-300">—</span>
-                              ) : pStat.createdAt ? (() => {
-                                const daysElapsed = Math.floor((Date.now() - pStat.createdAt) / 86400000);
-                                const daysLeft = Math.max(0, 14 - daysElapsed);
-                                return daysLeft > 0 ? (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-sky-100 text-sky-700">
-                                    <Clock size={10} />{daysLeft}d
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-600">
-                                    Expirado
-                                  </span>
-                                );
-                              })() : (
-                                <span className="text-xs text-slate-300">—</span>
-                              )
                             ) : (
                               <span className="text-xs text-slate-300">—</span>
                             )}
