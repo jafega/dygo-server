@@ -4264,16 +4264,21 @@ app.get('/api/admin/stats', authenticateRequest, async (req, res) => {
       return null;
     };
 
-    // Weekly new psychologist registrations (last 8 weeks)
+    // Weekly new psychologist registrations (last 8 weeks, Mon-Sun)
     const weeklyData = [];
+    const todayForWeek = new Date(now);
+    todayForWeek.setHours(0, 0, 0, 0);
+    const dayOfWeek = todayForWeek.getDay(); // 0=Sun,1=Mon,...
+    const diffToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    const thisMonday = new Date(todayForWeek.getTime() - diffToMonday * 86400000);
     for (let i = 7; i >= 0; i--) {
-      const weekStart = now - (i + 1) * 7 * 24 * 60 * 60 * 1000;
-      const weekEnd = now - i * 7 * 24 * 60 * 60 * 1000;
-      const label = new Date(weekEnd - 1).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
+      const weekStart = new Date(thisMonday.getTime() - i * 7 * 86400000);
+      const weekEnd   = new Date(weekStart.getTime() + 7 * 86400000);
+      const label = weekStart.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
       const count = allUsers.filter(u => {
         if (!u.is_psychologist) return false;
         const ca = getCreatedAt(u);
-        return ca && ca >= weekStart && ca < weekEnd;
+        return ca && ca >= weekStart.getTime() && ca < weekEnd.getTime();
       }).length;
       weeklyData.push({ semana: label, psicologos: count });
     }
@@ -4330,16 +4335,16 @@ app.get('/api/admin/stats', authenticateRequest, async (req, res) => {
       ? psychsWithPatients.reduce((sum, p) => sum + p.careRelationshipsCount, 0) / psychsWithPatients.length
       : 0;
 
-    // Weekly active paid psychologists (not trial) – last 8 weeks, by registration date
+    // Weekly active paid psychologists (not trial) – last 8 weeks, Mon-Sun
     const weeklyPaidData = [];
     for (let i = 7; i >= 0; i--) {
-      const weekStart = now - (i + 1) * 7 * 24 * 60 * 60 * 1000;
-      const weekEnd   = now - i * 7 * 24 * 60 * 60 * 1000;
-      const label = new Date(weekEnd - 1).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
+      const weekStart = new Date(thisMonday.getTime() - i * 7 * 86400000);
+      const weekEnd   = new Date(weekStart.getTime() + 7 * 86400000);
+      const label = weekStart.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
       const count = psychDetails.filter(p => {
         if (!p.isSubscribed && !p.isMaster) return false;
         const ca = p.createdAt;
-        return ca && ca >= weekStart && ca < weekEnd;
+        return ca && ca >= weekStart.getTime() && ca < weekEnd.getTime();
       }).length;
       weeklyPaidData.push({ semana: label, pagantes: count });
     }
