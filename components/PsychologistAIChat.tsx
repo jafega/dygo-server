@@ -359,7 +359,7 @@ ASISTENTE:`;
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-120px)] max-h-[900px] min-h-[500px]">
+    <div className="flex flex-col h-[calc(100dvh-160px)] sm:h-[calc(100dvh-120px)] max-h-[900px] min-h-[400px] sm:min-h-[500px]">
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-3">
@@ -394,18 +394,20 @@ ASISTENTE:`;
             <button
               onClick={clearChat}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+              title="Limpiar chat"
             >
               <RefreshCw size={13} />
-              Limpiar
+              <span className="hidden sm:inline">Limpiar</span>
             </button>
           )}
           <button
             onClick={loadPsychologistData}
             disabled={isLoadingData}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors disabled:opacity-50"
+            title="Actualizar datos"
           >
             <RefreshCw size={13} className={isLoadingData ? 'animate-spin' : ''} />
-            Actualizar
+            <span className="hidden sm:inline">Actualizar</span>
           </button>
         </div>
       </div>
