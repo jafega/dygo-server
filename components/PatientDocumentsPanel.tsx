@@ -52,6 +52,7 @@ interface Signature {
   signed: boolean;
   signature_date: string | null;
   external_document_url?: string;
+  template?: { id: number; content: string; template_name?: string };
 }
 
 interface PatientDocumentsPanelProps {
@@ -318,7 +319,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ doc, onClose, onSigned,
     }
   };
 
-  const title = getDocTitle(doc.content);
+  const title = doc.template?.template_name?.trim() || getDocTitle(doc.content);
   const missingVars = varNames.filter(v => !variableValues[v]?.trim());
 
   return (
@@ -567,7 +568,7 @@ const PatientDocumentsPanel: React.FC<PatientDocumentsPanelProps> = ({ patientId
       ) : (
         <div className="space-y-3">
           {filtered.map(doc => {
-            const title = getDocTitle(doc.content);
+            const title = doc.template?.template_name?.trim() || getDocTitle(doc.content);
             const preview = doc.content.replace(/^.+\n/, '').replace(/[#*_`>-]/g, '').trim().slice(0, 100);
 
             return (

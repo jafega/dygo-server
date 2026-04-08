@@ -60,6 +60,7 @@ const App: React.FC = () => {
   
   const [psychViewMode, setPsychViewMode] = useState<'DASHBOARD' | 'PERSONAL' | 'ADMIN'>('DASHBOARD');
   const [adminTab, setAdminTab] = useState<'dashboard' | 'users'>('dashboard');
+  const [adminSidebarOpen, setAdminSidebarOpen] = useState(false);
   const [psychPanelView, setPsychPanelView] = useState<'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule' | 'centros' | 'templates' | 'import' | 'ai-assistant' | 'materials'>('schedule');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   
@@ -1106,59 +1107,99 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
 
   if (psychViewMode === 'ADMIN' && isSuperAdminUser) {
     const goBackFromAdmin = () => setPsychViewMode(currentUser?.is_psychologist === true ? 'DASHBOARD' : 'PERSONAL');
+    const adminNavItems = [
+      { id: 'dashboard' as const, label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
+      { id: 'users'     as const, label: 'Usuarios',  icon: <Users size={18} /> },
+    ] as { id: 'dashboard' | 'users'; label: string; icon: React.ReactNode }[];
     return (
-      <div className="h-screen bg-slate-50 text-slate-900 flex overflow-hidden">
-        {/* Admin Sidebar */}
-        <aside className="w-64 bg-slate-900 flex flex-col flex-shrink-0">
-          {/* Header */}
-          <div className="p-4 border-b border-slate-700">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-red-600 rounded-lg flex items-center justify-center flex-shrink-0">
-                <Shield size={18} className="text-white" />
+      <div className="h-screen bg-slate-50 text-slate-900 flex flex-col overflow-hidden">
+        {/* ── Mobile top bar ─────────────────────────── */}
+        <header className="md:hidden flex items-center gap-3 px-4 py-3 bg-slate-900 border-b border-slate-700 flex-shrink-0">
+          <button
+            onClick={() => setAdminSidebarOpen(o => !o)}
+            className="p-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+          >
+            <Menu size={20} />
+          </button>
+          <div className="w-7 h-7 bg-red-600 rounded-lg flex items-center justify-center flex-shrink-0">
+            <Shield size={15} className="text-white" />
+          </div>
+          <span className="font-bold text-white text-base flex-1">Superadmin</span>
+          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">
+            {adminNavItems.find(n => n.id === adminTab)?.label}
+          </span>
+        </header>
+
+        <div className="flex flex-1 overflow-hidden">
+          {/* ── Sidebar overlay (mobile) ────────────────── */}
+          {adminSidebarOpen && (
+            <div
+              className="fixed inset-0 bg-black/50 z-40 md:hidden"
+              onClick={() => setAdminSidebarOpen(false)}
+            />
+          )}
+
+          {/* ── Sidebar ──────────────────────────────────── */}
+          <aside className={`
+            fixed md:static inset-y-0 left-0 z-50
+            w-64 bg-slate-900 flex flex-col flex-shrink-0
+            transform transition-transform duration-200 ease-in-out
+            ${adminSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+            md:translate-x-0
+          `}>
+            {/* Header */}
+            <div className="p-4 border-b border-slate-700 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-red-600 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <Shield size={18} className="text-white" />
+                </div>
+                <span className="font-bold text-white text-lg">Superadmin</span>
               </div>
-              <span className="font-bold text-white text-lg">Superadmin</span>
-            </div>
-          </div>
-
-          {/* Navigation */}
-          <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-            {([
-              { id: 'dashboard' as const, label: 'Dashboard',     icon: <LayoutDashboard size={18} /> },
-              { id: 'users'     as const, label: 'Usuarios',      icon: <Users size={18} /> },
-            ] as { id: 'dashboard' | 'users'; label: string; icon: React.ReactNode }[]).map(item => (
               <button
-                key={item.id}
-                onClick={() => setAdminTab(item.id)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium ${
-                  adminTab === item.id
-                    ? 'bg-red-900/40 text-red-300 shadow-sm'
-                    : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-                }`}
+                onClick={() => setAdminSidebarOpen(false)}
+                className="md:hidden p-1.5 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
               >
-                {item.icon}
-                <span>{item.label}</span>
+                <X size={16} />
               </button>
-            ))}
-          </nav>
+            </div>
 
-          {/* Footer */}
-          <div className="p-3 border-t border-slate-700">
-            <button
-              onClick={goBackFromAdmin}
-              className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
-            >
-              <ArrowLeftRight size={16} />
-              <span>{currentUser?.is_psychologist === true ? 'Volver a mainds pro' : 'Volver a mi diario'}</span>
-            </button>
-          </div>
-        </aside>
+            {/* Navigation */}
+            <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+              {adminNavItems.map(item => (
+                <button
+                  key={item.id}
+                  onClick={() => { setAdminTab(item.id); setAdminSidebarOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium ${
+                    adminTab === item.id
+                      ? 'bg-red-900/40 text-red-300 shadow-sm'
+                      : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                  }`}
+                >
+                  {item.icon}
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </nav>
 
-        {/* Main Content */}
-        <main className="flex-1 overflow-y-auto px-4 md:px-8 py-6">
-          <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}>
-            <SuperAdmin tab={adminTab} />
-          </Suspense>
-        </main>
+            {/* Footer */}
+            <div className="p-3 border-t border-slate-700">
+              <button
+                onClick={goBackFromAdmin}
+                className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+              >
+                <ArrowLeftRight size={16} />
+                <span>{currentUser?.is_psychologist === true ? 'Volver a mainds pro' : 'Volver a mi diario'}</span>
+              </button>
+            </div>
+          </aside>
+
+          {/* ── Main Content ─────────────────────────────── */}
+          <main className="flex-1 overflow-y-auto px-4 md:px-8 py-6">
+            <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}>
+              <SuperAdmin tab={adminTab} />
+            </Suspense>
+          </main>
+        </div>
       </div>
     );
   }
@@ -1191,11 +1232,11 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                          <p className="text-xs text-slate-500">Lo necesitamos para tu perfil profesional.</p>
                        </div>
                      </div>
-                     <div className="flex gap-2 mb-4">
+                     <div className="flex gap-2 mb-4 min-w-0">
                        <select
                          value={phonePromptPrefix}
                          onChange={e => setPhonePromptPrefix(e.target.value)}
-                         className="border border-slate-200 rounded-xl px-2 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-slate-50 w-28 flex-shrink-0"
+                         className="border border-slate-200 rounded-xl px-2 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-slate-50 w-24 flex-shrink-0"
                        >
                          <option value="+34">🇪🇸 +34</option>
                          <option value="+52">🇲🇽 +52</option>
@@ -1222,7 +1263,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                          value={phonePromptNumber}
                          onChange={e => setPhonePromptNumber(e.target.value)}
                          onKeyDown={e => { if (e.key === 'Enter' && phonePromptNumber.trim()) handleSavePhone(); }}
-                         className="flex-1 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                         className="flex-1 min-w-0 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
                          autoFocus
                        />
                      </div>

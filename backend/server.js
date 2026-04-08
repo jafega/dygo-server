@@ -4980,6 +4980,41 @@ async function deleteCalendarEventById(userId, eventId) {
   }
 }
 
+async function updateCalendarEventForSession(userId, eventId, session) {
+  if (!eventId) return;
+  try {
+    const calendar = await getCalendarClient(userId);
+    if (!calendar) return;
+
+    const startDt = session.starts_on || null;
+    const endDt = session.ends_on || null;
+    if (!startDt || !endDt) return;
+
+    const tz = session.schedule_timezone || 'Europe/Madrid';
+
+    const patch = {
+      start: { dateTime: startDt, timeZone: tz },
+      end: { dateTime: endDt, timeZone: tz },
+    };
+
+    // Update summary if patient name is available
+    if (session.patientName) {
+      patch.summary = `Sesión con ${session.patientName}`;
+    }
+
+    await calendar.events.patch({
+      calendarId: 'primary',
+      eventId,
+      requestBody: patch,
+    });
+    console.log(`✅ [Google Calendar] Evento actualizado: ${eventId}`);
+  } catch (e) {
+    if (e?.code !== 410 && e?.response?.status !== 410) {
+      console.error('[Google Calendar] Error actualizando evento:', e?.message || e);
+    }
+  }
+}
+
 // =============================================================================
 // --- GOOGLE OAUTH ROUTES ---
 // =============================================================================
@@ -14620,6 +14655,19 @@ app.patch('/api/sessions/:id', authenticateRequest, async (req, res) => {
         );
       }
     }
+
+    // --- Google Calendar: actualizar fecha/hora si cambió y no es cancelación ---
+    if (req.body.status !== 'cancelled' &&
+        (req.body.date !== undefined || req.body.startTime !== undefined || req.body.endTime !== undefined ||
+         req.body.starts_on !== undefined || req.body.ends_on !== undefined)) {
+      const psychUserId = updatedSession.psychologist_user_id || updatedSession.psychologistId;
+      const gcEventId = updatedSession.google_calendar_event_id;
+      if (psychUserId && gcEventId) {
+        updateCalendarEventForSession(psychUserId, gcEventId, updatedSession).catch(e =>
+          console.error('[PATCH /api/sessions] Error Google Calendar update:', e?.message)
+        );
+      }
+    }
     
     console.log(`📤 [PATCH /api/sessions/${id}] Enviando respuesta al cliente:`, db.sessions[idx]);
     
@@ -14738,7 +14786,31 @@ app.put('/api/sessions/:id', authenticateRequest, async (req, res) => {
     }
     
     console.log(`📤 [PUT /api/sessions/${id}] Enviando respuesta al cliente`);
-    
+
+    // --- Google Calendar: cancelar evento si el status es 'cancelled' ---
+    if (req.body.status === 'cancelled') {
+      const psychUserId = updatedSession.psychologist_user_id || updatedSession.psychologistId;
+      const gcEventId = updatedSession.google_calendar_event_id;
+      if (psychUserId && gcEventId) {
+        markCalendarEventCancelled(psychUserId, gcEventId).catch(e =>
+          console.error('[PUT /api/sessions] Error Google Calendar cancel:', e?.message)
+        );
+      }
+    }
+
+    // --- Google Calendar: actualizar fecha/hora si cambió y no es cancelación ---
+    if (req.body.status !== 'cancelled' &&
+        (req.body.date !== undefined || req.body.startTime !== undefined || req.body.endTime !== undefined ||
+         req.body.starts_on !== undefined || req.body.ends_on !== undefined)) {
+      const psychUserId = updatedSession.psychologist_user_id || updatedSession.psychologistId;
+      const gcEventId = updatedSession.google_calendar_event_id;
+      if (psychUserId && gcEventId) {
+        updateCalendarEventForSession(psychUserId, gcEventId, updatedSession).catch(e =>
+          console.error('[PUT /api/sessions] Error Google Calendar update:', e?.message)
+        );
+      }
+    }
+
     return res.json(db.sessions[idx]);
   } catch (err) {
     console.error('❌ Error updating session (PUT)', err);
@@ -16718,7 +16790,7 @@ app.get('/api/signatures', authenticateRequest, async (req, res) => {
     if (supabaseAdmin) {
       let query = supabaseAdmin
         .from('signatures')
-        .select('*, template:templates(id, content)')
+        .select('*, template:templates(id, content, template_name)')
         .order('created_at', { ascending: false });
 
       if (psych_user_id) query = query.eq('psych_user_id', psych_user_id);

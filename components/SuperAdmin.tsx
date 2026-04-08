@@ -167,17 +167,26 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
 
   const isLoading = statsLoading || loading;
 
-  const filtered = users.filter(u => {
-    const matchesQuery = !query ||
-      (u.name ? includesNormalized(u.name, query) : false) ||
-      (u.email ? includesNormalized(u.email, query) : false);
-    const matchesType = userTypeFilter === 'all' ||
-      (userTypeFilter === 'psychologist' && u.is_psychologist === true) ||
-      (userTypeFilter === 'patient' && u.is_psychologist !== true);
-    return matchesQuery && matchesType;
-  });
-
   const getPsychStat = (id: string) => stats?.psychologists.find(p => p.id === id);
+
+  const filtered = users
+    .filter(u => {
+      const matchesQuery = !query ||
+        (u.name ? includesNormalized(u.name, query) : false) ||
+        (u.email ? includesNormalized(u.email, query) : false);
+      const matchesType = userTypeFilter === 'all' ||
+        (userTypeFilter === 'psychologist' && u.is_psychologist === true) ||
+        (userTypeFilter === 'patient' && u.is_psychologist !== true);
+      return matchesQuery && matchesType;
+    })
+    .sort((a, b) => {
+      const aDate = getPsychStat(a.id)?.createdAt ?? null;
+      const bDate = getPsychStat(b.id)?.createdAt ?? null;
+      if (aDate === null && bDate === null) return 0;
+      if (aDate === null) return 1;
+      if (bDate === null) return -1;
+      return bDate - aDate;
+    });
 
   const openPsychDrawer = async (p: PsychologistStat) => {
     setSelectedPsych(p);
@@ -275,15 +284,15 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
               </div>
 
               {/* Weekly registrations chart */}
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6">
                 <h3 className="text-sm font-semibold text-slate-700 mb-4 uppercase tracking-wide">
                   Nuevos psicólogos por semana · últimas 8 semanas
                 </h3>
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={stats.weeklyRegistrations} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={stats.weeklyRegistrations} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                    <XAxis dataKey="semana" tick={{ fontSize: 11, fill: '#94a3b8' }} />
-                    <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#94a3b8' }} />
+                    <XAxis dataKey="semana" tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
                     <Tooltip
                       contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }}
                       formatter={(v: number) => [v, 'Psicólogos']}
@@ -294,16 +303,16 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
               </div>
 
               {/* Weekly paid psychologists chart */}
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6">
                 <h3 className="text-sm font-semibold text-slate-700 mb-1 uppercase tracking-wide">
                   Psicólogos con plan activo por semana · últimas 8 semanas
                 </h3>
                 <p className="text-xs text-slate-400 mb-4">Registros de psicólogos actualmente de pago, agrupados por semana de alta</p>
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={stats.weeklyPaidPsychs} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={stats.weeklyPaidPsychs} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                    <XAxis dataKey="semana" tick={{ fontSize: 11, fill: '#94a3b8' }} />
-                    <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#94a3b8' }} />
+                    <XAxis dataKey="semana" tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
                     <Tooltip
                       contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }}
                       formatter={(v: number) => [v, 'Psicólogos de pago']}
@@ -314,13 +323,13 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
               </div>
 
               {/* Monthly MRR chart */}
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6">
                 <h3 className="text-sm font-semibold text-slate-700 mb-1 uppercase tracking-wide">
                   Ingresos por suscripciones de psicólogos · últimos 12 meses
                 </h3>
                 <p className="text-xs text-slate-400 mb-4">MRR acumulado por mes de alta de suscriptores activos</p>
-                <ResponsiveContainer width="100%" height={220}>
-                  <AreaChart data={stats.monthlyMrr} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <ResponsiveContainer width="100%" height={200}>
+                  <AreaChart data={stats.monthlyMrr} margin={{ top: 4, right: 4, left: -4, bottom: 0 }}>
                     <defs>
                       <linearGradient id="mrrGradient" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3} />
@@ -328,8 +337,8 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                    <XAxis dataKey="mes" tick={{ fontSize: 11, fill: '#94a3b8' }} />
-                    <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} tickFormatter={(v: number) => `€${v}`} />
+                    <XAxis dataKey="mes" tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                    <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} tickFormatter={(v: number) => `€${v}`} />
                     <Tooltip
                       contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }}
                       formatter={(v: number) => [`€${v.toFixed(2)}`, 'Ingresos']}
@@ -354,18 +363,18 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                     const base = stats.overview.paidCount;
                     const pct = base > 0 ? Math.round((count / base) * 100) : 0;
                     return (
-                      <div key={planId} className="px-6 py-3 flex items-center gap-4">
-                        <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold w-28 text-center ${PLAN_COLORS[planId]}`}>
+                      <div key={planId} className="px-4 sm:px-6 py-3 flex items-center gap-3">
+                        <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold w-24 sm:w-28 text-center flex-shrink-0 ${PLAN_COLORS[planId]}`}>
                           {planNames[planId]}
                         </span>
-                        <span className="text-xs text-slate-400 w-16">{planPrices[planId]}/mes</span>
-                        <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <span className="text-xs text-slate-400 w-14 sm:w-16 flex-shrink-0">{planPrices[planId]}/mes</span>
+                        <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden min-w-0">
                           <div
                             className={`h-full rounded-full transition-all ${planId === 'starter' ? 'bg-blue-400' : planId === 'mainder' ? 'bg-violet-400' : 'bg-amber-400'}`}
                             style={{ width: `${pct}%` }}
                           />
                         </div>
-                        <span className="text-sm font-semibold text-slate-700 w-6 text-right">{count}</span>
+                        <span className="text-sm font-semibold text-slate-700 w-6 text-right flex-shrink-0">{count}</span>
                       </div>
                     );
                   })}
@@ -445,103 +454,149 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                     return (
                       <div
                         key={u.id}
-                        className={`grid grid-cols-1 lg:grid-cols-[2fr_2fr_1fr_1.5fr_1.5fr_1fr_1fr_1fr_28px] gap-3 items-center px-5 py-3 hover:bg-slate-50 transition-colors ${isPsych && pStat ? 'cursor-pointer' : ''}`}
+                        className={`${isPsych && pStat ? 'cursor-pointer' : ''} hover:bg-slate-50 transition-colors`}
                         onClick={() => isPsych && pStat && openPsychDrawer(pStat)}
                       >
-                        {/* Name */}
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="flex-shrink-0 w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-white text-xs font-bold">
-                            {u.name?.charAt(0)?.toUpperCase() || '?'}
-                          </div>
-                          <span className="text-sm font-medium text-slate-800 truncate">{u.name || 'Sin nombre'}</span>
-                        </div>
-
-                        {/* Email */}
-                        <span className="text-sm text-slate-500 truncate">
-                          {!isTempEmail(u.email) ? u.email : <span className="italic text-slate-300">Sin email</span>}
-                        </span>
-
-                        {/* Role */}
-                        <div>
-                          {isPsych ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-100 text-emerald-700 text-xs font-medium rounded-full">
-                              <Shield size={10} /> Psicólogo
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-100 text-purple-700 text-xs font-medium rounded-full">
-                              Paciente
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Plan */}
-                        <div>
-                          {isPsych && pStat ? (
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${PLAN_COLORS[pStat.plan] || 'bg-slate-100 text-slate-600'}`}>
-                              {pStat.planName}
-                            </span>
-                          ) : (
-                            <span className="text-xs text-slate-300">—</span>
-                          )}
-                        </div>
-
-                        {/* Status */}
-                        <div>
-                          {isPsych && pStat ? (
-                            <StatusBadge p={pStat} />
-                          ) : (
-                            <span className="text-xs text-slate-300">—</span>
-                          )}
-                        </div>
-
-                        {/* Care relationships */}
-                        <div>
-                          {isPsych ? (
-                            <span className="text-sm font-semibold text-indigo-700">
-                              {pStat?.careRelationshipsCount ?? (statsLoading ? '…' : '—')}
-                            </span>
-                          ) : (
-                            <span className="text-xs text-slate-300">—</span>
-                          )}
-                        </div>
-                        {/* Registration date */}
-                        <div>
-                          {isPsych && pStat?.createdAt ? (
-                            <span className="text-xs text-slate-500">
-                              {new Date(pStat.createdAt).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: '2-digit' })}
-                            </span>
-                          ) : (
-                            <span className="text-xs text-slate-300">—</span>
-                          )}
-                        </div>
-
-                        {/* Trial days left */}
-                        <div>
-                          {isPsych && pStat ? (
-                            pStat.isMaster || pStat.isSubscribed ? (
-                              <span className="text-xs text-slate-300">—</span>
-                            ) : pStat.createdAt ? (() => {
-                              const daysElapsed = Math.floor((Date.now() - pStat.createdAt) / 86400000);
-                              const daysLeft = Math.max(0, 14 - daysElapsed);
-                              return daysLeft > 0 ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-sky-100 text-sky-700">
-                                  <Clock size={10} />{daysLeft}d
+                        {/* ── Mobile card layout ─────────────────── */}
+                        <div className="lg:hidden px-4 py-3 space-y-2">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="flex-shrink-0 w-9 h-9 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-white text-sm font-bold">
+                              {u.name?.charAt(0)?.toUpperCase() || '?'}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-slate-800 truncate">{u.name || 'Sin nombre'}</p>
+                              <p className="text-xs text-slate-400 truncate">
+                                {!isTempEmail(u.email) ? u.email : <span className="italic text-slate-300">Sin email</span>}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              {isPsych ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-100 text-emerald-700 text-xs font-medium rounded-full">
+                                  <Shield size={10} /> Psic.
                                 </span>
                               ) : (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-600">
-                                  Expirado
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-100 text-purple-700 text-xs font-medium rounded-full">
+                                  Paciente
                                 </span>
-                              );
-                            })() : (
-                              <span className="text-xs text-slate-300">—</span>
-                            )
-                          ) : (
-                            <span className="text-xs text-slate-300">—</span>
+                              )}
+                              {isPsych && pStat && <ChevronRight size={14} className="text-slate-300" />}
+                            </div>
+                          </div>
+                          {isPsych && pStat && (
+                            <div className="flex items-center gap-2 flex-wrap pl-12">
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${PLAN_COLORS[pStat.plan] || 'bg-slate-100 text-slate-600'}`}>
+                                {pStat.planName}
+                              </span>
+                              <StatusBadge p={pStat} />
+                              <span className="text-xs text-slate-400">{pStat.careRelationshipsCount} pacientes</span>
+                              {pStat.createdAt && (
+                                <span className="text-xs text-slate-400">
+                                  {new Date(pStat.createdAt).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: '2-digit' })}
+                                </span>
+                              )}
+                            </div>
                           )}
                         </div>
-                        {/* Arrow */}
-                        <div>
-                          {isPsych && pStat && <ChevronRight size={15} className="text-slate-300" />}
+
+                        {/* ── Desktop table row ─────────────────── */}
+                        <div className="hidden lg:grid grid-cols-[2fr_2fr_1fr_1.5fr_1.5fr_1fr_1fr_1fr_28px] gap-3 items-center px-5 py-3">
+                          {/* Name */}
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="flex-shrink-0 w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-white text-xs font-bold">
+                              {u.name?.charAt(0)?.toUpperCase() || '?'}
+                            </div>
+                            <span className="text-sm font-medium text-slate-800 truncate">{u.name || 'Sin nombre'}</span>
+                          </div>
+
+                          {/* Email */}
+                          <span className="text-sm text-slate-500 truncate">
+                            {!isTempEmail(u.email) ? u.email : <span className="italic text-slate-300">Sin email</span>}
+                          </span>
+
+                          {/* Role */}
+                          <div>
+                            {isPsych ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-100 text-emerald-700 text-xs font-medium rounded-full">
+                                <Shield size={10} /> Psicólogo
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-100 text-purple-700 text-xs font-medium rounded-full">
+                                Paciente
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Plan */}
+                          <div>
+                            {isPsych && pStat ? (
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${PLAN_COLORS[pStat.plan] || 'bg-slate-100 text-slate-600'}`}>
+                                {pStat.planName}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-slate-300">—</span>
+                            )}
+                          </div>
+
+                          {/* Status */}
+                          <div>
+                            {isPsych && pStat ? (
+                              <StatusBadge p={pStat} />
+                            ) : (
+                              <span className="text-xs text-slate-300">—</span>
+                            )}
+                          </div>
+
+                          {/* Care relationships */}
+                          <div>
+                            {isPsych ? (
+                              <span className="text-sm font-semibold text-indigo-700">
+                                {pStat?.careRelationshipsCount ?? (statsLoading ? '…' : '—')}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-slate-300">—</span>
+                            )}
+                          </div>
+
+                          {/* Registration date */}
+                          <div>
+                            {isPsych && pStat?.createdAt ? (
+                              <span className="text-xs text-slate-500">
+                                {new Date(pStat.createdAt).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: '2-digit' })}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-slate-300">—</span>
+                            )}
+                          </div>
+
+                          {/* Trial days left */}
+                          <div>
+                            {isPsych && pStat ? (
+                              pStat.isMaster || pStat.isSubscribed ? (
+                                <span className="text-xs text-slate-300">—</span>
+                              ) : pStat.createdAt ? (() => {
+                                const daysElapsed = Math.floor((Date.now() - pStat.createdAt) / 86400000);
+                                const daysLeft = Math.max(0, 14 - daysElapsed);
+                                return daysLeft > 0 ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-sky-100 text-sky-700">
+                                    <Clock size={10} />{daysLeft}d
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-600">
+                                    Expirado
+                                  </span>
+                                );
+                              })() : (
+                                <span className="text-xs text-slate-300">—</span>
+                              )
+                            ) : (
+                              <span className="text-xs text-slate-300">—</span>
+                            )}
+                          </div>
+
+                          {/* Arrow */}
+                          <div>
+                            {isPsych && pStat && <ChevronRight size={15} className="text-slate-300" />}
+                          </div>
                         </div>
                       </div>
                     );
