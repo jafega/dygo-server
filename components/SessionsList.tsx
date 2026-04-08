@@ -377,19 +377,25 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
         );
         setSessions(actualSessions);
         
-        // Cargar session_entries para mostrar estados
-        const entriesResponse = await apiFetch(`${API_URL}/session-entries?creator_user_id=${psychologistId}`);
-        if (entriesResponse.ok) {
-          const entries = await entriesResponse.json();
-          const entriesMap = new Map();
-          entries.forEach((entry: any) => {
-            // Usar entry.id como clave para que coincida con session.session_entry_id
-            entriesMap.set(entry.id, { status: entry.data?.status || entry.status || 'pending' });
-          });
-          setSessionEntries(entriesMap);
+        // Cargar session_entries solo para las sesiones visibles (por IDs)
+        const entryIds = actualSessions
+          .map((s: Session) => (s as any).session_entry_id)
+          .filter(Boolean);
+        if (entryIds.length > 0) {
+          const entriesResponse = await apiFetch(`${API_URL}/session-entries?ids=${entryIds.join(',')}`);
+          if (entriesResponse.ok) {
+            const entries = await entriesResponse.json();
+            const entriesMap = new Map();
+            entries.forEach((entry: any) => {
+              entriesMap.set(entry.id, { status: entry.data?.status || entry.status || 'pending' });
+            });
+            setSessionEntries(entriesMap);
+          }
+        } else {
+          setSessionEntries(new Map());
         }
         
-        // Load patient names
+        // Load patient names in batch
         const patientIds = new Set<string>();
         actualSessions.forEach((s: Session) => {
           const pid = s.patient_user_id || s.patientId;
@@ -397,15 +403,17 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
         });
         
         const patientsMap = new Map<string, Patient>();
-        for (const pid of patientIds) {
+        if (patientIds.size > 0) {
           try {
-            const patientResponse = await apiFetch(`${API_URL}/users?id=${pid}`);
-            if (patientResponse.ok) {
-              const patientData = await patientResponse.json();
-              patientsMap.set(pid, patientData);
+            const batchResponse = await apiFetch(`${API_URL}/users?ids=${Array.from(patientIds).join(',')}`);
+            if (batchResponse.ok) {
+              const batchData = await batchResponse.json();
+              (Array.isArray(batchData) ? batchData : [batchData]).forEach((p: Patient) => {
+                if (p?.id) patientsMap.set(p.id, p);
+              });
             }
           } catch (err) {
-            console.error('Error loading patient:', pid, err);
+            console.error('Error loading patients batch:', err);
           }
         }
         setPatients(patientsMap);

@@ -4,6 +4,44 @@ const apiFetch = AuthService.apiFetch;
 import { API_URL, USE_BACKEND, ALLOW_LOCAL_FALLBACK } from './config';
 import { decompressTranscript } from './genaiService';
 
+// --------------- Request deduplicator ---------------
+// Reuses in-flight promises for identical GET requests so multiple
+// components mounting at the same time don't fire duplicate calls.
+const _inflight = new Map<string, Promise<Response>>();
+
+export const dedupedFetch = (url: string, init?: RequestInit): Promise<Response> => {
+  const method = (init?.method || 'GET').toUpperCase();
+  if (method !== 'GET') return apiFetch(url, init);
+  const key = url;
+  const existing = _inflight.get(key);
+  if (existing) return existing;
+  const p = apiFetch(url, init).finally(() => { _inflight.delete(key); });
+  _inflight.set(key, p);
+  return p;
+};
+
+// --------------- Short-lived data cache ---------------
+interface CacheEntry<T> { data: T; ts: number; }
+const _dataCache = new Map<string, CacheEntry<any>>();
+const DATA_CACHE_TTL = 15000; // 15s
+
+export const cachedGet = async <T>(url: string, ttl = DATA_CACHE_TTL): Promise<T | null> => {
+  const hit = _dataCache.get(url);
+  if (hit && Date.now() - hit.ts < ttl) return hit.data as T;
+  const res = await dedupedFetch(url);
+  if (!res.ok) return null;
+  const data = await res.json();
+  _dataCache.set(url, { data, ts: Date.now() });
+  return data as T;
+};
+
+export const invalidateCache = (urlPrefix?: string) => {
+  if (!urlPrefix) { _dataCache.clear(); return; }
+  for (const key of _dataCache.keys()) {
+    if (key.startsWith(urlPrefix)) _dataCache.delete(key);
+  }
+};
+
 const ENTRIES_KEY = 'ai_diary_entries_v2';
 const GOALS_KEY = 'ai_diary_goals_v2';
 const SETTINGS_KEY = 'ai_diary_settings_v3';

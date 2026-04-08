@@ -9,13 +9,15 @@ import { fileURLToPath } from 'url';
 import Stripe from 'stripe';
 import dotenv from 'dotenv';
 import Busboy from 'busboy';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { google } from 'googleapis';
+// PERFORMANCE: Heavy libraries loaded lazily inside their route handlers to reduce cold start.
+// Pattern: const { X } = await import('library'); inside the handler that needs it.
+// import { GoogleGenerativeAI } from '@google/generative-ai'; // lazy — see getGenAI()
+// import { google } from 'googleapis';                        // lazy — see getGoogleApis()
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
-import archiver from 'archiver';
-import PDFDocument from 'pdfkit';
-import { Resend } from 'resend';
+// import archiver from 'archiver';                            // lazy — only /api/invoices/zip
+// import PDFDocument from 'pdfkit';                           // lazy — only /api/signatures/:id/send-email
+// import { Resend } from 'resend';                            // lazy — only email routes
 
 // --- CONFIGURACIÓN PARA ES MODULES ---
 // En ES Modules no existe __dirname, así que lo recreamos:
@@ -47,8 +49,26 @@ try {
   console.warn('⚠️ mammoth not available - .docx text extraction disabled');
 }
 
-// Inicializar Google Generative AI (Gemini)
-const genAI = process.env.GEMINI_API_KEY ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY) : null;
+// --- LAZY SINGLETONS for heavy libraries ---
+let _genAI = null;
+let _googleApis = null;
+
+async function getGenAI() {
+  if (!process.env.GEMINI_API_KEY) return null;
+  if (!_genAI) {
+    const { GoogleGenerativeAI } = await import('@google/generative-ai');
+    _genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  }
+  return _genAI;
+}
+
+async function getGoogleApis() {
+  if (!_googleApis) {
+    const mod = await import('googleapis');
+    _googleApis = mod.google;
+  }
+  return _googleApis;
+}
 
 // --- GOOGLE OAUTH / CALENDAR ---
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
@@ -360,23 +380,58 @@ const validateSessionToken = async (token) => {
       if (userInfoRes.ok) {
         const supUser = await userInfoRes.json();
         if (supUser?.id) {
-          // Find the app user: first by auth_user_id (fast), then by email (fallback for
-          // users created before auth_user_id tracking was added).
-          // Use the in-memory cache when available (populated during initializeSupabase)
-          // to avoid a full SELECT * on every cross-instance token validation.
-          const users = (supabaseDbCache?.users?.length > 0)
-            ? supabaseDbCache.users
-            : await readSupabaseTable('users');
-          let appUser = (users || []).find(u =>
-            u.auth_user_id && String(u.auth_user_id) === String(supUser.id)
-          );
+          // Find the app user: direct Supabase query instead of loading entire users table.
+          // First try by auth_user_id (indexed), then by email (indexed).
+          let appUser = null;
+
+          // Fast path: use in-memory cache if populated
+          if (supabaseDbCache?.users?.length > 0) {
+            appUser = supabaseDbCache.users.find(u =>
+              u.auth_user_id && String(u.auth_user_id) === String(supUser.id)
+            );
+            if (!appUser && supUser.email) {
+              const normalizedSupEmail = String(supUser.email).trim().toLowerCase();
+              appUser = supabaseDbCache.users.find(u => {
+                const uEmail = String(u.user_email || u.email || '').trim().toLowerCase();
+                return uEmail && uEmail === normalizedSupEmail;
+              });
+            }
+          }
+
+          // Slow path: targeted Supabase query (NOT SELECT * from all users)
+          if (!appUser) {
+            try {
+              const { data: byAuthId } = await supabaseAdmin.from('users')
+                .select('id, user_email, auth_user_id')
+                .eq('auth_user_id', String(supUser.id))
+                .maybeSingle();
+              if (byAuthId) {
+                appUser = byAuthId;
+              } else if (supUser.email) {
+                const { data: byEmail } = await supabaseAdmin.from('users')
+                  .select('id, user_email, auth_user_id')
+                  .eq('user_email', String(supUser.email).trim().toLowerCase())
+                  .maybeSingle();
+                if (byEmail) appUser = byEmail;
+              }
+            } catch (dbErr) {
+              console.warn('⚠️ [validateSessionToken] Direct Supabase user lookup failed:', dbErr?.message);
+              // Ultimate fallback: full table read (legacy behavior)
+              const users = await readSupabaseTable('users');
+              appUser = (users || []).find(u =>
+                u.auth_user_id && String(u.auth_user_id) === String(supUser.id)
+              );
+              if (!appUser && supUser.email) {
+                const normalizedSupEmail = String(supUser.email).trim().toLowerCase();
+                appUser = (users || []).find(u => {
+                  const uEmail = String(u.user_email || u.email || '').trim().toLowerCase();
+                  return uEmail && uEmail === normalizedSupEmail;
+                });
+              }
+            }
+          }
+
           if (!appUser && supUser.email) {
-            // Fallback: match by email when auth_user_id is not yet populated
-            const normalizedSupEmail = String(supUser.email).trim().toLowerCase();
-            appUser = (users || []).find(u => {
-              const uEmail = String(u.user_email || u.email || '').trim().toLowerCase();
-              return uEmail && uEmail === normalizedSupEmail;
-            });
             // Backfill auth_user_id so the fast path works on the next request
             if (appUser?.id) {
               supabaseAdmin.from('users')
@@ -1783,17 +1838,21 @@ async function loadSupabaseCache() {
     }
   };
 
+  // --- PERFORMANCE: En serverless, cargar solo tablas esenciales para auth/access control ---
+  // session_entry NUNCA se carga en init — se consulta filtrada bajo demanda (era 44% del tiempo de DB)
   const usersRows = await readTableLocal('users');
-  // No cargar entries durante la inicialización - se cargan bajo demanda
-  const goalsRows = await readTableLocal('goals');
-  const invitationsRows = await readTableLocal('invitations');
-  const settingsRows = await readTableLocal('settings');
-  const sessionsRows = await readTableLocal('sessions');
-  const sessionEntriesRows = await readTableLocal('session_entry');
-  const invoicesRows = await readTableLocal('invoices');
   const relationshipsRows = await readTableLocal('care_relationships');
-  const profilesRows = await readTableLocal('psychologist_profiles');
   const subscriptionsRows = await readTableLocal('subscriptions');
+
+  // Tablas secundarias: cargar solo fuera de serverless o si el init no es crítico
+  const isQuickInit = IS_SERVERLESS;
+  const goalsRows = isQuickInit ? [] : await readTableLocal('goals');
+  const invitationsRows = isQuickInit ? [] : await readTableLocal('invitations');
+  const settingsRows = isQuickInit ? [] : await readTableLocal('settings');
+  const sessionsRows = isQuickInit ? [] : await readTableLocal('sessions');
+  const sessionEntriesRows = []; // NEVER bulk-load — queries go directly to Supabase with filters
+  const invoicesRows = isQuickInit ? [] : await readTableLocal('invoices');
+  const profilesRows = isQuickInit ? [] : await readTableLocal('psychologist_profiles');
 
   const users = usersRows.map(normalizeSupabaseRow);
   const entries = []; // No cargar entries aquí - lazy loading
@@ -3709,6 +3768,7 @@ app.post('/api/users/:patientId/invite-to-mainds', authenticateRequest, async (r
     const frontendUrl = process.env.FRONTEND_URL || 'https://mi.mainds.app';
     const inviteUrl = `${frontendUrl}/?invite_token=${token}`;
 
+    const { Resend } = await import('resend');
     const resend = new Resend(process.env.RESEND_API_KEY);
 
     await resend.emails.send({
@@ -4828,7 +4888,8 @@ app.post('/api/stripe-create-portal-session', authenticateRequest, handleCreateP
 // --- GOOGLE CALENDAR HELPERS ---
 // =============================================================================
 
-function createOAuth2Client() {
+async function createOAuth2Client() {
+  const google = await getGoogleApis();
   return new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI);
 }
 
@@ -4881,12 +4942,13 @@ async function saveGoogleTokensForUser(userId, tokens) {
 async function getCalendarClient(userId) {
   const tokens = await getGoogleTokensForUser(userId);
   if (!tokens) return null;
-  const oauth2Client = createOAuth2Client();
+  const oauth2Client = await createOAuth2Client();
   oauth2Client.setCredentials(tokens);
   oauth2Client.on('tokens', async (newTokens) => {
     const merged = { ...tokens, ...newTokens };
     await saveGoogleTokensForUser(userId, merged);
   });
+  const google = await getGoogleApis();
   return google.calendar({ version: 'v3', auth: oauth2Client });
 }
 
@@ -5027,7 +5089,7 @@ app.get('/api/google/auth-url', authenticateRequest, (req, res) => {
   if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
     return res.status(503).json({ error: 'Google OAuth no configurado en el servidor' });
   }
-  const oauth2Client = createOAuth2Client();
+  const oauth2Client = await createOAuth2Client();
   // Build CSRF-safe state: base64(userId:timestamp:nonce) signed with HMAC-SHA256
   const nonce = crypto.randomBytes(16).toString('hex');
   const payload = `${userId}:${Date.now()}:${nonce}`;
@@ -5079,7 +5141,7 @@ app.get('/api/google/callback', async (req, res) => {
   }
 
   try {
-    const oauth2Client = createOAuth2Client();
+    const oauth2Client = await createOAuth2Client();
     const { tokens } = await oauth2Client.getToken(String(code));
     await saveGoogleTokensForUser(userId, tokens);
     console.log(`✅ [Google OAuth] Tokens guardados para usuario: ${userId}`);
@@ -5110,7 +5172,7 @@ app.delete('/api/google/disconnect', authenticateRequest, async (req, res) => {
   try {
     const tokens = await getGoogleTokensForUser(String(userId));
     if (tokens?.access_token) {
-      const oauth2Client = createOAuth2Client();
+      const oauth2Client = await createOAuth2Client();
       oauth2Client.setCredentials(tokens);
       await oauth2Client.revokeCredentials().catch(() => {});
     }
@@ -5128,7 +5190,8 @@ app.delete('/api/google/disconnect', authenticateRequest, async (req, res) => {
 
 const GMAIL_REDIRECT_URI = process.env.GMAIL_REDIRECT_URI || 'http://localhost:3001/api/gmail/callback';
 
-function createGmailOAuth2Client() {
+async function createGmailOAuth2Client() {
+  const google = await getGoogleApis();
   return new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GMAIL_REDIRECT_URI);
 }
 
@@ -5186,7 +5249,7 @@ app.get('/api/gmail/auth-url', authenticateRequest, (req, res) => {
   if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
     return res.status(503).json({ error: 'Google OAuth no configurado en el servidor' });
   }
-  const oauth2Client = createGmailOAuth2Client();
+  const oauth2Client = await createGmailOAuth2Client();
   // Build CSRF-safe state: base64(userId:timestamp:nonce) signed with HMAC-SHA256
   const nonce = crypto.randomBytes(16).toString('hex');
   const payload = `${userId}:${Date.now()}:${nonce}`;
@@ -5237,7 +5300,7 @@ app.get('/api/gmail/callback', async (req, res) => {
   }
 
   try {
-    const oauth2Client = createGmailOAuth2Client();
+    const oauth2Client = await createGmailOAuth2Client();
     const { tokens } = await oauth2Client.getToken(String(code));
     await saveGmailTokensForUser(userId, tokens);
     console.log(`✅ [Gmail OAuth] Tokens guardados para usuario: ${userId}`);
@@ -5263,7 +5326,7 @@ app.delete('/api/gmail/disconnect', authenticateRequest, async (req, res) => {
   try {
     const tokens = await getGmailTokensForUser(String(userId));
     if (tokens?.access_token) {
-      const oauth2Client = createGmailOAuth2Client();
+      const oauth2Client = await createGmailOAuth2Client();
       oauth2Client.setCredentials(tokens);
       await oauth2Client.revokeCredentials().catch(() => {});
     }
@@ -5296,13 +5359,14 @@ app.post('/api/gmail/send', authenticateRequest, async (req, res) => {
   }
 
   try {
-    const oauth2Client = createGmailOAuth2Client();
+    const oauth2Client = await createGmailOAuth2Client();
     oauth2Client.setCredentials(tokens);
     oauth2Client.on('tokens', async (newTokens) => {
       const merged = { ...tokens, ...newTokens };
       await saveGmailTokensForUser(String(userId), merged);
     });
 
+    const google = await getGoogleApis();
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
     // Build RFC 2822 message
@@ -5716,6 +5780,7 @@ app.get('/api/users/:id', authenticateRequest, async (req, res) => {
 app.get('/api/users', authenticateRequest, async (req, res) => {
   try {
     const id = req.query.id || req.query.userId;
+    const ids = req.query.ids; // comma-separated batch
     const email = req.query.email;
 
     // --- Authorization (BOLA/IDOR prevention) ---
@@ -5774,6 +5839,36 @@ app.get('/api/users', authenticateRequest, async (req, res) => {
         user.isPsychologist = user.is_psychologist;
 
         return res.json(stripSensitiveFields(user));
+      }
+
+      // Batch fetch by IDs
+      if (ids) {
+        const idList = String(ids).split(',').map(s => s.trim()).filter(Boolean);
+        // Auth: only allow fetching users that are care-relationship partners
+        const rels = (supabaseDbCache?.careRelationships?.length ? supabaseDbCache.careRelationships : null)
+          || getDb().careRelationships || [];
+        const allowedIds = idList.filter(uid =>
+          String(uid) === String(authedId) ||
+          rels.some(r =>
+            (r.psychologist_user_id === authedId && r.patient_user_id === uid) ||
+            (r.psychologist_user_id === uid && r.patient_user_id === authedId)
+          )
+        );
+        if (allowedIds.length === 0) return res.json([]);
+        const { data: batchUsers, error: batchErr } = await supabaseAdmin.from('users')
+          .select('*')
+          .in('id', allowedIds);
+        if (batchErr) {
+          console.error('❌ Batch users error:', batchErr);
+          return res.status(500).json({ error: 'Error al obtener usuarios' });
+        }
+        const result = (batchUsers || []).map(row => {
+          const u = normalizeSupabaseRow(row);
+          if (u.is_psychologist === undefined || u.is_psychologist === null) u.is_psychologist = false;
+          u.isPsychologist = u.is_psychologist;
+          return stripSensitiveFields(u);
+        });
+        return res.json(result);
       }
 
       if (email) {
@@ -8052,22 +8147,25 @@ app.get('/api/invoices', authenticateRequest, async (req, res) => {
     // Consultar Supabase si está disponible
     if (supabaseAdmin) {
       try {
-        const invoicesRows = await readTable('invoices');
-        console.log(`📋 [GET /api/invoices] Filas leídas de Supabase: ${invoicesRows.length}`);
-        if (invoicesRows.length > 0) {
-          console.log('📋 [GET /api/invoices] Primera fila raw:', JSON.stringify(invoicesRows[0], null, 2).substring(0, 500));
+        // Push filters down to Supabase query to avoid loading all invoices
+        let query = supabaseAdmin.from('invoices').select('*');
+        if (psychologistId) {
+          query = query.eq('psychologist_user_id', psychologistId);
         }
-        invoices = invoicesRows.map(normalizeSupabaseRow);
+        if (patientId) {
+          query = query.eq('patient_user_id', patientId);
+        }
+        if (startDate) {
+          query = query.gte('invoice_date', startDate);
+        }
+        if (endDate) {
+          query = query.lte('invoice_date', endDate);
+        }
+        const { data: invoicesRows, error: invErr } = await query;
+        if (invErr) throw invErr;
+        console.log(`📋 [GET /api/invoices] Filas leídas de Supabase: ${(invoicesRows || []).length}`);
+        invoices = (invoicesRows || []).map(normalizeSupabaseRow);
         console.log(`📊 [GET /api/invoices] Encontradas ${invoices.length} facturas en Supabase después de normalizar`);
-        if (invoices.length > 0) {
-          console.log('📊 [GET /api/invoices] Primera factura normalizada:', {
-            id: invoices[0].id,
-            psychologist_user_id: invoices[0].psychologist_user_id,
-            psychologistId: invoices[0].psychologistId,
-            patient_user_id: invoices[0].patient_user_id,
-            invoiceNumber: invoices[0].invoiceNumber
-          });
-        }
       } catch (err) {
         console.error('Error reading invoices from Supabase:', err);
         // Fallback a DB local si falla Supabase
@@ -11000,6 +11098,7 @@ app.get('/api/invoices/zip', authenticateRequest, async (req, res) => {
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="facturas_${startDate}_${endDate}.zip"`);
 
+    const archiver = (await import('archiver')).default;
     const archive = archiver('zip', { zlib: { level: 6 } });
     archive.on('error', err => {
       console.error('❌ [ZIP] Error en archiver:', err);
@@ -12689,7 +12788,7 @@ app.post('/api/relationships/:id/historical-documents/generate-summary', authent
           // Para PDFs y archivos multimedia, usar Gemini para extraer el contenido
           if (doc.fileType === 'application/pdf' || doc.fileType.startsWith('audio/') || doc.fileType.startsWith('video/')) {
             try {
-              const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+              const model = (await getGenAI()).getGenerativeModel({ model: 'gemini-2.5-flash' });
               
               const promptText = doc.fileType === 'application/pdf'
                 ? 'Extrae todo el texto de este documento PDF. Proporciona únicamente el contenido textual sin añadir comentarios adicionales.'
@@ -12761,7 +12860,7 @@ ${sanitizedContent || '[Sin contenido disponible - solo metadatos]'}
     const docsInfo = docsContent.join('\n\n');
 
     // Generar resumen con Gemini
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const model = (await getGenAI()).getGenerativeModel({ model: 'gemini-2.5-flash' });
     
     const prompt = `Eres un psicólogo clínico experto. Se te proporcionan documentos históricos de un paciente que está siendo transferido desde otro terapeuta. 
 
@@ -15300,7 +15399,7 @@ app.post('/api/transcribe', authenticateRequest, async (req, res) => {
           console.log('📄 Extrayendo texto de PDF con Gemini...');
           
           try {
-            const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+            const model = (await getGenAI()).getGenerativeModel({ model: 'gemini-2.5-flash' });
             
             const result = await model.generateContent([
               {
@@ -15326,7 +15425,7 @@ app.post('/api/transcribe', authenticateRequest, async (req, res) => {
           console.log('🎤 Transcribiendo audio con Gemini...');
 
           try {
-            const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+            const model = (await getGenAI()).getGenerativeModel({ model: 'gemini-2.5-flash' });
             
             const result = await model.generateContent([
               {
@@ -15496,11 +15595,17 @@ app.post('/api/session-entries', authenticateRequest, async (req, res) => {
 
 app.get('/api/session-entries', authenticateRequest, async (req, res) => {
   try {
-    const { session_id, target_user_id, creator_user_id } = req.query;
+    const { session_id, target_user_id, creator_user_id, ids } = req.query;
     const db = getDb();
 
     let entries = db.sessionEntries || [];
     console.log(`📖 [GET /api/session-entries] Total entries in cache: ${entries.length}`);
+
+    if (ids) {
+      const idList = String(ids).split(',').map(s => s.trim()).filter(Boolean);
+      entries = entries.filter(e => idList.includes(e.id));
+      console.log(`📖 [GET /api/session-entries] Filtered by ids (${idList.length}): ${entries.length} entries`);
+    }
 
     if (session_id) {
       entries = entries.filter(e => e.session_id === session_id || e.data?.session_id === session_id);
@@ -15518,11 +15623,15 @@ app.get('/api/session-entries', authenticateRequest, async (req, res) => {
     }
     
     // Si no hay entradas en caché, consultar Supabase directamente
-    if (entries.length === 0 && supabaseAdmin && (session_id || target_user_id || creator_user_id)) {
+    if (entries.length === 0 && supabaseAdmin && (session_id || target_user_id || creator_user_id || ids)) {
       console.log(`🔍 [GET /api/session-entries] No entries in cache, querying Supabase...`);
       try {
-        let query = supabaseAdmin.from('session_entry').select('*');
+        let query = supabaseAdmin.from('session_entry').select('id, status, data, creator_user_id, target_user_id, session_id');
         
+        if (ids) {
+          const idList = String(ids).split(',').map(s => s.trim()).filter(Boolean);
+          query = query.in('id', idList);
+        }
         if (session_id) {
           query = query.or(`session_id.eq.${session_id},data->>session_id.eq.${session_id}`);
         }
@@ -17023,6 +17132,7 @@ app.post('/api/signatures/:id/send-email', authenticateRequest, async (req, res)
     const docContent = stripMarkdown(sig.content || '');
     const docTitle = (sig.content || '').split('\n')[0].replace(/^#+\s*/, '').trim() || 'Documento';
 
+    const PDFDocument = (await import('pdfkit')).default;
     const pdfBuffer = await new Promise((resolve, reject) => {
       const chunks = [];
       const doc = new PDFDocument({ margin: 60, size: 'A4' });

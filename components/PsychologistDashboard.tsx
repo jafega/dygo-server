@@ -80,9 +80,10 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
         setPatients(patientsData);
       }
 
-      // Cargar TODAS las facturas sin filtro de fecha para el gráfico de 12 meses y métricas globales
-      // El filtro de rango se aplica en el frontend para la métrica "Facturado en Período"
-      const invoicesResponse = await apiFetch(`${API_URL}/invoices?psychologist_user_id=${psychologistId}`);
+      // Cargar facturas de los últimos 13 meses (cubre gráfico de 12 meses + margen)
+      const invoiceSince = new Date();
+      invoiceSince.setMonth(invoiceSince.getMonth() - 13);
+      const invoicesResponse = await apiFetch(`${API_URL}/invoices?psychologist_user_id=${psychologistId}&startDate=${invoiceSince.toISOString().split('T')[0]}`);
       if (invoicesResponse.ok) {
         const invoicesData = await invoicesResponse.json();
         setInvoices(invoicesData);
