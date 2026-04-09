@@ -229,11 +229,11 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   };
 
   const loadClinicalHistory = async () => {
-    if (!patientUserId || !currentPsychologistId) return;
+    if (!patientUserId) return;
     
     setIsLoadingHistory(true);
     try {
-      const response = await apiFetch(`${API_URL}/session-entries?target_user_id=${patientUserId}&creator_user_id=${currentPsychologistId}`);
+      const response = await apiFetch(`${API_URL}/session-entries?target_user_id=${patientUserId}`);
       if (response.ok) {
         const entries = await response.json();
         // Cargar las sesiones asociadas para obtener las fechas
