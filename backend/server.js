@@ -13671,32 +13671,39 @@ app.get('/api/sessions', authenticateRequest, async (req, res) => {
       let sessions = (sessionsData || []).map(row => {
         const normalized = normalizeSupabaseRow(row);
         if (row.status) normalized.status = row.status;
+        // Convertir usando la zona horaria guardada en la sesión para que la hora mostrada
+        // coincida con la hora que el psicólogo introdujo en la agenda.
+        const sessionTz = normalized.schedule_timezone || 'Europe/Madrid';
         if (row.starts_on) {
-          // NO usar toTimeString() porque aplica zona horaria local
-          // Extraer la hora directamente del string ISO
-          const startsISO = row.starts_on;
-          const match = startsISO.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
-          if (match) {
-            normalized.date = match[1];
-            normalized.startTime = match[2];
-          } else {
-            // Fallback si el formato es diferente
-            const startsDate = new Date(row.starts_on);
-            normalized.date = startsDate.toISOString().split('T')[0];
-            normalized.startTime = startsDate.toISOString().split('T')[1].substring(0, 5);
+          const startsDate = new Date(row.starts_on);
+          try {
+            normalized.date = startsDate.toLocaleDateString('sv-SE', { timeZone: sessionTz }); // YYYY-MM-DD
+            normalized.startTime = startsDate.toLocaleTimeString('es-ES', {
+              timeZone: sessionTz,
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false
+            });
+            normalized.timezone = sessionTz;
+          } catch {
+            // Timezone inválida — caer a UTC
+            normalized.date = row.starts_on.split('T')[0];
+            normalized.startTime = row.starts_on.substring(11, 16);
+            normalized.timezone = 'UTC';
           }
           normalized.starts_on = row.starts_on;
         }
         if (row.ends_on) {
-          // Extraer la hora directamente del string ISO sin conversiones de zona horaria
-          const endsISO = row.ends_on;
-          const match = endsISO.match(/T(\d{2}:\d{2})/);
-          if (match) {
-            normalized.endTime = match[1];
-          } else {
-            // Fallback
-            const endsDate = new Date(row.ends_on);
-            normalized.endTime = endsDate.toISOString().split('T')[1].substring(0, 5);
+          const endsDate = new Date(row.ends_on);
+          try {
+            normalized.endTime = endsDate.toLocaleTimeString('es-ES', {
+              timeZone: sessionTz,
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false
+            });
+          } catch {
+            normalized.endTime = row.ends_on.substring(11, 16);
           }
           normalized.ends_on = row.ends_on;
         }
