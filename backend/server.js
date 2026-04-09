@@ -15666,8 +15666,8 @@ app.post('/api/session-entries', authenticateRequest, async (req, res) => {
     if (supabaseAdmin) {
       const { data: existingRows } = await supabaseAdmin
         .from('session_entry')
-        .select('id, status, data, creator_user_id, target_user_id, session_id, transcript, summary, created_at, updated_at')
-        .or(`session_id.eq.${session_id},data->>session_id.eq.${session_id}`)
+        .select('id, status, data, creator_user_id, target_user_id, transcript, summary, created_at')
+        .eq('data->>session_id', session_id)
         .limit(1);
       if (existingRows && existingRows.length > 0) {
         const row = existingRows[0];
@@ -15819,7 +15819,7 @@ app.get('/api/session-entries', authenticateRequest, async (req, res) => {
         try {
           const { data: supabaseEntries, error } = await supabaseAdmin
             .from('session_entry')
-            .select('id, status, data, creator_user_id, target_user_id, session_id, transcript, summary, created_at, updated_at')
+            .select('id, status, data, creator_user_id, target_user_id, transcript, summary, created_at')
             .in('id', missingIds);
           if (!error && supabaseEntries?.length > 0) {
             const extra = supabaseEntries.map(row => {
@@ -15851,14 +15851,14 @@ app.get('/api/session-entries', authenticateRequest, async (req, res) => {
     if (entries.length === 0 && supabaseAdmin && !ids && (session_id || target_user_id || creator_user_id)) {
       console.log(`🔍 [GET /api/session-entries] No entries in cache, querying Supabase...`);
       try {
-        let query = supabaseAdmin.from('session_entry').select('id, status, data, creator_user_id, target_user_id, session_id, transcript, summary, created_at, updated_at');
+        let query = supabaseAdmin.from('session_entry').select('id, status, data, creator_user_id, target_user_id, transcript, summary, created_at');
         
         if (ids) {
           const idList = String(ids).split(',').map(s => s.trim()).filter(Boolean);
           query = query.in('id', idList);
         }
         if (session_id) {
-          query = query.or(`session_id.eq.${session_id},data->>session_id.eq.${session_id}`);
+          query = query.eq('data->>session_id', session_id);
         }
         if (target_user_id) {
           query = query.eq('target_user_id', target_user_id);
@@ -15999,7 +15999,7 @@ app.patch('/api/session-entries/:id', authenticateRequest, async (req, res) => {
       try {
         const { data: rows, error } = await supabaseAdmin
           .from('session_entry')
-          .select('id, status, data, creator_user_id, target_user_id, session_id, transcript, summary, created_at, updated_at')
+          .select('id, status, data, creator_user_id, target_user_id, transcript, summary, created_at')
           .eq('id', id)
           .limit(1);
         if (!error && rows && rows.length > 0) {
@@ -16049,15 +16049,13 @@ app.patch('/api/session-entries/:id', authenticateRequest, async (req, res) => {
         try {
           const { error: upsertError } = await supabaseAdmin.from('session_entry').upsert({
             id,
-            session_id: newEntry.session_id,
             creator_user_id: newEntry.creator_user_id,
             target_user_id: newEntry.target_user_id,
             status: newEntry.status,
             transcript: newEntry.transcript,
             summary: newEntry.summary,
-            data: newEntry.data,
+            data: { ...newEntry.data, session_id: newEntry.session_id },
             created_at: now,
-            updated_at: now,
           }, { onConflict: 'id' });
           if (upsertError) {
             console.error(`❌ [PATCH session-entry] Upsert error:`, upsertError);
