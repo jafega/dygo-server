@@ -15666,7 +15666,7 @@ app.post('/api/session-entries', authenticateRequest, async (req, res) => {
     if (supabaseAdmin) {
       const { data: existingRows } = await supabaseAdmin
         .from('session_entry')
-        .select('id, status, data, creator_user_id, target_user_id, transcript, summary, created_at')
+        .select('id, status, data, creator_user_id, target_user_id, transcript, summary')
         .eq('data->>session_id', session_id)
         .limit(1);
       if (existingRows && existingRows.length > 0) {
@@ -15675,7 +15675,7 @@ app.post('/api/session-entries', authenticateRequest, async (req, res) => {
         if (row.status) { existing.status = row.status; }
         if (row.transcript !== undefined) existing.transcript = row.transcript;
         if (row.summary !== undefined) existing.summary = row.summary;
-        if (row.created_at !== undefined) existing.created_at = row.created_at;
+        existing.created_at = row.data?.created_at || null;
         console.log('⚠️ [POST session-entries] Duplicate blocked (Supabase) — returning existing:', existing.id);
         if (!db.sessionEntries) db.sessionEntries = [];
         const inCache = db.sessionEntries.find(e => e.id === existing.id);
@@ -15819,7 +15819,7 @@ app.get('/api/session-entries', authenticateRequest, async (req, res) => {
         try {
           const { data: supabaseEntries, error } = await supabaseAdmin
             .from('session_entry')
-            .select('id, status, data, creator_user_id, target_user_id, transcript, summary, created_at')
+            .select('id, status, data, creator_user_id, target_user_id, transcript, summary')
             .in('id', missingIds);
           if (!error && supabaseEntries?.length > 0) {
             const extra = supabaseEntries.map(row => {
@@ -15827,8 +15827,7 @@ app.get('/api/session-entries', authenticateRequest, async (req, res) => {
               if (row.status) { normalized.status = row.status; if (normalized.data) normalized.data.status = row.status; }
               if (row.transcript !== undefined) normalized.transcript = row.transcript;
               if (row.summary !== undefined) normalized.summary = row.summary;
-              if (row.created_at !== undefined) normalized.created_at = row.created_at;
-              if (row.updated_at !== undefined) normalized.updated_at = row.updated_at;
+              normalized.created_at = row.data?.created_at || null;
               return normalized;
             });
             // Actualizar cache
@@ -15851,7 +15850,7 @@ app.get('/api/session-entries', authenticateRequest, async (req, res) => {
     if (supabaseAdmin && !ids && (session_id || target_user_id || creator_user_id)) {
       console.log(`🔍 [GET /api/session-entries] Querying Supabase to ensure cache completeness...`);
       try {
-        let query = supabaseAdmin.from('session_entry').select('id, status, data, creator_user_id, target_user_id, transcript, summary, created_at');
+        let query = supabaseAdmin.from('session_entry').select('id, status, data, creator_user_id, target_user_id, transcript, summary');
         
         if (ids) {
           const idList = String(ids).split(',').map(s => s.trim()).filter(Boolean);
@@ -15879,8 +15878,7 @@ app.get('/api/session-entries', authenticateRequest, async (req, res) => {
             }
             if (row.transcript !== undefined) normalized.transcript = row.transcript;
             if (row.summary !== undefined) normalized.summary = row.summary;
-            if (row.created_at !== undefined) normalized.created_at = row.created_at;
-            if (row.updated_at !== undefined) normalized.updated_at = row.updated_at;
+            normalized.created_at = row.data?.created_at || null;
             return normalized;
           });
           
@@ -15957,8 +15955,7 @@ app.get('/api/session-entries/:id', authenticateRequest, async (req, res) => {
           }
           if (row.transcript !== undefined) entry.transcript = row.transcript;
           if (row.summary !== undefined) entry.summary = row.summary;
-          if (row.created_at !== undefined) entry.created_at = row.created_at;
-          if (row.updated_at !== undefined) entry.updated_at = row.updated_at;
+          entry.created_at = row.data?.created_at || null;
           console.log(`✅ [GET /api/session-entries/${id}] Entry found in Supabase`);
           
           // Agregar al caché
