@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { includesNormalized } from '../services/textUtils';
-import { X, User, Calendar, Phone, Mail, FileText, DollarSign, Settings, Tag, Trash2, Save, Edit2, CreditCard, MapPin, Cake, Clock as ClockIcon, BookOpen, Sparkles, CheckCircle, AlertCircle, Download, Loader2, Ticket, Building2, TrendingUp, BarChart3, Upload, File, XCircle, Send, Scroll, Eye, Award, Shield, Lock, ClipboardList, Link, ExternalLink } from 'lucide-react';
+import { X, User, Calendar, Phone, Mail, FileText, DollarSign, Settings, Tag, Trash2, Save, Edit2, CreditCard, MapPin, Cake, Clock as ClockIcon, BookOpen, Sparkles, CheckCircle, AlertCircle, Download, Loader2, Ticket, Building2, TrendingUp, BarChart3, Upload, File, XCircle, Send, Scroll, Eye, Award, Shield, Lock, ClipboardList, Link, ExternalLink, Plus } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser, apiFetch } from '../services/authService';
 import InsightsPanel from './InsightsPanel';
@@ -10,6 +10,7 @@ import PatientTimeline from './PatientTimeline';
 import BonosPanel from './BonosPanel';
 import { AddressAutocomplete } from './AddressAutocomplete';
 import UpgradeModal from './UpgradeModal';
+import SessionDetailsModal from './SessionDetailsModal';
 import { HistoricalDocument, HistoricalDocumentsSummary } from '../types';
 import { normalizePhone, detectDefaultPrefix } from '../services/phoneUtils';
 
@@ -94,6 +95,12 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
 
+  // Session entry picker state (Add Entry flow)
+  const [showSessionPicker, setShowSessionPicker] = useState(false);
+  const [sessionsForPicker, setSessionsForPicker] = useState<any[]>([]);
+  const [isLoadingSessionsForPicker, setIsLoadingSessionsForPicker] = useState(false);
+  const [sessionEntryEditor, setSessionEntryEditor] = useState<any | null>(null);
+
   // LOPD / RGPD compliance state
   const [isLoadingLOPD, setIsLoadingLOPD] = useState(false);
   const [lopdSessions, setLopdSessions] = useState<any[]>([]);
@@ -113,7 +120,16 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
 
   useEffect(() => {
     if (activeTab === 'HISTORY') {
-      loadClinicalHistory();
+      // Clean up any duplicate session entries first, then load
+      apiFetch(`${API_URL}/session-entries/cleanup-duplicates`, { method: 'POST' })
+        .then(r => r.json())
+        .then(res => {
+          if (res.removed > 0) console.log(`🧹 Cleaned up ${res.removed} duplicate session entries`);
+        })
+        .catch(() => {})
+        .finally(() => {
+          loadClinicalHistory();
+        });
       loadHistoricalDocuments();
     }
     if (activeTab === 'DOCS') {
@@ -250,6 +266,90 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
     setIsLoadingHistory(false);
   };
 
+  const loadSessionsForEntryPicker = async () => {
+    if (!currentPsychologistId || !patientUserId) return;
+    setIsLoadingSessionsForPicker(true);
+    try {
+      // Fetch completed sessions AND current session entries in parallel
+      const [sessionsRes, entriesRes] = await Promise.all([
+        apiFetch(`${API_URL}/sessions?psychologistId=${currentPsychologistId}`),
+        apiFetch(`${API_URL}/session-entries?target_user_id=${patientUserId}`)
+      ]);
+
+      if (!sessionsRes.ok) {
+        setIsLoadingSessionsForPicker(false);
+        return;
+      }
+
+      const allSessions: any[] = await sessionsRes.json();
+      const completed = allSessions.filter(
+        (s: any) =>
+          s.status === 'completed' &&
+          (s.patient_user_id === patientUserId || s.patientId === patientUserId)
+      );
+
+      // Build a set of session_entry_ids that are 'done' (those already appear in the history list)
+      let doneEntryIds = new Set<string>();
+      if (entriesRes.ok) {
+        const allEntries: any[] = await entriesRes.json();
+        allEntries
+          .filter((e: any) => (e.status || e.data?.status) === 'done')
+          .forEach((e: any) => doneEntryIds.add(e.id));
+      }
+
+      // Exclude sessions whose entry is already done (those appear in the history list)
+      const pickable = completed.filter((s: any) => {
+        if (!s.session_entry_id) return true;
+        return !doneEntryIds.has(s.session_entry_id);
+      });
+
+      // Sort newest first
+      pickable.sort((a: any, b: any) => {
+        const da = new Date(a.starts_on || a.date || 0).getTime();
+        const db = new Date(b.starts_on || b.date || 0).getTime();
+        return db - da;
+      });
+
+      setSessionsForPicker(pickable);
+    } catch (error) {
+      console.error('Error loading sessions for entry picker:', error);
+    }
+    setIsLoadingSessionsForPicker(false);
+  };
+
+  const handleOpenSessionPicker = async () => {
+    await loadSessionsForEntryPicker();
+    setShowSessionPicker(true);
+  };
+
+  const handleSelectSessionForEntry = async (sessionFromPicker: any) => {
+    setShowSessionPicker(false);
+    try {
+      const response = await apiFetch(`${API_URL}/sessions/${sessionFromPicker.id}`);
+      if (response.ok) {
+        setSessionEntryEditor(await response.json());
+      } else {
+        setSessionEntryEditor(sessionFromPicker);
+      }
+    } catch {
+      setSessionEntryEditor(sessionFromPicker);
+    }
+  };
+
+  const handleEditEntryFromHistory = async (entry: any) => {
+    const sessionId = entry.data?.session_id || entry.session_id;
+    if (!sessionId) return;
+    try {
+      const response = await apiFetch(`${API_URL}/sessions/${sessionId}`);
+      if (response.ok) {
+        const session = await response.json();
+        setSessionEntryEditor(session);
+      }
+    } catch (error) {
+      console.error('Error loading session for entry edit:', error);
+    }
+  };
+
   const loadPatientStats = async () => {
     if (!patientUserId || !currentPsychologistId) return;
     
@@ -267,9 +367,9 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   };
 
   const downloadEntryAsPDF = (entry: any) => {
-    const entryDate = entry.created_at ? new Date(entry.created_at) : new Date();
-    const dateStr = entryDate.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
-    const timeStr = entryDate.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+    const entryDate = new Date(entry.sessionDate || entry.created_at || Date.now());
+    const dateStr = entryDate.toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' });
+    const timeStr = '';  // session date has no meaningful time
     
     // Crear contenido HTML para el PDF
     const htmlContent = `
@@ -597,9 +697,9 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
 
     // Crear contenido HTML para todas las entradas
     const entriesHTML = clinicalHistory.map((entry, index) => {
-      const entryDate = entry.created_at ? new Date(entry.created_at) : new Date();
-      const dateStr = entryDate.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
-      const timeStr = entryDate.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+      const entryDate = new Date(entry.sessionDate || entry.created_at || Date.now());
+      const dateStr = entryDate.toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' });
+      const timeStr = '';
       
       return `
         <div class="entry">
@@ -3029,6 +3129,17 @@ tr:nth-child(even) td{background:#f8fafc}
                 </div>
               )}
 
+              {/* Botón Añadir Entrada */}
+              <div className="flex justify-end">
+                <button
+                  onClick={handleOpenSessionPicker}
+                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all text-sm font-medium shadow-sm"
+                >
+                  <Plus size={16} />
+                  Añadir Entrada
+                </button>
+              </div>
+
               {isLoadingHistory ? (
                 <div className="flex items-center justify-center h-64">
                   <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
@@ -3041,7 +3152,9 @@ tr:nth-child(even) td{background:#f8fafc}
               ) : (
                 <div className="space-y-3 sm:space-y-4">
                   {clinicalHistory.map((entry) => {
-                    const entryDate = entry.created_at ? new Date(entry.created_at) : new Date();
+                    // Prefer the linked session's date (starts_on) over entry created_at
+                    const dateSource = entry.sessionDate || entry.created_at;
+                    const entryDate = dateSource ? new Date(dateSource) : new Date();
                     const status = entry.data?.status || entry.status || 'pending';
                     const isExpanded = selectedEntry?.id === entry.id;
                     
@@ -3069,7 +3182,7 @@ tr:nth-child(even) td{background:#f8fafc}
                               <div className="flex items-center justify-between gap-2">
                                 <div className="flex items-center gap-2">
                                   <span className="text-sm sm:text-base font-semibold text-slate-900">
-                                    Sesión - {entryDate.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                    Sesión {entryDate.toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}
                                   </span>
                                   <span className={`px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-medium ${
                                     status === 'done' 
@@ -3079,9 +3192,6 @@ tr:nth-child(even) td{background:#f8fafc}
                                     {status === 'done' ? 'Completada' : 'Pendiente'}
                                   </span>
                                 </div>
-                                <span className="text-xs text-slate-500">
-                                  {entryDate.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
-                                </span>
                               </div>
                               
                               {(entry.summary || entry.data?.summary) && (
@@ -3091,6 +3201,16 @@ tr:nth-child(even) td{background:#f8fafc}
                               )}
                             </div>
                             
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEditEntryFromHistory(entry);
+                              }}
+                              className="flex-shrink-0 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 p-2 rounded-lg transition-all"
+                              title="Editar esta entrada"
+                            >
+                              <Edit2 size={18} />
+                            </button>
                             <button 
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -3676,6 +3796,88 @@ tr:nth-child(even) td{background:#f8fafc}
           onClose={() => setUpgradeModal(false)}
           returnPanel="patients"
         />
+      )}
+
+      {/* Session Picker Modal — select a completed session to add/edit its entry */}
+      {showSessionPicker && (
+        <div
+          className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4"
+          onClick={(e) => { e.stopPropagation(); setShowSessionPicker(false); }}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[80vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
+              <div className="flex items-center gap-2">
+                <FileText size={20} className="text-indigo-600" />
+                <h3 className="text-base font-bold text-slate-800">Seleccionar Sesión</h3>
+              </div>
+              <button onClick={() => setShowSessionPicker(false)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-4 space-y-2">
+              {isLoadingSessionsForPicker ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="animate-spin text-indigo-600" size={32} />
+                </div>
+              ) : sessionsForPicker.length === 0 ? (
+                <div className="text-center py-12">
+                  <CheckCircle size={48} className="mx-auto mb-3 text-green-400" />
+                  <p className="text-sm font-medium text-slate-700">Todas las sesiones completadas ya tienen su entrada registrada</p>
+                  <p className="text-xs text-slate-400 mt-1">No hay sesiones pendientes de documentar</p>
+                </div>
+              ) : (
+                sessionsForPicker.map((session: any) => {
+                  const sessionDate = session.starts_on
+                    ? new Date(session.starts_on)
+                    : session.date
+                    ? new Date(`${session.date}T12:00:00`)
+                    : null;
+                  const hasEntry = !!session.session_entry_id;
+                  return (
+                    <button
+                      key={session.id}
+                      onClick={(e) => { e.stopPropagation(); handleSelectSessionForEntry(session); }}
+                      className="w-full text-left p-3 rounded-xl border border-slate-200 hover:border-indigo-400 hover:bg-indigo-50 transition-colors flex items-center gap-3"
+                    >
+                      <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${hasEntry ? 'bg-orange-100' : 'bg-slate-100'}`}>
+                        <FileText size={16} className={hasEntry ? 'text-orange-600' : 'text-slate-500'} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-slate-900">
+                          {sessionDate
+                            ? sessionDate.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })
+                            : 'Fecha desconocida'}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {session.startTime || ''}{session.endTime ? ` - ${session.endTime}` : ''}
+                          {hasEntry && <span className="ml-2 text-orange-600 font-medium">• Entrada pendiente</span>}
+                          {!hasEntry && <span className="ml-2 text-slate-400">• Sin entrada</span>}
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Session Entry Editor — opens SessionDetailsModal for the selected session */}
+      {sessionEntryEditor && (
+        <div onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+          <SessionDetailsModal
+            session={sessionEntryEditor}
+            onClose={() => setSessionEntryEditor(null)}
+            onSave={() => {
+              setSessionEntryEditor(null);
+              loadClinicalHistory();
+            }}
+          />
+        </div>
       )}
     </div>
   );

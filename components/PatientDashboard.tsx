@@ -434,7 +434,7 @@ const PatientDashboard = forwardRef<PatientDashboardHandle, PatientDashboardProp
        </div>
        
        <div className="space-y-3">
-          <div className="grid gap-3 sm:gap-4 md:grid-cols-2">
+          <div className="grid gap-3 sm:gap-4">
             {filteredPatients.length === 0 ? (
                 <div className="text-center py-10 sm:py-12 bg-white rounded-xl sm:rounded-2xl border border-slate-100 border-dashed">
                     <Users className="w-10 h-10 sm:w-12 sm:h-12 text-slate-300 mx-auto mb-2 sm:mb-3" />

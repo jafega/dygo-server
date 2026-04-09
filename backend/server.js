@@ -15651,6 +15651,40 @@ app.post('/api/session-entries', authenticateRequest, async (req, res) => {
       });
     }
 
+    // ── DUPLICATE GUARD ────────────────────────────────────────────────────────
+    // If a session_entry already exists for this session_id, return it as-is
+    // (unique-per-session constraint enforced here to avoid duplicate entries).
+    const existingInCache = (db.sessionEntries || []).find(
+      e => e.session_id === session_id || e.data?.session_id === session_id
+    );
+    if (existingInCache) {
+      console.log('⚠️ [POST session-entries] Duplicate blocked — returning existing entry:', existingInCache.id, 'for session:', session_id);
+      return res.json(existingInCache);
+    }
+
+    // Also check Supabase in case the cache is stale
+    if (supabaseAdmin) {
+      const { data: existingRows } = await supabaseAdmin
+        .from('session_entry')
+        .select('id, status, data, creator_user_id, target_user_id, session_id, transcript, summary, created_at, updated_at')
+        .or(`session_id.eq.${session_id},data->>session_id.eq.${session_id}`)
+        .limit(1);
+      if (existingRows && existingRows.length > 0) {
+        const row = existingRows[0];
+        const existing = normalizeSupabaseRow(row);
+        if (row.status) { existing.status = row.status; }
+        if (row.transcript !== undefined) existing.transcript = row.transcript;
+        if (row.summary !== undefined) existing.summary = row.summary;
+        if (row.created_at !== undefined) existing.created_at = row.created_at;
+        console.log('⚠️ [POST session-entries] Duplicate blocked (Supabase) — returning existing:', existing.id);
+        if (!db.sessionEntries) db.sessionEntries = [];
+        const inCache = db.sessionEntries.find(e => e.id === existing.id);
+        if (!inCache) db.sessionEntries.push(existing);
+        return res.json(existing);
+      }
+    }
+    // ── END DUPLICATE GUARD ────────────────────────────────────────────────────
+
     // transcript y summary pueden ser vacíos al crear una entrada inicial
     if (transcript === undefined || summary === undefined) {
       return res.status(400).json({ 
@@ -15775,11 +15809,49 @@ app.get('/api/session-entries', authenticateRequest, async (req, res) => {
       console.log(`📖 [GET /api/session-entries] Filtered by creator_user_id=${creator_user_id}: ${entries.length} entries`);
     }
     
-    // Si no hay entradas en caché, consultar Supabase directamente
-    if (entries.length === 0 && supabaseAdmin && (session_id || target_user_id || creator_user_id || ids)) {
+    // Si se buscan por IDs, verificar si faltan algunos en el cache
+    if (ids && supabaseAdmin) {
+      const idList = String(ids).split(',').map(s => s.trim()).filter(Boolean);
+      const cachedIds = new Set(entries.map(e => e.id));
+      const missingIds = idList.filter(id => !cachedIds.has(id));
+      if (missingIds.length > 0) {
+        console.log(`🔍 [GET /api/session-entries] ${missingIds.length} IDs missing from cache, querying Supabase...`);
+        try {
+          const { data: supabaseEntries, error } = await supabaseAdmin
+            .from('session_entry')
+            .select('id, status, data, creator_user_id, target_user_id, session_id, transcript, summary, created_at, updated_at')
+            .in('id', missingIds);
+          if (!error && supabaseEntries?.length > 0) {
+            const extra = supabaseEntries.map(row => {
+              const normalized = normalizeSupabaseRow(row);
+              if (row.status) { normalized.status = row.status; if (normalized.data) normalized.data.status = row.status; }
+              if (row.transcript !== undefined) normalized.transcript = row.transcript;
+              if (row.summary !== undefined) normalized.summary = row.summary;
+              if (row.created_at !== undefined) normalized.created_at = row.created_at;
+              if (row.updated_at !== undefined) normalized.updated_at = row.updated_at;
+              return normalized;
+            });
+            // Actualizar cache
+            extra.forEach(entry => {
+              const idx = db.sessionEntries.findIndex(e => e.id === entry.id);
+              if (idx === -1) db.sessionEntries.push(entry); else db.sessionEntries[idx] = entry;
+            });
+            entries = [...entries, ...extra];
+            console.log(`✅ [GET /api/session-entries] Loaded ${extra.length} missing entries from Supabase`);
+          } else if (error) {
+            console.error(`❌ [GET /api/session-entries] Error querying missing IDs from Supabase:`, error);
+          }
+        } catch (supabaseErr) {
+          console.error(`❌ [GET /api/session-entries] Exception querying missing IDs:`, supabaseErr);
+        }
+      }
+    }
+
+    // Si no hay entradas en caché y la búsqueda es por filtro (no por ids, que ya se maneja arriba)
+    if (entries.length === 0 && supabaseAdmin && !ids && (session_id || target_user_id || creator_user_id)) {
       console.log(`🔍 [GET /api/session-entries] No entries in cache, querying Supabase...`);
       try {
-        let query = supabaseAdmin.from('session_entry').select('id, status, data, creator_user_id, target_user_id, session_id');
+        let query = supabaseAdmin.from('session_entry').select('id, status, data, creator_user_id, target_user_id, session_id, transcript, summary, created_at, updated_at');
         
         if (ids) {
           const idList = String(ids).split(',').map(s => s.trim()).filter(Boolean);
@@ -15800,12 +15872,15 @@ app.get('/api/session-entries', authenticateRequest, async (req, res) => {
         if (!error && supabaseEntries) {
           entries = supabaseEntries.map(row => {
             const normalized = normalizeSupabaseRow(row);
+            // Columns stored separately in Supabase (not inside data JSONB)
             if (row.status) {
               normalized.status = row.status;
-              if (normalized.data) {
-                normalized.data.status = row.status;
-              }
+              if (normalized.data) normalized.data.status = row.status;
             }
+            if (row.transcript !== undefined) normalized.transcript = row.transcript;
+            if (row.summary !== undefined) normalized.summary = row.summary;
+            if (row.created_at !== undefined) normalized.created_at = row.created_at;
+            if (row.updated_at !== undefined) normalized.updated_at = row.updated_at;
             return normalized;
           });
           console.log(`✅ [GET /api/session-entries] Loaded ${entries.length} entries from Supabase`);
@@ -15870,10 +15945,12 @@ app.get('/api/session-entries/:id', authenticateRequest, async (req, res) => {
           entry = normalizeSupabaseRow(row);
           if (row.status) {
             entry.status = row.status;
-            if (entry.data) {
-              entry.data.status = row.status;
-            }
+            if (entry.data) entry.data.status = row.status;
           }
+          if (row.transcript !== undefined) entry.transcript = row.transcript;
+          if (row.summary !== undefined) entry.summary = row.summary;
+          if (row.created_at !== undefined) entry.created_at = row.created_at;
+          if (row.updated_at !== undefined) entry.updated_at = row.updated_at;
           console.log(`✅ [GET /api/session-entries/${id}] Entry found in Supabase`);
           
           // Agregar al caché
@@ -15915,7 +15992,33 @@ app.patch('/api/session-entries/:id', authenticateRequest, async (req, res) => {
 
     if (!db.sessionEntries) db.sessionEntries = [];
 
-    const idx = db.sessionEntries.findIndex(e => e.id === id);
+    let idx = db.sessionEntries.findIndex(e => e.id === id);
+
+    // Si no está en cache, intentar cargarla desde Supabase antes de dar 404
+    if (idx === -1 && supabaseAdmin) {
+      try {
+        const { data: rows, error } = await supabaseAdmin
+          .from('session_entry')
+          .select('id, status, data, creator_user_id, target_user_id, session_id, transcript, summary, created_at, updated_at')
+          .eq('id', id)
+          .limit(1);
+        if (!error && rows && rows.length > 0) {
+          const row = rows[0];
+          const normalized = normalizeSupabaseRow(row);
+          if (row.status) { normalized.status = row.status; if (normalized.data) normalized.data.status = row.status; }
+          if (row.transcript !== undefined) normalized.transcript = row.transcript;
+          if (row.summary !== undefined) normalized.summary = row.summary;
+          if (row.created_at !== undefined) normalized.created_at = row.created_at;
+          if (row.updated_at !== undefined) normalized.updated_at = row.updated_at;
+          db.sessionEntries.push(normalized);
+          idx = db.sessionEntries.length - 1;
+          console.log(`✅ [PATCH session-entry] Loaded entry ${id} from Supabase into cache`);
+        }
+      } catch (loadErr) {
+        console.error(`❌ [PATCH session-entry] Error loading entry ${id} from Supabase:`, loadErr);
+      }
+    }
+
     if (idx === -1) {
       return res.status(404).json({ error: 'Session entry not found' });
     }
@@ -16014,6 +16117,54 @@ app.patch('/api/session-entries/:id', authenticateRequest, async (req, res) => {
   } catch (err) {
     console.error('❌ Error updating session entry', err);
     return res.status(500).json({ error: err?.message || 'No se pudo actualizar la entrada' });
+  }
+});
+
+// --- CLEANUP DUPLICATE SESSION ENTRIES ---
+// Keeps only the most recent entry per session_id, deletes the rest.
+app.post('/api/session-entries/cleanup-duplicates', authenticateRequest, async (req, res) => {
+  try {
+    const db = getDb();
+    const entries = db.sessionEntries || [];
+
+    // Group by session_id
+    const bySession = {};
+    for (const e of entries) {
+      const sid = e.session_id || e.data?.session_id;
+      if (!sid) continue;
+      if (!bySession[sid]) bySession[sid] = [];
+      bySession[sid].push(e);
+    }
+
+    const toDelete = [];
+    for (const sid of Object.keys(bySession)) {
+      const group = bySession[sid];
+      if (group.length <= 1) continue;
+      // Keep the most recently updated / created
+      group.sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0));
+      const [keep, ...dupes] = group;
+      console.log(`🧹 [cleanup-duplicates] session ${sid}: keeping ${keep.id}, removing ${dupes.map(d => d.id).join(', ')}`);
+      toDelete.push(...dupes.map(d => d.id));
+    }
+
+    if (toDelete.length === 0) {
+      return res.json({ removed: 0, message: 'No hay duplicados' });
+    }
+
+    // Delete from Supabase
+    if (supabaseAdmin) {
+      const { error } = await supabaseAdmin.from('session_entry').delete().in('id', toDelete);
+      if (error) console.error('❌ Error deleting duplicates from Supabase:', error);
+    }
+
+    // Remove from in-memory cache
+    db.sessionEntries = db.sessionEntries.filter(e => !toDelete.includes(e.id));
+
+    console.log(`✅ [cleanup-duplicates] Removed ${toDelete.length} duplicate session entries`);
+    return res.json({ removed: toDelete.length, deletedIds: toDelete });
+  } catch (err) {
+    console.error('❌ Error in cleanup-duplicates:', err);
+    return res.status(500).json({ error: err?.message || 'Error durante la limpieza' });
   }
 });
 
