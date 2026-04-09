@@ -7,7 +7,9 @@
     "node": "22.x"
   },
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently --kill-others-on-fail --names \"backend,frontend\" --prefix-colors \"cyan,magenta\" \"node backend/start-server.js\" \"vite\"",
+    "dev:front": "vite",
+    "dev:back": "node backend/start-server.js",
     "build": "vite build",
     "preview": "vite preview"
   },
@@ -47,6 +49,7 @@
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
     "autoprefixer": "^10.4.23",
+    "concurrently": "^9.2.1",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.18",
     "vite": "^6.2.0"

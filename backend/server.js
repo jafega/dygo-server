@@ -15847,9 +15847,9 @@ app.get('/api/session-entries', authenticateRequest, async (req, res) => {
       }
     }
 
-    // Si no hay entradas en caché y la búsqueda es por filtro (no por ids, que ya se maneja arriba)
-    if (entries.length === 0 && supabaseAdmin && !ids && (session_id || target_user_id || creator_user_id)) {
-      console.log(`🔍 [GET /api/session-entries] No entries in cache, querying Supabase...`);
+    // Always query Supabase when filtering by target_user_id or creator_user_id to ensure completeness
+    if (supabaseAdmin && !ids && (session_id || target_user_id || creator_user_id)) {
+      console.log(`🔍 [GET /api/session-entries] Querying Supabase to ensure cache completeness...`);
       try {
         let query = supabaseAdmin.from('session_entry').select('id, status, data, creator_user_id, target_user_id, transcript, summary, created_at');
         
@@ -15870,7 +15870,7 @@ app.get('/api/session-entries', authenticateRequest, async (req, res) => {
         const { data: supabaseEntries, error } = await query;
         
         if (!error && supabaseEntries) {
-          entries = supabaseEntries.map(row => {
+          const supabaseNormalized = supabaseEntries.map(row => {
             const normalized = normalizeSupabaseRow(row);
             // Columns stored separately in Supabase (not inside data JSONB)
             if (row.status) {
@@ -15883,10 +15883,18 @@ app.get('/api/session-entries', authenticateRequest, async (req, res) => {
             if (row.updated_at !== undefined) normalized.updated_at = row.updated_at;
             return normalized;
           });
-          console.log(`✅ [GET /api/session-entries] Loaded ${entries.length} entries from Supabase`);
+          
+          // Merge: Supabase is source of truth, add any entries not already in results
+          const existingIds = new Set(entries.map(e => e.id));
+          for (const sEntry of supabaseNormalized) {
+            if (!existingIds.has(sEntry.id)) {
+              entries.push(sEntry);
+            }
+          }
+          console.log(`✅ [GET /api/session-entries] Merged with Supabase, total: ${entries.length} entries`);
           
           // Actualizar caché con las entradas encontradas
-          entries.forEach(entry => {
+          supabaseNormalized.forEach(entry => {
             const existingIdx = db.sessionEntries.findIndex(e => e.id === entry.id);
             if (existingIdx === -1) {
               db.sessionEntries.push(entry);

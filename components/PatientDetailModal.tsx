@@ -229,11 +229,11 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   };
 
   const loadClinicalHistory = async () => {
-    if (!patientUserId) return;
+    if (!patientUserId || !currentPsychologistId) return;
     
     setIsLoadingHistory(true);
     try {
-      const response = await apiFetch(`${API_URL}/session-entries?target_user_id=${patientUserId}`);
+      const response = await apiFetch(`${API_URL}/session-entries?target_user_id=${patientUserId}&creator_user_id=${currentPsychologistId}`);
       if (response.ok) {
         const entries = await response.json();
         // Cargar las sesiones asociadas para obtener las fechas
@@ -270,11 +270,7 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
     if (!currentPsychologistId || !patientUserId) return;
     setIsLoadingSessionsForPicker(true);
     try {
-      // Fetch completed sessions AND current session entries in parallel
-      const [sessionsRes, entriesRes] = await Promise.all([
-        apiFetch(`${API_URL}/sessions?psychologistId=${currentPsychologistId}`),
-        apiFetch(`${API_URL}/session-entries?target_user_id=${patientUserId}`)
-      ]);
+      const sessionsRes = await apiFetch(`${API_URL}/sessions?psychologistId=${currentPsychologistId}`);
 
       if (!sessionsRes.ok) {
         setIsLoadingSessionsForPicker(false);
@@ -282,26 +278,13 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
       }
 
       const allSessions: any[] = await sessionsRes.json();
-      const completed = allSessions.filter(
+      // Only show completed sessions for this patient that don't have any session entry
+      const pickable = allSessions.filter(
         (s: any) =>
           s.status === 'completed' &&
-          (s.patient_user_id === patientUserId || s.patientId === patientUserId)
+          (s.patient_user_id === patientUserId || s.patientId === patientUserId) &&
+          !s.session_entry_id
       );
-
-      // Build a set of session_entry_ids that are 'done' (those already appear in the history list)
-      let doneEntryIds = new Set<string>();
-      if (entriesRes.ok) {
-        const allEntries: any[] = await entriesRes.json();
-        allEntries
-          .filter((e: any) => (e.status || e.data?.status) === 'done')
-          .forEach((e: any) => doneEntryIds.add(e.id));
-      }
-
-      // Exclude sessions whose entry is already done (those appear in the history list)
-      const pickable = completed.filter((s: any) => {
-        if (!s.session_entry_id) return true;
-        return !doneEntryIds.has(s.session_entry_id);
-      });
 
       // Sort newest first
       pickable.sort((a: any, b: any) => {
@@ -3835,15 +3818,14 @@ tr:nth-child(even) td{background:#f8fafc}
                     : session.date
                     ? new Date(`${session.date}T12:00:00`)
                     : null;
-                  const hasEntry = !!session.session_entry_id;
                   return (
                     <button
                       key={session.id}
                       onClick={(e) => { e.stopPropagation(); handleSelectSessionForEntry(session); }}
                       className="w-full text-left p-3 rounded-xl border border-slate-200 hover:border-indigo-400 hover:bg-indigo-50 transition-colors flex items-center gap-3"
                     >
-                      <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${hasEntry ? 'bg-orange-100' : 'bg-slate-100'}`}>
-                        <FileText size={16} className={hasEntry ? 'text-orange-600' : 'text-slate-500'} />
+                      <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 bg-slate-100">
+                        <FileText size={16} className="text-slate-500" />
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-slate-900">
@@ -3853,8 +3835,7 @@ tr:nth-child(even) td{background:#f8fafc}
                         </p>
                         <p className="text-xs text-slate-500">
                           {session.startTime || ''}{session.endTime ? ` - ${session.endTime}` : ''}
-                          {hasEntry && <span className="ml-2 text-orange-600 font-medium">• Entrada pendiente</span>}
-                          {!hasEntry && <span className="ml-2 text-slate-400">• Sin entrada</span>}
+                          <span className="ml-2 text-slate-400">• Sin entrada</span>
                         </p>
                       </div>
                     </button>
