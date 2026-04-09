@@ -16020,7 +16020,57 @@ app.patch('/api/session-entries/:id', authenticateRequest, async (req, res) => {
     }
 
     if (idx === -1) {
-      return res.status(404).json({ error: 'Session entry not found' });
+      // La entry no existe en cache ni en Supabase pero la sesión tiene su ID registrado.
+      // Hacer upsert: crear el registro con los datos que vienen en el body.
+      console.log(`⚠️ [PATCH session-entry] Entry ${id} no encontrada — haciendo upsert`);
+      const { summary: uSummary, status: uStatus, transcript: uTranscript,
+              file: uFile, file_name: uFileName, file_type: uFileType,
+              session_id: uSessionId, creator_user_id: uCreatorId, target_user_id: uTargetId } = req.body;
+      const now = new Date().toISOString();
+      const newEntry = {
+        id,
+        session_id: uSessionId || null,
+        creator_user_id: uCreatorId || req.authenticatedUserId || null,
+        target_user_id: uTargetId || null,
+        status: uStatus || 'pending',
+        transcript: uTranscript || '',
+        summary: uSummary || '',
+        created_at: now,
+        updated_at: now,
+        data: {
+          status: uStatus || 'pending',
+          ...(uFile !== undefined && { file: uFile }),
+          ...(uFileName !== undefined && { file_name: uFileName }),
+          ...(uFileType !== undefined && { file_type: uFileType }),
+          updated_at: now,
+        }
+      };
+      if (supabaseAdmin) {
+        try {
+          const { error: upsertError } = await supabaseAdmin.from('session_entry').upsert({
+            id,
+            session_id: newEntry.session_id,
+            creator_user_id: newEntry.creator_user_id,
+            target_user_id: newEntry.target_user_id,
+            status: newEntry.status,
+            transcript: newEntry.transcript,
+            summary: newEntry.summary,
+            data: newEntry.data,
+            created_at: now,
+            updated_at: now,
+          }, { onConflict: 'id' });
+          if (upsertError) {
+            console.error(`❌ [PATCH session-entry] Upsert error:`, upsertError);
+            return res.status(500).json({ error: 'Error creating session entry' });
+          }
+          console.log(`✅ [PATCH session-entry] Entry ${id} creada via upsert en Supabase`);
+        } catch (err) {
+          console.error(`❌ [PATCH session-entry] Upsert exception:`, err);
+          return res.status(500).json({ error: 'Error creating session entry' });
+        }
+      }
+      db.sessionEntries.push(newEntry);
+      return res.json(newEntry);
     }
 
     const { summary, status, transcript, file, file_name, file_type } = req.body;
