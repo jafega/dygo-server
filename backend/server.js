@@ -14698,6 +14698,23 @@ app.patch('/api/sessions/:id', authenticateRequest, async (req, res) => {
         ? Math.min(req.body.percent_psych, 100) 
         : db.sessions[idx].percent_psych
     };
+
+    // --- Ensure google_calendar_event_id is preserved from Supabase ---
+    // The in-memory cache may not have it (e.g. serverless cold-start),
+    // so fetch from Supabase before we overwrite the data column.
+    if (!updatedSession.google_calendar_event_id && supabaseAdmin) {
+      try {
+        const { data: existingRow } = await supabaseAdmin.from('sessions').select('data, psychologist_user_id').eq('id', id).maybeSingle();
+        if (existingRow?.data?.google_calendar_event_id) {
+          updatedSession.google_calendar_event_id = existingRow.data.google_calendar_event_id;
+          console.log(`🗓️ [PATCH /api/sessions/${id}] Recuperado google_calendar_event_id de Supabase: ${updatedSession.google_calendar_event_id}`);
+        }
+        // Also preserve meetLink if missing
+        if (!updatedSession.meetLink && existingRow?.data?.meetLink) {
+          updatedSession.meetLink = existingRow.data.meetLink;
+        }
+      } catch (_) {}
+    }
     
     // SOLO recalcular starts_on/ends_on si se modificaron explícitamente date, startTime o endTime
     // Esto evita problemas de zona horaria cuando solo se actualiza status, paid, etc.
@@ -14897,12 +14914,15 @@ app.patch('/api/sessions/:id', authenticateRequest, async (req, res) => {
       await saveDb(db, { awaitPersistence: true });
     }
 
+    // --- Google Calendar: resolve IDs for calendar operations ---
+    const patchGcEventId = updatedSession.google_calendar_event_id;
+    const patchPsychUserId = updatedSession.psychologist_user_id || updatedSession.psychologistId;
+    console.log(`🗓️ [PATCH /api/sessions/${id}] Calendar state: gcEventId=${patchGcEventId}, psychUserId=${patchPsychUserId}`);
+
     // --- Google Calendar: marcar evento como cancelado si el status cambió a 'cancelled' ---
     if (req.body.status === 'cancelled') {
-      const psychUserId = updatedSession.psychologist_user_id || updatedSession.psychologistId;
-      const gcEventId = updatedSession.google_calendar_event_id;
-      if (psychUserId && gcEventId) {
-        markCalendarEventCancelled(psychUserId, gcEventId).catch(e =>
+      if (patchPsychUserId && patchGcEventId) {
+        markCalendarEventCancelled(patchPsychUserId, patchGcEventId).catch(e =>
           console.error('[PATCH /api/sessions] Error Google Calendar cancel:', e?.message)
         );
       }
@@ -14912,10 +14932,8 @@ app.patch('/api/sessions/:id', authenticateRequest, async (req, res) => {
     if (req.body.status !== 'cancelled' &&
         (req.body.date !== undefined || req.body.startTime !== undefined || req.body.endTime !== undefined ||
          req.body.starts_on !== undefined || req.body.ends_on !== undefined)) {
-      const psychUserId = updatedSession.psychologist_user_id || updatedSession.psychologistId;
-      const gcEventId = updatedSession.google_calendar_event_id;
-      if (psychUserId && gcEventId) {
-        updateCalendarEventForSession(psychUserId, gcEventId, updatedSession).catch(e =>
+      if (patchPsychUserId && patchGcEventId) {
+        updateCalendarEventForSession(patchPsychUserId, patchGcEventId, updatedSession).catch(e =>
           console.error('[PATCH /api/sessions] Error Google Calendar update:', e?.message)
         );
       }
@@ -14968,6 +14986,22 @@ app.put('/api/sessions/:id', authenticateRequest, async (req, res) => {
       id,
       percent_psych: Math.min(req.body.percent_psych ?? 100, 100)
     };
+
+    // --- Ensure google_calendar_event_id is preserved from Supabase ---
+    // PUT replaces the entire session from req.body which won't include
+    // internal fields like google_calendar_event_id. Fetch from Supabase.
+    if (!updatedSession.google_calendar_event_id && supabaseAdmin) {
+      try {
+        const { data: existingRow } = await supabaseAdmin.from('sessions').select('data, psychologist_user_id').eq('id', id).maybeSingle();
+        if (existingRow?.data?.google_calendar_event_id) {
+          updatedSession.google_calendar_event_id = existingRow.data.google_calendar_event_id;
+          console.log(`🗓️ [PUT /api/sessions/${id}] Recuperado google_calendar_event_id de Supabase: ${updatedSession.google_calendar_event_id}`);
+        }
+        if (!updatedSession.meetLink && existingRow?.data?.meetLink) {
+          updatedSession.meetLink = existingRow.data.meetLink;
+        }
+      } catch (_) {}
+    }
     
     // Calcular starts_on/ends_on si se proporcionan date/startTime/endTime
     // Priorizar los que ya vienen del cliente (calculados con timezone correcto)
@@ -15039,12 +15073,15 @@ app.put('/api/sessions/:id', authenticateRequest, async (req, res) => {
     
     console.log(`📤 [PUT /api/sessions/${id}] Enviando respuesta al cliente`);
 
+    // --- Google Calendar: resolve IDs for calendar operations ---
+    const putGcEventId = updatedSession.google_calendar_event_id;
+    const putPsychUserId = updatedSession.psychologist_user_id || updatedSession.psychologistId;
+    console.log(`🗓️ [PUT /api/sessions/${id}] Calendar state: gcEventId=${putGcEventId}, psychUserId=${putPsychUserId}`);
+
     // --- Google Calendar: cancelar evento si el status es 'cancelled' ---
     if (req.body.status === 'cancelled') {
-      const psychUserId = updatedSession.psychologist_user_id || updatedSession.psychologistId;
-      const gcEventId = updatedSession.google_calendar_event_id;
-      if (psychUserId && gcEventId) {
-        markCalendarEventCancelled(psychUserId, gcEventId).catch(e =>
+      if (putPsychUserId && putGcEventId) {
+        markCalendarEventCancelled(putPsychUserId, putGcEventId).catch(e =>
           console.error('[PUT /api/sessions] Error Google Calendar cancel:', e?.message)
         );
       }
@@ -15054,10 +15091,8 @@ app.put('/api/sessions/:id', authenticateRequest, async (req, res) => {
     if (req.body.status !== 'cancelled' &&
         (req.body.date !== undefined || req.body.startTime !== undefined || req.body.endTime !== undefined ||
          req.body.starts_on !== undefined || req.body.ends_on !== undefined)) {
-      const psychUserId = updatedSession.psychologist_user_id || updatedSession.psychologistId;
-      const gcEventId = updatedSession.google_calendar_event_id;
-      if (psychUserId && gcEventId) {
-        updateCalendarEventForSession(psychUserId, gcEventId, updatedSession).catch(e =>
+      if (putPsychUserId && putGcEventId) {
+        updateCalendarEventForSession(putPsychUserId, putGcEventId, updatedSession).catch(e =>
           console.error('[PUT /api/sessions] Error Google Calendar update:', e?.message)
         );
       }
@@ -15277,6 +15312,7 @@ app.delete('/api/sessions/bulk', authenticateRequest, async (req, res) => {
 
         // Google Calendar cleanup (fire-and-forget)
         const gcEventId = sessionData.data?.google_calendar_event_id;
+        console.log(`🗓️ [bulk delete] Calendar cleanup for session ${id}: gcEventId=${gcEventId}, psychUserId=${sessionData.psychologist_user_id}`);
         if (gcEventId && sessionData.psychologist_user_id) {
           deleteCalendarEventById(sessionData.psychologist_user_id, gcEventId).catch(() => {});
         }
@@ -15403,8 +15439,10 @@ app.delete('/api/sessions/:id', authenticateRequest, async (req, res) => {
         console.log(`✅ Sesión ${id} eliminada de Supabase`);
 
         // --- Google Calendar: eliminar evento ---
-        const gcEventId = session.google_calendar_event_id || session.data?.google_calendar_event_id;
+        // Use normalized field first, then raw Supabase JSONB as fallback
+        const gcEventId = session.google_calendar_event_id || sessionData?.data?.google_calendar_event_id;
         const psychUserId = session.psychologist_user_id;
+        console.log(`🗓️ [DELETE /api/sessions] Calendar cleanup: gcEventId=${gcEventId}, psychUserId=${psychUserId}`);
         if (gcEventId && psychUserId) {
           deleteCalendarEventById(psychUserId, gcEventId).catch(e =>
             console.error('[DELETE /api/sessions] Error Google Calendar delete:', e?.message)
