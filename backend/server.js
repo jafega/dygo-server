@@ -1098,6 +1098,18 @@ const ensureSessionEntryTable = async () => {
 };
 
 // Ensure historical_documents JSONB column exists on care_relationships and migrate legacy data
+const ensureEntriesCreatedAtColumn = async () => {
+  if (!supabaseAdmin || !SUPABASE_SQL_ENDPOINT || !SUPABASE_SERVICE_ROLE_KEY) return;
+  try {
+    await executeSupabaseSql(
+      `ALTER TABLE public.entries ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL;`
+    );
+    console.log('✅ entries.created_at column ensured');
+  } catch (err) {
+    console.error('❌ Error ensuring entries.created_at column:', err?.message || err);
+  }
+};
+
 const ensureHistoricalDocumentsColumn = async () => {
   if (!supabaseAdmin || !SUPABASE_SQL_ENDPOINT || !SUPABASE_SERVICE_ROLE_KEY) return;
   try {
@@ -1390,6 +1402,16 @@ async function initializeSupabase() {
           .catch(schemaErr => console.error('❌ Error ensuring Supabase schema', schemaErr?.message || schemaErr));
       });
       
+      // Ensure entries.created_at column exists
+      try {
+        await Promise.race([
+          ensureEntriesCreatedAtColumn(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('ensureEntriesCreatedAtColumn timeout')), 8000))
+        ]);
+      } catch (migErr) {
+        console.error('⚠️ entries.created_at column migration skipped:', migErr?.message || migErr);
+      }
+
       // Ensure historical_documents column exists BEFORE loading cache so migration data is available
       try {
         await Promise.race([
@@ -1443,7 +1465,7 @@ async function initializeSupabase() {
 // Campos que NUNCA deben ir dentro de data JSONB (columnas de tabla + campos que causan anidamiento)
 const USER_TABLE_COLUMNS             = ['id', 'data', 'is_psychologist', 'isPsychologist', 'user_email', 'psychologist_profile_id', 'psycologist_profile_id', 'auth_user_id', 'master', 'role', 'email', 'created_at', 'password'];
 const SESSION_TABLE_COLUMNS          = ['id', 'data', 'created_at', 'psychologist_user_id', 'patient_user_id', 'status', 'starts_on', 'ends_on', 'price', 'paid', 'percent_psych', 'session_entry_id', 'invoice_id', 'bonus_id', 'session_name', 'calendar_id'];
-const ENTRY_TABLE_COLUMNS            = ['id', 'data', 'creator_user_id', 'target_user_id', 'entry_type', 'center_id', 'transcript', 'summary'];
+const ENTRY_TABLE_COLUMNS            = ['id', 'data', 'created_at', 'creator_user_id', 'target_user_id', 'entry_type', 'center_id', 'transcript', 'summary'];
 const GOAL_TABLE_COLUMNS             = ['id', 'data', 'patient_user_id'];
 const INVITATION_TABLE_COLUMNS       = ['id', 'data', 'psychologist_user_id', 'patient_user_id', 'psychologist_email', 'invited_patient_email'];
 const SETTINGS_TABLE_COLUMNS         = ['id', 'data', 'user_id'];
@@ -1724,7 +1746,7 @@ function buildSupabaseRowFromEntity(originalRow, entity) {
 
 // Función específica para entries que maneja creator_user_id y target_user_id correctamente
 function buildSupabaseEntryRow(entry) {
-  const { id, creator_user_id, target_user_id, userId, createdByPsychologistId, entryType, psychologistEntryType, type, transcript, summary, center_id, ...restData } = entry;
+  const { id, creator_user_id, target_user_id, userId, createdByPsychologistId, entryType, psychologistEntryType, type, transcript, summary, center_id, created_at, ...restData } = entry;
   
   // Determinar creator_user_id y target_user_id
   // Si la entrada es del psicólogo (createdBy === 'PSYCHOLOGIST'):

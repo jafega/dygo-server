@@ -526,10 +526,11 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
             <button
               onClick={() => {
                 const now = new Date();
-                const start = new Date(now.getFullYear(), now.getMonth(), 1);
-                const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-                const startStr = start.toISOString().split('T')[0];
-                const endStr = end.toISOString().split('T')[0];
+                const y = now.getFullYear();
+                const m = now.getMonth() + 1;
+                const lastDay = new Date(y, m, 0).getDate();
+                const startStr = `${y}-${String(m).padStart(2, '0')}-01`;
+                const endStr = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
                 setInputDateRange({ start: startStr, end: endStr });
                 setDateRange({ start: startStr, end: endStr });
               }}

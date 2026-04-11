@@ -27,7 +27,6 @@ CREATE TABLE public.care_relationships (
   center_id text,
   active boolean,
   historical_info text,
-  historical_documents jsonb,
   patientnumber bigint,
   status text,
   CONSTRAINT care_relationships_pkey PRIMARY KEY (id),
@@ -58,6 +57,7 @@ CREATE TABLE public.dispo (
 CREATE TABLE public.entries (
   id text NOT NULL,
   data jsonb NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT timezone('utc'::text, now()),
   creator_user_id text NOT NULL,
   target_user_id text NOT NULL,
   entry_type text NOT NULL,
