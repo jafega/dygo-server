@@ -5085,7 +5085,10 @@ async function saveGoogleTokensForUser(userId, tokens) {
 
 async function getCalendarClient(userId) {
   const tokens = await getGoogleTokensForUser(userId);
-  if (!tokens) return null;
+  if (!tokens) {
+    console.warn(`⚠️ [Google Calendar] No se encontraron tokens OAuth para userId=${userId}. ¿Tiene Calendar conectado?`);
+    return null;
+  }
   const oauth2Client = await createOAuth2Client();
   oauth2Client.setCredentials(tokens);
   oauth2Client.on('tokens', async (newTokens) => {
@@ -5144,10 +5147,16 @@ async function createCalendarEventForSession(userId, session, withMeet = true) {
 }
 
 async function markCalendarEventCancelled(userId, eventId) {
-  if (!eventId) return;
+  if (!eventId) {
+    console.warn(`⚠️ [Google Calendar] markCalendarEventCancelled llamado sin eventId para userId=${userId}`);
+    return;
+  }
   try {
     const calendar = await getCalendarClient(userId);
-    if (!calendar) return;
+    if (!calendar) {
+      console.warn(`⚠️ [Google Calendar] No se pudo obtener cliente de Calendar para cancelar evento ${eventId}`);
+      return;
+    }
     // Get existing event summary first
     let existingSummary = 'Sesión';
     try {
@@ -5172,10 +5181,16 @@ async function markCalendarEventCancelled(userId, eventId) {
 }
 
 async function deleteCalendarEventById(userId, eventId) {
-  if (!eventId) return;
+  if (!eventId) {
+    console.warn(`⚠️ [Google Calendar] deleteCalendarEventById llamado sin eventId para userId=${userId}`);
+    return;
+  }
   try {
     const calendar = await getCalendarClient(userId);
-    if (!calendar) return;
+    if (!calendar) {
+      console.warn(`⚠️ [Google Calendar] No se pudo obtener cliente de Calendar para eliminar evento ${eventId}`);
+      return;
+    }
     await calendar.events.delete({ calendarId: 'primary', eventId });
     console.log(`✅ [Google Calendar] Evento eliminado: ${eventId}`);
   } catch (e) {
@@ -14839,13 +14854,32 @@ app.patch('/api/sessions/:id', authenticateRequest, async (req, res) => {
     const db = getDb();
     if (!db.sessions) db.sessions = [];
 
-    const idx = db.sessions.findIndex(s => s.id === id);
-    if (idx === -1) {
+    let idx = db.sessions.findIndex(s => s.id === id);
+
+    // Serverless fallback: if session is not in memory cache (cold start),
+    // fetch it directly from Supabase and inject into the cache.
+    if (idx === -1 && supabaseAdmin) {
+      console.log(`🔄 [PATCH /api/sessions/${id}] No está en caché, consultando Supabase...`);
+      const { data: supaRow, error: supaErr } = await supabaseAdmin
+        .from('sessions')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+      if (supaErr || !supaRow) {
+        console.log(`❌ [PATCH /api/sessions/${id}] Sesión no encontrada en caché ni en Supabase`);
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      const normalized = normalizeSupabaseRow(supaRow);
+      if (supaRow.status) normalized.status = supaRow.status;
+      db.sessions.push(normalized);
+      idx = db.sessions.length - 1;
+      console.log(`✅ [PATCH /api/sessions/${id}] Sesión cargada desde Supabase al caché (calendar_id=${supaRow.calendar_id || 'null'})`);
+    } else if (idx === -1) {
       console.log(`❌ [PATCH /api/sessions/${id}] Sesión no encontrada`);
       return res.status(404).json({ error: 'Session not found' });
     }
 
-    console.log(`✅ [PATCH /api/sessions/${id}] Sesión encontrada en índice ${idx}:`, db.sessions[idx]);
+    console.log(`✅ [PATCH /api/sessions/${id}] Sesión encontrada en índice ${idx}`);
 
     // Authorization: only psychologist, patient, or superadmin
     // Exception: 'available' slots can be booked by any authenticated user
@@ -15095,7 +15129,7 @@ app.patch('/api/sessions/:id', authenticateRequest, async (req, res) => {
     // --- Google Calendar: resolve IDs for calendar operations ---
     const patchGcEventId = updatedSession.google_calendar_event_id;
     const patchPsychUserId = updatedSession.psychologist_user_id || updatedSession.psychologistId;
-    console.log(`🗓️ [PATCH /api/sessions/${id}] Calendar state: gcEventId=${patchGcEventId}, psychUserId=${patchPsychUserId}`);
+    console.log(`🗓️ [PATCH /api/sessions/${id}] Calendar state: gcEventId=${patchGcEventId || 'NO ENCONTRADO'}, psychUserId=${patchPsychUserId}`);
 
     // --- Google Calendar: marcar evento como cancelado si el status cambió a 'cancelled' ---
     if (req.body.status === 'cancelled') {
@@ -15103,6 +15137,8 @@ app.patch('/api/sessions/:id', authenticateRequest, async (req, res) => {
         markCalendarEventCancelled(patchPsychUserId, patchGcEventId).catch(e =>
           console.error('[PATCH /api/sessions] Error Google Calendar cancel:', e?.message)
         );
+      } else {
+        console.warn(`⚠️ [PATCH /api/sessions/${id}] Cancelación sin Calendar: gcEventId=${patchGcEventId || 'null'}, psychUserId=${patchPsychUserId || 'null'}`);
       }
     }
 
@@ -15134,8 +15170,27 @@ app.put('/api/sessions/:id', authenticateRequest, async (req, res) => {
     const db = getDb();
     if (!db.sessions) db.sessions = [];
 
-    const idx = db.sessions.findIndex(s => s.id === id);
-    if (idx === -1) {
+    let idx = db.sessions.findIndex(s => s.id === id);
+
+    // Serverless fallback: if session is not in memory cache (cold start),
+    // fetch it directly from Supabase and inject into the cache.
+    if (idx === -1 && supabaseAdmin) {
+      console.log(`🔄 [PUT /api/sessions/${id}] No está en caché, consultando Supabase...`);
+      const { data: supaRow, error: supaErr } = await supabaseAdmin
+        .from('sessions')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+      if (supaErr || !supaRow) {
+        console.log(`❌ [PUT /api/sessions/${id}] Sesión no encontrada en caché ni en Supabase`);
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      const normalized = normalizeSupabaseRow(supaRow);
+      if (supaRow.status) normalized.status = supaRow.status;
+      db.sessions.push(normalized);
+      idx = db.sessions.length - 1;
+      console.log(`✅ [PUT /api/sessions/${id}] Sesión cargada desde Supabase al caché (calendar_id=${supaRow.calendar_id || 'null'})`);
+    } else if (idx === -1) {
       console.log(`❌ [PUT /api/sessions/${id}] Sesión no encontrada`);
       return res.status(404).json({ error: 'Session not found' });
     }
@@ -15623,11 +15678,13 @@ app.delete('/api/sessions/:id', authenticateRequest, async (req, res) => {
         // Use calendar_id column first, then normalized/JSONB fallback
         const gcEventId = sessionData?.calendar_id || session.google_calendar_event_id || sessionData?.data?.google_calendar_event_id;
         const psychUserId = session.psychologist_user_id;
-        console.log(`🗓️ [DELETE /api/sessions] Calendar cleanup: gcEventId=${gcEventId}, psychUserId=${psychUserId}`);
+        console.log(`🗓️ [DELETE /api/sessions] Calendar cleanup: gcEventId=${gcEventId || 'NO ENCONTRADO'}, psychUserId=${psychUserId}, calendar_id_col=${sessionData?.calendar_id || 'null'}, normalized=${session.google_calendar_event_id || 'null'}, jsonb=${sessionData?.data?.google_calendar_event_id || 'null'}`);
         if (gcEventId && psychUserId) {
           deleteCalendarEventById(psychUserId, gcEventId).catch(e =>
             console.error('[DELETE /api/sessions] Error Google Calendar delete:', e?.message)
           );
+        } else {
+          console.warn(`⚠️ [DELETE /api/sessions] No se pudo limpiar Calendar: gcEventId=${gcEventId || 'null'}, psychUserId=${psychUserId || 'null'}`);
         }
       } else {
         // Buscar en tabla dispo

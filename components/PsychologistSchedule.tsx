@@ -1435,6 +1435,10 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
         if (status === 'cancelled') {
           alert('Sesión cancelada correctamente');
         }
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('Error updating session status:', errorData);
+        alert('Error al actualizar la sesión: ' + (errorData.error || 'Error desconocido'));
       }
     } catch (error) {
       console.error('Error updating session:', error);
