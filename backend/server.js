@@ -1097,6 +1097,39 @@ const ensureSessionEntryTable = async () => {
   }
 };
 
+// Ensure historical_documents JSONB column exists on care_relationships and migrate legacy data
+const ensureHistoricalDocumentsColumn = async () => {
+  if (!supabaseAdmin || !SUPABASE_SQL_ENDPOINT || !SUPABASE_SERVICE_ROLE_KEY) return;
+  try {
+    const sql = `
+      DO $$
+      BEGIN
+        -- Add column if it doesn't exist
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name = 'care_relationships'
+            AND column_name = 'historical_documents'
+        ) THEN
+          ALTER TABLE public.care_relationships ADD COLUMN historical_documents JSONB DEFAULT NULL;
+          RAISE NOTICE 'Column historical_documents added';
+        END IF;
+
+        -- Migrate legacy data from data->'historicalDocuments' to the new column
+        UPDATE public.care_relationships
+          SET historical_documents = data->'historicalDocuments',
+              data = data - 'historicalDocuments'
+          WHERE data ? 'historicalDocuments'
+            AND (historical_documents IS NULL);
+      END $$;
+    `;
+    await executeSupabaseSql(sql);
+    console.log('✅ historical_documents column ensured + legacy data migrated');
+  } catch (err) {
+    console.error('❌ Error ensuring historical_documents column:', err?.message || err);
+  }
+};
+
 const ensureSupabaseTablesExist = async (force = false) => {
   if (!supabaseAdmin || !SUPABASE_SQL_ENDPOINT || !SUPABASE_SERVICE_ROLE_KEY) return;
   if (supabaseTablesEnsured && !force) return;
@@ -1364,6 +1397,10 @@ async function initializeSupabase() {
         ensureSupabaseTablesExist()
           .then(() => console.log('✅ Supabase tables verified'))
           .catch(schemaErr => console.error('❌ Error ensuring Supabase schema', schemaErr?.message || schemaErr));
+        // Ensure historical_documents column exists and migrate legacy data
+        ensureHistoricalDocumentsColumn()
+          .then(() => console.log('✅ historical_documents column verified'))
+          .catch(err => console.error('❌ Error ensuring historical_documents column', err?.message || err));
       });
       
       try {
@@ -1413,7 +1450,7 @@ const ENTRY_TABLE_COLUMNS            = ['id', 'data', 'creator_user_id', 'target
 const GOAL_TABLE_COLUMNS             = ['id', 'data', 'patient_user_id'];
 const INVITATION_TABLE_COLUMNS       = ['id', 'data', 'psychologist_user_id', 'patient_user_id', 'psychologist_email', 'invited_patient_email'];
 const SETTINGS_TABLE_COLUMNS         = ['id', 'data', 'user_id'];
-const CARE_REL_TABLE_COLUMNS         = ['id', 'data', 'created_at', 'psychologist_user_id', 'patient_user_id', 'default_session_price', 'default_psych_percent', 'center_id', 'active', 'historical_info', 'patientnumber', 'status'];
+const CARE_REL_TABLE_COLUMNS         = ['id', 'data', 'created_at', 'psychologist_user_id', 'patient_user_id', 'default_session_price', 'default_psych_percent', 'center_id', 'active', 'historical_info', 'historical_documents', 'patientnumber', 'status'];
 const INVOICE_TABLE_COLUMNS          = ['id', 'data', 'created_at', 'psychologist_user_id', 'patient_user_id', 'amount', 'tax', 'total', 'status', 'psych_invoice_id', 'invoice_date', 'invoiceNumber', 'irpf_percent'];
 const PSYCH_PROFILE_TABLE_COLUMNS    = ['id', 'data', 'created_at', 'updated_at', 'user_id', 'locations'];
 const SUBSCRIPTION_TABLE_COLUMNS     = ['id', 'data', 'created_at'];
@@ -1512,6 +1549,8 @@ function normalizeSupabaseRow(row) {
     delete cleanData.id;                     // Usar columna de tabla PK
     delete cleanData.auth_user_id;           // Usar columna de tabla (users)
     delete cleanData.psycologist_profile_id; // Typo histórico - usar psychologist_profile_id
+    delete cleanData.historicalDocuments;     // Usar columna dedicada historical_documents (care_relationships)
+    delete cleanData.historical_documents;   // Usar columna dedicada (care_relationships)
     // NOTA: uses_bonos NO se elimina porque está en data JSONB, no en columna de tabla
     
     // Combinar: primero data limpia, luego columnas de tabla
@@ -2062,6 +2101,10 @@ async function loadSupabaseCache() {
     if (normalized.default_psych_percent === null || normalized.default_psych_percent === undefined) {
       normalized.default_psych_percent = 100;
     }
+    // Preservar historical_documents de la columna dedicada (no pasa por normalizeSupabaseRow)
+    if (row.historical_documents) {
+      normalized.historical_documents = row.historical_documents;
+    }
     return normalized;
   });
   const settings = Object.fromEntries(settingsRows.map(row => [row.id, (row.data && typeof row.data === 'object') ? row.data : normalizeSupabaseRow(row)]));
@@ -2494,7 +2537,8 @@ async function saveSupabaseDb(data, prevCache = null) {
       psychologist_user_id: rel.psychologist_user_id || null,
       patient_user_id: rel.patient_user_id || null,
       default_session_price: rel.default_session_price,
-      default_psych_percent: Math.min(rel.default_psych_percent, 100)
+      default_psych_percent: Math.min(rel.default_psych_percent, 100),
+      historical_documents: rel.historical_documents || null
     }));
   
   // Psychologist profiles: extraer campo user_id
@@ -12681,14 +12725,15 @@ app.get('/api/relationships/:id/historical-documents', authenticateRequest, asyn
       try {
         const { data: rows, error } = await supabaseAdmin
           .from('care_relationships')
-          .select('data')
+          .select('historical_documents, data')
           .eq('id', id)
           .limit(1);
         
         if (error) throw error;
         
         if (rows && rows[0]) {
-          historicalDocs = rows[0].data?.historicalDocuments || { documents: [], lastUpdated: 0 };
+          // Priorizar columna dedicada historical_documents, fallback a data.historicalDocuments (legacy)
+          historicalDocs = rows[0].historical_documents || rows[0].data?.historicalDocuments || { documents: [], lastUpdated: 0 };
         }
       } catch (err) {
         console.error(`[GET /api/relationships/${id}/historical-documents] ⚠️ Error loading from Supabase:`, err);
@@ -12705,7 +12750,7 @@ app.get('/api/relationships/:id/historical-documents', authenticateRequest, asyn
         return res.status(404).json({ error: 'Relación no encontrada' });
       }
 
-      historicalDocs = relationship.data?.historicalDocuments || { documents: [], lastUpdated: 0 };
+      historicalDocs = relationship.historical_documents || relationship.data?.historicalDocuments || { documents: [], lastUpdated: 0 };
     }
 
     // Generar signed URLs para documentos en Storage y limpiar base64 del response
@@ -12753,14 +12798,14 @@ app.post('/api/relationships/:id/historical-documents', authenticateRequest, exp
     }
 
     let relationship = null;
-    let rawRelData = {}; // datos JSONB crudos de Supabase
+    let historicalDocs = null; // datos de la columna dedicada historical_documents
 
     // Intentar cargar desde Supabase primero
     if (supabaseAdmin) {
       try {
         const { data: rows, error } = await supabaseAdmin
           .from('care_relationships')
-          .select('*')
+          .select('id, historical_documents, data')
           .eq('id', id)
           .limit(1);
         
@@ -12768,7 +12813,8 @@ app.post('/api/relationships/:id/historical-documents', authenticateRequest, exp
         
         if (rows && rows[0]) {
           relationship = rows[0];
-          rawRelData = (relationship.data && typeof relationship.data === 'object') ? relationship.data : {};
+          // Priorizar columna dedicada, fallback a data.historicalDocuments (legacy)
+          historicalDocs = rows[0].historical_documents || rows[0].data?.historicalDocuments || null;
         }
       } catch (err) {
         console.error(`[POST /api/relationships/${id}/historical-documents] ⚠️ Error loading from Supabase:`, err);
@@ -12784,12 +12830,12 @@ app.post('/api/relationships/:id/historical-documents', authenticateRequest, exp
       if (!relationship) {
         return res.status(404).json({ error: 'Relación no encontrada' });
       }
-      rawRelData = (relationship.data && typeof relationship.data === 'object') ? relationship.data : {};
+      historicalDocs = relationship.historical_documents || relationship.data?.historicalDocuments || null;
     }
 
     // Inicializar estructura de documentos históricos si no existe
-    if (!rawRelData.historicalDocuments) {
-      rawRelData.historicalDocuments = { documents: [], lastUpdated: 0 };
+    if (!historicalDocs) {
+      historicalDocs = { documents: [], lastUpdated: 0 };
     }
 
     const docId = crypto.randomBytes(16).toString('hex');
@@ -12854,15 +12900,15 @@ app.post('/api/relationships/:id/historical-documents', authenticateRequest, exp
       newDocument.content = content;
     }
 
-    rawRelData.historicalDocuments.documents.push(newDocument);
-    rawRelData.historicalDocuments.lastUpdated = Date.now();
+    historicalDocs.documents.push(newDocument);
+    historicalDocs.lastUpdated = Date.now();
 
-    // Persistir metadatos en Supabase (sin el contenido base64)
+    // Persistir en la columna dedicada historical_documents (no en data JSONB)
     if (supabaseAdmin) {
       try {
         const { error } = await supabaseAdmin
           .from('care_relationships')
-          .update({ data: cleanDataForStorage(rawRelData, CARE_REL_TABLE_COLUMNS) })
+          .update({ historical_documents: historicalDocs })
           .eq('id', id);
         
         if (error) throw error;
@@ -12872,7 +12918,7 @@ app.post('/api/relationships/:id/historical-documents', authenticateRequest, exp
         if (supabaseDbCache?.careRelationships) {
           const idx = supabaseDbCache.careRelationships.findIndex(rel => rel.id === id);
           if (idx >= 0) {
-            supabaseDbCache.careRelationships[idx].data = rawRelData;
+            supabaseDbCache.careRelationships[idx].historical_documents = historicalDocs;
           }
         }
       } catch (err) {
@@ -12886,10 +12932,8 @@ app.post('/api/relationships/:id/historical-documents', authenticateRequest, exp
     if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
     const localRelIdx = db.careRelationships.findIndex(rel => rel.id === id);
     if (localRelIdx >= 0) {
-      if (!db.careRelationships[localRelIdx].data) db.careRelationships[localRelIdx].data = {};
-      db.careRelationships[localRelIdx].data.historicalDocuments = rawRelData.historicalDocuments;
+      db.careRelationships[localRelIdx].historical_documents = historicalDocs;
     }
-    await saveDb(db, { awaitPersistence: true });
     console.log(`[POST /api/relationships/${id}/historical-documents] Document uploaded: ${fileName}`);
     
     return res.json(newDocument);
@@ -12908,21 +12952,21 @@ app.delete('/api/relationships/:id/historical-documents/:docId', authenticateReq
       return res.status(400).json({ error: 'IDs requeridos' });
     }
 
-    let rawRelData = null;
+    let historicalDocs = null;
 
-    // Intentar cargar desde Supabase primero
+    // Intentar cargar desde Supabase primero (columna dedicada)
     if (supabaseAdmin) {
       try {
         const { data: rows, error } = await supabaseAdmin
           .from('care_relationships')
-          .select('data')
+          .select('historical_documents, data')
           .eq('id', id)
           .limit(1);
         
         if (error) throw error;
         
         if (rows && rows[0]) {
-          rawRelData = (rows[0].data && typeof rows[0].data === 'object') ? rows[0].data : {};
+          historicalDocs = rows[0].historical_documents || rows[0].data?.historicalDocuments || null;
         }
       } catch (err) {
         console.error(`[DELETE /api/relationships/${id}/historical-documents/${docId}] ⚠️ Error loading from Supabase:`, err);
@@ -12930,7 +12974,7 @@ app.delete('/api/relationships/:id/historical-documents/:docId', authenticateReq
     }
 
     // Fallback a DB local si no se encontró en Supabase
-    if (!rawRelData) {
+    if (!historicalDocs) {
       const db = getDb();
       if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
       
@@ -12938,15 +12982,15 @@ app.delete('/api/relationships/:id/historical-documents/:docId', authenticateReq
       if (!relationship) {
         return res.status(404).json({ error: 'Relación no encontrada' });
       }
-      rawRelData = (relationship.data && typeof relationship.data === 'object') ? relationship.data : {};
+      historicalDocs = relationship.historical_documents || relationship.data?.historicalDocuments || null;
     }
 
-    if (!rawRelData.historicalDocuments?.documents) {
+    if (!historicalDocs?.documents) {
       return res.status(404).json({ error: 'No hay documentos' });
     }
 
     // Buscar el documento para obtener su storagePath antes de eliminarlo
-    const docToDelete = rawRelData.historicalDocuments.documents.find(doc => doc.id === docId);
+    const docToDelete = historicalDocs.documents.find(doc => doc.id === docId);
     if (!docToDelete) {
       return res.status(404).json({ error: 'Documento no encontrado' });
     }
@@ -12967,23 +13011,23 @@ app.delete('/api/relationships/:id/historical-documents/:docId', authenticateReq
       }
     }
 
-    rawRelData.historicalDocuments.documents = rawRelData.historicalDocuments.documents.filter(
+    historicalDocs.documents = historicalDocs.documents.filter(
       doc => doc.id !== docId
     );
 
-    rawRelData.historicalDocuments.lastUpdated = Date.now();
+    historicalDocs.lastUpdated = Date.now();
     
     // Si no quedan documentos, limpiar el resumen y el campo historical_info
-    if (rawRelData.historicalDocuments.documents.length === 0) {
-      rawRelData.historicalDocuments.aiSummary = undefined;
+    if (historicalDocs.documents.length === 0) {
+      historicalDocs.aiSummary = undefined;
     }
 
-    // Persistir en Supabase
+    // Persistir en la columna dedicada historical_documents
     if (supabaseAdmin) {
       try {
-        const updateData = { data: cleanDataForStorage(rawRelData, CARE_REL_TABLE_COLUMNS) };
+        const updateData = { historical_documents: historicalDocs };
         // Si no quedan documentos, limpiar también historical_info
-        if (rawRelData.historicalDocuments.documents.length === 0) {
+        if (historicalDocs.documents.length === 0) {
           updateData.historical_info = null;
         }
         
@@ -12999,7 +13043,7 @@ app.delete('/api/relationships/:id/historical-documents/:docId', authenticateReq
         if (supabaseDbCache?.careRelationships) {
           const idx = supabaseDbCache.careRelationships.findIndex(rel => rel.id === id);
           if (idx >= 0) {
-            supabaseDbCache.careRelationships[idx].data = rawRelData;
+            supabaseDbCache.careRelationships[idx].historical_documents = historicalDocs;
           }
         }
       } catch (err) {
@@ -13013,10 +13057,8 @@ app.delete('/api/relationships/:id/historical-documents/:docId', authenticateReq
     if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
     const localRelIdx = db.careRelationships.findIndex(rel => rel.id === id);
     if (localRelIdx >= 0) {
-      if (!db.careRelationships[localRelIdx].data) db.careRelationships[localRelIdx].data = {};
-      db.careRelationships[localRelIdx].data.historicalDocuments = rawRelData.historicalDocuments;
+      db.careRelationships[localRelIdx].historical_documents = historicalDocs;
     }
-    await saveDb(db, { awaitPersistence: true });
     console.log(`[DELETE /api/relationships/${id}/historical-documents/${docId}] Document deleted`);
     
     return res.json({ success: true });
@@ -13039,21 +13081,21 @@ app.post('/api/relationships/:id/historical-documents/generate-summary', authent
       return res.status(503).json({ error: 'Servicio de IA no disponible. Configure GEMINI_API_KEY.' });
     }
 
-    let rawRelData = null;
+    let historicalDocs = null;
 
-    // Intentar cargar desde Supabase primero
+    // Intentar cargar desde Supabase primero (columna dedicada)
     if (supabaseAdmin) {
       try {
         const { data: rows, error } = await supabaseAdmin
           .from('care_relationships')
-          .select('data')
+          .select('historical_documents, data')
           .eq('id', id)
           .limit(1);
         
         if (error) throw error;
         
         if (rows && rows[0]) {
-          rawRelData = (rows[0].data && typeof rows[0].data === 'object') ? rows[0].data : {};
+          historicalDocs = rows[0].historical_documents || rows[0].data?.historicalDocuments || null;
         }
       } catch (err) {
         console.error(`[POST /api/relationships/${id}/historical-documents/generate-summary] ⚠️ Error loading from Supabase:`, err);
@@ -13061,7 +13103,7 @@ app.post('/api/relationships/:id/historical-documents/generate-summary', authent
     }
 
     // Fallback a DB local si no se encontró en Supabase
-    if (!rawRelData) {
+    if (!historicalDocs) {
       const db = getDb();
       if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
       
@@ -13069,10 +13111,10 @@ app.post('/api/relationships/:id/historical-documents/generate-summary', authent
       if (!relationship) {
         return res.status(404).json({ error: 'Relación no encontrada' });
       }
-      rawRelData = (relationship.data && typeof relationship.data === 'object') ? relationship.data : {};
+      historicalDocs = relationship.historical_documents || relationship.data?.historicalDocuments || null;
     }
 
-    const docs = rawRelData.historicalDocuments?.documents || [];
+    const docs = historicalDocs?.documents || [];
     if (docs.length === 0) {
       return res.status(400).json({ error: 'No hay documentos para resumir' });
     }
@@ -13214,21 +13256,21 @@ IMPORTANTE: Analiza el contenido REAL de los documentos proporcionados arriba. N
     const result = await model.generateContent(prompt);
     const summary = result.response.text();
 
-    // Guardar resumen
-    if (!rawRelData.historicalDocuments) {
-      rawRelData.historicalDocuments = { documents: docs, lastUpdated: 0 };
+    // Guardar resumen en historicalDocs
+    if (!historicalDocs) {
+      historicalDocs = { documents: docs, lastUpdated: 0 };
     }
     
-    rawRelData.historicalDocuments.aiSummary = summary;
-    rawRelData.historicalDocuments.lastUpdated = Date.now();
+    historicalDocs.aiSummary = summary;
+    historicalDocs.lastUpdated = Date.now();
 
-    // Persistir en Supabase (guardando tanto en data.historicalDocuments como en historical_info)
+    // Persistir en la columna dedicada historical_documents + historical_info
     if (supabaseAdmin) {
       try {
         const { error } = await supabaseAdmin
           .from('care_relationships')
           .update({ 
-            data: cleanDataForStorage(rawRelData, CARE_REL_TABLE_COLUMNS),
+            historical_documents: historicalDocs,
             historical_info: summary  // Guardar también en el campo de nivel superior
           })
           .eq('id', id);
@@ -13240,7 +13282,7 @@ IMPORTANTE: Analiza el contenido REAL de los documentos proporcionados arriba. N
         if (supabaseDbCache?.careRelationships) {
           const idx = supabaseDbCache.careRelationships.findIndex(rel => rel.id === id);
           if (idx >= 0) {
-            supabaseDbCache.careRelationships[idx].data = rawRelData;
+            supabaseDbCache.careRelationships[idx].historical_documents = historicalDocs;
           }
         }
       } catch (err) {
@@ -13254,10 +13296,8 @@ IMPORTANTE: Analiza el contenido REAL de los documentos proporcionados arriba. N
     if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
     const localRelIdx = db.careRelationships.findIndex(rel => rel.id === id);
     if (localRelIdx >= 0) {
-      if (!db.careRelationships[localRelIdx].data) db.careRelationships[localRelIdx].data = {};
-      db.careRelationships[localRelIdx].data.historicalDocuments = rawRelData.historicalDocuments;
+      db.careRelationships[localRelIdx].historical_documents = historicalDocs;
     }
-    await saveDb(db, { awaitPersistence: true });
     console.log(`[POST /api/relationships/${id}/historical-documents/generate-summary] Summary generated successfully`);
     
     return res.json({ 
