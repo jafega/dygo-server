@@ -1104,7 +1104,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
   );
 
   // Superadmin View - Solo para garryjavi@gmail.com y daniel.m.mendezv@gmail.com
-  const SUPERADMIN_EMAILS_FRONTEND = ['garryjavi@gmail.com', 'daniel.m.mendezv@gmail.com'];
+  const SUPERADMIN_EMAILS_FRONTEND = ['garryjavi@gmail.com', 'daniel.m.mendezv@gmail.com', 'info@mainds.app'];
   const isSuperAdminUser = SUPERADMIN_EMAILS_FRONTEND.includes(currentUser?.email?.toLowerCase() || '');
 
   if (psychViewMode === 'ADMIN' && isSuperAdminUser) {

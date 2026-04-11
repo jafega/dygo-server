@@ -97,6 +97,9 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session: init
         if (response.ok) {
           const sessionData = await response.json();
           setSession(sessionData);
+        } else if (response.status === 404) {
+          console.warn(`⚠️ Sesión ${initialSession.id} no encontrada en servidor, usando datos locales`);
+          setSession(initialSession);
         }
       } catch (error) {
         console.error('Error reloading session:', error);

@@ -246,7 +246,6 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                 <KpiCard
                   label="Con plan contratado"
                   value={stats.overview.paidCount}
-                  sub={`${stats.overview.blockedCount} bloqueados`}
                   from="from-emerald-50" to="to-emerald-100" border="border-emerald-200"
                   textMain="text-emerald-900" textLabel="text-emerald-600"
                   icon={<CreditCard size={22} className="text-emerald-600" />}
@@ -273,6 +272,14 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                   from="from-rose-50" to="to-rose-100" border="border-rose-200"
                   textMain="text-rose-900" textLabel="text-rose-600"
                   icon={<TrendingUp size={22} className="text-rose-600" />}
+                />
+                <KpiCard
+                  label="Inactivos (trial agotado)"
+                  value={stats.overview.blockedCount}
+                  sub="prueba expirada sin plan"
+                  from="from-red-50" to="to-red-100" border="border-red-200"
+                  textMain="text-red-900" textLabel="text-red-600"
+                  icon={<UserX size={22} className="text-red-600" />}
                 />
                 <KpiCard
                   label="Total usuarios"

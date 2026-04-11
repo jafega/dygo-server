@@ -492,7 +492,7 @@ const BulkBillingPanel: React.FC<BulkBillingPanelProps> = ({ psychologistId, onD
         bonoIds,
         psychologistId,
         psychologist_user_id: psychologistId,
-        billing_client_name: center.nombre_comercial || center.centerName,
+        billing_client_name: center.centerName,
         billing_client_address: center.address,
         billing_client_tax_id: center.cif,
         billing_client_postal_code: '',

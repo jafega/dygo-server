@@ -15445,7 +15445,7 @@ app.delete('/api/sessions/future-pending', authenticateRequest, async (req, res)
       // Fetch candidates first so we can apply JS-side filters (startTime in JSONB, weekday)
       let query = supabaseAdmin
         .from('sessions')
-        .select('id, data, starts_on, calendar_id, psychologist_user_id')
+        .select('id, data, starts_on, calendar_id, psychologist_user_id, session_entry_id')
         .eq('patient_user_id', patient_user_id)
         .eq('status', 'scheduled')
         .gte('starts_on', fromDate + 'T00:00:00.000Z');
@@ -15480,6 +15480,20 @@ app.delete('/api/sessions/future-pending', authenticateRequest, async (req, res)
       const matchingIds = matchingSessions.map(s => s.id);
 
       if (matchingIds.length > 0) {
+        // Delete associated session_entries first (by session_entry_id on sessions, and by session_id column on session_entry)
+        const sessionsWithEntries = matchingSessions.filter(s => s.session_entry_id);
+        if (sessionsWithEntries.length > 0) {
+          const entryIds = sessionsWithEntries.map(s => s.session_entry_id);
+          // Null out FK on sessions first to avoid constraint violation
+          await supabaseAdmin.from('sessions').update({ session_entry_id: null }).in('id', sessionsWithEntries.map(s => s.id));
+          await supabaseAdmin.from('session_entry').delete().in('id', entryIds);
+          console.log(`🗑️ [DELETE /future-pending] Eliminadas ${entryIds.length} session_entries por session_entry_id`);
+        }
+        // Also delete any session_entries linked by session_id column
+        try {
+          await supabaseAdmin.from('session_entry').delete().in('session_id', matchingIds);
+        } catch (_) { /* session_id column may not exist yet */ }
+
         const { data: deleted, error: delError } = await supabaseAdmin
           .from('sessions')
           .delete()
@@ -15732,8 +15746,10 @@ app.delete('/api/sessions/:id', authenticateRequest, async (req, res) => {
           }
         }
 
-        // Eliminar session_entry si existe
+        // Eliminar session_entry si existe (por session_entry_id en la sesión)
         if (sessionEntryId) {
+          // Null out FK first to avoid constraint violation
+          await supabaseAdmin.from('sessions').update({ session_entry_id: null }).eq('id', id);
           const { error: entryDeleteError } = await supabaseAdmin
             .from('session_entry')
             .delete()
@@ -15745,6 +15761,17 @@ app.delete('/api/sessions/:id', authenticateRequest, async (req, res) => {
             console.log(`✅ Session entry ${sessionEntryId} eliminada de Supabase`);
           }
         }
+        // También eliminar session_entries huérfanas vinculadas por session_id
+        try {
+          const { data: extraEntries } = await supabaseAdmin
+            .from('session_entry')
+            .delete()
+            .eq('session_id', id)
+            .select('id');
+          if (extraEntries && extraEntries.length > 0) {
+            console.log(`✅ ${extraEntries.length} session_entries adicionales eliminadas por session_id=${id}`);
+          }
+        } catch (_) { /* session_id column may not exist yet */ }
         
         // Eliminar sesión de Supabase
         const { error: deleteError } = await supabaseAdmin
@@ -15817,6 +15844,11 @@ app.delete('/api/sessions/:id', authenticateRequest, async (req, res) => {
           db.sessionEntries.splice(entryIdx, 1);
         }
       }
+      // También eliminar entries vinculadas por session_id en cache
+      db.sessionEntries = db.sessionEntries.filter(e => {
+        const eSid = e.session_id || e.data?.session_id;
+        return eSid !== id;
+      });
       // Google Calendar: eliminar evento si existe (para sesiones no encontradas en Supabase)
       if (!session) {
         const localGcEventId = localSession.google_calendar_event_id || localSession.data?.google_calendar_event_id;
