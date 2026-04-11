@@ -1080,17 +1080,39 @@ const ensureSessionEntryTable = async () => {
           creator_user_id TEXT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
           target_user_id TEXT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
           status TEXT NOT NULL DEFAULT 'pending',
+          session_id TEXT REFERENCES public.sessions(id),
+          summary TEXT,
+          transcript TEXT,
           created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
         
         CREATE INDEX IF NOT EXISTS idx_session_entry_creator ON public.session_entry(creator_user_id);
         CREATE INDEX IF NOT EXISTS idx_session_entry_target ON public.session_entry(target_user_id);
         CREATE INDEX IF NOT EXISTS idx_session_entry_status ON public.session_entry(status);
+        CREATE INDEX IF NOT EXISTS idx_session_entry_session_id ON public.session_entry(session_id);
         
         ALTER TABLE public.session_entry ENABLE ROW LEVEL SECURITY;
       `;
       await executeSupabaseSql(sql);
       console.log('✅ Tabla session_entry creada en Supabase');
+    } else {
+      // Table exists — ensure session_id column exists
+      try {
+        const { error: colErr } = await supabaseAdmin.from('session_entry').select('session_id').limit(1);
+        if (colErr && colErr.message && colErr.message.includes('session_id')) {
+          console.log('🔧 [session_entry] Añadiendo columna session_id...');
+          const migrationSql = `
+            ALTER TABLE public.session_entry ADD COLUMN IF NOT EXISTS session_id TEXT DEFAULT NULL;
+            UPDATE public.session_entry SET session_id = data->>'session_id' WHERE data->>'session_id' IS NOT NULL AND session_id IS NULL;
+            UPDATE public.session_entry se SET session_id = s.id FROM public.sessions s WHERE s.session_entry_id = se.id AND se.session_id IS NULL;
+            CREATE INDEX IF NOT EXISTS idx_session_entry_session_id ON public.session_entry(session_id);
+          `;
+          await executeSupabaseSql(migrationSql);
+          console.log('✅ Columna session_id añadida y migrada en session_entry');
+        }
+      } catch (colCheckErr) {
+        console.error('❌ Error verificando columna session_id:', colCheckErr?.message || colCheckErr);
+      }
     }
   } catch (err) {
     console.error('❌ Error asegurando tabla session_entry:', err?.message || err);
@@ -15994,7 +16016,7 @@ app.post('/api/session-entries', authenticateRequest, async (req, res) => {
     // If a session_entry already exists for this session_id, return it as-is
     // (unique-per-session constraint enforced here to avoid duplicate entries).
     const existingInCache = (db.sessionEntries || []).find(
-      e => e.session_id === session_id
+      e => e.session_id === session_id || e.data?.session_id === session_id
     );
     if (existingInCache) {
       console.log('⚠️ [POST session-entries] Duplicate blocked — returning existing entry:', existingInCache.id, 'for session:', session_id);
@@ -16003,11 +16025,28 @@ app.post('/api/session-entries', authenticateRequest, async (req, res) => {
 
     // Also check Supabase in case the cache is stale
     if (supabaseAdmin) {
-      const { data: existingRows } = await supabaseAdmin
-        .from('session_entry')
-        .select('id, session_id, status, data, creator_user_id, target_user_id, transcript, summary')
-        .eq('session_id', session_id)
-        .limit(1);
+      let existingRows = null;
+      // Try column first, fallback to JSONB if column doesn't exist yet
+      try {
+        const { data: rows, error: colError } = await supabaseAdmin
+          .from('session_entry')
+          .select('*')
+          .eq('session_id', session_id)
+          .limit(1);
+        if (!colError) {
+          existingRows = rows;
+        } else {
+          // Column may not exist yet, try JSONB fallback
+          const { data: rows2 } = await supabaseAdmin
+            .from('session_entry')
+            .select('*')
+            .eq('data->>session_id', session_id)
+            .limit(1);
+          existingRows = rows2;
+        }
+      } catch (dupErr) {
+        console.error('⚠️ [POST session-entries] Error checking duplicates in Supabase:', dupErr);
+      }
       if (existingRows && existingRows.length > 0) {
         const row = existingRows[0];
         const existing = normalizeSupabaseRow(row);
@@ -16048,18 +16087,32 @@ app.post('/api/session-entries', authenticateRequest, async (req, res) => {
         await ensureSessionEntryTable();
 
         // Insertar en Supabase (session_id, summary y transcript en columnas, resto en data)
-        const { error: insertError } = await supabaseAdmin
+        let insertError = null;
+        const insertPayload = {
+          id: sessionEntryId,
+          session_id,
+          creator_user_id: creator_user_id || userId,
+          target_user_id,
+          status: status || 'pending',
+          summary: summary || null,
+          transcript: transcript || null,
+          data: sessionEntryData
+        };
+        const result = await supabaseAdmin
           .from('session_entry')
-          .insert({
-            id: sessionEntryId,
-            session_id,
-            creator_user_id: creator_user_id || userId,
-            target_user_id,
-            status: status || 'pending',
-            summary: summary || null,
-            transcript: transcript || null,
-            data: sessionEntryData
-          });
+          .insert(insertPayload);
+        insertError = result.error;
+
+        // Si falla porque session_id column no existe aún, reintentar con session_id en data
+        if (insertError && insertError.message && insertError.message.includes('session_id')) {
+          console.log('⚠️ [POST session-entries] session_id column not available, retrying with JSONB...');
+          const { session_id: _sid, ...payloadWithoutCol } = insertPayload;
+          payloadWithoutCol.data = { ...sessionEntryData, session_id };
+          const retryResult = await supabaseAdmin
+            .from('session_entry')
+            .insert(payloadWithoutCol);
+          insertError = retryResult.error;
+        }
 
         if (insertError) {
           console.error('❌ Error insertando session_entry en Supabase:', insertError);
@@ -16134,7 +16187,7 @@ app.get('/api/session-entries', authenticateRequest, async (req, res) => {
     }
 
     if (session_id) {
-      entries = entries.filter(e => e.session_id === session_id);
+      entries = entries.filter(e => e.session_id === session_id || e.data?.session_id === session_id);
       console.log(`📖 [GET /api/session-entries] Filtered by session_id=${session_id}: ${entries.length} entries`);
     }
 
@@ -16158,7 +16211,7 @@ app.get('/api/session-entries', authenticateRequest, async (req, res) => {
         try {
           const { data: supabaseEntries, error } = await supabaseAdmin
             .from('session_entry')
-            .select('id, session_id, status, data, creator_user_id, target_user_id, transcript, summary')
+            .select('*')
             .in('id', missingIds);
           if (!error && supabaseEntries?.length > 0) {
             const extra = supabaseEntries.map(row => {
@@ -16189,14 +16242,25 @@ app.get('/api/session-entries', authenticateRequest, async (req, res) => {
     if (supabaseAdmin && !ids && (session_id || target_user_id || creator_user_id)) {
       console.log(`🔍 [GET /api/session-entries] Querying Supabase to ensure cache completeness...`);
       try {
-        let query = supabaseAdmin.from('session_entry').select('id, session_id, status, data, creator_user_id, target_user_id, transcript, summary');
+        let query = supabaseAdmin.from('session_entry').select('*');
         
         if (ids) {
           const idList = String(ids).split(',').map(s => s.trim()).filter(Boolean);
           query = query.in('id', idList);
         }
         if (session_id) {
-          query = query.eq('session_id', session_id);
+          // Try column first; if it fails (column doesn't exist yet), fallback to JSONB
+          try {
+            const testQuery = supabaseAdmin.from('session_entry').select('session_id').limit(1);
+            const { error: testErr } = await testQuery;
+            if (!testErr) {
+              query = query.eq('session_id', session_id);
+            } else {
+              query = query.eq('data->>session_id', session_id);
+            }
+          } catch {
+            query = query.eq('data->>session_id', session_id);
+          }
         }
         if (target_user_id) {
           query = query.eq('target_user_id', target_user_id);
@@ -16343,7 +16407,7 @@ app.patch('/api/session-entries/:id', authenticateRequest, async (req, res) => {
       try {
         const { data: rows, error } = await supabaseAdmin
           .from('session_entry')
-          .select('id, session_id, status, data, creator_user_id, target_user_id, transcript, summary, created_at')
+          .select('*')
           .eq('id', id)
           .limit(1);
         if (!error && rows && rows.length > 0) {
@@ -16475,7 +16539,7 @@ app.post('/api/session-entries/cleanup-duplicates', authenticateRequest, async (
     // Group by session_id
     const bySession = {};
     for (const e of entries) {
-      const sid = e.session_id;
+      const sid = e.session_id || e.data?.session_id;
       if (!sid) continue;
       if (!bySession[sid]) bySession[sid] = [];
       bySession[sid].push(e);

@@ -804,10 +804,13 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session: init
             </h2>
             <p className="text-xs sm:text-sm text-purple-100">
               <span className="truncate">{session.patientName || 'Paciente'}</span>
-              <span className="hidden sm:inline"> • {(() => {
+              <span> • {(() => {
                 const d = session.date || ((session as any).starts_on ? new Date((session as any).starts_on).toLocaleDateString('sv-SE', { timeZone: (session as any).schedule_timezone || 'Europe/Madrid' }) : null);
                 return d ? new Date(d + 'T12:00:00').toLocaleDateString('es-ES') : '—';
               })()} • {session.startTime || '—'} - {session.endTime || '—'}</span>
+            </p>
+            <p className="text-[10px] sm:text-xs text-purple-200 font-mono truncate">
+              Sesión: {session.id}
             </p>
           </div>
         </div>
