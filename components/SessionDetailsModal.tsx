@@ -658,6 +658,17 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session: init
         });
 
         if (response.ok) {
+          // Asegurarse de que la sesión tenga el session_entry_id vinculado
+          if (!session.session_entry_id || session.session_entry_id !== existingEntry.id) {
+            await apiFetch(`${API_URL}/sessions/${session.id}`, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-user-id': currentUser.id
+              },
+              body: JSON.stringify({ session_entry_id: existingEntry.id })
+            });
+          }
           if (status === 'done') await handleMarkSessionCompleted(currentUser.id);
           alert('Entrada de sesión actualizada correctamente');
           onSave();
