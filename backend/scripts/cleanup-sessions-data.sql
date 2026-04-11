@@ -143,8 +143,9 @@ WHERE session_name IS NULL
 -- Elimina campos que pertenecen a columnas de tabla.
 -- Preserva: type, notes, patientId, patientName, patientPhone,
 --   paymentMethod, psychologistId, schedule_timezone, timezone,
---   userId, meetLink, google_calendar_event_id, date, startTime,
+--   userId, meetLink, date, startTime,
 --   endTime, y cualquier otro campo que NO sea columna de tabla.
+--   google_calendar_event_id ahora es columna calendar_id.
 -- ============================================================
 UPDATE sessions SET
   data = flatten_nested_data(data)
@@ -162,7 +163,9 @@ UPDATE sessions SET
     - 'session_entry_id'      -- Columna de tabla
     - 'invoice_id'            -- Columna de tabla
     - 'bonus_id'              -- Columna de tabla
-    - 'session_name';         -- Columna de tabla
+    - 'session_name'          -- Columna de tabla
+    - 'calendar_id'           -- Columna de tabla
+    - 'google_calendar_event_id'; -- Migrado a columna calendar_id
 
 
 -- ============================================================

@@ -658,8 +658,13 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   };
 
   const downloadDocument = (doc: HistoricalDocument) => {
+    const url = doc.storageUrl || doc.content;
+    if (!url) {
+      alert('No se puede descargar este documento');
+      return;
+    }
     const link = document.createElement('a');
-    link.href = doc.content;
+    link.href = url;
     link.download = doc.fileName;
     document.body.appendChild(link);
     link.click();

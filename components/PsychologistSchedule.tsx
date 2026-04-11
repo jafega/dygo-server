@@ -32,6 +32,7 @@ interface Session {
   schedule_timezone?: string; // Zona horaria del psicólogo cuando se creó la sesión
   generateMeetLink?: boolean;
   google_calendar_event_id?: string;
+  calendar_id?: string;
   reminder_enabled?: boolean;
   whatsapp_reminder_enabled?: boolean;
 }

@@ -1408,7 +1408,7 @@ async function initializeSupabase() {
 
 // Campos que NUNCA deben ir dentro de data JSONB (columnas de tabla + campos que causan anidamiento)
 const USER_TABLE_COLUMNS             = ['id', 'data', 'is_psychologist', 'isPsychologist', 'user_email', 'psychologist_profile_id', 'psycologist_profile_id', 'auth_user_id', 'master', 'role', 'email', 'created_at', 'password'];
-const SESSION_TABLE_COLUMNS          = ['id', 'data', 'created_at', 'psychologist_user_id', 'patient_user_id', 'status', 'starts_on', 'ends_on', 'price', 'paid', 'percent_psych', 'session_entry_id', 'invoice_id', 'bonus_id', 'session_name'];
+const SESSION_TABLE_COLUMNS          = ['id', 'data', 'created_at', 'psychologist_user_id', 'patient_user_id', 'status', 'starts_on', 'ends_on', 'price', 'paid', 'percent_psych', 'session_entry_id', 'invoice_id', 'bonus_id', 'session_name', 'calendar_id'];
 const ENTRY_TABLE_COLUMNS            = ['id', 'data', 'creator_user_id', 'target_user_id', 'entry_type', 'center_id', 'transcript', 'summary'];
 const GOAL_TABLE_COLUMNS             = ['id', 'data', 'patient_user_id'];
 const INVITATION_TABLE_COLUMNS       = ['id', 'data', 'psychologist_user_id', 'patient_user_id', 'psychologist_email', 'invited_patient_email'];
@@ -1501,6 +1501,7 @@ function normalizeSupabaseRow(row) {
     delete cleanData.price;                // Usar columna de tabla (sessions)
     delete cleanData.percent_psych;        // Usar columna de tabla (sessions)
     delete cleanData.paid;                 // Usar columna de tabla (sessions)
+    delete cleanData.google_calendar_event_id; // Usar columna calendar_id (sessions)
     delete cleanData.default_session_price; // Usar columna de tabla (care_relationships)
     delete cleanData.default_psych_percent; // Usar columna de tabla (care_relationships)
     delete cleanData.summary;               // Usar columna de tabla (entries)
@@ -1626,6 +1627,12 @@ function normalizeSupabaseRow(row) {
     
     if (base.paid !== undefined && base.paid !== null) {
       merged.paid = base.paid;
+    }
+
+    // Para sessions: mapear calendar_id → google_calendar_event_id
+    if (base.calendar_id) {
+      merged.google_calendar_event_id = base.calendar_id;
+      merged.calendar_id = base.calendar_id;
     }
     
     // Para care_relationships: mapear default_session_price y default_psych_percent
@@ -12106,9 +12113,25 @@ app.patch('/api/relationships/end', authenticateRequest, async (req, res) => {
     // Persistir en Supabase si está habilitado
     if (supabaseAdmin) {
       try {
+        // Cargar datos actuales de Supabase para preservar historicalDocuments y otros campos JSONB
+        let supabaseData = {};
+        try {
+          const { data: rows } = await supabaseAdmin
+            .from('care_relationships')
+            .select('data')
+            .eq('id', relationship.id)
+            .limit(1);
+          if (rows && rows[0] && rows[0].data) {
+            supabaseData = rows[0].data;
+          }
+        } catch (fetchErr) {
+          console.error('[PATCH /api/relationships/end] ⚠️ Error cargando datos de Supabase, usando datos locales:', fetchErr);
+        }
+        // Merge: preservar datos existentes de Supabase (como historicalDocuments) y agregar endedAt
+        const mergedData = { ...supabaseData, endedAt: relationship.endedAt };
         const { error: endErr } = await supabaseAdmin
           .from('care_relationships')
-          .update({ data: cleanDataForStorage(relationship, CARE_REL_TABLE_COLUMNS) })
+          .update({ data: cleanDataForStorage(mergedData, CARE_REL_TABLE_COLUMNS) })
           .eq('id', relationship.id);
         if (endErr) throw endErr;
         console.log('[PATCH /api/relationships/end] ✓ Supabase actualizado');
@@ -12186,10 +12209,14 @@ app.put('/api/relationships/:id', authenticateRequest, async (req, res) => {
 
         if (selectErr) throw selectErr;
         
-        const existing = existingRows && existingRows[0] ? normalizeSupabaseRow(existingRows[0]) : null;
+        const rawRow = existingRows && existingRows[0] ? existingRows[0] : null;
+        const existing = rawRow ? normalizeSupabaseRow(rawRow) : null;
         if (!existing) {
           return res.status(404).json({ error: 'Relación no encontrada' });
         }
+
+        // Preservar el JSONB data original de Supabase (normalizeSupabaseRow lo aplana y pierde .data)
+        const rawJsonbData = (rawRow && rawRow.data && typeof rawRow.data === 'object') ? rawRow.data : {};
 
         // Preparar datos actualizados: ahora default_session_price, default_psych_percent y active son columnas directas
         const updatePayload = {};
@@ -12218,7 +12245,8 @@ app.put('/api/relationships/:id', authenticateRequest, async (req, res) => {
         }
         
         // Actualizar data JSONB con tags y otros campos
-        const existingData = existing.data || {};
+        // IMPORTANTE: usar rawJsonbData (datos crudos de Supabase) para preservar historicalDocuments y otros campos JSONB
+        const existingData = rawJsonbData;
         const newData = { ...existingData };
         
         // Si se envían tags, guardarlas en data
@@ -12241,13 +12269,16 @@ app.put('/api/relationships/:id', authenticateRequest, async (req, res) => {
           newData.patientNumber = updatedData.patientNumber;
         }
         
-        // Merge cualquier otro campo de data que venga
-        if (updatedData.data) {
-          Object.assign(newData, updatedData.data);
+        // Merge cualquier otro campo de data que venga (excluir campos que son columnas de tabla)
+        if (updatedData.data && typeof updatedData.data === 'object') {
+          const safeData = { ...updatedData.data };
+          // Eliminar campos que pertenecen a columnas de tabla para evitar duplicación
+          for (const col of CARE_REL_TABLE_COLUMNS) delete safeData[col];
+          Object.assign(newData, safeData);
         }
         
-        // Siempre actualizar el campo data
-        updatePayload.data = newData;
+        // Limpiar para mantener JSONB plano y sin campos de tabla
+        updatePayload.data = cleanDataForStorage(newData, CARE_REL_TABLE_COLUMNS);
         
         console.log('[PUT /api/relationships/:id] Update payload:', JSON.stringify(updatePayload, null, 2));
 
@@ -12299,6 +12330,11 @@ app.put('/api/relationships/:id', authenticateRequest, async (req, res) => {
 
     // Actualizar campos directos y mantener compatibilidad con data
     const existingData = db.careRelationships[idx].data || {};
+    const newData = {
+      ...existingData,
+      ...(updatedData.data || {})
+    };
+    
     // Si se envía active, guardarlo en data
     if (updatedData.active !== undefined) {
       newData.active = updatedData.active;
@@ -12309,19 +12345,26 @@ app.put('/api/relationships/:id', authenticateRequest, async (req, res) => {
       newData.patientNumber = updatedData.patientNumber;
     }
     
-    const newData = {
-      ...existingData,
-      ...(updatedData.data || {})
-    };
-    
     // Si se envían tags, guardarlas en data
     if (updatedData.tags !== undefined) {
       newData.tags = updatedData.tags;
     }
     
+    // Si se envía uses_bonos, guardarlo en data
+    if (updatedData.uses_bonos !== undefined) {
+      newData.uses_bonos = updatedData.uses_bonos;
+    }
+    
+    // Si se envían instrucciones de IA, guardarlas en data
+    if (updatedData.ai_instructions !== undefined) {
+      newData.ai_instructions = updatedData.ai_instructions;
+    }
+    
+    // Eliminar campos de tabla de data para mantener JSONB limpio
+    for (const col of CARE_REL_TABLE_COLUMNS) delete newData[col];
+    
     db.careRelationships[idx] = {
       ...db.careRelationships[idx],
-      ...updatedData,
       default_session_price: updatedData.default_session_price ?? db.careRelationships[idx].default_session_price ?? 0,
       default_psych_percent: updatedData.default_psych_percent !== undefined 
         ? Math.min(updatedData.default_psych_percent, 100) 
@@ -12329,6 +12372,7 @@ app.put('/api/relationships/:id', authenticateRequest, async (req, res) => {
       uses_bonos: updatedData.uses_bonos !== undefined 
         ? updatedData.uses_bonos 
         : (db.careRelationships[idx].uses_bonos ?? false),
+      active: updatedData.active !== undefined ? updatedData.active : db.careRelationships[idx].active,
       data: newData
     };
 
@@ -12615,6 +12659,8 @@ app.get('/api/relationships/:id/historical-documents', authenticateRequest, asyn
       return res.status(400).json({ error: 'Relationship ID requerido' });
     }
 
+    let historicalDocs = null;
+
     // Intentar cargar desde Supabase primero
     if (supabaseAdmin) {
       try {
@@ -12627,9 +12673,7 @@ app.get('/api/relationships/:id/historical-documents', authenticateRequest, asyn
         if (error) throw error;
         
         if (rows && rows[0]) {
-          const historicalDocs = rows[0].data?.historicalDocuments || { documents: [], lastUpdated: 0 };
-          console.log(`[GET /api/relationships/${id}/historical-documents] Returning ${historicalDocs.documents?.length || 0} documents from Supabase`);
-          return res.json(historicalDocs);
+          historicalDocs = rows[0].data?.historicalDocuments || { documents: [], lastUpdated: 0 };
         }
       } catch (err) {
         console.error(`[GET /api/relationships/${id}/historical-documents] ⚠️ Error loading from Supabase:`, err);
@@ -12637,17 +12681,45 @@ app.get('/api/relationships/:id/historical-documents', authenticateRequest, asyn
     }
 
     // Fallback a DB local
-    const db = getDb();
-    if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
-    
-    const relationship = db.careRelationships.find(rel => rel.id === id);
-    if (!relationship) {
-      return res.status(404).json({ error: 'Relación no encontrada' });
+    if (!historicalDocs) {
+      const db = getDb();
+      if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
+      
+      const relationship = db.careRelationships.find(rel => rel.id === id);
+      if (!relationship) {
+        return res.status(404).json({ error: 'Relación no encontrada' });
+      }
+
+      historicalDocs = relationship.data?.historicalDocuments || { documents: [], lastUpdated: 0 };
     }
 
-    const historicalDocs = relationship.data?.historicalDocuments || { documents: [], lastUpdated: 0 };
-    console.log(`[GET /api/relationships/${id}/historical-documents] Returning ${historicalDocs.documents?.length || 0} documents from local DB`);
-    
+    // Generar signed URLs para documentos en Storage y limpiar base64 del response
+    if (supabaseAdmin && Array.isArray(historicalDocs.documents)) {
+      historicalDocs.documents = await Promise.all(historicalDocs.documents.map(async (doc) => {
+        const cleanDoc = { ...doc };
+        if (doc.storagePath) {
+          // Documento en Storage: generar signed URL
+          try {
+            const { data: urlData } = await supabaseAdmin.storage
+              .from('historical-documents')
+              .createSignedUrl(doc.storagePath, 60 * 60 * 2); // 2 horas
+            if (urlData?.signedUrl) {
+              cleanDoc.storageUrl = urlData.signedUrl;
+            }
+          } catch (urlErr) {
+            console.error(`⚠️ Error creating signed URL for ${doc.storagePath}:`, urlErr);
+          }
+          // No enviar content al frontend para documentos en Storage
+          delete cleanDoc.content;
+        }
+        // Para docs legacy con content inline, mantener content para compatibilidad
+        // pero no enviar extractedText (no es necesario en el frontend)
+        delete cleanDoc.extractedText;
+        return cleanDoc;
+      }));
+    }
+
+    console.log(`[GET /api/relationships/${id}/historical-documents] Returning ${historicalDocs.documents?.length || 0} documents`);
     return res.json(historicalDocs);
   } catch (err) {
     console.error('❌ Error getting historical documents:', err);
@@ -12656,7 +12728,7 @@ app.get('/api/relationships/:id/historical-documents', authenticateRequest, asyn
 });
 
 // POST /api/relationships/:id/historical-documents - Subir documento histórico
-app.post('/api/relationships/:id/historical-documents', authenticateRequest, async (req, res) => {
+app.post('/api/relationships/:id/historical-documents', authenticateRequest, express.json({ limit: '15mb' }), async (req, res) => {
   try {
     const { id } = req.params;
     const { fileName, fileType, fileSize, content } = req.body;
@@ -12666,6 +12738,7 @@ app.post('/api/relationships/:id/historical-documents', authenticateRequest, asy
     }
 
     let relationship = null;
+    let rawRelData = {}; // datos JSONB crudos de Supabase
 
     // Intentar cargar desde Supabase primero
     if (supabaseAdmin) {
@@ -12680,7 +12753,7 @@ app.post('/api/relationships/:id/historical-documents', authenticateRequest, asy
         
         if (rows && rows[0]) {
           relationship = rows[0];
-          if (!relationship.data) relationship.data = {};
+          rawRelData = (relationship.data && typeof relationship.data === 'object') ? relationship.data : {};
         }
       } catch (err) {
         console.error(`[POST /api/relationships/${id}/historical-documents] ⚠️ Error loading from Supabase:`, err);
@@ -12696,43 +12769,95 @@ app.post('/api/relationships/:id/historical-documents', authenticateRequest, asy
       if (!relationship) {
         return res.status(404).json({ error: 'Relación no encontrada' });
       }
+      rawRelData = (relationship.data && typeof relationship.data === 'object') ? relationship.data : {};
     }
 
     // Inicializar estructura de documentos históricos si no existe
-    if (!relationship.data) relationship.data = {};
-    if (!relationship.data.historicalDocuments) {
-      relationship.data.historicalDocuments = { documents: [], lastUpdated: 0 };
+    if (!rawRelData.historicalDocuments) {
+      rawRelData.historicalDocuments = { documents: [], lastUpdated: 0 };
     }
 
-    // Crear nuevo documento
+    const docId = crypto.randomBytes(16).toString('hex');
+
+    // Crear metadatos del documento (sin contenido base64)
     const newDocument = {
-      id: crypto.randomBytes(16).toString('hex'),
+      id: docId,
       fileName,
       fileType,
       fileSize,
-      content,
       uploadedAt: Date.now()
     };
 
-    relationship.data.historicalDocuments.documents.push(newDocument);
-    relationship.data.historicalDocuments.lastUpdated = Date.now();
+    // Subir archivo a Supabase Storage si está disponible
+    if (supabaseAdmin) {
+      try {
+        // Crear bucket si no existe
+        const { data: buckets } = await supabaseAdmin.storage.listBuckets();
+        const bucketExists = buckets?.some(b => b.name === 'historical-documents');
+        
+        if (!bucketExists) {
+          console.log('📦 Creando bucket historical-documents...');
+          const { error: createError } = await supabaseAdmin.storage.createBucket('historical-documents', {
+            public: false,
+            fileSizeLimit: 50 * 1024 * 1024 // 50MB limit
+          });
+          if (createError && !createError.message.includes('already exists')) {
+            console.error('Error creando bucket:', createError);
+            throw createError;
+          }
+        }
 
-    // Persistir en Supabase
+        // Extraer datos base64
+        const base64Data = content.includes(',') ? content.split(',')[1] : content;
+        const buffer = Buffer.from(base64Data, 'base64');
+        const safeFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
+        const storagePath = `${id}/${docId}_${safeFileName}`;
+
+        // Subir archivo
+        const { error: uploadError } = await supabaseAdmin.storage
+          .from('historical-documents')
+          .upload(storagePath, buffer, {
+            contentType: fileType,
+            upsert: false,
+            cacheControl: '3600'
+          });
+
+        if (uploadError) {
+          console.error('Error subiendo a Storage:', uploadError);
+          throw uploadError;
+        }
+
+        newDocument.storagePath = storagePath;
+        console.log(`[POST /api/relationships/${id}/historical-documents] ✅ File uploaded to Storage: ${storagePath}`);
+      } catch (storageErr) {
+        console.error(`[POST /api/relationships/${id}/historical-documents] ⚠️ Storage upload failed, saving base64 inline:`, storageErr);
+        // Fallback: guardar base64 inline si Storage falla
+        newDocument.content = content;
+      }
+    } else {
+      // Sin Supabase → guardar base64 inline en DB local
+      newDocument.content = content;
+    }
+
+    rawRelData.historicalDocuments.documents.push(newDocument);
+    rawRelData.historicalDocuments.lastUpdated = Date.now();
+
+    // Persistir metadatos en Supabase (sin el contenido base64)
     if (supabaseAdmin) {
       try {
         const { error } = await supabaseAdmin
           .from('care_relationships')
-          .update({ data: cleanDataForStorage(relationship.data, CARE_REL_TABLE_COLUMNS) })
+          .update({ data: cleanDataForStorage(rawRelData, CARE_REL_TABLE_COLUMNS) })
           .eq('id', id);
         
         if (error) throw error;
-        console.log(`[POST /api/relationships/${id}/historical-documents] ✅ Document saved to Supabase: ${fileName}`);
+        console.log(`[POST /api/relationships/${id}/historical-documents] ✅ Metadata saved to Supabase: ${fileName}`);
         
         // Actualizar cache
         if (supabaseDbCache?.careRelationships) {
           const idx = supabaseDbCache.careRelationships.findIndex(rel => rel.id === id);
           if (idx >= 0) {
-            supabaseDbCache.careRelationships[idx].data = relationship.data;
+            supabaseDbCache.careRelationships[idx].data = rawRelData;
           }
         }
       } catch (err) {
@@ -12746,7 +12871,8 @@ app.post('/api/relationships/:id/historical-documents', authenticateRequest, asy
     if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
     const localRelIdx = db.careRelationships.findIndex(rel => rel.id === id);
     if (localRelIdx >= 0) {
-      db.careRelationships[localRelIdx] = relationship;
+      if (!db.careRelationships[localRelIdx].data) db.careRelationships[localRelIdx].data = {};
+      db.careRelationships[localRelIdx].data.historicalDocuments = rawRelData.historicalDocuments;
     }
     await saveDb(db, { awaitPersistence: true });
     console.log(`[POST /api/relationships/${id}/historical-documents] Document uploaded: ${fileName}`);
@@ -12767,22 +12893,21 @@ app.delete('/api/relationships/:id/historical-documents/:docId', authenticateReq
       return res.status(400).json({ error: 'IDs requeridos' });
     }
 
-    let relationship = null;
+    let rawRelData = null;
 
     // Intentar cargar desde Supabase primero
     if (supabaseAdmin) {
       try {
         const { data: rows, error } = await supabaseAdmin
           .from('care_relationships')
-          .select('*')
+          .select('data')
           .eq('id', id)
           .limit(1);
         
         if (error) throw error;
         
         if (rows && rows[0]) {
-          relationship = rows[0];
-          if (!relationship.data) relationship.data = {};
+          rawRelData = (rows[0].data && typeof rows[0].data === 'object') ? rows[0].data : {};
         }
       } catch (err) {
         console.error(`[DELETE /api/relationships/${id}/historical-documents/${docId}] ⚠️ Error loading from Supabase:`, err);
@@ -12790,42 +12915,60 @@ app.delete('/api/relationships/:id/historical-documents/:docId', authenticateReq
     }
 
     // Fallback a DB local si no se encontró en Supabase
-    if (!relationship) {
+    if (!rawRelData) {
       const db = getDb();
       if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
       
-      relationship = db.careRelationships.find(rel => rel.id === id);
+      const relationship = db.careRelationships.find(rel => rel.id === id);
       if (!relationship) {
         return res.status(404).json({ error: 'Relación no encontrada' });
       }
+      rawRelData = (relationship.data && typeof relationship.data === 'object') ? relationship.data : {};
     }
 
-    if (!relationship.data?.historicalDocuments?.documents) {
+    if (!rawRelData.historicalDocuments?.documents) {
       return res.status(404).json({ error: 'No hay documentos' });
     }
 
-    const initialLength = relationship.data.historicalDocuments.documents.length;
-    relationship.data.historicalDocuments.documents = relationship.data.historicalDocuments.documents.filter(
-      doc => doc.id !== docId
-    );
-
-    if (relationship.data.historicalDocuments.documents.length === initialLength) {
+    // Buscar el documento para obtener su storagePath antes de eliminarlo
+    const docToDelete = rawRelData.historicalDocuments.documents.find(doc => doc.id === docId);
+    if (!docToDelete) {
       return res.status(404).json({ error: 'Documento no encontrado' });
     }
 
-    relationship.data.historicalDocuments.lastUpdated = Date.now();
+    // Eliminar archivo de Supabase Storage si tiene storagePath
+    if (supabaseAdmin && docToDelete.storagePath) {
+      try {
+        const { error: removeError } = await supabaseAdmin.storage
+          .from('historical-documents')
+          .remove([docToDelete.storagePath]);
+        if (removeError) {
+          console.error(`⚠️ Error removing file from Storage: ${docToDelete.storagePath}`, removeError);
+        } else {
+          console.log(`✅ File removed from Storage: ${docToDelete.storagePath}`);
+        }
+      } catch (storageErr) {
+        console.error(`⚠️ Storage remove error (non-blocking):`, storageErr);
+      }
+    }
+
+    rawRelData.historicalDocuments.documents = rawRelData.historicalDocuments.documents.filter(
+      doc => doc.id !== docId
+    );
+
+    rawRelData.historicalDocuments.lastUpdated = Date.now();
     
     // Si no quedan documentos, limpiar el resumen y el campo historical_info
-    if (relationship.data.historicalDocuments.documents.length === 0) {
-      relationship.data.historicalDocuments.aiSummary = undefined;
+    if (rawRelData.historicalDocuments.documents.length === 0) {
+      rawRelData.historicalDocuments.aiSummary = undefined;
     }
 
     // Persistir en Supabase
     if (supabaseAdmin) {
       try {
-        const updateData = { data: cleanDataForStorage(relationship.data, CARE_REL_TABLE_COLUMNS) };
+        const updateData = { data: cleanDataForStorage(rawRelData, CARE_REL_TABLE_COLUMNS) };
         // Si no quedan documentos, limpiar también historical_info
-        if (relationship.data.historicalDocuments.documents.length === 0) {
+        if (rawRelData.historicalDocuments.documents.length === 0) {
           updateData.historical_info = null;
         }
         
@@ -12841,7 +12984,7 @@ app.delete('/api/relationships/:id/historical-documents/:docId', authenticateReq
         if (supabaseDbCache?.careRelationships) {
           const idx = supabaseDbCache.careRelationships.findIndex(rel => rel.id === id);
           if (idx >= 0) {
-            supabaseDbCache.careRelationships[idx].data = relationship.data;
+            supabaseDbCache.careRelationships[idx].data = rawRelData;
           }
         }
       } catch (err) {
@@ -12855,7 +12998,8 @@ app.delete('/api/relationships/:id/historical-documents/:docId', authenticateReq
     if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
     const localRelIdx = db.careRelationships.findIndex(rel => rel.id === id);
     if (localRelIdx >= 0) {
-      db.careRelationships[localRelIdx] = relationship;
+      if (!db.careRelationships[localRelIdx].data) db.careRelationships[localRelIdx].data = {};
+      db.careRelationships[localRelIdx].data.historicalDocuments = rawRelData.historicalDocuments;
     }
     await saveDb(db, { awaitPersistence: true });
     console.log(`[DELETE /api/relationships/${id}/historical-documents/${docId}] Document deleted`);
@@ -12880,22 +13024,21 @@ app.post('/api/relationships/:id/historical-documents/generate-summary', authent
       return res.status(503).json({ error: 'Servicio de IA no disponible. Configure GEMINI_API_KEY.' });
     }
 
-    let relationship = null;
+    let rawRelData = null;
 
     // Intentar cargar desde Supabase primero
     if (supabaseAdmin) {
       try {
         const { data: rows, error } = await supabaseAdmin
           .from('care_relationships')
-          .select('*')
+          .select('data')
           .eq('id', id)
           .limit(1);
         
         if (error) throw error;
         
         if (rows && rows[0]) {
-          relationship = rows[0];
-          if (!relationship.data) relationship.data = {};
+          rawRelData = (rows[0].data && typeof rows[0].data === 'object') ? rows[0].data : {};
         }
       } catch (err) {
         console.error(`[POST /api/relationships/${id}/historical-documents/generate-summary] ⚠️ Error loading from Supabase:`, err);
@@ -12903,34 +13046,58 @@ app.post('/api/relationships/:id/historical-documents/generate-summary', authent
     }
 
     // Fallback a DB local si no se encontró en Supabase
-    if (!relationship) {
+    if (!rawRelData) {
       const db = getDb();
       if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
       
-      relationship = db.careRelationships.find(rel => rel.id === id);
+      const relationship = db.careRelationships.find(rel => rel.id === id);
       if (!relationship) {
         return res.status(404).json({ error: 'Relación no encontrada' });
       }
+      rawRelData = (relationship.data && typeof relationship.data === 'object') ? relationship.data : {};
     }
 
-    const docs = relationship.data?.historicalDocuments?.documents || [];
+    const docs = rawRelData.historicalDocuments?.documents || [];
     if (docs.length === 0) {
       return res.status(400).json({ error: 'No hay documentos para resumir' });
     }
 
     console.log(`[POST /api/relationships/${id}/historical-documents/generate-summary] Generating summary for ${docs.length} documents`);
 
+    // Helper: obtener base64 del documento (desde Storage o inline)
+    const getDocBase64 = async (doc) => {
+      // Si tiene storagePath, descargar desde Supabase Storage
+      if (doc.storagePath && supabaseAdmin) {
+        try {
+          const { data, error } = await supabaseAdmin.storage
+            .from('historical-documents')
+            .download(doc.storagePath);
+          if (error) throw error;
+          if (data) {
+            const arrayBuffer = await data.arrayBuffer();
+            return Buffer.from(arrayBuffer).toString('base64');
+          }
+        } catch (dlErr) {
+          console.error(`⚠️ Error downloading ${doc.storagePath} from Storage:`, dlErr);
+        }
+      }
+      // Fallback: contenido inline (legacy)
+      if (doc.content) {
+        return doc.content.includes(',') ? doc.content.split(',')[1] : doc.content;
+      }
+      return null;
+    };
+
     // Preparar información de documentos para la IA incluyendo contenido
     const docsContent = await Promise.all(docs.map(async (doc) => {
       const uploadDate = new Date(doc.uploadedAt).toLocaleDateString('es-ES');
       let content = '';
       
-      // Si el documento tiene contenido en base64, intentar extraerlo
-      if (doc.content) {
+      // Obtener base64 del documento (desde Storage o inline)
+      const base64Data = await getDocBase64(doc);
+      
+      if (base64Data) {
         try {
-          // El contenido ya está en base64 en el documento
-          const base64Data = doc.content.includes(',') ? doc.content.split(',')[1] : doc.content;
-          
           // Para PDFs y archivos multimedia, usar Gemini para extraer el contenido
           if (doc.fileType === 'application/pdf' || doc.fileType.startsWith('audio/') || doc.fileType.startsWith('video/')) {
             try {
@@ -13033,12 +13200,12 @@ IMPORTANTE: Analiza el contenido REAL de los documentos proporcionados arriba. N
     const summary = result.response.text();
 
     // Guardar resumen
-    if (!relationship.data.historicalDocuments) {
-      relationship.data.historicalDocuments = { documents: docs, lastUpdated: 0 };
+    if (!rawRelData.historicalDocuments) {
+      rawRelData.historicalDocuments = { documents: docs, lastUpdated: 0 };
     }
     
-    relationship.data.historicalDocuments.aiSummary = summary;
-    relationship.data.historicalDocuments.lastUpdated = Date.now();
+    rawRelData.historicalDocuments.aiSummary = summary;
+    rawRelData.historicalDocuments.lastUpdated = Date.now();
 
     // Persistir en Supabase (guardando tanto en data.historicalDocuments como en historical_info)
     if (supabaseAdmin) {
@@ -13046,7 +13213,7 @@ IMPORTANTE: Analiza el contenido REAL de los documentos proporcionados arriba. N
         const { error } = await supabaseAdmin
           .from('care_relationships')
           .update({ 
-            data: cleanDataForStorage(relationship.data, CARE_REL_TABLE_COLUMNS),
+            data: cleanDataForStorage(rawRelData, CARE_REL_TABLE_COLUMNS),
             historical_info: summary  // Guardar también en el campo de nivel superior
           })
           .eq('id', id);
@@ -13058,7 +13225,7 @@ IMPORTANTE: Analiza el contenido REAL de los documentos proporcionados arriba. N
         if (supabaseDbCache?.careRelationships) {
           const idx = supabaseDbCache.careRelationships.findIndex(rel => rel.id === id);
           if (idx >= 0) {
-            supabaseDbCache.careRelationships[idx].data = relationship.data;
+            supabaseDbCache.careRelationships[idx].data = rawRelData;
           }
         }
       } catch (err) {
@@ -13072,7 +13239,8 @@ IMPORTANTE: Analiza el contenido REAL de los documentos proporcionados arriba. N
     if (!Array.isArray(db.careRelationships)) db.careRelationships = [];
     const localRelIdx = db.careRelationships.findIndex(rel => rel.id === id);
     if (localRelIdx >= 0) {
-      db.careRelationships[localRelIdx] = relationship;
+      if (!db.careRelationships[localRelIdx].data) db.careRelationships[localRelIdx].data = {};
+      db.careRelationships[localRelIdx].data.historicalDocuments = rawRelData.historicalDocuments;
     }
     await saveDb(db, { awaitPersistence: true });
     console.log(`[POST /api/relationships/${id}/historical-documents/generate-summary] Summary generated successfully`);
@@ -14048,19 +14216,20 @@ app.post('/api/sessions', authenticateRequest, async (req, res) => {
         try {
           const { data: existingRow } = await supabaseAdmin
             .from('sessions')
-            .select('data')
+            .select('data, calendar_id')
             .eq('id', session.id)
             .maybeSingle();
-          if (existingRow?.data?.google_calendar_event_id) {
-            session.google_calendar_event_id = existingRow.data.google_calendar_event_id;
-            if (existingRow.data.meetLink && !session.meetLink) {
+          const existingCalId = existingRow?.calendar_id || existingRow?.data?.google_calendar_event_id;
+          if (existingCalId) {
+            session.google_calendar_event_id = existingCalId;
+            if (existingRow.data?.meetLink && !session.meetLink) {
               session.meetLink = existingRow.data.meetLink;
             }
             console.log(`🔁 [POST /api/sessions] Sesión ya tiene evento de Calendar: ${session.google_calendar_event_id} — omitiendo creación duplicada`);
           }
         } catch (_) { /* non-critical, proceed normally */ }
         
-        // Preparar row para Supabase (incluye google_calendar_event_id si ya existía)
+        // Preparar row para Supabase
         const supabaseRow = {
           id: session.id,
           data: cleanSessionDataForStorage(session),
@@ -14072,7 +14241,8 @@ app.post('/api/sessions', authenticateRequest, async (req, res) => {
           price: session.price ?? 0,
           percent_psych: session.percent_psych ?? 100,
           paid: session.paid ?? false,
-          bonus_id: session.bonus_id || null
+          bonus_id: session.bonus_id || null,
+          calendar_id: session.google_calendar_event_id || null
         };
         
         const { error: insertErr } = await supabaseAdmin
@@ -14118,11 +14288,14 @@ app.post('/api/sessions', authenticateRequest, async (req, res) => {
         // Actualizar en memoria
         const idxCal = db.sessions.findIndex(s => s.id === session.id);
         if (idxCal !== -1) db.sessions[idxCal] = session;
-        // Actualizar en Supabase con meetLink y google_calendar_event_id reales
+        // Actualizar en Supabase con meetLink, calendar_id y data
         if (supabaseAdmin) {
           await supabaseAdmin
             .from('sessions')
-            .update({ data: cleanSessionDataForStorage(session) })
+            .update({
+              calendar_id: calResult.eventId,
+              data: cleanSessionDataForStorage(session)
+            })
             .eq('id', session.id)
             .catch(e => console.error('[POST /api/sessions] Error updating Calendar data in Supabase:', e?.message));
         }
@@ -14172,7 +14345,10 @@ app.post('/api/sessions/:sessionId/generate-meet', authenticateRequest, async (r
     if (supabaseAdmin) {
       await supabaseAdmin
         .from('sessions')
-        .update({ data: cleanSessionDataForStorage(session) })
+        .update({
+          calendar_id: calResult.eventId,
+          data: cleanSessionDataForStorage(session)
+        })
         .eq('id', sessionId)
         .catch(e => console.error('[generate-meet] Error updating Supabase:', e?.message));
     }
@@ -14701,13 +14877,14 @@ app.patch('/api/sessions/:id', authenticateRequest, async (req, res) => {
 
     // --- Ensure google_calendar_event_id is preserved from Supabase ---
     // The in-memory cache may not have it (e.g. serverless cold-start),
-    // so fetch from Supabase before we overwrite the data column.
+    // so fetch calendar_id column from Supabase before we overwrite.
     if (!updatedSession.google_calendar_event_id && supabaseAdmin) {
       try {
-        const { data: existingRow } = await supabaseAdmin.from('sessions').select('data, psychologist_user_id').eq('id', id).maybeSingle();
-        if (existingRow?.data?.google_calendar_event_id) {
-          updatedSession.google_calendar_event_id = existingRow.data.google_calendar_event_id;
-          console.log(`🗓️ [PATCH /api/sessions/${id}] Recuperado google_calendar_event_id de Supabase: ${updatedSession.google_calendar_event_id}`);
+        const { data: existingRow } = await supabaseAdmin.from('sessions').select('calendar_id, data, psychologist_user_id').eq('id', id).maybeSingle();
+        const resolvedCalId = existingRow?.calendar_id || existingRow?.data?.google_calendar_event_id;
+        if (resolvedCalId) {
+          updatedSession.google_calendar_event_id = resolvedCalId;
+          console.log(`🗓️ [PATCH /api/sessions/${id}] Recuperado calendar_id de Supabase: ${updatedSession.google_calendar_event_id}`);
         }
         // Also preserve meetLink if missing
         if (!updatedSession.meetLink && existingRow?.data?.meetLink) {
@@ -14874,7 +15051,8 @@ app.patch('/api/sessions/:id', authenticateRequest, async (req, res) => {
           ends_on: updatedSession.ends_on,
           price: updatedSession.price ?? 0,
           percent_psych: updatedSession.percent_psych ?? 100,
-          paid: updatedSession.paid ?? false
+          paid: updatedSession.paid ?? false,
+          calendar_id: updatedSession.google_calendar_event_id || null
         };
         
         // Incluir session_entry_id si se proporcionó
@@ -14989,13 +15167,14 @@ app.put('/api/sessions/:id', authenticateRequest, async (req, res) => {
 
     // --- Ensure google_calendar_event_id is preserved from Supabase ---
     // PUT replaces the entire session from req.body which won't include
-    // internal fields like google_calendar_event_id. Fetch from Supabase.
+    // internal fields like calendar_id. Fetch from Supabase column.
     if (!updatedSession.google_calendar_event_id && supabaseAdmin) {
       try {
-        const { data: existingRow } = await supabaseAdmin.from('sessions').select('data, psychologist_user_id').eq('id', id).maybeSingle();
-        if (existingRow?.data?.google_calendar_event_id) {
-          updatedSession.google_calendar_event_id = existingRow.data.google_calendar_event_id;
-          console.log(`🗓️ [PUT /api/sessions/${id}] Recuperado google_calendar_event_id de Supabase: ${updatedSession.google_calendar_event_id}`);
+        const { data: existingRow } = await supabaseAdmin.from('sessions').select('calendar_id, data, psychologist_user_id').eq('id', id).maybeSingle();
+        const resolvedCalId = existingRow?.calendar_id || existingRow?.data?.google_calendar_event_id;
+        if (resolvedCalId) {
+          updatedSession.google_calendar_event_id = resolvedCalId;
+          console.log(`🗓️ [PUT /api/sessions/${id}] Recuperado calendar_id de Supabase: ${updatedSession.google_calendar_event_id}`);
         }
         if (!updatedSession.meetLink && existingRow?.data?.meetLink) {
           updatedSession.meetLink = existingRow.data.meetLink;
@@ -15036,7 +15215,8 @@ app.put('/api/sessions/:id', authenticateRequest, async (req, res) => {
           ends_on: updatedSession.ends_on,
           price: updatedSession.price ?? 0,
           percent_psych: updatedSession.percent_psych ?? 100,
-          paid: updatedSession.paid ?? false
+          paid: updatedSession.paid ?? false,
+          calendar_id: updatedSession.google_calendar_event_id || null
         };
         
         // Solo incluir patient_user_id si está presente en el request
@@ -15125,7 +15305,7 @@ app.delete('/api/sessions/future-pending', authenticateRequest, async (req, res)
       // Fetch candidates first so we can apply JS-side filters (startTime in JSONB, weekday)
       let query = supabaseAdmin
         .from('sessions')
-        .select('id, data, starts_on, google_calendar_event_id, psychologist_user_id')
+        .select('id, data, starts_on, calendar_id, psychologist_user_id')
         .eq('patient_user_id', patient_user_id)
         .eq('status', 'scheduled')
         .gte('starts_on', fromDate + 'T00:00:00.000Z');
@@ -15173,8 +15353,9 @@ app.delete('/api/sessions/future-pending', authenticateRequest, async (req, res)
 
         // Google Calendar: eliminar eventos de las sesiones eliminadas
         for (const s of matchingSessions) {
-          if (s.google_calendar_event_id && s.psychologist_user_id) {
-            deleteCalendarEventById(s.psychologist_user_id, s.google_calendar_event_id).catch(e =>
+          const calId = s.calendar_id || s.data?.google_calendar_event_id;
+          if (calId && s.psychologist_user_id) {
+            deleteCalendarEventById(s.psychologist_user_id, calId).catch(e =>
               console.error('[DELETE /future-pending] Error Google Calendar delete:', e?.message)
             );
           }
@@ -15240,7 +15421,7 @@ app.delete('/api/sessions/bulk', authenticateRequest, async (req, res) => {
       if (supabaseAdmin) {
         const { data: sessionData, error: sessionError } = await supabaseAdmin
           .from('sessions')
-          .select('id, data, invoice_id, session_entry_id, psychologist_user_id, patient_user_id')
+          .select('id, data, invoice_id, session_entry_id, psychologist_user_id, patient_user_id, calendar_id')
           .eq('id', id)
           .maybeSingle();
 
@@ -15311,7 +15492,7 @@ app.delete('/api/sessions/bulk', authenticateRequest, async (req, res) => {
         }
 
         // Google Calendar cleanup (fire-and-forget)
-        const gcEventId = sessionData.data?.google_calendar_event_id;
+        const gcEventId = sessionData.calendar_id || sessionData.data?.google_calendar_event_id;
         console.log(`🗓️ [bulk delete] Calendar cleanup for session ${id}: gcEventId=${gcEventId}, psychUserId=${sessionData.psychologist_user_id}`);
         if (gcEventId && sessionData.psychologist_user_id) {
           deleteCalendarEventById(sessionData.psychologist_user_id, gcEventId).catch(() => {});
@@ -15439,8 +15620,8 @@ app.delete('/api/sessions/:id', authenticateRequest, async (req, res) => {
         console.log(`✅ Sesión ${id} eliminada de Supabase`);
 
         // --- Google Calendar: eliminar evento ---
-        // Use normalized field first, then raw Supabase JSONB as fallback
-        const gcEventId = session.google_calendar_event_id || sessionData?.data?.google_calendar_event_id;
+        // Use calendar_id column first, then normalized/JSONB fallback
+        const gcEventId = sessionData?.calendar_id || session.google_calendar_event_id || sessionData?.data?.google_calendar_event_id;
         const psychUserId = session.psychologist_user_id;
         console.log(`🗓️ [DELETE /api/sessions] Calendar cleanup: gcEventId=${gcEventId}, psychUserId=${psychUserId}`);
         if (gcEventId && psychUserId) {

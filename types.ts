@@ -106,7 +106,9 @@ export interface HistoricalDocument {
   fileType: string; // MIME type
   fileSize: number; // In bytes
   uploadedAt: number; // timestamp
-  content: string; // Base64 encoded file content
+  content?: string; // Legacy: Base64 encoded file content (no longer stored for new uploads)
+  storagePath?: string; // Path in Supabase Storage bucket 'historical-documents'
+  storageUrl?: string; // Signed URL for downloading from Supabase Storage
   extractedText?: string; // Text extracted from the document for AI processing
 }
 
