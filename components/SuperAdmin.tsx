@@ -90,6 +90,13 @@ const PLAN_COLORS: Record<string, string> = {
   supermainder: 'bg-amber-100 text-amber-700',
 };
 
+const getPlanDisplay = (p: PsychologistStat): { label: string; className: string } => {
+  if (p.isMaster) return { label: 'Master', className: 'bg-indigo-100 text-indigo-700' };
+  if (p.isSubscribed) return { label: p.planName, className: PLAN_COLORS[p.plan] || 'bg-slate-100 text-slate-600' };
+  if (p.trialActive) return { label: 'Prueba', className: 'bg-sky-100 text-sky-700' };
+  return { label: 'Inactivo', className: 'bg-red-100 text-red-600' };
+};
+
 const StatusBadge: React.FC<{ p: PsychologistStat }> = ({ p }) => {
   if (p.isMaster)
     return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-700">Master</span>;
@@ -491,9 +498,11 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                           </div>
                           {isPsych && pStat && (
                             <div className="flex items-center gap-2 flex-wrap pl-12">
-                              <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${PLAN_COLORS[pStat.plan] || 'bg-slate-100 text-slate-600'}`}>
-                                {pStat.planName}
+                              {(() => { const pd = getPlanDisplay(pStat); return (
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${pd.className}`}>
+                                {pd.label}
                               </span>
+                              ); })()}
                               <StatusBadge p={pStat} />
                               <span className="text-xs text-slate-400">{pStat.careRelationshipsCount} pacientes</span>
                               {pStat.createdAt && (
@@ -541,9 +550,11 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                           {/* Plan */}
                           <div>
                             {isPsych && pStat ? (
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${PLAN_COLORS[pStat.plan] || 'bg-slate-100 text-slate-600'}`}>
-                                {pStat.planName}
+                              (() => { const pd = getPlanDisplay(pStat); return (
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${pd.className}`}>
+                                {pd.label}
                               </span>
+                              ); })()
                             ) : (
                               <span className="text-xs text-slate-300">—</span>
                             )}
@@ -661,9 +672,11 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                 <div className="bg-slate-50 rounded-xl divide-y divide-slate-100">
                   <div className="flex items-center justify-between px-4 py-3">
                     <span className="text-sm text-slate-500">Plan</span>
-                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${PLAN_COLORS[selectedPsych.plan] || 'bg-slate-100 text-slate-600'}`}>
-                      {selectedPsych.planName} · €{selectedPsych.planPrice}/mes
+                    {(() => { const pd = getPlanDisplay(selectedPsych); return (
+                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${pd.className}`}>
+                      {pd.label}{selectedPsych.isSubscribed ? ` · €${selectedPsych.planPrice}/mes` : ''}
                     </span>
+                    ); })()}
                   </div>
                   <div className="flex items-center justify-between px-4 py-3">
                     <span className="text-sm text-slate-500">Estado</span>
