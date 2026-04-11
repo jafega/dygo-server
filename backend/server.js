@@ -14305,14 +14305,14 @@ app.post('/api/sessions', authenticateRequest, async (req, res) => {
         if (idxCal !== -1) db.sessions[idxCal] = session;
         // Actualizar en Supabase con meetLink, calendar_id y data
         if (supabaseAdmin) {
-          await supabaseAdmin
+          const { error: calUpdateErr } = await supabaseAdmin
             .from('sessions')
             .update({
               calendar_id: calResult.eventId,
               data: cleanSessionDataForStorage(session)
             })
-            .eq('id', session.id)
-            .catch(e => console.error('[POST /api/sessions] Error updating Calendar data in Supabase:', e?.message));
+            .eq('id', session.id);
+          if (calUpdateErr) console.error('[POST /api/sessions] Error updating Calendar data in Supabase:', calUpdateErr.message);
         }
       }
     } catch (calErr) {
@@ -14358,14 +14358,14 @@ app.post('/api/sessions/:sessionId/generate-meet', authenticateRequest, async (r
 
     // Actualizar en Supabase
     if (supabaseAdmin) {
-      await supabaseAdmin
+      const { error: meetUpdateErr } = await supabaseAdmin
         .from('sessions')
         .update({
           calendar_id: calResult.eventId,
           data: cleanSessionDataForStorage(session)
         })
-        .eq('id', sessionId)
-        .catch(e => console.error('[generate-meet] Error updating Supabase:', e?.message));
+        .eq('id', sessionId);
+      if (meetUpdateErr) console.error('[generate-meet] Error updating Supabase:', meetUpdateErr.message);
     }
 
     // Solo guardar en DB local si no hay Supabase activo (la sesión ya fue actualizada arriba).
