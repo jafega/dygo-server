@@ -1101,30 +1101,21 @@ const ensureSessionEntryTable = async () => {
 const ensureHistoricalDocumentsColumn = async () => {
   if (!supabaseAdmin || !SUPABASE_SQL_ENDPOINT || !SUPABASE_SERVICE_ROLE_KEY) return;
   try {
-    const sql = `
-      DO $$
-      BEGIN
-        -- Add column if it doesn't exist
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns
-          WHERE table_schema = 'public'
-            AND table_name = 'care_relationships'
-            AND column_name = 'historical_documents'
-        ) THEN
-          ALTER TABLE public.care_relationships ADD COLUMN historical_documents JSONB DEFAULT NULL;
-          RAISE NOTICE 'Column historical_documents added';
-        END IF;
+    // Step 1: Add column (IF NOT EXISTS is safe to re-run)
+    await executeSupabaseSql(
+      `ALTER TABLE public.care_relationships ADD COLUMN IF NOT EXISTS historical_documents JSONB DEFAULT NULL;`
+    );
+    console.log('✅ historical_documents column ensured');
 
-        -- Migrate legacy data from data->'historicalDocuments' to the new column
-        UPDATE public.care_relationships
-          SET historical_documents = data->'historicalDocuments',
-              data = data - 'historicalDocuments'
-          WHERE data ? 'historicalDocuments'
-            AND (historical_documents IS NULL);
-      END $$;
-    `;
-    await executeSupabaseSql(sql);
-    console.log('✅ historical_documents column ensured + legacy data migrated');
+    // Step 2: Migrate legacy data from data->'historicalDocuments' to the new column
+    await executeSupabaseSql(`
+      UPDATE public.care_relationships
+        SET historical_documents = data->'historicalDocuments',
+            data = data - 'historicalDocuments'
+        WHERE data ? 'historicalDocuments'
+          AND historical_documents IS NULL;
+    `);
+    console.log('✅ Legacy historicalDocuments data migrated to dedicated column');
   } catch (err) {
     console.error('❌ Error ensuring historical_documents column:', err?.message || err);
   }
@@ -1397,11 +1388,17 @@ async function initializeSupabase() {
         ensureSupabaseTablesExist()
           .then(() => console.log('✅ Supabase tables verified'))
           .catch(schemaErr => console.error('❌ Error ensuring Supabase schema', schemaErr?.message || schemaErr));
-        // Ensure historical_documents column exists and migrate legacy data
-        ensureHistoricalDocumentsColumn()
-          .then(() => console.log('✅ historical_documents column verified'))
-          .catch(err => console.error('❌ Error ensuring historical_documents column', err?.message || err));
       });
+      
+      // Ensure historical_documents column exists BEFORE loading cache so migration data is available
+      try {
+        await Promise.race([
+          ensureHistoricalDocumentsColumn(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('ensureHistoricalDocumentsColumn timeout')), 8000))
+        ]);
+      } catch (migErr) {
+        console.error('⚠️ historical_documents column migration skipped:', migErr?.message || migErr);
+      }
       
       try {
         console.log('🔄 Loading Supabase cache...');
@@ -2537,8 +2534,11 @@ async function saveSupabaseDb(data, prevCache = null) {
       psychologist_user_id: rel.psychologist_user_id || null,
       patient_user_id: rel.patient_user_id || null,
       default_session_price: rel.default_session_price,
-      default_psych_percent: Math.min(rel.default_psych_percent, 100),
-      historical_documents: rel.historical_documents || null
+      default_psych_percent: Math.min(rel.default_psych_percent, 100)
+      // NOTA: historical_documents NO se incluye aquí intencionalmente.
+      // Esa columna se gestiona exclusivamente via escrituras directas en los endpoints
+      // de /historical-documents para evitar que un upsert masivo con caché stale
+      // (instancia serverless diferente) la sobreescriba con null.
     }));
   
   // Psychologist profiles: extraer campo user_id

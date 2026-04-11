@@ -8,16 +8,7 @@ ALTER TABLE public.care_relationships
 
 -- Step 2: Migrate existing data from data->'historicalDocuments' into the new column
 UPDATE public.care_relationships
-  SET historical_documents = data->'historicalDocuments'
-  WHERE data->'historicalDocuments' IS NOT NULL
+  SET historical_documents = data->'historicalDocuments',
+      data = data - 'historicalDocuments'
+  WHERE data ? 'historicalDocuments'
     AND historical_documents IS NULL;
-
--- Step 3: Remove historicalDocuments from the data JSONB to avoid duplication
-UPDATE public.care_relationships
-  SET data = data - 'historicalDocuments'
-  WHERE data ? 'historicalDocuments';
-
--- Step 4: Create index for querying relationships that have documents
-CREATE INDEX IF NOT EXISTS idx_care_relationships_has_documents
-  ON public.care_relationships ((historical_documents IS NOT NULL))
-  WHERE historical_documents IS NOT NULL;
