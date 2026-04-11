@@ -148,9 +148,12 @@ CREATE TABLE public.session_entry (
   status text NOT NULL,
   summary text,
   transcript text,
+  session_id text,
   CONSTRAINT session_entry_pkey PRIMARY KEY (id),
+  CONSTRAINT session_entry_session_id_unique UNIQUE (session_id),
   CONSTRAINT session_entry_creator_user_id_fkey FOREIGN KEY (creator_user_id) REFERENCES public.users(id),
-  CONSTRAINT session_entry_target_user_id_fkey FOREIGN KEY (target_user_id) REFERENCES public.users(id)
+  CONSTRAINT session_entry_target_user_id_fkey FOREIGN KEY (target_user_id) REFERENCES public.users(id),
+  CONSTRAINT session_entry_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.sessions(id)
 );
 CREATE TABLE public.sessions (
   id text NOT NULL,

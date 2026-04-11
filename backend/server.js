@@ -1563,6 +1563,7 @@ function normalizeSupabaseRow(row) {
     delete cleanData.summary;               // Usar columna de tabla (entries)
     delete cleanData.transcript;            // Usar columna de tabla (entries)
     delete cleanData.center_id;             // Usar columna de tabla (entries)
+    delete cleanData.session_id;            // Usar columna de tabla (session_entry)
     delete cleanData.master;                 // Usar columna de tabla (users)
     delete cleanData.data;                   // Evitar anidamiento recursivo
     delete cleanData.id;                     // Usar columna de tabla PK
@@ -2517,18 +2518,18 @@ async function saveSupabaseDb(data, prevCache = null) {
     .filter(inv => inv.psychologist_user_id || inv.psychologistId) // Filtrar facturas sin psicólogo
     .map(inv => buildSupabaseInvoiceRow(inv));
 
-  // Session entry: guardar status como columna separada, resto (incluyendo session_id) en data
+  // Session entry: session_id, status, summary, transcript en columnas; resto en data
   const sessionEntriesRows = (data.sessionEntries || []).map(se => {
     const seData = se.data || se;
     return {
       id: se.id,
       creator_user_id: se.creator_user_id || null,
       target_user_id: se.target_user_id || null,
+      session_id: se.session_id || seData.session_id || null,
       status: seData.status || 'pending',
+      summary: se.summary || seData.summary || '',
+      transcript: se.transcript || seData.transcript || '',
       data: {
-        session_id: se.session_id || seData.session_id || null,
-        transcript: seData.transcript || '',
-        summary: seData.summary || '',
         file: seData.file || null,
         file_name: seData.file_name || null,
         file_type: seData.file_type || null,
@@ -15993,7 +15994,7 @@ app.post('/api/session-entries', authenticateRequest, async (req, res) => {
     // If a session_entry already exists for this session_id, return it as-is
     // (unique-per-session constraint enforced here to avoid duplicate entries).
     const existingInCache = (db.sessionEntries || []).find(
-      e => e.session_id === session_id || e.data?.session_id === session_id
+      e => e.session_id === session_id
     );
     if (existingInCache) {
       console.log('⚠️ [POST session-entries] Duplicate blocked — returning existing entry:', existingInCache.id, 'for session:', session_id);
@@ -16004,8 +16005,8 @@ app.post('/api/session-entries', authenticateRequest, async (req, res) => {
     if (supabaseAdmin) {
       const { data: existingRows } = await supabaseAdmin
         .from('session_entry')
-        .select('id, status, data, creator_user_id, target_user_id, transcript, summary')
-        .eq('data->>session_id', session_id)
+        .select('id, session_id, status, data, creator_user_id, target_user_id, transcript, summary')
+        .eq('session_id', session_id)
         .limit(1);
       if (existingRows && existingRows.length > 0) {
         const row = existingRows[0];
@@ -16033,7 +16034,6 @@ app.post('/api/session-entries', authenticateRequest, async (req, res) => {
     const sessionEntryId = crypto.randomUUID();
     // Separar campos que van en columnas vs data
     const sessionEntryData = {
-      session_id,
       file,
       file_name,
       file_type,
@@ -16047,11 +16047,12 @@ app.post('/api/session-entries', authenticateRequest, async (req, res) => {
         // Asegurar que la tabla existe
         await ensureSessionEntryTable();
 
-        // Insertar en Supabase (summary y transcript en columnas, resto en data)
+        // Insertar en Supabase (session_id, summary y transcript en columnas, resto en data)
         const { error: insertError } = await supabaseAdmin
           .from('session_entry')
           .insert({
             id: sessionEntryId,
+            session_id,
             creator_user_id: creator_user_id || userId,
             target_user_id,
             status: status || 'pending',
@@ -16133,7 +16134,7 @@ app.get('/api/session-entries', authenticateRequest, async (req, res) => {
     }
 
     if (session_id) {
-      entries = entries.filter(e => e.session_id === session_id || e.data?.session_id === session_id);
+      entries = entries.filter(e => e.session_id === session_id);
       console.log(`📖 [GET /api/session-entries] Filtered by session_id=${session_id}: ${entries.length} entries`);
     }
 
@@ -16157,7 +16158,7 @@ app.get('/api/session-entries', authenticateRequest, async (req, res) => {
         try {
           const { data: supabaseEntries, error } = await supabaseAdmin
             .from('session_entry')
-            .select('id, status, data, creator_user_id, target_user_id, transcript, summary')
+            .select('id, session_id, status, data, creator_user_id, target_user_id, transcript, summary')
             .in('id', missingIds);
           if (!error && supabaseEntries?.length > 0) {
             const extra = supabaseEntries.map(row => {
@@ -16188,14 +16189,14 @@ app.get('/api/session-entries', authenticateRequest, async (req, res) => {
     if (supabaseAdmin && !ids && (session_id || target_user_id || creator_user_id)) {
       console.log(`🔍 [GET /api/session-entries] Querying Supabase to ensure cache completeness...`);
       try {
-        let query = supabaseAdmin.from('session_entry').select('id, status, data, creator_user_id, target_user_id, transcript, summary');
+        let query = supabaseAdmin.from('session_entry').select('id, session_id, status, data, creator_user_id, target_user_id, transcript, summary');
         
         if (ids) {
           const idList = String(ids).split(',').map(s => s.trim()).filter(Boolean);
           query = query.in('id', idList);
         }
         if (session_id) {
-          query = query.eq('data->>session_id', session_id);
+          query = query.eq('session_id', session_id);
         }
         if (target_user_id) {
           query = query.eq('target_user_id', target_user_id);
@@ -16342,7 +16343,7 @@ app.patch('/api/session-entries/:id', authenticateRequest, async (req, res) => {
       try {
         const { data: rows, error } = await supabaseAdmin
           .from('session_entry')
-          .select('id, status, data, creator_user_id, target_user_id, transcript, summary, created_at')
+          .select('id, session_id, status, data, creator_user_id, target_user_id, transcript, summary, created_at')
           .eq('id', id)
           .limit(1);
         if (!error && rows && rows.length > 0) {
@@ -16474,7 +16475,7 @@ app.post('/api/session-entries/cleanup-duplicates', authenticateRequest, async (
     // Group by session_id
     const bySession = {};
     for (const e of entries) {
-      const sid = e.session_id || e.data?.session_id;
+      const sid = e.session_id;
       if (!sid) continue;
       if (!bySession[sid]) bySession[sid] = [];
       bySession[sid].push(e);
