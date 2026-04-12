@@ -10,6 +10,7 @@ export interface Lead {
   name: string | null;
   phone: string | null;
   company: string | null;
+  details: string | null;
   source: string;
   stage: LeadStage;
   app_user_id: string | null;
@@ -58,6 +59,7 @@ export interface LeadImportRow {
   name?: string;
   phone?: string;
   company?: string;
+  details?: string;
   source?: string;
   _status?: 'ok' | 'duplicate' | 'invalid';
   _reason?: string;

@@ -18435,8 +18435,9 @@ app.get('/api/admin/leads', authenticateRequest, requireSuperAdmin, async (req, 
 app.post('/api/admin/leads', authenticateRequest, requireSuperAdmin, async (req, res) => {
   try {
     if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
-    const { email, name, phone, company, source, stage, tags } = req.body;
+    const { email, name, phone, company, details, source, stage, tags } = req.body;
     if (!email) return res.status(400).json({ error: 'Email es obligatorio' });
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Nombre es obligatorio' });
     const normalizedEmail = email.trim().toLowerCase();
 
     // Dedup check
@@ -18467,6 +18468,7 @@ app.post('/api/admin/leads', authenticateRequest, requireSuperAdmin, async (req,
       name: name || null,
       phone: phone || null,
       company: company || null,
+      details: details || null,
       source: source || 'manual',
       stage: LEAD_STAGES.includes(stage) ? stage : 'new',
       tags: tags || [],
@@ -18521,6 +18523,11 @@ app.post('/api/admin/leads/import', authenticateRequest, requireSuperAdmin, asyn
         results.details.push({ email: row.email, status: 'invalid', reason: 'Email inválido' });
         continue;
       }
+      if (!row.name || !row.name.trim()) {
+        results.invalid++;
+        results.details.push({ email, status: 'invalid', reason: 'Nombre es obligatorio' });
+        continue;
+      }
       if (existingEmails.has(email)) {
         results.duplicates++;
         results.details.push({ email, status: 'duplicate', reason: 'Ya existe' });
@@ -18534,6 +18541,7 @@ app.post('/api/admin/leads/import', authenticateRequest, requireSuperAdmin, asyn
         name: row.name || null,
         phone: row.phone || null,
         company: row.company || null,
+        details: row.details || null,
         source: row.source || 'import',
         stage: 'new',
         tags: [],
@@ -18591,11 +18599,14 @@ app.post('/api/admin/leads/import-file', authenticateRequest, requireSuperAdmin,
 
       try {
         let extractedText = '';
+        let directParsable = false;
+        let excelRows = null;
         const ext = (fileName || '').toLowerCase().split('.').pop();
 
         // For CSV/text files, read directly
         if (mimeType.startsWith('text/') || mimeType === 'text/csv' || ext === 'csv' || ext === 'txt') {
           extractedText = fileBuffer.toString('utf-8');
+          directParsable = true;
         }
         // Word documents (.docx, .doc) — extract text with mammoth
         else if (ext === 'docx' || ext === 'doc' || mimeType.includes('wordprocessing') || mimeType.includes('msword')) {
@@ -18611,21 +18622,23 @@ app.post('/api/admin/leads/import-file', authenticateRequest, requireSuperAdmin,
             return res.status(422).json({ error: 'Error leyendo el archivo Word. Asegúrate de que es un .docx válido.' });
           }
         }
-        // Excel files (.xlsx, .xls) — extract text with xlsx
+        // Excel files (.xlsx, .xls) — parse rows directly
         else if (ext === 'xlsx' || ext === 'xls' || mimeType.includes('spreadsheet') || mimeType.includes('excel')) {
           try {
             const XLSX = await import('xlsx');
             const workbook = XLSX.default.read(fileBuffer, { type: 'buffer' });
-            const rows = [];
+            const allRows = [];
             for (const sheetName of workbook.SheetNames) {
               const sheet = workbook.Sheets[sheetName];
-              const data = XLSX.default.utils.sheet_to_csv(sheet);
-              if (data.trim()) rows.push(data);
+              const rows = XLSX.default.utils.sheet_to_json(sheet, { defval: null });
+              if (rows.length > 0) allRows.push(...rows);
             }
-            extractedText = rows.join('\n');
-            if (!extractedText.trim()) {
+            if (allRows.length === 0) {
               return res.status(422).json({ error: 'El archivo Excel está vacío' });
             }
+            // Direct structured parse — map columns by header detection
+            excelRows = allRows;
+            directParsable = true;
           } catch (xlsErr) {
             console.error('[leads] xlsx error:', xlsErr);
             return res.status(422).json({ error: 'Error leyendo el archivo Excel' });
@@ -18636,10 +18649,10 @@ app.post('/api/admin/leads/import-file', authenticateRequest, requireSuperAdmin,
           const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
           const filePart = { inlineData: { data: fileBuffer.toString('base64'), mimeType: 'application/pdf' } };
           const prompt = `Analiza este documento y extrae todos los contactos/leads/psicólogos que encuentres.
-Para cada persona, extrae: email, nombre completo, teléfono, empresa/clínica (si existe).
+Para cada persona, extrae: email, nombre completo, teléfono, empresa/clínica (si existe), y cualquier información adicional relevante (cargo, especialidad, dirección, etc.) en un campo details.
 
 Devuelve SOLO un JSON array con este formato exacto, sin texto adicional ni markdown:
-[{"email":"...", "name":"...", "phone":"...", "company":"..."}]
+[{"email":"...", "name":"...", "phone":"...", "company":"...", "details":"..."}]
 
 Si un campo no existe, usa null. El email es obligatorio — omite entradas sin email.
 Si no encuentras contactos, devuelve [].`;
@@ -18652,24 +18665,101 @@ Si no encuentras contactos, devuelve [].`;
 
         // Parse the result
         let leads = [];
-        // Try direct JSON parse first
-        try {
-          const cleaned = extractedText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-          leads = JSON.parse(cleaned);
-        } catch {
-          // For text extracted from Word/Excel/CSV, use Gemini to structure it
-          const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-          const prompt = `Convierte este texto/tabla en un JSON array de contactos.
-Extrae: email, name, phone, company.
 
-Devuelve SOLO un JSON array con formato: [{"email":"...", "name":"...", "phone":"...", "company":"..."}]
+        if (excelRows) {
+          // Direct Excel parse — detect columns by header names
+          const headers = Object.keys(excelRows[0] || {});
+          const findCol = (keywords) => headers.find(h => keywords.some(k => h.toLowerCase().includes(k)));
+          const emailCol = findCol(['email', 'correo', 'e-mail', 'mail']);
+          const nameCol = findCol(['nombre', 'name', 'contacto']);
+          const phoneCol = findCol(['teléfono', 'telefono', 'phone', 'tel', 'móvil', 'movil', 'celular']);
+          const companyCol = findCol(['empresa', 'company', 'clínica', 'clinica', 'organización', 'organizacion', 'centro']);
+
+          const detailCols = headers.filter(h => h !== emailCol && h !== nameCol && h !== phoneCol && h !== companyCol);
+
+          for (const row of excelRows) {
+            const email = emailCol ? String(row[emailCol] || '').trim() : '';
+            if (!email) continue;
+            const detailParts = detailCols.map(c => row[c] != null && String(row[c]).trim() ? `${c}: ${String(row[c]).trim()}` : null).filter(Boolean);
+            leads.push({
+              email,
+              name: nameCol ? String(row[nameCol] || '').trim() || null : null,
+              phone: phoneCol ? String(row[phoneCol] || '').trim() || null : null,
+              company: companyCol ? String(row[companyCol] || '').trim() || null : null,
+              details: detailParts.length > 0 ? detailParts.join('; ') : null,
+            });
+          }
+        } else if (directParsable && extractedText) {
+          // CSV/text — parse rows directly
+          const lines = extractedText.trim().split('\n').filter(Boolean);
+          if (lines.length > 1) {
+            const sep = lines[0].includes('\t') ? '\t' : ',';
+            const headerLine = lines[0].split(sep).map(h => h.trim().replace(/^["']|["']$/g, ''));
+            const findCol = (keywords) => headerLine.findIndex(h => keywords.some(k => h.toLowerCase().includes(k)));
+            const emailIdx = findCol(['email', 'correo', 'e-mail', 'mail']);
+            const nameIdx = findCol(['nombre', 'name', 'contacto']);
+            const phoneIdx = findCol(['teléfono', 'telefono', 'phone', 'tel', 'móvil', 'movil', 'celular']);
+            const companyIdx = findCol(['empresa', 'company', 'clínica', 'clinica', 'organización', 'organizacion', 'centro']);
+
+            const detailIdxs = headerLine.map((_, i) => i).filter(i => i !== emailIdx && i !== nameIdx && i !== phoneIdx && i !== companyIdx);
+
+            for (let i = 1; i < lines.length; i++) {
+              const cols = lines[i].split(sep).map(c => c.trim().replace(/^["']|["']$/g, ''));
+              const email = emailIdx >= 0 ? (cols[emailIdx] || '').trim() : '';
+              if (!email) continue;
+              const detailParts = detailIdxs.map(di => cols[di]?.trim() ? `${headerLine[di]}: ${cols[di].trim()}` : null).filter(Boolean);
+              leads.push({
+                email,
+                name: nameIdx >= 0 ? cols[nameIdx]?.trim() || null : null,
+                phone: phoneIdx >= 0 ? cols[phoneIdx]?.trim() || null : null,
+                company: companyIdx >= 0 ? cols[companyIdx]?.trim() || null : null,
+                details: detailParts.length > 0 ? detailParts.join('; ') : null,
+              });
+            }
+          }
+          // Fallback: if no structured parse or too few results, try Gemini (for unstructured text)
+          if (leads.length === 0) {
+            const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+            const chunkSize = 100000;
+            for (let offset = 0; offset < extractedText.length; offset += chunkSize) {
+              const chunk = extractedText.substring(offset, offset + chunkSize);
+              const prompt = `Convierte este texto/tabla en un JSON array de contactos.
+Extrae: email, name, phone, company, details (información adicional como cargo, especialidad, dirección, etc.).
+
+Devuelve SOLO un JSON array con formato: [{"email":"...", "name":"...", "phone":"...", "company":"...", "details":"..."}]
 Sin texto adicional ni markdown. Si un campo no existe, usa null. Omite entradas sin email.
 
 Texto:
-${extractedText.substring(0, 50000)}`;
-          const result = await model.generateContent([prompt]);
-          const text = result.response.text().replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-          try { leads = JSON.parse(text); } catch { return res.status(422).json({ error: 'No se pudieron extraer leads del documento' }); }
+${chunk}`;
+              const result = await model.generateContent([prompt]);
+              const text = result.response.text().replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+              try { const parsed = JSON.parse(text); if (Array.isArray(parsed)) leads.push(...parsed); } catch { /* skip chunk */ }
+            }
+          }
+        } else {
+          // AI-extracted text (PDF, Word) — parse JSON or send to Gemini
+          try {
+            const cleaned = extractedText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+            leads = JSON.parse(cleaned);
+          } catch {
+            const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+            // Process in chunks to handle large documents
+            const chunkSize = 100000;
+            for (let offset = 0; offset < extractedText.length; offset += chunkSize) {
+              const chunk = extractedText.substring(offset, offset + chunkSize);
+              const prompt = `Convierte este texto/tabla en un JSON array de contactos.
+Extrae: email, name, phone, company, details (información adicional como cargo, especialidad, dirección, etc.).
+
+Devuelve SOLO un JSON array con formato: [{"email":"...", "name":"...", "phone":"...", "company":"...", "details":"..."}]
+Sin texto adicional ni markdown. Si un campo no existe, usa null. Omite entradas sin email.
+
+Texto:
+${chunk}`;
+              const result = await model.generateContent([prompt]);
+              const text = result.response.text().replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+              try { const parsed = JSON.parse(text); if (Array.isArray(parsed)) leads.push(...parsed); } catch { /* skip chunk */ }
+            }
+          }
         }
 
         if (!Array.isArray(leads)) leads = [];
@@ -18682,6 +18772,7 @@ ${extractedText.substring(0, 50000)}`;
             name: l.name || null,
             phone: l.phone || null,
             company: l.company || null,
+            details: l.details || null,
           }));
 
         // Dedup against existing leads
@@ -18693,7 +18784,14 @@ ${extractedText.substring(0, 50000)}`;
           _reason: existingEmails.has(l.email) ? 'Ya existe' : undefined,
         }));
 
-        res.json({ leads: deduped, fileName, totalExtracted: leads.length, validCount: validLeads.length });
+        res.json({
+          leads: deduped,
+          fileName,
+          totalExtracted: leads.length,
+          validCount: validLeads.length,
+          invalidCount: leads.length - validLeads.length,
+          duplicateCount: deduped.filter(l => l._status === 'duplicate').length,
+        });
       } catch (parseErr) {
         console.error('[leads] AI parsing error:', parseErr);
         res.status(500).json({ error: 'Error procesando el archivo' });
@@ -18817,6 +18915,14 @@ app.post('/api/admin/leads/:id/email', authenticateRequest, requireSuperAdmin, a
     const fromAddr = `${fromName} <info@mainds.app>`;
     let emailResult = null;
 
+    // Replace {{name}} / {{email}} placeholders
+    const personalizedHtml = body_html
+      .replace(/\{\{name\}\}/gi, lead.name || '')
+      .replace(/\{\{email\}\}/gi, lead.email);
+    const personalizedSubject = subject
+      .replace(/\{\{name\}\}/gi, lead.name || '')
+      .replace(/\{\{email\}\}/gi, lead.email);
+
     if (process.env.RESEND_API_KEY) {
       const { Resend } = await import('resend');
       const resend = new Resend(process.env.RESEND_API_KEY);
@@ -18824,12 +18930,12 @@ app.post('/api/admin/leads/:id/email', authenticateRequest, requireSuperAdmin, a
         from: fromAddr,
         to: lead.email,
         reply_to: 'info@mainds.app',
-        subject,
-        html: body_html,
+        subject: personalizedSubject,
+        html: personalizedHtml,
       });
-      console.log(`📧 [CRM] Email sent to ${lead.email}: ${subject}`, emailResult);
+      console.log(`📧 [CRM] Email sent to ${lead.email}: ${personalizedSubject}`, emailResult);
     } else {
-      console.log(`📧 [CRM] RESEND_API_KEY not set — would send to ${lead.email}: ${subject}`);
+      console.log(`📧 [CRM] RESEND_API_KEY not set — would send to ${lead.email}: ${personalizedSubject}`);
       emailResult = { id: 'dev-mock-' + Date.now() };
     }
 
@@ -18837,8 +18943,8 @@ app.post('/api/admin/leads/:id/email', authenticateRequest, requireSuperAdmin, a
     const { data: activity } = await supabaseAdmin.from('lead_activities').insert([{
       lead_id: lead.id,
       type: 'email_sent',
-      title: subject,
-      body: body_html,
+      title: personalizedSubject,
+      body: personalizedHtml,
       metadata: { resend_id: emailResult?.id, from: fromAddr, to: lead.email, sender_name: fromName },
       created_by: req.superAdminEmail,
     }]).select().single();
@@ -18875,6 +18981,9 @@ app.post('/api/admin/leads/email-bulk', authenticateRequest, requireSuperAdmin, 
         const personalizedHtml = body_html
           .replace(/\{\{name\}\}/gi, lead.name || '')
           .replace(/\{\{email\}\}/gi, lead.email);
+        const personalizedSubject = subject
+          .replace(/\{\{name\}\}/gi, lead.name || '')
+          .replace(/\{\{email\}\}/gi, lead.email);
 
         let resendId = null;
         if (process.env.RESEND_API_KEY) {
@@ -18884,7 +18993,7 @@ app.post('/api/admin/leads/email-bulk', authenticateRequest, requireSuperAdmin, 
             from: fromAddr,
             to: lead.email,
             reply_to: 'info@mainds.app',
-            subject,
+            subject: personalizedSubject,
             html: personalizedHtml,
           });
           resendId = result?.id;
@@ -18894,7 +19003,7 @@ app.post('/api/admin/leads/email-bulk', authenticateRequest, requireSuperAdmin, 
         await supabaseAdmin.from('lead_activities').insert([{
           lead_id: lead.id,
           type: 'email_bulk',
-          title: subject,
+          title: personalizedSubject,
           body: personalizedHtml,
           metadata: { resend_id: resendId, from: fromAddr, to: lead.email, sender_name: fromName, bulk: true },
           created_by: req.superAdminEmail,

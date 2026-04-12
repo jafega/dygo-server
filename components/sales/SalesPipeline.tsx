@@ -30,7 +30,7 @@ const SalesPipeline: React.FC = () => {
   const [showImport, setShowImport] = useState(false);
   const [showBulkEmail, setShowBulkEmail] = useState(false);
   const [showCreateLead, setShowCreateLead] = useState(false);
-  const [newLead, setNewLead] = useState({ email: '', name: '', phone: '', company: '' });
+  const [newLead, setNewLead] = useState({ email: '', name: '', phone: '', company: '', details: '' });
   const [creating, setCreating] = useState(false);
 
   const loadLeads = useCallback(async () => {
@@ -55,7 +55,7 @@ const SalesPipeline: React.FC = () => {
   useEffect(() => { loadLeads(); loadTemplates(); }, [loadLeads, loadTemplates]);
 
   const handleCreateLead = async () => {
-    if (!newLead.email) return;
+    if (!newLead.email || !newLead.name.trim()) return;
     setCreating(true);
     try {
       const res = await apiFetch(`${API_URL}/admin/leads`, {
@@ -64,7 +64,7 @@ const SalesPipeline: React.FC = () => {
       });
       if (res.ok) {
         setShowCreateLead(false);
-        setNewLead({ email: '', name: '', phone: '', company: '' });
+        setNewLead({ email: '', name: '', phone: '', company: '', details: '' });
         loadLeads();
       } else {
         const err = await res.json();
@@ -321,10 +321,11 @@ const SalesPipeline: React.FC = () => {
               <button onClick={() => setShowCreateLead(false)} className="p-1 rounded-lg hover:bg-slate-100 text-slate-400"><X size={18} /></button>
             </div>
             <div className="space-y-3">
-              <input type="email" placeholder="Email *" value={newLead.email} onChange={e => setNewLead(p => ({ ...p, email: e.target.value }))} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none" />
-              <input type="text" placeholder="Nombre" value={newLead.name} onChange={e => setNewLead(p => ({ ...p, name: e.target.value }))} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none" />
+              <input type="email" placeholder="Email *" value={newLead.email} onChange={e => setNewLead(p => ({ ...p, email: e.target.value }))} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none" required />
+              <input type="text" placeholder="Nombre *" value={newLead.name} onChange={e => setNewLead(p => ({ ...p, name: e.target.value }))} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none" required />
               <input type="tel" placeholder="Teléfono" value={newLead.phone} onChange={e => setNewLead(p => ({ ...p, phone: e.target.value }))} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none" />
               <input type="text" placeholder="Empresa / Clínica" value={newLead.company} onChange={e => setNewLead(p => ({ ...p, company: e.target.value }))} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none" />
+              <textarea placeholder="Detalles (cargo, especialidad, notas...)" value={newLead.details} onChange={e => setNewLead(p => ({ ...p, details: e.target.value }))} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none resize-none h-16" />
             </div>
             <div className="flex justify-end gap-2 mt-5">
               <button onClick={() => setShowCreateLead(false)} className="px-4 py-2 text-sm font-medium text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">Cancelar</button>

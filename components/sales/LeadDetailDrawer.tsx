@@ -7,7 +7,7 @@ import {
   X, Mail, Phone, Building2, Calendar, Smartphone, Tag,
   ChevronDown, Trash2, Plus, FileText, ArrowRightLeft,
   Send, StickyNote, Paperclip, Zap, Globe, Clock,
-  Eye, MousePointer, AlertTriangle, CheckCircle2,
+  Eye, EyeOff, MousePointer, AlertTriangle, CheckCircle2,
 } from 'lucide-react';
 
 interface Props {
@@ -48,6 +48,7 @@ export const LeadDetailDrawer: React.FC<Props> = ({ lead, templates, onClose, on
   const [showStageMenu, setShowStageMenu] = useState(false);
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
     loadActivities();
@@ -99,8 +100,8 @@ export const LeadDetailDrawer: React.FC<Props> = ({ lead, templates, onClose, on
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
-      <div className="fixed right-0 top-0 bottom-0 w-full max-w-lg bg-white shadow-2xl z-50 flex flex-col overflow-hidden">
+      {!isFullscreen && <div className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />}
+      <div className={`fixed right-0 top-0 bottom-0 bg-white shadow-2xl z-50 flex flex-col overflow-hidden transition-all duration-300 ${isFullscreen ? 'left-0' : 'w-full max-w-lg'}`}>
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 flex-shrink-0">
           <h2 className="text-lg font-bold text-slate-900 truncate">{lead.name || lead.email}</h2>
@@ -108,7 +109,10 @@ export const LeadDetailDrawer: React.FC<Props> = ({ lead, templates, onClose, on
             <button onClick={() => onDelete(lead.id)} className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors">
               <Trash2 size={16} />
             </button>
-            <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
+            <button onClick={() => setIsFullscreen(!isFullscreen)} className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors" title={isFullscreen ? 'Reducir' : 'Ampliar'}>
+              {isFullscreen ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+            <button onClick={() => { setIsFullscreen(false); onClose(); }} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
               <X size={18} />
             </button>
           </div>
@@ -175,6 +179,28 @@ export const LeadDetailDrawer: React.FC<Props> = ({ lead, templates, onClose, on
                   )}
                 </div>
               ))}
+
+              {/* Details field — multiline */}
+              <div className="flex gap-3 group">
+                <FileText size={14} className="text-slate-400 mt-1 flex-shrink-0" />
+                {editingField === 'details' ? (
+                  <textarea
+                    autoFocus
+                    value={editValue}
+                    onChange={e => setEditValue(e.target.value)}
+                    onBlur={saveEdit}
+                    onKeyDown={e => { if (e.key === 'Escape') setEditingField(null); }}
+                    className="flex-1 text-sm border border-indigo-300 rounded px-2 py-1 focus:ring-2 focus:ring-indigo-200 outline-none resize-none h-20"
+                  />
+                ) : (
+                  <span
+                    onClick={() => startEdit('details', lead.details || '')}
+                    className="flex-1 text-sm text-slate-700 cursor-pointer hover:text-indigo-600 transition-colors whitespace-pre-wrap"
+                  >
+                    {lead.details || <span className="text-slate-300 italic">Añadir detalles</span>}
+                  </span>
+                )}
+              </div>
             </div>
 
             {/* App status */}
