@@ -220,8 +220,8 @@ async function sendPsychWelcomeEmail(toEmail, firstName) {
     await resend.emails.send({
       from: 'mainds <no-reply@mainds.app>',
       to: toEmail,
-      bcc: 'mainds@mainds.app',
-      reply_to: 'mainds@mainds.app',
+      bcc: 'info@mainds.app',
+      reply_to: 'info@mainds.app',
       subject: `¡Bienvenido/a a mainds${firstName ? `, ${firstName}` : ''}! Tu prueba gratuita ha comenzado`,
       html: buildPsychWelcomeEmail({ firstName, appUrl })
     });
@@ -19080,7 +19080,7 @@ app.post('/api/admin/leads/:id/email', authenticateRequest, requireSuperAdmin, a
     if (!lead) return res.status(404).json({ error: 'Lead no encontrado' });
 
     const fromName = sender_name || 'mainds';
-    const fromAddr = `${fromName} <mainds@mainds.app>`;
+    const fromAddr = `${fromName} <info@mainds.app>`;
     let emailResult = null;
 
     // Replace {{name}} / {{email}} placeholders
@@ -19097,7 +19097,7 @@ app.post('/api/admin/leads/:id/email', authenticateRequest, requireSuperAdmin, a
       emailResult = await resend.emails.send({
         from: fromAddr,
         to: lead.email,
-        reply_to: 'mainds@mainds.app',
+        reply_to: 'info@mainds.app',
         subject: personalizedSubject,
         html: personalizedHtml,
       });
@@ -19121,7 +19121,7 @@ app.post('/api/admin/leads/:id/email', authenticateRequest, requireSuperAdmin, a
     await supabaseAdmin.from('admin_emails').insert({
       mailbox: 'sales',
       direction: 'outbound',
-      from_email: 'mainds@mainds.app',
+      from_email: 'info@mainds.app',
       from_name: fromName,
       to_email: lead.email,
       to_name: lead.name || null,
@@ -19156,7 +19156,7 @@ app.post('/api/admin/leads/email-bulk', authenticateRequest, requireSuperAdmin, 
     if (!leads || leads.length === 0) return res.status(404).json({ error: 'No leads found' });
 
     const fromName = sender_name || 'mainds';
-    const fromAddr = `${fromName} <mainds@mainds.app>`;
+    const fromAddr = `${fromName} <info@mainds.app>`;
     const results = { sent: 0, failed: 0, details: [] };
 
     for (const lead of leads) {
@@ -19176,7 +19176,7 @@ app.post('/api/admin/leads/email-bulk', authenticateRequest, requireSuperAdmin, 
           const result = await resend.emails.send({
             from: fromAddr,
             to: lead.email,
-            reply_to: 'mainds@mainds.app',
+            reply_to: 'info@mainds.app',
             subject: personalizedSubject,
             html: personalizedHtml,
           });
@@ -19197,7 +19197,7 @@ app.post('/api/admin/leads/email-bulk', authenticateRequest, requireSuperAdmin, 
         await supabaseAdmin.from('admin_emails').insert({
           mailbox: 'sales',
           direction: 'outbound',
-          from_email: 'mainds@mainds.app',
+          from_email: 'info@mainds.app',
           from_name: fromName,
           to_email: lead.email,
           to_name: lead.name || null,
@@ -19385,7 +19385,7 @@ app.delete('/api/admin/lead-templates/:id', authenticateRequest, requireSuperAdm
 // =====================================================================
 
 const MAILBOX_CONFIG = {
-  sales:   { email: 'mainds@mainds.app',  name: 'mainds' },
+  sales:   { email: 'info@mainds.app',   name: 'mainds' },
   support: { email: 'soporte@mainds.app', name: 'mainds Soporte' },
 };
 
@@ -19710,7 +19710,7 @@ app.post('/api/webhooks/resend', async (req, res) => {
       // Determine which mailbox received the email
       let mailbox = null;
       if (toEmails.some(e => e.includes('soporte@mainds.app'))) mailbox = 'support';
-      else if (toEmails.some(e => e.includes('mainds@mainds.app'))) mailbox = 'sales';
+      else if (toEmails.some(e => e.includes('info@mainds.app'))) mailbox = 'sales';
 
       // ── Store in admin_emails table for the inbox ──
       if (mailbox && fromEmail) {

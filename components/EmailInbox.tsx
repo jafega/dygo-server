@@ -48,7 +48,7 @@ const MAILBOX_LABELS: Record<Mailbox, string> = {
 };
 
 const MAILBOX_EMAILS: Record<Mailbox, string> = {
-  sales: 'mainds@mainds.app',
+  sales: 'info@mainds.app',
   support: 'soporte@mainds.app',
 };
 
