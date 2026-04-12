@@ -214,7 +214,8 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
 
   return (
     <div className="space-y-5">
-      {/* Refresh button */}
+      {/* Refresh button — hidden on email tab (has its own) */}
+      {tab !== 'email' && (
       <div className="flex justify-end">
         <button
           onClick={handleRefresh}
@@ -226,6 +227,7 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
           Refrescar
         </button>
       </div>
+      )}
 
       {/* ── DASHBOARD TAB ─────────────────────────── */}
       {tab === 'dashboard' && (
