@@ -2931,6 +2931,36 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
       );
     }
 
+    // CRM: Auto-create/update lead when psychologist registers
+    if (isPsych && supabaseAdmin && normalizedEmail) {
+      (async () => {
+        try {
+          const { data: existing } = await supabaseAdmin.from('leads').select('id, stage').eq('email', normalizedEmail).limit(1);
+          if (existing && existing.length > 0) {
+            // Lead exists — link to app user
+            const lead = existing[0];
+            const updates = { app_user_id: newUser.id, app_registered_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+            // Move from new/contacted to prueba if they registered
+            if (['new', 'contacted'].includes(lead.stage)) updates.stage = 'prueba';
+            await supabaseAdmin.from('leads').update(updates).eq('id', lead.id);
+            await supabaseAdmin.from('lead_activities').insert([{ lead_id: lead.id, type: 'app_event', title: 'Se registró en la app', metadata: { user_id: newUser.id, event: 'registered' } }]);
+            console.log(`🎯 [CRM] Lead ${normalizedEmail} linked to user ${newUser.id}`);
+          } else {
+            // Create new lead automatically
+            const { data: lead } = await supabaseAdmin.from('leads').insert([{
+              email: normalizedEmail, name: sanitizeString(name), phone: null, company: null,
+              source: 'app_registration', stage: 'prueba',
+              app_user_id: newUser.id, app_registered_at: new Date().toISOString(),
+            }]).select().single();
+            if (lead) {
+              await supabaseAdmin.from('lead_activities').insert([{ lead_id: lead.id, type: 'app_event', title: 'Se registró en la app (lead auto-creado)', metadata: { user_id: newUser.id, event: 'registered' } }]);
+              console.log(`🎯 [CRM] Auto-created lead for ${normalizedEmail}`);
+            }
+          }
+        } catch (err) { console.error('[CRM] Error auto-creating lead:', err?.message || err); }
+      })();
+    }
+
     res.json(stripSensitiveFields(newUser));
   } catch (error) {
     console.error('❌ Error en /api/auth/register:', error);
@@ -3125,6 +3155,32 @@ const handleSupabaseAuth = async (req, res) => {
         }
         
         user = newUser;
+
+        // CRM: Auto-create/update lead for OAuth registrations
+        if (supabaseAdmin && normalizedEmail) {
+          (async () => {
+            try {
+              const { data: existing } = await supabaseAdmin.from('leads').select('id, stage').eq('email', normalizedEmail).limit(1);
+              if (existing && existing.length > 0) {
+                const lead = existing[0];
+                const updates = { app_user_id: newUser.id, app_registered_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+                if (['new', 'contacted'].includes(lead.stage)) updates.stage = 'prueba';
+                await supabaseAdmin.from('leads').update(updates).eq('id', lead.id);
+                await supabaseAdmin.from('lead_activities').insert([{ lead_id: lead.id, type: 'app_event', title: 'Se registró en la app (OAuth)', metadata: { user_id: newUser.id, event: 'registered_oauth' } }]);
+                console.log(`🎯 [CRM] Lead ${normalizedEmail} linked via OAuth`);
+              } else {
+                const { data: lead } = await supabaseAdmin.from('leads').insert([{
+                  email: normalizedEmail, name: newUser.name, source: 'app_registration', stage: 'prueba',
+                  app_user_id: newUser.id, app_registered_at: new Date().toISOString(),
+                }]).select().single();
+                if (lead) {
+                  await supabaseAdmin.from('lead_activities').insert([{ lead_id: lead.id, type: 'app_event', title: 'Se registró en la app (lead auto-creado, OAuth)', metadata: { user_id: newUser.id, event: 'registered_oauth' } }]);
+                  console.log(`🎯 [CRM] Auto-created lead for ${normalizedEmail} via OAuth`);
+                }
+              }
+            } catch (err) { console.error('[CRM] Error auto-creating lead (OAuth):', err?.message || err); }
+          })();
+        }
       }
     } else {
       // Usuario encontrado - asegurar que auth_user_id esté actualizado
@@ -5894,6 +5950,32 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
           }
           saveDb(db);
           console.log(`[Webhook] subscription.updated: ${subscription.id} → status=${subscription.status}, plan=${sub.plan_id}`);
+
+          // CRM: Auto-move lead to 'won' on active subscription, 'cancelled' on cancel
+          if (supabaseAdmin && sub.psychologist_user_id) {
+            (async () => {
+              try {
+                const user = await readSupabaseRowById('users', sub.psychologist_user_id);
+                if (user?.user_email) {
+                  const { data: leads } = await supabaseAdmin.from('leads').select('id, stage').eq('email', user.user_email.toLowerCase()).limit(1);
+                  if (leads && leads.length > 0) {
+                    const lead = leads[0];
+                    const isActive = ['active', 'trialing'].includes(subscription.status);
+                    const isCanceled = subscription.status === 'canceled' || (subscription.cancel_at_period_end && !isActive);
+                    if (isActive && ['new', 'prueba', 'contacted', 'demo'].includes(lead.stage)) {
+                      await supabaseAdmin.from('leads').update({ stage: 'won', app_is_subscribed: true, app_plan: sub.plan_id, updated_at: new Date().toISOString() }).eq('id', lead.id);
+                      await supabaseAdmin.from('lead_activities').insert([{ lead_id: lead.id, type: 'app_event', title: `Suscripción activada (${sub.plan_id})`, metadata: { event: 'subscription_active', plan: sub.plan_id } }]);
+                      console.log(`🎯 [CRM] Lead ${user.user_email} moved to won`);
+                    } else if (isCanceled && lead.stage === 'won') {
+                      await supabaseAdmin.from('leads').update({ stage: 'cancelled', app_is_subscribed: false, updated_at: new Date().toISOString() }).eq('id', lead.id);
+                      await supabaseAdmin.from('lead_activities').insert([{ lead_id: lead.id, type: 'app_event', title: 'Suscripción cancelada', metadata: { event: 'subscription_cancelled' } }]);
+                      console.log(`🎯 [CRM] Lead ${user.user_email} moved to cancelled`);
+                    }
+                  }
+                }
+              } catch (err) { console.error('[CRM] Error updating lead from webhook:', err?.message || err); }
+            })();
+          }
         } else {
           // Check patient subscriptions
           const patSub = (db.patientSubscriptions || []).find(s =>
@@ -5921,6 +6003,23 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
           sub.access_blocked = false;
           saveDb(db);
           console.log(`[Webhook] subscription.deleted: ${subscription.id}`);
+
+          // CRM: Move lead to cancelled
+          if (supabaseAdmin && sub.psychologist_user_id) {
+            (async () => {
+              try {
+                const user = await readSupabaseRowById('users', sub.psychologist_user_id);
+                if (user?.user_email) {
+                  const { data: leads } = await supabaseAdmin.from('leads').select('id, stage').eq('email', user.user_email.toLowerCase()).limit(1);
+                  if (leads && leads.length > 0 && leads[0].stage === 'won') {
+                    await supabaseAdmin.from('leads').update({ stage: 'cancelled', app_is_subscribed: false, updated_at: new Date().toISOString() }).eq('id', leads[0].id);
+                    await supabaseAdmin.from('lead_activities').insert([{ lead_id: leads[0].id, type: 'app_event', title: 'Suscripción eliminada', metadata: { event: 'subscription_deleted' } }]);
+                    console.log(`🎯 [CRM] Lead ${user.user_email} moved to cancelled (deleted)`);
+                  }
+                }
+              } catch (err) { console.error('[CRM] Error on subscription.deleted lead update:', err?.message || err); }
+            })();
+          }
         } else {
           const patSub = (db.patientSubscriptions || []).find(s => s.stripe_subscription_id === subscription.id);
           if (patSub) {
@@ -18283,6 +18382,789 @@ app.get('/api/gdpr/privacy-info', (_req, res) => {
     dpo: 'dpo@mainds.app',
     supervisoryAuthority: 'Agencia Española de Protección de Datos (AEPD) - www.aepd.es'
   });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// ═══  CRM / LEADS — SuperAdmin Sales Pipeline               ═══
+// ═══════════════════════════════════════════════════════════════
+
+const LEAD_STAGES = ['new', 'prueba', 'contacted', 'demo', 'won', 'lost', 'cancelled'];
+const LEAD_ACTIVITY_TYPES = ['note', 'email_sent', 'email_received', 'email_bulk', 'document', 'stage_change', 'app_event'];
+
+// Helper: require superadmin for all lead endpoints
+const requireSuperAdmin = async (req, res, next) => {
+  const userId = req.authenticatedUserId;
+  if (!userId) return res.status(401).json({ error: 'Autenticación requerida' });
+  let user = null;
+  if (supabaseAdmin) {
+    const row = await readSupabaseRowById('users', userId);
+    if (row) user = row;
+  }
+  if (!user) {
+    const db = getDb();
+    user = db.users.find(u => u.id === userId);
+  }
+  if (!user || !isSuperAdmin(user.email || user.user_email)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  req.superAdminEmail = user.email || user.user_email;
+  next();
+};
+
+// --- GET /api/admin/leads — List leads with filters ---
+app.get('/api/admin/leads', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { stage, search, sort_by, sort_dir } = req.query;
+    let query = supabaseAdmin.from('leads').select('*');
+    if (stage) query = query.eq('stage', stage);
+    if (search) query = query.or(`email.ilike.%${search}%,name.ilike.%${search}%,company.ilike.%${search}%,phone.ilike.%${search}%`);
+    const sortCol = sort_by || 'created_at';
+    const sortAsc = sort_dir === 'asc';
+    query = query.order(sortCol, { ascending: sortAsc });
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    console.error('[leads] Error listing leads:', err);
+    res.status(500).json({ error: 'Error listing leads' });
+  }
+});
+
+// --- POST /api/admin/leads — Create single lead (dedup by email) ---
+app.post('/api/admin/leads', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { email, name, phone, company, source, stage, tags } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email es obligatorio' });
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // Dedup check
+    const { data: existing } = await supabaseAdmin.from('leads').select('id').eq('email', normalizedEmail).limit(1);
+    if (existing && existing.length > 0) {
+      return res.status(409).json({ error: 'Lead ya existe', existing_id: existing[0].id });
+    }
+
+    // Check if already an app user
+    let appUserId = null, appRegisteredAt = null, appPlan = null, appIsSubscribed = false;
+    const { data: appUsers } = await supabaseAdmin.from('users').select('id, data, is_psychologist, user_email').eq('user_email', normalizedEmail).limit(1);
+    if (appUsers && appUsers.length > 0) {
+      const au = appUsers[0];
+      appUserId = au.id;
+      const d = typeof au.data === 'string' ? JSON.parse(au.data) : (au.data || {});
+      appRegisteredAt = d.createdAt ? new Date(d.createdAt).toISOString() : null;
+      // Check subscription
+      const { data: subs } = await supabaseAdmin.from('subscriptions').select('data').eq('id', au.id).limit(1);
+      if (subs && subs.length > 0) {
+        const subData = typeof subs[0].data === 'string' ? JSON.parse(subs[0].data) : (subs[0].data || {});
+        appPlan = subData.plan_id || null;
+        appIsSubscribed = ['active', 'trialing'].includes(subData.stripe_status || '');
+      }
+    }
+
+    const { data: lead, error } = await supabaseAdmin.from('leads').insert([{
+      email: normalizedEmail,
+      name: name || null,
+      phone: phone || null,
+      company: company || null,
+      source: source || 'manual',
+      stage: LEAD_STAGES.includes(stage) ? stage : 'new',
+      tags: tags || [],
+      app_user_id: appUserId,
+      app_registered_at: appRegisteredAt,
+      app_plan: appPlan,
+      app_is_subscribed: appIsSubscribed,
+    }]).select().single();
+    if (error) throw error;
+
+    // Create initial activity
+    await supabaseAdmin.from('lead_activities').insert([{
+      lead_id: lead.id,
+      type: 'stage_change',
+      title: 'Lead creado',
+      metadata: { to_stage: lead.stage, source: lead.source },
+      created_by: req.superAdminEmail,
+    }]);
+
+    res.json(lead);
+  } catch (err) {
+    console.error('[leads] Error creating lead:', err);
+    res.status(500).json({ error: 'Error creating lead' });
+  }
+});
+
+// --- POST /api/admin/leads/import — Bulk import with dedup ---
+app.post('/api/admin/leads/import', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { leads: rows } = req.body;
+    if (!Array.isArray(rows) || rows.length === 0) return res.status(400).json({ error: 'No leads provided' });
+    if (rows.length > 2000) return res.status(400).json({ error: 'Máximo 2000 leads por importación' });
+
+    // Get existing lead emails for dedup
+    const { data: existingLeads } = await supabaseAdmin.from('leads').select('email');
+    const existingEmails = new Set((existingLeads || []).map(l => l.email.toLowerCase()));
+
+    // Check app users
+    const allEmails = rows.map(r => r.email?.trim().toLowerCase()).filter(Boolean);
+    const { data: appUsers } = await supabaseAdmin.from('users').select('id, data, user_email').in('user_email', allEmails);
+    const appUserMap = {};
+    (appUsers || []).forEach(u => { appUserMap[u.user_email?.toLowerCase()] = u; });
+
+    const results = { imported: 0, duplicates: 0, invalid: 0, details: [] };
+    const toInsert = [];
+
+    for (const row of rows) {
+      const email = row.email?.trim().toLowerCase();
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        results.invalid++;
+        results.details.push({ email: row.email, status: 'invalid', reason: 'Email inválido' });
+        continue;
+      }
+      if (existingEmails.has(email)) {
+        results.duplicates++;
+        results.details.push({ email, status: 'duplicate', reason: 'Ya existe' });
+        continue;
+      }
+      existingEmails.add(email); // prevent intra-batch duplicates
+
+      const appUser = appUserMap[email];
+      toInsert.push({
+        email,
+        name: row.name || null,
+        phone: row.phone || null,
+        company: row.company || null,
+        source: row.source || 'import',
+        stage: 'new',
+        tags: [],
+        app_user_id: appUser?.id || null,
+        app_registered_at: appUser ? (typeof appUser.data === 'object' && appUser.data?.createdAt ? new Date(appUser.data.createdAt).toISOString() : null) : null,
+      });
+      results.details.push({ email, status: 'ok' });
+    }
+
+    // Batch insert (Supabase supports up to ~1000 per call)
+    if (toInsert.length > 0) {
+      const batchSize = 500;
+      for (let i = 0; i < toInsert.length; i += batchSize) {
+        const batch = toInsert.slice(i, i + batchSize);
+        const { error } = await supabaseAdmin.from('leads').insert(batch);
+        if (error) {
+          console.error('[leads] Batch insert error:', error);
+          // Continue — some may fail individually
+        }
+      }
+      results.imported = toInsert.length;
+    }
+
+    res.json(results);
+  } catch (err) {
+    console.error('[leads] Error importing leads:', err);
+    res.status(500).json({ error: 'Error importing leads' });
+  }
+});
+
+// --- POST /api/admin/leads/import-file — AI-powered file parsing (PDF, CSV, Excel, Word) ---
+app.post('/api/admin/leads/import-file', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const genAI = await getGenAI();
+    if (!genAI) return res.status(503).json({ error: 'GEMINI_API_KEY no configurada' });
+
+    const busboy = Busboy({ headers: req.headers });
+    let fileBuffer = null;
+    let fileName = '';
+    let mimeType = '';
+
+    busboy.on('file', (fieldname, file, info) => {
+      const { filename, mimeType: mime } = info;
+      fileName = filename;
+      mimeType = mime;
+      const chunks = [];
+      file.on('data', (data) => chunks.push(data));
+      file.on('end', () => { fileBuffer = Buffer.concat(chunks); });
+    });
+
+    busboy.on('finish', async () => {
+      if (!fileBuffer) return res.status(400).json({ error: 'No se recibió ningún archivo' });
+      if (fileBuffer.length > 10 * 1024 * 1024) return res.status(400).json({ error: 'Archivo demasiado grande (máx 10MB)' });
+
+      try {
+        let extractedText = '';
+        const ext = (fileName || '').toLowerCase().split('.').pop();
+
+        // For CSV/text files, read directly
+        if (mimeType.startsWith('text/') || mimeType === 'text/csv' || ext === 'csv' || ext === 'txt') {
+          extractedText = fileBuffer.toString('utf-8');
+        }
+        // Word documents (.docx, .doc) — extract text with mammoth
+        else if (ext === 'docx' || ext === 'doc' || mimeType.includes('wordprocessing') || mimeType.includes('msword')) {
+          try {
+            const mammoth = await import('mammoth');
+            const result = await mammoth.default.extractRawText({ buffer: fileBuffer });
+            extractedText = result.value;
+            if (!extractedText || extractedText.trim().length === 0) {
+              return res.status(422).json({ error: 'No se pudo extraer texto del documento Word' });
+            }
+          } catch (docErr) {
+            console.error('[leads] mammoth error:', docErr);
+            return res.status(422).json({ error: 'Error leyendo el archivo Word. Asegúrate de que es un .docx válido.' });
+          }
+        }
+        // Excel files (.xlsx, .xls) — extract text with xlsx
+        else if (ext === 'xlsx' || ext === 'xls' || mimeType.includes('spreadsheet') || mimeType.includes('excel')) {
+          try {
+            const XLSX = await import('xlsx');
+            const workbook = XLSX.default.read(fileBuffer, { type: 'buffer' });
+            const rows = [];
+            for (const sheetName of workbook.SheetNames) {
+              const sheet = workbook.Sheets[sheetName];
+              const data = XLSX.default.utils.sheet_to_csv(sheet);
+              if (data.trim()) rows.push(data);
+            }
+            extractedText = rows.join('\n');
+            if (!extractedText.trim()) {
+              return res.status(422).json({ error: 'El archivo Excel está vacío' });
+            }
+          } catch (xlsErr) {
+            console.error('[leads] xlsx error:', xlsErr);
+            return res.status(422).json({ error: 'Error leyendo el archivo Excel' });
+          }
+        }
+        // PDF — Gemini multimodal handles these well
+        else if (ext === 'pdf' || mimeType === 'application/pdf') {
+          const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+          const filePart = { inlineData: { data: fileBuffer.toString('base64'), mimeType: 'application/pdf' } };
+          const prompt = `Analiza este documento y extrae todos los contactos/leads/psicólogos que encuentres.
+Para cada persona, extrae: email, nombre completo, teléfono, empresa/clínica (si existe).
+
+Devuelve SOLO un JSON array con este formato exacto, sin texto adicional ni markdown:
+[{"email":"...", "name":"...", "phone":"...", "company":"..."}]
+
+Si un campo no existe, usa null. El email es obligatorio — omite entradas sin email.
+Si no encuentras contactos, devuelve [].`;
+          const result = await model.generateContent([prompt, filePart]);
+          extractedText = result.response.text();
+        }
+        else {
+          return res.status(400).json({ error: `Formato no soportado: ${ext || mimeType}. Usa CSV, Excel, Word o PDF.` });
+        }
+
+        // Parse the result
+        let leads = [];
+        // Try direct JSON parse first
+        try {
+          const cleaned = extractedText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+          leads = JSON.parse(cleaned);
+        } catch {
+          // For text extracted from Word/Excel/CSV, use Gemini to structure it
+          const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+          const prompt = `Convierte este texto/tabla en un JSON array de contactos.
+Extrae: email, name, phone, company.
+
+Devuelve SOLO un JSON array con formato: [{"email":"...", "name":"...", "phone":"...", "company":"..."}]
+Sin texto adicional ni markdown. Si un campo no existe, usa null. Omite entradas sin email.
+
+Texto:
+${extractedText.substring(0, 50000)}`;
+          const result = await model.generateContent([prompt]);
+          const text = result.response.text().replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+          try { leads = JSON.parse(text); } catch { return res.status(422).json({ error: 'No se pudieron extraer leads del documento' }); }
+        }
+
+        if (!Array.isArray(leads)) leads = [];
+
+        // Validate and normalize
+        const validLeads = leads
+          .filter(l => l.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(l.email.trim()))
+          .map(l => ({
+            email: l.email.trim().toLowerCase(),
+            name: l.name || null,
+            phone: l.phone || null,
+            company: l.company || null,
+          }));
+
+        // Dedup against existing leads
+        const { data: existingLeads } = await supabaseAdmin.from('leads').select('email');
+        const existingEmails = new Set((existingLeads || []).map(l => l.email.toLowerCase()));
+        const deduped = validLeads.map(l => ({
+          ...l,
+          _status: existingEmails.has(l.email) ? 'duplicate' : 'ok',
+          _reason: existingEmails.has(l.email) ? 'Ya existe' : undefined,
+        }));
+
+        res.json({ leads: deduped, fileName, totalExtracted: leads.length, validCount: validLeads.length });
+      } catch (parseErr) {
+        console.error('[leads] AI parsing error:', parseErr);
+        res.status(500).json({ error: 'Error procesando el archivo' });
+      }
+    });
+
+    req.pipe(busboy);
+  } catch (err) {
+    console.error('[leads] Error uploading file:', err);
+    res.status(500).json({ error: 'Error uploading file' });
+  }
+});
+
+// --- PUT /api/admin/leads/:id — Update lead ---
+app.put('/api/admin/leads/:id', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { id } = req.params;
+    const updates = req.body;
+    // Validate stage if provided
+    if (updates.stage && !LEAD_STAGES.includes(updates.stage)) {
+      return res.status(400).json({ error: 'Stage inválido' });
+    }
+
+    // If stage is changing, record in timeline
+    if (updates.stage) {
+      const { data: current } = await supabaseAdmin.from('leads').select('stage').eq('id', id).single();
+      if (current && current.stage !== updates.stage) {
+        await supabaseAdmin.from('lead_activities').insert([{
+          lead_id: id,
+          type: 'stage_change',
+          title: `Movido de "${current.stage}" a "${updates.stage}"`,
+          metadata: { from_stage: current.stage, to_stage: updates.stage },
+          created_by: req.superAdminEmail,
+        }]);
+      }
+    }
+
+    updates.updated_at = new Date().toISOString();
+    const { data: lead, error } = await supabaseAdmin.from('leads').update(updates).eq('id', id).select().single();
+    if (error) throw error;
+    if (!lead) return res.status(404).json({ error: 'Lead no encontrado' });
+    res.json(lead);
+  } catch (err) {
+    console.error('[leads] Error updating lead:', err);
+    res.status(500).json({ error: 'Error updating lead' });
+  }
+});
+
+// --- DELETE /api/admin/leads/:id ---
+app.delete('/api/admin/leads/:id', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { error } = await supabaseAdmin.from('leads').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[leads] Error deleting lead:', err);
+    res.status(500).json({ error: 'Error deleting lead' });
+  }
+});
+
+// --- GET /api/admin/leads/:id/activities — Lead timeline ---
+app.get('/api/admin/leads/:id/activities', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { data, error } = await supabaseAdmin
+      .from('lead_activities')
+      .select('*')
+      .eq('lead_id', req.params.id)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    console.error('[leads] Error listing activities:', err);
+    res.status(500).json({ error: 'Error listing activities' });
+  }
+});
+
+// --- POST /api/admin/leads/:id/activities — Add note/document ---
+app.post('/api/admin/leads/:id/activities', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { type, title, body, metadata } = req.body;
+    if (!type || !LEAD_ACTIVITY_TYPES.includes(type)) return res.status(400).json({ error: 'Tipo inválido' });
+    const { data, error } = await supabaseAdmin.from('lead_activities').insert([{
+      lead_id: req.params.id,
+      type,
+      title: title || null,
+      body: body || null,
+      metadata: metadata || {},
+      created_by: req.superAdminEmail,
+    }]).select().single();
+    if (error) throw error;
+
+    // Update notes_count on lead
+    if (type === 'note') {
+      const { count } = await supabaseAdmin.from('lead_activities').select('id', { count: 'exact', head: true }).eq('lead_id', req.params.id).eq('type', 'note');
+      await supabaseAdmin.from('leads').update({ notes_count: count || 0 }).eq('id', req.params.id);
+    }
+
+    res.json(data);
+  } catch (err) {
+    console.error('[leads] Error creating activity:', err);
+    res.status(500).json({ error: 'Error creating activity' });
+  }
+});
+
+// --- POST /api/admin/leads/:id/email — Send individual email via Resend ---
+app.post('/api/admin/leads/:id/email', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { subject, body_html, sender_name } = req.body;
+    if (!subject || !body_html) return res.status(400).json({ error: 'Subject y body son obligatorios' });
+
+    // Get lead
+    const { data: lead } = await supabaseAdmin.from('leads').select('*').eq('id', req.params.id).single();
+    if (!lead) return res.status(404).json({ error: 'Lead no encontrado' });
+
+    const fromName = sender_name || 'mainds';
+    const fromAddr = `${fromName} <info@mainds.app>`;
+    let emailResult = null;
+
+    if (process.env.RESEND_API_KEY) {
+      const { Resend } = await import('resend');
+      const resend = new Resend(process.env.RESEND_API_KEY);
+      emailResult = await resend.emails.send({
+        from: fromAddr,
+        to: lead.email,
+        reply_to: 'info@mainds.app',
+        subject,
+        html: body_html,
+      });
+      console.log(`📧 [CRM] Email sent to ${lead.email}: ${subject}`, emailResult);
+    } else {
+      console.log(`📧 [CRM] RESEND_API_KEY not set — would send to ${lead.email}: ${subject}`);
+      emailResult = { id: 'dev-mock-' + Date.now() };
+    }
+
+    // Record in timeline
+    const { data: activity } = await supabaseAdmin.from('lead_activities').insert([{
+      lead_id: lead.id,
+      type: 'email_sent',
+      title: subject,
+      body: body_html,
+      metadata: { resend_id: emailResult?.id, from: fromAddr, to: lead.email, sender_name: fromName },
+      created_by: req.superAdminEmail,
+    }]).select().single();
+
+    // Update last_contacted_at
+    await supabaseAdmin.from('leads').update({ last_contacted_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', lead.id);
+
+    res.json({ ok: true, activity, resend_id: emailResult?.id });
+  } catch (err) {
+    console.error('[leads] Error sending email:', err);
+    res.status(500).json({ error: 'Error sending email' });
+  }
+});
+
+// --- POST /api/admin/leads/email-bulk — Send email to multiple leads ---
+app.post('/api/admin/leads/email-bulk', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { lead_ids, subject, body_html, sender_name } = req.body;
+    if (!Array.isArray(lead_ids) || lead_ids.length === 0) return res.status(400).json({ error: 'No leads selected' });
+    if (!subject || !body_html) return res.status(400).json({ error: 'Subject y body son obligatorios' });
+    if (lead_ids.length > 200) return res.status(400).json({ error: 'Máximo 200 emails por envío' });
+
+    const { data: leads } = await supabaseAdmin.from('leads').select('id, email, name').in('id', lead_ids);
+    if (!leads || leads.length === 0) return res.status(404).json({ error: 'No leads found' });
+
+    const fromName = sender_name || 'mainds';
+    const fromAddr = `${fromName} <info@mainds.app>`;
+    const results = { sent: 0, failed: 0, details: [] };
+
+    for (const lead of leads) {
+      try {
+        // Replace {{name}} / {{email}} placeholders
+        const personalizedHtml = body_html
+          .replace(/\{\{name\}\}/gi, lead.name || '')
+          .replace(/\{\{email\}\}/gi, lead.email);
+
+        let resendId = null;
+        if (process.env.RESEND_API_KEY) {
+          const { Resend } = await import('resend');
+          const resend = new Resend(process.env.RESEND_API_KEY);
+          const result = await resend.emails.send({
+            from: fromAddr,
+            to: lead.email,
+            reply_to: 'info@mainds.app',
+            subject,
+            html: personalizedHtml,
+          });
+          resendId = result?.id;
+        }
+
+        // Record in timeline
+        await supabaseAdmin.from('lead_activities').insert([{
+          lead_id: lead.id,
+          type: 'email_bulk',
+          title: subject,
+          body: personalizedHtml,
+          metadata: { resend_id: resendId, from: fromAddr, to: lead.email, sender_name: fromName, bulk: true },
+          created_by: req.superAdminEmail,
+        }]);
+
+        results.sent++;
+        results.details.push({ email: lead.email, status: 'sent', resend_id: resendId });
+      } catch (emailErr) {
+        results.failed++;
+        results.details.push({ email: lead.email, status: 'failed', error: emailErr.message });
+      }
+    }
+
+    // Update last_contacted_at for all
+    const now = new Date().toISOString();
+    await supabaseAdmin.from('leads').update({ last_contacted_at: now, updated_at: now }).in('id', lead_ids);
+
+    res.json(results);
+  } catch (err) {
+    console.error('[leads] Error sending bulk emails:', err);
+    res.status(500).json({ error: 'Error sending bulk emails' });
+  }
+});
+
+// --- GET /api/admin/leads/:id/email-events — Get Resend email delivery events ---
+app.get('/api/admin/leads/:id/email-events', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    if (!process.env.RESEND_API_KEY) return res.json([]);
+
+    // Get all email activities with resend_id for this lead
+    const { data: activities } = await supabaseAdmin
+      .from('lead_activities')
+      .select('id, metadata')
+      .eq('lead_id', req.params.id)
+      .in('type', ['email_sent', 'email_bulk'])
+      .not('metadata->resend_id', 'is', null);
+
+    if (!activities || activities.length === 0) return res.json([]);
+
+    const { Resend } = await import('resend');
+    const resend = new Resend(process.env.RESEND_API_KEY);
+    const events = [];
+
+    for (const act of activities) {
+      const resendId = act.metadata?.resend_id;
+      if (!resendId || resendId.startsWith('dev-mock')) continue;
+      try {
+        const email = await resend.emails.get(resendId);
+        events.push({
+          activity_id: act.id,
+          resend_id: resendId,
+          status: email.last_event,
+          created_at: email.created_at,
+          to: email.to,
+          subject: email.subject,
+        });
+      } catch { /* skip failed lookups */ }
+    }
+    res.json(events);
+  } catch (err) {
+    console.error('[leads] Error fetching email events:', err);
+    res.status(500).json({ error: 'Error fetching email events' });
+  }
+});
+
+// --- POST /api/admin/leads/sync-app-status — Cross-reference leads with app users ---
+app.post('/api/admin/leads/sync-app-status', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+
+    // Get all leads without app linkage
+    const { data: leads } = await supabaseAdmin.from('leads').select('id, email');
+    if (!leads || leads.length === 0) return res.json({ synced: 0 });
+
+    const leadEmails = leads.map(l => l.email);
+    const { data: appUsers } = await supabaseAdmin.from('users').select('id, data, user_email, is_psychologist').in('user_email', leadEmails);
+    if (!appUsers || appUsers.length === 0) return res.json({ synced: 0 });
+
+    const userMap = {};
+    appUsers.forEach(u => { userMap[u.user_email?.toLowerCase()] = u; });
+
+    // Get subscription data
+    const userIds = appUsers.map(u => u.id);
+    const { data: subs } = await supabaseAdmin.from('subscriptions').select('id, data').in('id', userIds);
+    const subMap = {};
+    (subs || []).forEach(s => { subMap[s.id] = typeof s.data === 'string' ? JSON.parse(s.data) : (s.data || {}); });
+
+    let synced = 0;
+    for (const lead of leads) {
+      const user = userMap[lead.email];
+      if (!user) continue;
+      const subData = subMap[user.id] || {};
+      const isSubscribed = ['active', 'trialing'].includes(subData.stripe_status || '');
+      const d = typeof user.data === 'string' ? JSON.parse(user.data) : (user.data || {});
+
+      const updates = {
+        app_user_id: user.id,
+        app_registered_at: d.createdAt ? new Date(d.createdAt).toISOString() : new Date().toISOString(),
+        app_plan: subData.plan_id || null,
+        app_is_subscribed: isSubscribed,
+        updated_at: new Date().toISOString(),
+      };
+
+      // Auto-move to 'won' if subscribed and still in pipeline
+      if (isSubscribed && ['new', 'contacted', 'demo'].includes(lead.stage)) {
+        updates.stage = 'won';
+      }
+
+      await supabaseAdmin.from('leads').update(updates).eq('id', lead.id);
+      synced++;
+    }
+
+    res.json({ synced });
+  } catch (err) {
+    console.error('[leads] Error syncing app status:', err);
+    res.status(500).json({ error: 'Error syncing app status' });
+  }
+});
+
+// --- Email Templates CRUD ---
+app.get('/api/admin/lead-templates', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { data, error } = await supabaseAdmin.from('lead_email_templates').select('*').order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    console.error('[leads] Error listing templates:', err);
+    res.status(500).json({ error: 'Error listing templates' });
+  }
+});
+
+app.post('/api/admin/lead-templates', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { name, subject, body_html, variables } = req.body;
+    if (!name || !subject || !body_html) return res.status(400).json({ error: 'name, subject y body_html son obligatorios' });
+    const { data, error } = await supabaseAdmin.from('lead_email_templates').insert([{
+      name, subject, body_html, variables: variables || [], created_by: req.superAdminEmail,
+    }]).select().single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    console.error('[leads] Error creating template:', err);
+    res.status(500).json({ error: 'Error creating template' });
+  }
+});
+
+app.put('/api/admin/lead-templates/:id', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { name, subject, body_html, variables } = req.body;
+    const { data, error } = await supabaseAdmin.from('lead_email_templates').update({
+      name, subject, body_html, variables: variables || [], updated_at: new Date().toISOString(),
+    }).eq('id', req.params.id).select().single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    console.error('[leads] Error updating template:', err);
+    res.status(500).json({ error: 'Error updating template' });
+  }
+});
+
+app.delete('/api/admin/lead-templates/:id', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { error } = await supabaseAdmin.from('lead_email_templates').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[leads] Error deleting template:', err);
+    res.status(500).json({ error: 'Error deleting template' });
+  }
+});
+
+// --- Resend Webhook (inbound-ready) — POST /api/webhooks/resend ---
+app.post('/api/webhooks/resend', async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(200).send('ok');
+    const event = req.body;
+    const eventType = event.type;
+    const data = event.data || {};
+    console.log(`[Resend Webhook] ${eventType}`, data.email_id || data.from || '');
+
+    // ── Outbound tracking events ──
+    // These update the metadata.events array on the original email activity
+    const TRACKING_EVENTS = [
+      'email.sent', 'email.delivered', 'email.opened', 'email.clicked',
+      'email.bounced', 'email.complained', 'email.delivery_delayed',
+      'email.failed', 'email.suppressed', 'email.scheduled',
+    ];
+
+    if (TRACKING_EVENTS.includes(eventType)) {
+      const resendId = data.email_id;
+      if (resendId) {
+        const { data: activities } = await supabaseAdmin
+          .from('lead_activities')
+          .select('id, lead_id, metadata')
+          .or(`metadata->>resend_id.eq.${resendId}`)
+          .limit(1);
+
+        if (activities && activities.length > 0) {
+          const act = activities[0];
+          const meta = { ...(act.metadata || {}) };
+          if (!meta.events) meta.events = [];
+          const shortType = eventType.replace('email.', '');
+          // Avoid duplicate events of the same type
+          if (!meta.events.some(e => e.type === shortType)) {
+            meta.events.push({ type: shortType, at: data.created_at || new Date().toISOString() });
+          }
+          // Store the latest status for quick access
+          meta.last_event = shortType;
+          meta.last_event_at = data.created_at || new Date().toISOString();
+          await supabaseAdmin.from('lead_activities').update({ metadata: meta }).eq('id', act.id);
+          console.log(`[Resend Webhook] Tracked ${shortType} for activity ${act.id}`);
+        }
+      }
+    }
+
+    // ── Inbound email (reply from lead) ──
+    if (eventType === 'email.received') {
+      const fromEmail = (data.from || '').toLowerCase().trim();
+      const subject = data.subject || '(sin asunto)';
+      const htmlBody = data.html || data.text || '';
+
+      if (fromEmail) {
+        // Match sender to a lead by email
+        const { data: leads } = await supabaseAdmin
+          .from('leads')
+          .select('id, email, name')
+          .eq('email', fromEmail)
+          .limit(1);
+
+        if (leads && leads.length > 0) {
+          const lead = leads[0];
+          // Create inbound email activity in the lead's timeline
+          await supabaseAdmin.from('lead_activities').insert([{
+            lead_id: lead.id,
+            type: 'email_received',
+            title: subject,
+            body: htmlBody,
+            metadata: {
+              from: fromEmail,
+              to: data.to,
+              subject,
+              resend_id: data.email_id || null,
+              received_at: data.created_at || new Date().toISOString(),
+            },
+            created_by: fromEmail,
+          }]);
+
+          // Update last_contacted_at
+          await supabaseAdmin.from('leads').update({
+            last_contacted_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }).eq('id', lead.id);
+
+          console.log(`[Resend Webhook] 📥 Inbound email from ${fromEmail} → lead ${lead.id}`);
+        } else {
+          console.log(`[Resend Webhook] 📥 Inbound email from ${fromEmail} — no matching lead`);
+        }
+      }
+    }
+
+    res.status(200).send('ok');
+  } catch (err) {
+    console.error('[Resend Webhook] Error:', err);
+    res.status(200).send('ok'); // Always 200 to avoid retries
+  }
 });
 
 // =====================================================================

@@ -16,6 +16,8 @@ import { API_URL } from '../services/config';
 import { includesNormalized, isTempEmail } from '../services/textUtils';
 import { apiFetch } from '../services/authService';
 
+const SalesPipeline = React.lazy(() => import('./sales/SalesPipeline'));
+
 // ─────────────────── Types ───────────────────
 interface PsychologistStat {
   id: string;
@@ -81,7 +83,7 @@ interface UserDetail {
   lastActivity: string | null;
 }
 
-type Tab = 'dashboard' | 'users';
+type Tab = 'dashboard' | 'users' | 'sales';
 
 // ─────────────────── Helpers ───────────────────
 const PLAN_COLORS: Record<string, string> = {
@@ -800,6 +802,13 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── VENTAS TAB ─────────────────────────── */}
+      {tab === 'sales' && (
+        <React.Suspense fallback={<div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-2 border-indigo-200 border-t-indigo-600 rounded-full" /></div>}>
+          <SalesPipeline />
+        </React.Suspense>
       )}
     </div>
   );

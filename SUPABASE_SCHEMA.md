@@ -231,3 +231,48 @@ CREATE TABLE public.users (
   CONSTRAINT users_auth_user_id_fkey FOREIGN KEY (auth_user_id) REFERENCES auth.users(id),
   CONSTRAINT users_psychologist_profile_id_fkey FOREIGN KEY (psychologist_profile_id) REFERENCES public.psychologist_profiles(id)
 );
+CREATE TABLE public.leads (
+  id uuid DEFAULT gen_random_uuid() NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  email text NOT NULL,
+  name text,
+  phone text,
+  company text,
+  source text DEFAULT 'manual'::text,
+  stage text NOT NULL DEFAULT 'new'::text CHECK (stage = ANY (ARRAY['new'::text, 'contacted'::text, 'demo'::text, 'won'::text, 'lost'::text, 'cancelled'::text])),
+  app_user_id text,
+  app_registered_at timestamp with time zone,
+  app_plan text,
+  app_is_subscribed boolean DEFAULT false,
+  assigned_to text,
+  tags text[] DEFAULT '{}'::text[],
+  notes_count integer DEFAULT 0,
+  last_contacted_at timestamp with time zone,
+  CONSTRAINT leads_pkey PRIMARY KEY (id),
+  CONSTRAINT leads_email_key UNIQUE (email),
+  CONSTRAINT leads_app_user_id_fkey FOREIGN KEY (app_user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.lead_activities (
+  id uuid DEFAULT gen_random_uuid() NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  lead_id uuid NOT NULL,
+  type text NOT NULL CHECK (type = ANY (ARRAY['note'::text, 'email_sent'::text, 'email_received'::text, 'email_bulk'::text, 'document'::text, 'stage_change'::text, 'app_event'::text])),
+  title text,
+  body text,
+  metadata jsonb DEFAULT '{}'::jsonb,
+  created_by text,
+  CONSTRAINT lead_activities_pkey PRIMARY KEY (id),
+  CONSTRAINT lead_activities_lead_id_fkey FOREIGN KEY (lead_id) REFERENCES public.leads(id) ON DELETE CASCADE
+);
+CREATE TABLE public.lead_email_templates (
+  id uuid DEFAULT gen_random_uuid() NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  name text NOT NULL,
+  subject text NOT NULL,
+  body_html text NOT NULL,
+  variables text[] DEFAULT '{}'::text[],
+  created_by text,
+  CONSTRAINT lead_email_templates_pkey PRIMARY KEY (id)
+);

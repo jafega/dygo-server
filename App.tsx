@@ -60,7 +60,7 @@ const App: React.FC = () => {
   const [phonePromptSaving, setPhonePromptSaving] = useState(false);
   
   const [psychViewMode, setPsychViewMode] = useState<'DASHBOARD' | 'PERSONAL' | 'ADMIN'>('DASHBOARD');
-  const [adminTab, setAdminTab] = useState<'dashboard' | 'users'>('dashboard');
+  const [adminTab, setAdminTab] = useState<'dashboard' | 'users' | 'sales'>('dashboard');
   const [adminSidebarOpen, setAdminSidebarOpen] = useState(false);
   const [psychPanelView, setPsychPanelView] = useState<'home' | 'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule' | 'centros' | 'templates' | 'import' | 'ai-assistant' | 'materials'>('home');
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -1112,7 +1112,8 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
     const adminNavItems = [
       { id: 'dashboard' as const, label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
       { id: 'users'     as const, label: 'Usuarios',  icon: <Users size={18} /> },
-    ] as { id: 'dashboard' | 'users'; label: string; icon: React.ReactNode }[];
+      { id: 'sales'     as const, label: 'Ventas',     icon: <TrendingUp size={18} /> },
+    ] as { id: 'dashboard' | 'users' | 'sales'; label: string; icon: React.ReactNode }[];
     return (
       <div className="h-screen bg-slate-50 text-slate-900 flex flex-col overflow-hidden">
         {/* ── Mobile top bar ─────────────────────────── */}
