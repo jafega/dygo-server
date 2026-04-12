@@ -39,7 +39,7 @@ const BulkImportPanel = lazy(() => import('./components/BulkImportPanel'));
 const PsychologistAIChat = lazy(() => import('./components/PsychologistAIChat'));
 // Lazy-loaded: admin only
 const SuperAdmin = lazy(() => import('./components/SuperAdmin'));
-import { Mic, LayoutDashboard, Home, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock, AlertCircle, Smile, Shield, Building2, LogOut, Upload, Bot, FolderOpen, Phone } from 'lucide-react';
+import { Mic, LayoutDashboard, Home, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock, AlertCircle, Smile, Shield, Building2, LogOut, Upload, Bot, FolderOpen, Phone, Mail } from 'lucide-react';
 
 // Custom Mainds Logo Component
 const MaindsLogo: React.FC<{ className?: string }> = ({ className = "w-12 h-12" }) => (
@@ -60,7 +60,7 @@ const App: React.FC = () => {
   const [phonePromptSaving, setPhonePromptSaving] = useState(false);
   
   const [psychViewMode, setPsychViewMode] = useState<'DASHBOARD' | 'PERSONAL' | 'ADMIN'>('DASHBOARD');
-  const [adminTab, setAdminTab] = useState<'dashboard' | 'users' | 'sales'>('dashboard');
+  const [adminTab, setAdminTab] = useState<'dashboard' | 'users' | 'sales' | 'templates' | 'email'>('dashboard');
   const [adminSidebarOpen, setAdminSidebarOpen] = useState(false);
   const [psychPanelView, setPsychPanelView] = useState<'home' | 'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule' | 'centros' | 'templates' | 'import' | 'ai-assistant' | 'materials'>('home');
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -1113,7 +1113,9 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
       { id: 'dashboard' as const, label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
       { id: 'users'     as const, label: 'Usuarios',  icon: <Users size={18} /> },
       { id: 'sales'     as const, label: 'Ventas',     icon: <TrendingUp size={18} /> },
-    ] as { id: 'dashboard' | 'users' | 'sales'; label: string; icon: React.ReactNode }[];
+      { id: 'templates' as const, label: 'Plantillas', icon: <FileText size={18} /> },
+      { id: 'email'     as const, label: 'Buzón',      icon: <Mail size={18} /> },
+    ] as { id: 'dashboard' | 'users' | 'sales' | 'templates' | 'email'; label: string; icon: React.ReactNode }[];
     return (
       <div className="h-screen bg-slate-50 text-slate-900 flex flex-col overflow-hidden">
         {/* ── Mobile top bar ─────────────────────────── */}

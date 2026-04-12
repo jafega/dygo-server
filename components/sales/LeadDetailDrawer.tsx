@@ -3,11 +3,12 @@ import { Lead, LeadActivity, LeadEmailTemplate, LEAD_STAGES, LeadStage } from '.
 import { LeadEmailComposer } from './LeadEmailComposer';
 import { API_URL } from '../../services/config';
 import { apiFetch } from '../../services/authService';
+import type { MasterUser } from './SalesPipeline';
 import {
   X, Mail, Phone, Building2, Calendar, Smartphone, Tag,
   ChevronDown, Trash2, Plus, FileText, ArrowRightLeft,
   Send, StickyNote, Paperclip, Zap, Globe, Clock,
-  Eye, EyeOff, MousePointer, AlertTriangle, CheckCircle2,
+  Eye, EyeOff, MousePointer, AlertTriangle, CheckCircle2, UserCheck,
 } from 'lucide-react';
 
 interface Props {
@@ -49,9 +50,13 @@ export const LeadDetailDrawer: React.FC<Props> = ({ lead, templates, onClose, on
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [assignees, setAssignees] = useState<MasterUser[]>([]);
+  const [showAssignMenu, setShowAssignMenu] = useState(false);
+  const [assignSearch, setAssignSearch] = useState('');
 
   useEffect(() => {
     loadActivities();
+    loadAssignees();
   }, [lead.id]);
 
   const loadActivities = async () => {
@@ -61,6 +66,13 @@ export const LeadDetailDrawer: React.FC<Props> = ({ lead, templates, onClose, on
       if (res.ok) setActivities(await res.json());
     } catch (e) { console.error('Error loading activities:', e); }
     setLoadingActivities(false);
+  };
+
+  const loadAssignees = async () => {
+    try {
+      const res = await apiFetch(`${API_URL}/admin/leads/assignees`);
+      if (res.ok) setAssignees(await res.json());
+    } catch (e) { console.error('Error loading assignees:', e); }
   };
 
   const addNote = async () => {
@@ -200,6 +212,74 @@ export const LeadDetailDrawer: React.FC<Props> = ({ lead, templates, onClose, on
                     {lead.details || <span className="text-slate-300 italic">Añadir detalles</span>}
                   </span>
                 )}
+              </div>
+
+              {/* Assigned to */}
+              <div className="flex items-center gap-3 relative">
+                <UserCheck size={14} className="text-slate-400" />
+                <div className="flex-1 relative">
+                  <button
+                    onClick={() => { setShowAssignMenu(!showAssignMenu); setAssignSearch(''); }}
+                    className="text-sm text-slate-700 hover:text-indigo-600 transition-colors cursor-pointer flex items-center gap-1"
+                  >
+                    {lead.assigned_to ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                        {(() => { const m = assignees.find(a => a.email === lead.assigned_to); return m?.name ? `${m.name} (${m.email})` : lead.assigned_to; })()}
+                      </span>
+                    ) : (
+                      <span className="text-slate-300 italic text-sm">Asignar responsable</span>
+                    )}
+                    <ChevronDown size={12} className="text-slate-400" />
+                  </button>
+                  {showAssignMenu && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setShowAssignMenu(false)} />
+                      <div className="absolute top-full left-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg z-20 min-w-[260px] overflow-hidden">
+                        <div className="p-2 border-b border-slate-100">
+                          <input
+                            autoFocus
+                            type="text"
+                            placeholder="Buscar por email o nombre..."
+                            value={assignSearch}
+                            onChange={e => setAssignSearch(e.target.value)}
+                            className="w-full px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 outline-none"
+                          />
+                        </div>
+                        <div className="max-h-48 overflow-y-auto py-1">
+                          {assignees
+                            .filter(a => {
+                              if (!assignSearch) return true;
+                              const q = assignSearch.toLowerCase();
+                              return a.email.toLowerCase().includes(q) || (a.name || '').toLowerCase().includes(q);
+                            })
+                            .map(a => (
+                              <button
+                                key={a.id}
+                                onClick={() => { onUpdate(lead.id, { assigned_to: a.email }); setShowAssignMenu(false); }}
+                                className={`w-full px-3 py-2 text-left text-sm hover:bg-slate-50 flex flex-col ${lead.assigned_to === a.email ? 'bg-indigo-50' : ''}`}
+                              >
+                                <span className={`font-medium ${lead.assigned_to === a.email ? 'text-indigo-600' : 'text-slate-700'}`}>{a.name || a.email}</span>
+                                {a.name && <span className="text-xs text-slate-400">{a.email}</span>}
+                              </button>
+                            ))}
+                          {assignees.filter(a => { const q = assignSearch.toLowerCase(); return !assignSearch || a.email.toLowerCase().includes(q) || (a.name || '').toLowerCase().includes(q); }).length === 0 && (
+                            <div className="px-3 py-2 text-xs text-slate-400">No se encontraron usuarios</div>
+                          )}
+                        </div>
+                        {lead.assigned_to && (
+                          <div className="border-t border-slate-100">
+                            <button
+                              onClick={() => { onUpdate(lead.id, { assigned_to: null }); setShowAssignMenu(false); }}
+                              className="w-full px-3 py-2 text-left text-sm text-red-500 hover:bg-red-50 flex items-center gap-2"
+                            >
+                              <X size={12} /> Sin asignar
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
 

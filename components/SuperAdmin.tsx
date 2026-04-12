@@ -17,6 +17,8 @@ import { includesNormalized, isTempEmail } from '../services/textUtils';
 import { apiFetch } from '../services/authService';
 
 const SalesPipeline = React.lazy(() => import('./sales/SalesPipeline'));
+const TemplatesPanel = React.lazy(() => import('./sales/TemplatesPanel'));
+const EmailInbox = React.lazy(() => import('./EmailInbox'));
 
 // ─────────────────── Types ───────────────────
 interface PsychologistStat {
@@ -83,7 +85,7 @@ interface UserDetail {
   lastActivity: string | null;
 }
 
-type Tab = 'dashboard' | 'users' | 'sales';
+type Tab = 'dashboard' | 'users' | 'sales' | 'templates' | 'email';
 
 // ─────────────────── Helpers ───────────────────
 const PLAN_COLORS: Record<string, string> = {
@@ -808,6 +810,20 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
       {tab === 'sales' && (
         <React.Suspense fallback={<div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-2 border-indigo-200 border-t-indigo-600 rounded-full" /></div>}>
           <SalesPipeline />
+        </React.Suspense>
+      )}
+
+      {/* ── PLANTILLAS TAB ─────────────────────── */}
+      {tab === 'templates' && (
+        <React.Suspense fallback={<div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-2 border-indigo-200 border-t-indigo-600 rounded-full" /></div>}>
+          <TemplatesPanel />
+        </React.Suspense>
+      )}
+
+      {/* ── EMAIL INBOX TAB ─────────────────────── */}
+      {tab === 'email' && (
+        <React.Suspense fallback={<div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-2 border-indigo-200 border-t-indigo-600 rounded-full" /></div>}>
+          <EmailInbox />
         </React.Suspense>
       )}
     </div>

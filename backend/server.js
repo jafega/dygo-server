@@ -220,8 +220,8 @@ async function sendPsychWelcomeEmail(toEmail, firstName) {
     await resend.emails.send({
       from: 'mainds <no-reply@mainds.app>',
       to: toEmail,
-      bcc: 'info@mainds.app',
-      reply_to: 'info@mainds.app',
+      bcc: 'mainds@mainds.app',
+      reply_to: 'mainds@mainds.app',
       subject: `¡Bienvenido/a a mainds${firstName ? `, ${firstName}` : ''}! Tu prueba gratuita ha comenzado`,
       html: buildPsychWelcomeEmail({ firstName, appUrl })
     });
@@ -18423,19 +18423,46 @@ app.get('/api/admin/leads', authenticateRequest, requireSuperAdmin, async (req, 
     const limit = Math.min(200, Math.max(1, parseInt(limitStr) || 50));
 
     let query = supabaseAdmin.from('leads').select('*', { count: 'exact' });
-    if (stage) query = query.eq('stage', stage);
+    // Multi-value filters (comma-separated)
+    if (stage) {
+      const stages = stage.split(',').map(s => s.trim()).filter(Boolean);
+      if (stages.length === 1) query = query.eq('stage', stages[0]);
+      else if (stages.length > 1) query = query.in('stage', stages);
+    }
     if (search) query = query.or(`email.ilike.%${search}%,name.ilike.%${search}%,company.ilike.%${search}%,phone.ilike.%${search}%`);
-    // Column-level filters
-    if (name) query = query.ilike('name', `%${name}%`);
-    if (email) query = query.ilike('email', `%${email}%`);
-    if (phone) query = query.ilike('phone', `%${phone}%`);
-    if (company) query = query.ilike('company', `%${company}%`);
-    if (source) query = query.ilike('source', `%${source}%`);
-    if (assigned_to === '__unassigned__') query = query.is('assigned_to', null);
-    else if (assigned_to) query = query.eq('assigned_to', assigned_to);
-    if (app_status === 'registered') query = query.not('app_user_id', 'is', null);
-    else if (app_status === 'subscribed') query = query.eq('app_is_subscribed', true);
-    else if (app_status === 'none') query = query.is('app_user_id', null);
+    if (source) {
+      const sources = source.split(',').map(s => s.trim()).filter(Boolean);
+      if (sources.length === 1) query = query.ilike('source', sources[0]);
+      else if (sources.length > 1) query = query.in('source', sources);
+    }
+    if (assigned_to) {
+      const assignees = assigned_to.split(',').map(s => s.trim()).filter(Boolean);
+      const hasUnassigned = assignees.includes('__unassigned__');
+      const named = assignees.filter(a => a !== '__unassigned__');
+      if (hasUnassigned && named.length === 0) {
+        query = query.is('assigned_to', null);
+      } else if (hasUnassigned && named.length > 0) {
+        query = query.or(`assigned_to.is.null,assigned_to.in.(${named.join(',')})`);
+      } else if (named.length === 1) {
+        query = query.eq('assigned_to', named[0]);
+      } else if (named.length > 1) {
+        query = query.in('assigned_to', named);
+      }
+    }
+    if (app_status) {
+      const statuses = app_status.split(',').map(s => s.trim()).filter(Boolean);
+      if (statuses.length === 1) {
+        if (statuses[0] === 'registered') query = query.not('app_user_id', 'is', null);
+        else if (statuses[0] === 'subscribed') query = query.eq('app_is_subscribed', true);
+        else if (statuses[0] === 'none') query = query.is('app_user_id', null);
+      } else if (statuses.length > 1) {
+        const orParts = [];
+        if (statuses.includes('registered')) orParts.push('app_user_id.not.is.null');
+        if (statuses.includes('subscribed')) orParts.push('app_is_subscribed.eq.true');
+        if (statuses.includes('none')) orParts.push('app_user_id.is.null');
+        if (orParts.length) query = query.or(orParts.join(','));
+      }
+    }
     query = query.order(sortCol, { ascending: sortAsc }).range(offset, offset + limit - 1);
 
     const { data, error, count } = await query;
@@ -18949,17 +18976,49 @@ app.put('/api/admin/leads/bulk', authenticateRequest, requireSuperAdmin, async (
   }
 });
 
-// --- GET /api/admin/leads/assignees — List unique assigned_to values ---
+// --- GET /api/admin/leads/assignees — List master users available for assignment ---
 app.get('/api/admin/leads/assignees', authenticateRequest, requireSuperAdmin, async (req, res) => {
   try {
     if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
-    const { data, error } = await supabaseAdmin.from('leads').select('assigned_to').not('assigned_to', 'is', null);
+    if (SUPERADMIN_EMAILS.length === 0) return res.json([]);
+    const { data, error } = await supabaseAdmin
+      .from('users')
+      .select('id, user_email, data')
+      .in('user_email', SUPERADMIN_EMAILS);
     if (error) throw error;
-    const unique = [...new Set((data || []).map(r => r.assigned_to).filter(Boolean))].sort();
+    const masters = (data || []).map(u => {
+      const d = u.data || {};
+      const name = d.name || d.firstName
+        ? [d.firstName, d.lastName].filter(Boolean).join(' ') || d.name
+        : null;
+      return { id: u.id, email: u.user_email, name: name || null };
+    });
+    // Deduplicate by email
+    const seen = new Set();
+    const unique = masters.filter(m => {
+      const key = (m.email || '').toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
     res.json(unique);
   } catch (err) {
     console.error('[leads] Error listing assignees:', err);
     res.status(500).json({ error: 'Error listing assignees' });
+  }
+});
+
+// --- GET /api/admin/leads/sources — List unique source values ---
+app.get('/api/admin/leads/sources', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { data, error } = await supabaseAdmin.from('leads').select('source').not('source', 'is', null);
+    if (error) throw error;
+    const unique = [...new Set((data || []).map(r => r.source).filter(Boolean))].sort();
+    res.json(unique);
+  } catch (err) {
+    console.error('[leads] Error listing sources:', err);
+    res.status(500).json({ error: 'Error listing sources' });
   }
 });
 
@@ -19021,7 +19080,7 @@ app.post('/api/admin/leads/:id/email', authenticateRequest, requireSuperAdmin, a
     if (!lead) return res.status(404).json({ error: 'Lead no encontrado' });
 
     const fromName = sender_name || 'mainds';
-    const fromAddr = `${fromName} <info@mainds.app>`;
+    const fromAddr = `${fromName} <mainds@mainds.app>`;
     let emailResult = null;
 
     // Replace {{name}} / {{email}} placeholders
@@ -19038,7 +19097,7 @@ app.post('/api/admin/leads/:id/email', authenticateRequest, requireSuperAdmin, a
       emailResult = await resend.emails.send({
         from: fromAddr,
         to: lead.email,
-        reply_to: 'info@mainds.app',
+        reply_to: 'mainds@mainds.app',
         subject: personalizedSubject,
         html: personalizedHtml,
       });
@@ -19054,9 +19113,25 @@ app.post('/api/admin/leads/:id/email', authenticateRequest, requireSuperAdmin, a
       type: 'email_sent',
       title: personalizedSubject,
       body: personalizedHtml,
-      metadata: { resend_id: emailResult?.id, from: fromAddr, to: lead.email, sender_name: fromName },
+      metadata: { resend_id: emailResult?.id || emailResult?.data?.id, from: fromAddr, to: lead.email, sender_name: fromName },
       created_by: req.superAdminEmail,
     }]).select().single();
+
+    // Register in admin_emails (sales inbox)
+    await supabaseAdmin.from('admin_emails').insert({
+      mailbox: 'sales',
+      direction: 'outbound',
+      from_email: 'mainds@mainds.app',
+      from_name: fromName,
+      to_email: lead.email,
+      to_name: lead.name || null,
+      subject: personalizedSubject,
+      body_html: personalizedHtml,
+      is_read: true,
+      resend_id: emailResult?.id || emailResult?.data?.id || null,
+      resend_status: 'sent',
+      metadata: { sent_by: req.superAdminEmail, lead_id: lead.id, source: 'crm' },
+    }).then(() => {}).catch(e => console.error('[admin-emails] Error registering CRM email:', e));
 
     // Update last_contacted_at
     await supabaseAdmin.from('leads').update({ last_contacted_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', lead.id);
@@ -19081,7 +19156,7 @@ app.post('/api/admin/leads/email-bulk', authenticateRequest, requireSuperAdmin, 
     if (!leads || leads.length === 0) return res.status(404).json({ error: 'No leads found' });
 
     const fromName = sender_name || 'mainds';
-    const fromAddr = `${fromName} <info@mainds.app>`;
+    const fromAddr = `${fromName} <mainds@mainds.app>`;
     const results = { sent: 0, failed: 0, details: [] };
 
     for (const lead of leads) {
@@ -19101,11 +19176,11 @@ app.post('/api/admin/leads/email-bulk', authenticateRequest, requireSuperAdmin, 
           const result = await resend.emails.send({
             from: fromAddr,
             to: lead.email,
-            reply_to: 'info@mainds.app',
+            reply_to: 'mainds@mainds.app',
             subject: personalizedSubject,
             html: personalizedHtml,
           });
-          resendId = result?.id;
+          resendId = result?.data?.id || result?.id;
         }
 
         // Record in timeline
@@ -19117,6 +19192,22 @@ app.post('/api/admin/leads/email-bulk', authenticateRequest, requireSuperAdmin, 
           metadata: { resend_id: resendId, from: fromAddr, to: lead.email, sender_name: fromName, bulk: true },
           created_by: req.superAdminEmail,
         }]);
+
+        // Register in admin_emails (sales inbox)
+        await supabaseAdmin.from('admin_emails').insert({
+          mailbox: 'sales',
+          direction: 'outbound',
+          from_email: 'mainds@mainds.app',
+          from_name: fromName,
+          to_email: lead.email,
+          to_name: lead.name || null,
+          subject: personalizedSubject,
+          body_html: personalizedHtml,
+          is_read: true,
+          resend_id: resendId,
+          resend_status: 'sent',
+          metadata: { sent_by: req.superAdminEmail, lead_id: lead.id, source: 'crm_bulk' },
+        }).catch(e => console.error('[admin-emails] Error registering bulk email:', e));
 
         results.sent++;
         results.details.push({ email: lead.email, status: 'sent', resend_id: resendId });
@@ -19289,6 +19380,272 @@ app.delete('/api/admin/lead-templates/:id', authenticateRequest, requireSuperAdm
   }
 });
 
+// =====================================================================
+// ===  ADMIN EMAIL INBOX (Sales & Support)                          ===
+// =====================================================================
+
+const MAILBOX_CONFIG = {
+  sales:   { email: 'mainds@mainds.app',  name: 'mainds' },
+  support: { email: 'soporte@mainds.app', name: 'mainds Soporte' },
+};
+
+// --- GET /api/admin/emails — List emails for a mailbox ---
+app.get('/api/admin/emails', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { mailbox = 'sales', folder = 'inbox', search = '', page = 1, limit = 50 } = req.query;
+    if (!MAILBOX_CONFIG[mailbox]) return res.status(400).json({ error: 'Buzón inválido' });
+
+    const offset = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
+    const lim = Math.min(100, Math.max(1, parseInt(limit)));
+
+    let query = supabaseAdmin
+      .from('admin_emails')
+      .select('*', { count: 'exact' })
+      .eq('mailbox', mailbox)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + lim - 1);
+
+    if (folder === 'sent') {
+      query = query.eq('direction', 'outbound');
+    } else if (folder === 'inbox') {
+      // inbox shows inbound only (not archived)
+      query = query.eq('direction', 'inbound').eq('is_archived', false);
+    } else if (folder === 'archived') {
+      query = query.eq('is_archived', true);
+    }
+    // folder === 'all' shows everything without extra filters
+
+    if (search) {
+      query = query.or(`subject.ilike.%${search}%,from_email.ilike.%${search}%,from_name.ilike.%${search}%,to_email.ilike.%${search}%`);
+    }
+
+    const { data: emails, count, error } = await query;
+    if (error) throw error;
+    res.json({ emails: emails || [], total: count || 0, page: parseInt(page), limit: lim });
+  } catch (err) {
+    console.error('[admin-emails] Error listing:', err);
+    res.status(500).json({ error: 'Error al listar emails' });
+  }
+});
+
+// --- GET /api/admin/emails/unread-counts — Unread counts per mailbox ---
+app.get('/api/admin/emails/unread-counts', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const counts = {};
+    for (const mb of Object.keys(MAILBOX_CONFIG)) {
+      const { count } = await supabaseAdmin
+        .from('admin_emails')
+        .select('id', { count: 'exact', head: true })
+        .eq('mailbox', mb)
+        .eq('direction', 'inbound')
+        .eq('is_read', false)
+        .eq('is_archived', false);
+      counts[mb] = count || 0;
+    }
+    res.json(counts);
+  } catch (err) {
+    console.error('[admin-emails] Error getting unread counts:', err);
+    res.status(500).json({ error: 'Error al obtener contadores' });
+  }
+});
+
+// --- GET /api/admin/emails/:id — Get single email ---
+app.get('/api/admin/emails/:id', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { data: email, error } = await supabaseAdmin
+      .from('admin_emails')
+      .select('*')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (error) throw error;
+    if (!email) return res.status(404).json({ error: 'Email no encontrado' });
+
+    // Auto-mark as read if inbound
+    if (email.direction === 'inbound' && !email.is_read) {
+      await supabaseAdmin.from('admin_emails').update({ is_read: true, updated_at: new Date().toISOString() }).eq('id', email.id);
+      email.is_read = true;
+    }
+
+    res.json(email);
+  } catch (err) {
+    console.error('[admin-emails] Error getting email:', err);
+    res.status(500).json({ error: 'Error al obtener el email' });
+  }
+});
+
+// --- GET /api/admin/emails/:id/thread — Get all emails in a thread ---
+app.get('/api/admin/emails/:id/thread', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { data: email } = await supabaseAdmin
+      .from('admin_emails')
+      .select('id, thread_id')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (!email) return res.status(404).json({ error: 'Email no encontrado' });
+
+    // The thread root is either thread_id or the email itself
+    const rootId = email.thread_id || email.id;
+
+    const { data: thread, error } = await supabaseAdmin
+      .from('admin_emails')
+      .select('*')
+      .or(`id.eq.${rootId},thread_id.eq.${rootId}`)
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+    res.json(thread || []);
+  } catch (err) {
+    console.error('[admin-emails] Error getting thread:', err);
+    res.status(500).json({ error: 'Error al obtener hilo' });
+  }
+});
+
+// --- POST /api/admin/emails/send — Send a new email or reply ---
+app.post('/api/admin/emails/send', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    if (!process.env.RESEND_API_KEY) return res.status(500).json({ error: 'RESEND_API_KEY no configurada' });
+
+    const { mailbox = 'sales', to, cc, bcc, subject, body_html, reply_to_id } = req.body;
+    if (!MAILBOX_CONFIG[mailbox]) return res.status(400).json({ error: 'Buzón inválido' });
+    if (!to || !subject) return res.status(400).json({ error: 'Destinatario y asunto son obligatorios' });
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const toEmails = Array.isArray(to) ? to : [to];
+    for (const e of toEmails) {
+      if (!emailRegex.test(e.trim())) return res.status(400).json({ error: `Email inválido: ${e}` });
+    }
+
+    const config = MAILBOX_CONFIG[mailbox];
+    const fromAddr = `${config.name} <${config.email}>`;
+
+    // Determine thread_id if replying
+    let thread_id = null;
+    if (reply_to_id) {
+      const { data: parent } = await supabaseAdmin
+        .from('admin_emails')
+        .select('id, thread_id')
+        .eq('id', reply_to_id)
+        .maybeSingle();
+      if (parent) thread_id = parent.thread_id || parent.id;
+    }
+
+    // Send via Resend
+    const { Resend } = await import('resend');
+    const resend = new Resend(process.env.RESEND_API_KEY);
+
+    const sendPayload = {
+      from: fromAddr,
+      to: toEmails.map(e => e.trim()),
+      subject,
+      html: body_html || '',
+      reply_to: config.email,
+    };
+    if (cc) sendPayload.cc = Array.isArray(cc) ? cc : [cc];
+    if (bcc) sendPayload.bcc = Array.isArray(bcc) ? bcc : [bcc];
+
+    const result = await resend.emails.send(sendPayload);
+
+    // Store in DB
+    const { data: saved, error: saveErr } = await supabaseAdmin
+      .from('admin_emails')
+      .insert({
+        mailbox,
+        direction: 'outbound',
+        thread_id,
+        from_email: config.email,
+        from_name: config.name,
+        to_email: toEmails.join(', '),
+        to_name: null,
+        cc: cc ? (Array.isArray(cc) ? cc.join(', ') : cc) : null,
+        bcc: bcc ? (Array.isArray(bcc) ? bcc.join(', ') : bcc) : null,
+        subject,
+        body_html: body_html || '',
+        body_text: null,
+        is_read: true,
+        resend_id: result?.data?.id || result?.id || null,
+        resend_status: 'sent',
+        metadata: { sent_by: req.superAdminEmail },
+      })
+      .select()
+      .single();
+
+    if (saveErr) console.error('[admin-emails] Error saving sent email:', saveErr);
+
+    res.json({ success: true, email: saved, resend_id: result?.data?.id || result?.id });
+  } catch (err) {
+    console.error('[admin-emails] Error sending:', err);
+    res.status(500).json({ error: err.message || 'Error al enviar email' });
+  }
+});
+
+// --- PATCH /api/admin/emails/:id — Update email (read, starred, archived) ---
+app.patch('/api/admin/emails/:id', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const allowed = ['is_read', 'is_starred', 'is_archived'];
+    const updates = {};
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) updates[key] = req.body[key];
+    }
+    if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No hay campos a actualizar' });
+    updates.updated_at = new Date().toISOString();
+
+    const { error } = await supabaseAdmin
+      .from('admin_emails')
+      .update(updates)
+      .eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[admin-emails] Error updating:', err);
+    res.status(500).json({ error: 'Error al actualizar email' });
+  }
+});
+
+// --- POST /api/admin/emails/batch — Batch update (mark read, archive, etc.) ---
+app.post('/api/admin/emails/batch', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { ids, updates } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'No IDs provided' });
+    if (ids.length > 100) return res.status(400).json({ error: 'Máximo 100 emails por operación' });
+
+    const allowed = ['is_read', 'is_starred', 'is_archived'];
+    const safeUpdates = {};
+    for (const key of allowed) {
+      if (updates[key] !== undefined) safeUpdates[key] = updates[key];
+    }
+    if (Object.keys(safeUpdates).length === 0) return res.status(400).json({ error: 'No valid updates' });
+    safeUpdates.updated_at = new Date().toISOString();
+
+    const { error } = await supabaseAdmin.from('admin_emails').update(safeUpdates).in('id', ids);
+    if (error) throw error;
+    res.json({ ok: true, updated: ids.length });
+  } catch (err) {
+    console.error('[admin-emails] Error batch updating:', err);
+    res.status(500).json({ error: 'Error en actualización masiva' });
+  }
+});
+
+// --- DELETE /api/admin/emails/:id — Permanently delete an email ---
+app.delete('/api/admin/emails/:id', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { error } = await supabaseAdmin.from('admin_emails').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[admin-emails] Error deleting:', err);
+    res.status(500).json({ error: 'Error al eliminar email' });
+  }
+});
+
 // --- Resend Webhook (inbound-ready) — POST /api/webhooks/resend ---
 app.post('/api/webhooks/resend', async (req, res) => {
   try {
@@ -19300,6 +19657,7 @@ app.post('/api/webhooks/resend', async (req, res) => {
 
     // ── Outbound tracking events ──
     // These update the metadata.events array on the original email activity
+    // AND update resend_status on admin_emails
     const TRACKING_EVENTS = [
       'email.sent', 'email.delivered', 'email.opened', 'email.clicked',
       'email.bounced', 'email.complained', 'email.delivery_delayed',
@@ -19309,6 +19667,7 @@ app.post('/api/webhooks/resend', async (req, res) => {
     if (TRACKING_EVENTS.includes(eventType)) {
       const resendId = data.email_id;
       if (resendId) {
+        // Update lead_activities (existing)
         const { data: activities } = await supabaseAdmin
           .from('lead_activities')
           .select('id, lead_id, metadata')
@@ -19330,15 +19689,67 @@ app.post('/api/webhooks/resend', async (req, res) => {
           await supabaseAdmin.from('lead_activities').update({ metadata: meta }).eq('id', act.id);
           console.log(`[Resend Webhook] Tracked ${shortType} for activity ${act.id}`);
         }
+
+        // Also update admin_emails resend_status
+        const shortStatus = eventType.replace('email.', '');
+        await supabaseAdmin
+          .from('admin_emails')
+          .update({ resend_status: shortStatus, updated_at: new Date().toISOString() })
+          .eq('resend_id', resendId);
       }
     }
 
-    // ── Inbound email (reply from lead) ──
+    // ── Inbound email (reply from lead or new email) ──
     if (eventType === 'email.received') {
       const fromEmail = (data.from || '').toLowerCase().trim();
+      const toRaw = data.to || [];
+      const toEmails = (Array.isArray(toRaw) ? toRaw : [toRaw]).map(e => (e || '').toLowerCase().trim());
       const subject = data.subject || '(sin asunto)';
       const htmlBody = data.html || data.text || '';
 
+      // Determine which mailbox received the email
+      let mailbox = null;
+      if (toEmails.some(e => e.includes('soporte@mainds.app'))) mailbox = 'support';
+      else if (toEmails.some(e => e.includes('mainds@mainds.app'))) mailbox = 'sales';
+
+      // ── Store in admin_emails table for the inbox ──
+      if (mailbox && fromEmail) {
+        // Try to find an existing thread (match by from_email + similar subject)
+        let thread_id = null;
+        const cleanSubject = subject.replace(/^(Re:|Fwd?:)\s*/gi, '').trim();
+        if (cleanSubject) {
+          const { data: possibleParent } = await supabaseAdmin
+            .from('admin_emails')
+            .select('id, thread_id')
+            .eq('mailbox', mailbox)
+            .or(`to_email.ilike.%${fromEmail}%,from_email.eq.${fromEmail}`)
+            .ilike('subject', `%${cleanSubject}%`)
+            .order('created_at', { ascending: false })
+            .limit(1);
+          if (possibleParent && possibleParent.length > 0) {
+            thread_id = possibleParent[0].thread_id || possibleParent[0].id;
+          }
+        }
+
+        await supabaseAdmin.from('admin_emails').insert({
+          mailbox,
+          direction: 'inbound',
+          thread_id,
+          from_email: fromEmail,
+          from_name: data.from_name || fromEmail.split('@')[0],
+          to_email: toEmails.join(', '),
+          to_name: null,
+          subject,
+          body_html: htmlBody,
+          body_text: data.text || null,
+          is_read: false,
+          resend_id: data.email_id || null,
+          metadata: { raw_to: toRaw, headers: data.headers || {} },
+        });
+        console.log(`[Resend Webhook] 📥 Stored inbound email in ${mailbox} inbox from ${fromEmail}`);
+      }
+
+      // ── Also store in leads system (existing behavior) ──
       if (fromEmail) {
         // Match sender to a lead by email
         const { data: leads } = await supabaseAdmin

@@ -1,17 +1,21 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Lead, LEAD_STAGES, PIPELINE_STAGES, CLOSED_STAGES, LeadStage } from './types';
 import { Mail, Phone, Smartphone, GripVertical, Building2, Loader2 } from 'lucide-react';
+import { API_URL } from '../../services/config';
+import { apiFetch } from '../../services/authService';
+import type { MultiFilters } from './SalesPipeline';
 
 interface Props {
-  leads: Lead[];
   stageCounts: Record<string, number>;
+  search: string;
+  filters: MultiFilters;
   onSelectLead: (lead: Lead) => void;
   onStageChange: (leadId: string, newStage: LeadStage) => void;
-  onLoadMore: () => void;
-  hasMore: boolean;
-  loadingMore: boolean;
   loading: boolean;
+  refreshKey: number;
 }
+
+const KANBAN_PAGE_SIZE = 30;
 
 const stageMap = Object.fromEntries(LEAD_STAGES.map(s => [s.id, s]));
 
@@ -71,11 +75,65 @@ const KanbanColumn: React.FC<{
   color: string;
   bgColor: string;
   borderColor: string;
-  leads: Lead[];
   totalCount: number;
+  search: string;
+  filters: MultiFilters;
+  refreshKey: number;
   onSelectLead: (lead: Lead) => void;
   onDrop: (leadId: string, stage: LeadStage) => void;
-}> = ({ stageId, label, color, bgColor, borderColor, leads, totalCount, onSelectLead, onDrop }) => {
+}> = ({ stageId, label, color, bgColor, borderColor, totalCount, search, filters, refreshKey, onSelectLead, onDrop }) => {
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  const loadLeads = useCallback(async (append = false) => {
+    if (!append) setInitialLoading(true);
+    else setLoadingMore(true);
+    try {
+      const offset = append ? leads.length : 0;
+      const params = new URLSearchParams();
+      params.set('stage', stageId);
+      if (search) params.set('search', search);
+      if (filters.sources.length) params.set('source', filters.sources.join(','));
+      if (filters.assignees.length) params.set('assigned_to', filters.assignees.join(','));
+      if (filters.appStatus.length) params.set('app_status', filters.appStatus.join(','));
+      params.set('offset', String(offset));
+      params.set('limit', String(KANBAN_PAGE_SIZE));
+      const res = await apiFetch(`${API_URL}/admin/leads?${params}`);
+      if (res.ok) {
+        const result = await res.json();
+        if (append) {
+          setLeads(prev => [...prev, ...result.data]);
+        } else {
+          setLeads(result.data);
+        }
+        setHasMore(offset + result.data.length < result.total);
+      }
+    } catch (e) { console.error(`Error loading leads for ${stageId}:`, e); }
+    if (!append) setInitialLoading(false);
+    else setLoadingMore(false);
+  }, [stageId, search, filters, leads.length]);
+
+  // Reset when search, filters or refreshKey changes
+  useEffect(() => {
+    setLeads([]);
+    setHasMore(true);
+    loadLeads(false);
+  }, [stageId, search, filters, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Infinite scroll within column
+  useEffect(() => {
+    if (!sentinelRef.current || !hasMore || initialLoading) return;
+    const observer = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && !loadingMore) loadLeads(true);
+    }, { root: scrollRef.current, rootMargin: '100px' });
+    observer.observe(sentinelRef.current);
+    return () => observer.disconnect();
+  }, [hasMore, loadingMore, initialLoading, loadLeads]);
+
   const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; };
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -97,21 +155,36 @@ const KanbanColumn: React.FC<{
           </span>
         </div>
       </div>
-      <div className="flex-1 p-2 space-y-2 overflow-y-auto max-h-[calc(100vh-320px)]">
-        {leads.map(lead => (
-          <LeadCard key={lead.id} lead={lead} onClick={() => onSelectLead(lead)} />
-        ))}
-        {leads.length === 0 && (
-          <div className="text-center py-8 text-xs text-slate-400">
-            Arrastra leads aquí
+      <div ref={scrollRef} className="flex-1 p-2 space-y-2 overflow-y-auto max-h-[calc(100vh-320px)]">
+        {initialLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 size={16} className={`animate-spin ${color}`} />
           </div>
+        ) : (
+          <>
+            {leads.map(lead => (
+              <LeadCard key={lead.id} lead={lead} onClick={() => onSelectLead(lead)} />
+            ))}
+            {leads.length === 0 && (
+              <div className="text-center py-8 text-xs text-slate-400">
+                Arrastra leads aquí
+              </div>
+            )}
+            {/* Sentinel for infinite scroll */}
+            {hasMore && <div ref={sentinelRef} className="h-1" />}
+            {loadingMore && (
+              <div className="flex items-center justify-center py-2">
+                <Loader2 size={14} className={`animate-spin ${color}`} />
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
   );
 };
 
-export const LeadKanban: React.FC<Props> = ({ leads, stageCounts, onSelectLead, onStageChange, onLoadMore, hasMore, loadingMore, loading }) => {
+export const LeadKanban: React.FC<Props> = ({ stageCounts, search, filters, onSelectLead, onStageChange, loading, refreshKey }) => {
   if (loading) {
     return (
       <div className="bg-white border border-slate-200 rounded-xl p-12 text-center">
@@ -121,37 +194,28 @@ export const LeadKanban: React.FC<Props> = ({ leads, stageCounts, onSelectLead, 
     );
   }
 
-  const leadsByStage = (stageId: LeadStage) => leads.filter(l => l.stage === stageId);
+  const visibleStages = filters.stages.length > 0
+    ? LEAD_STAGES.filter(s => filters.stages.includes(s.id))
+    : LEAD_STAGES;
 
   return (
-    <div>
-      <div className="flex gap-3 overflow-x-auto pb-2">
-        {LEAD_STAGES.map(stage => (
-          <KanbanColumn
-            key={stage.id}
-            stageId={stage.id}
-            label={stage.label}
-            color={stage.color}
-            bgColor={stage.bgColor}
-            borderColor={stage.borderColor}
-            leads={leadsByStage(stage.id)}
-            totalCount={stageCounts[stage.id] || leadsByStage(stage.id).length}
-            onSelectLead={onSelectLead}
-            onDrop={onStageChange}
-          />
-        ))}
-      </div>
-      {hasMore && (
-        <div className="flex justify-center mt-3">
-          <button
-            onClick={onLoadMore}
-            disabled={loadingMore}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 disabled:opacity-50 transition-colors"
-          >
-            {loadingMore ? <><Loader2 size={14} className="animate-spin" /> Cargando...</> : 'Cargar más leads'}
-          </button>
-        </div>
-      )}
+    <div className="flex gap-3 overflow-x-auto pb-2">
+      {visibleStages.map(stage => (
+        <KanbanColumn
+          key={stage.id}
+          stageId={stage.id}
+          label={stage.label}
+          color={stage.color}
+          bgColor={stage.bgColor}
+          borderColor={stage.borderColor}
+          totalCount={stageCounts[stage.id] || 0}
+          search={search}
+          filters={filters}
+          refreshKey={refreshKey}
+          onSelectLead={onSelectLead}
+          onDrop={onStageChange}
+        />
+      ))}
     </div>
   );
 };

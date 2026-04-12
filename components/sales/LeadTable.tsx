@@ -1,7 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { Lead, LEAD_STAGES, LeadStage } from './types';
 import { Mail, Phone, Building2, Calendar, Smartphone, Trash2, Loader2, UserCheck } from 'lucide-react';
-import type { ColumnFilters } from './SalesPipeline';
 
 interface Props {
   leads: Lead[];
@@ -15,16 +14,11 @@ interface Props {
   hasMore: boolean;
   loadingMore: boolean;
   total: number;
-  columnFilters: ColumnFilters;
-  onColumnFilterChange: (key: keyof ColumnFilters, value: string) => void;
-  assignees: string[];
-  stageFilter: LeadStage | '';
 }
 
 const stageMap = Object.fromEntries(LEAD_STAGES.map(s => [s.id, s]));
-const filterInputClass = 'w-full px-2 py-1 text-xs border border-slate-200 rounded focus:ring-1 focus:ring-indigo-200 focus:border-indigo-300 outline-none bg-white placeholder-slate-300';
 
-export const LeadTable: React.FC<Props> = ({ leads, selectedIds, onSelectLead, onToggleSelect, onSelectAll, onDelete, loading, onLoadMore, hasMore, loadingMore, total, columnFilters, onColumnFilterChange, assignees, stageFilter }) => {
+export const LeadTable: React.FC<Props> = ({ leads, selectedIds, onSelectLead, onToggleSelect, onSelectAll, onDelete, loading, onLoadMore, hasMore, loadingMore, total }) => {
   const sentinelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -77,49 +71,6 @@ export const LeadTable: React.FC<Props> = ({ leads, selectedIds, onSelectLead, o
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide hidden lg:table-cell">Fuente</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide hidden lg:table-cell">Creado</th>
               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wide w-10"></th>
-            </tr>
-            {/* Column filter row */}
-            <tr className="border-b border-slate-100 bg-slate-25">
-              <td className="px-4 py-1.5"></td>
-              <td className="px-4 py-1.5">
-                <input type="text" placeholder="Filtrar..." value={columnFilters.name} onChange={e => onColumnFilterChange('name', e.target.value)} className={filterInputClass} />
-              </td>
-              <td className="px-4 py-1.5">
-                <input type="text" placeholder="Filtrar..." value={columnFilters.email} onChange={e => onColumnFilterChange('email', e.target.value)} className={filterInputClass} />
-              </td>
-              <td className="px-4 py-1.5 hidden md:table-cell">
-                <input type="text" placeholder="Filtrar..." value={columnFilters.phone} onChange={e => onColumnFilterChange('phone', e.target.value)} className={filterInputClass} />
-              </td>
-              <td className="px-4 py-1.5 hidden lg:table-cell">
-                <input type="text" placeholder="Filtrar..." value={columnFilters.company} onChange={e => onColumnFilterChange('company', e.target.value)} className={filterInputClass} />
-              </td>
-              <td className="px-4 py-1.5">
-                {!stageFilter && (
-                  <select value="" onChange={e => { /* stage filter is in parent toolbar */ }} disabled className={`${filterInputClass} opacity-40`}>
-                    <option value="">Toolbar</option>
-                  </select>
-                )}
-              </td>
-              <td className="px-4 py-1.5 hidden md:table-cell">
-                <select value={columnFilters.assigned_to} onChange={e => onColumnFilterChange('assigned_to', e.target.value)} className={filterInputClass}>
-                  <option value="">Todos</option>
-                  <option value="__unassigned__">Sin asignar</option>
-                  {assignees.map(a => <option key={a} value={a}>{a}</option>)}
-                </select>
-              </td>
-              <td className="px-4 py-1.5 hidden md:table-cell">
-                <select value={columnFilters.app_status} onChange={e => onColumnFilterChange('app_status', e.target.value)} className={filterInputClass}>
-                  <option value="">Todos</option>
-                  <option value="registered">Registrado</option>
-                  <option value="subscribed">Suscrito</option>
-                  <option value="none">No</option>
-                </select>
-              </td>
-              <td className="px-4 py-1.5 hidden lg:table-cell">
-                <input type="text" placeholder="Filtrar..." value={columnFilters.source} onChange={e => onColumnFilterChange('source', e.target.value)} className={filterInputClass} />
-              </td>
-              <td className="px-4 py-1.5 hidden lg:table-cell"></td>
-              <td className="px-4 py-1.5"></td>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">

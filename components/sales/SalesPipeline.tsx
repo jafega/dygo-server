@@ -9,28 +9,96 @@ import { API_URL } from '../../services/config';
 import { apiFetch } from '../../services/authService';
 import {
   LayoutGrid, Table2, Upload, RefreshCcw, Plus, Search, Filter,
-  Mail, Zap, X, Users, TrendingUp, Target, Ban, FileText, Loader2,
-  ArrowRightLeft, UserCheck,
+  Mail, Zap, X, Users, TrendingUp, Target, Ban, Loader2,
+  ArrowRightLeft, UserCheck, ChevronDown,
 } from 'lucide-react';
 
-const TemplatesPanel = React.lazy(() => import('./TemplatesPanel'));
-
 type ViewMode = 'kanban' | 'table';
-type SalesTab = 'pipeline' | 'templates';
 
 const PAGE_SIZE = 50;
 
-export interface ColumnFilters {
-  name: string;
+export interface MasterUser {
+  id: string;
   email: string;
-  phone: string;
-  company: string;
-  source: string;
-  assigned_to: string;
-  app_status: string;
+  name: string | null;
 }
 
-const emptyFilters: ColumnFilters = { name: '', email: '', phone: '', company: '', source: '', assigned_to: '', app_status: '' };
+export interface MultiFilters {
+  stages: LeadStage[];
+  assignees: string[];
+  appStatus: string[];
+  sources: string[];
+}
+
+const emptyMultiFilters: MultiFilters = { stages: [], assignees: [], appStatus: [], sources: [] };
+
+const MultiSelectDropdown: React.FC<{
+  label: string;
+  options: { value: string; label: string }[];
+  selected: string[];
+  onChange: (selected: string[]) => void;
+}> = ({ label, options, selected, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const toggle = (value: string) => {
+    onChange(selected.includes(value) ? selected.filter(v => v !== value) : [...selected, value]);
+  };
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className={`flex items-center gap-1.5 px-3 py-2 text-sm border rounded-lg transition-colors whitespace-nowrap ${
+          selected.length > 0
+            ? 'bg-indigo-50 border-indigo-200 text-indigo-700'
+            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+        }`}
+      >
+        {label}
+        {selected.length > 0 && (
+          <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold bg-indigo-600 text-white">
+            {selected.length}
+          </span>
+        )}
+        <ChevronDown size={14} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 mt-1 w-56 bg-white border border-slate-200 rounded-xl shadow-lg z-30 py-1 max-h-64 overflow-y-auto">
+          {options.length === 0 && (
+            <div className="px-3 py-2 text-xs text-slate-400">Sin opciones</div>
+          )}
+          {options.map(opt => (
+            <label key={opt.value} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={selected.includes(opt.value)}
+                onChange={() => toggle(opt.value)}
+                className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+              />
+              <span className="text-sm text-slate-700">{opt.label}</span>
+            </label>
+          ))}
+          {selected.length > 0 && (
+            <div className="border-t border-slate-100 mt-1 pt-1">
+              <button onClick={() => onChange([])} className="w-full text-left px-3 py-1.5 text-xs text-red-500 hover:bg-red-50 transition-colors">
+                Limpiar
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const SalesPipeline: React.FC = () => {
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -40,12 +108,10 @@ const SalesPipeline: React.FC = () => {
   const [templates, setTemplates] = useState<LeadEmailTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>('kanban');
-  const [activeTab, setActiveTab] = useState<SalesTab>('pipeline');
+
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [stageFilter, setStageFilter] = useState<LeadStage | ''>('');
-  const [columnFilters, setColumnFilters] = useState<ColumnFilters>(emptyFilters);
-  const [debouncedColumnFilters, setDebouncedColumnFilters] = useState<ColumnFilters>(emptyFilters);
+  const [multiFilters, setMultiFilters] = useState<MultiFilters>(emptyMultiFilters);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
   const [showImport, setShowImport] = useState(false);
@@ -54,9 +120,11 @@ const SalesPipeline: React.FC = () => {
   const [newLead, setNewLead] = useState({ email: '', name: '', phone: '', company: '', details: '' });
   const [creating, setCreating] = useState(false);
   const [counts, setCounts] = useState<{ counts: Record<string, number>; total: number; inApp: number }>({ counts: {}, total: 0, inApp: 0 });
-  const [assignees, setAssignees] = useState<string[]>([]);
+  const [assignees, setAssignees] = useState<MasterUser[]>([]);
+  const [sources, setSources] = useState<string[]>([]);
   const [bulkAction, setBulkAction] = useState<'stage' | 'assign' | null>(null);
   const [bulkProcessing, setBulkProcessing] = useState(false);
+  const [kanbanRefreshKey, setKanbanRefreshKey] = useState(0);
 
   // Debounce search
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -66,26 +134,17 @@ const SalesPipeline: React.FC = () => {
     return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
   }, [search]);
 
-  // Debounce column filters
-  const colFilterTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (colFilterTimer.current) clearTimeout(colFilterTimer.current);
-    colFilterTimer.current = setTimeout(() => setDebouncedColumnFilters(columnFilters), 350);
-    return () => { if (colFilterTimer.current) clearTimeout(colFilterTimer.current); };
-  }, [columnFilters]);
-
   const loadLeads = useCallback(async (append = false) => {
     if (!append) setLoading(true);
     else setLoadingMore(true);
     try {
       const offset = append ? leads.length : 0;
       const params = new URLSearchParams();
-      if (stageFilter) params.set('stage', stageFilter);
+      if (multiFilters.stages.length) params.set('stage', multiFilters.stages.join(','));
       if (debouncedSearch) params.set('search', debouncedSearch);
-      // Column filters
-      for (const [k, v] of Object.entries(debouncedColumnFilters)) {
-        if (v) params.set(k, v);
-      }
+      if (multiFilters.sources.length) params.set('source', multiFilters.sources.join(','));
+      if (multiFilters.assignees.length) params.set('assigned_to', multiFilters.assignees.join(','));
+      if (multiFilters.appStatus.length) params.set('app_status', multiFilters.appStatus.join(','));
       params.set('offset', String(offset));
       params.set('limit', String(PAGE_SIZE));
       const res = await apiFetch(`${API_URL}/admin/leads?${params}`);
@@ -102,7 +161,7 @@ const SalesPipeline: React.FC = () => {
     } catch (e) { console.error('Error loading leads:', e); }
     if (!append) setLoading(false);
     else setLoadingMore(false);
-  }, [stageFilter, debouncedSearch, debouncedColumnFilters, leads.length]);
+  }, [multiFilters, debouncedSearch, leads.length]);
 
   const loadCounts = useCallback(async () => {
     try {
@@ -118,6 +177,13 @@ const SalesPipeline: React.FC = () => {
       const res = await apiFetch(`${API_URL}/admin/leads/assignees`);
       if (res.ok) setAssignees(await res.json());
     } catch (e) { console.error('Error loading assignees:', e); }
+  }, []);
+
+  const loadSources = useCallback(async () => {
+    try {
+      const res = await apiFetch(`${API_URL}/admin/leads/sources`);
+      if (res.ok) setSources(await res.json());
+    } catch (e) { console.error('Error loading sources:', e); }
   }, []);
 
   const loadMore = useCallback(() => {
@@ -137,9 +203,9 @@ const SalesPipeline: React.FC = () => {
     setHasMore(true);
     loadLeads(false);
     loadCounts();
-  }, [stageFilter, debouncedSearch, debouncedColumnFilters]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [multiFilters, debouncedSearch]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { loadTemplates(); loadAssignees(); }, [loadTemplates, loadAssignees]);
+  useEffect(() => { loadTemplates(); loadAssignees(); loadSources(); }, [loadTemplates, loadAssignees, loadSources]);
 
   const refreshAll = () => {
     setLeads([]);
@@ -147,6 +213,8 @@ const SalesPipeline: React.FC = () => {
     loadLeads(false);
     loadCounts();
     loadAssignees();
+    loadSources();
+    setKanbanRefreshKey(k => k + 1);
   };
 
   const handleBulkUpdate = async (updates: Partial<Lead>) => {
@@ -169,11 +237,7 @@ const SalesPipeline: React.FC = () => {
     setBulkProcessing(false);
   };
 
-  const updateColumnFilter = (key: keyof ColumnFilters, value: string) => {
-    setColumnFilters(prev => ({ ...prev, [key]: value }));
-  };
-
-  const hasActiveColumnFilters = Object.values(columnFilters).some(Boolean);
+  const hasActiveFilters = multiFilters.stages.length > 0 || multiFilters.assignees.length > 0 || multiFilters.appStatus.length > 0 || multiFilters.sources.length > 0;
 
   const handleCreateLead = async () => {
     if (!newLead.email || !newLead.name.trim()) return;
@@ -263,35 +327,6 @@ const SalesPipeline: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Tab switcher */}
-      <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit">
-        <button
-          onClick={() => setActiveTab('pipeline')}
-          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-            activeTab === 'pipeline' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          <TrendingUp size={15} /> Pipeline
-        </button>
-        <button
-          onClick={() => { setActiveTab('templates'); loadTemplates(); }}
-          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-            activeTab === 'templates' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          <FileText size={15} /> Plantillas
-        </button>
-      </div>
-
-      {/* Templates tab */}
-      {activeTab === 'templates' && (
-        <React.Suspense fallback={<div className="flex items-center justify-center py-12 text-slate-400"><Loader2 size={20} className="animate-spin mr-2" /> Cargando...</div>}>
-          <TemplatesPanel />
-        </React.Suspense>
-      )}
-
-      {/* Pipeline tab */}
-      {activeTab === 'pipeline' && (<>
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -356,23 +391,47 @@ const SalesPipeline: React.FC = () => {
         <div className="relative flex-1 w-full sm:max-w-xs">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
-            type="text" placeholder="Buscar leads..."
+            type="text" placeholder="Buscar por nombre, email, teléfono..."
             value={search} onChange={e => setSearch(e.target.value)}
             className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
           />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Filter size={14} className="text-slate-400" />
-          <select
-            value={stageFilter} onChange={e => setStageFilter(e.target.value as LeadStage | '')}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
-          >
-            <option value="">Todos los estados</option>
-            {LEAD_STAGES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-          </select>
+          <MultiSelectDropdown
+            label="Estado"
+            options={LEAD_STAGES.map(s => ({ value: s.id, label: s.label }))}
+            selected={multiFilters.stages}
+            onChange={stages => setMultiFilters(prev => ({ ...prev, stages: stages as LeadStage[] }))}
+          />
+          <MultiSelectDropdown
+            label="Asignado"
+            options={[
+              { value: '__unassigned__', label: 'Sin asignar' },
+              ...assignees.map(a => ({ value: a.email, label: a.name ? `${a.name} (${a.email})` : a.email })),
+            ]}
+            selected={multiFilters.assignees}
+            onChange={assignees => setMultiFilters(prev => ({ ...prev, assignees }))}
+          />
+          <MultiSelectDropdown
+            label="En App"
+            options={[
+              { value: 'registered', label: 'Registrado' },
+              { value: 'subscribed', label: 'Suscrito' },
+              { value: 'none', label: 'No registrado' },
+            ]}
+            selected={multiFilters.appStatus}
+            onChange={appStatus => setMultiFilters(prev => ({ ...prev, appStatus }))}
+          />
+          <MultiSelectDropdown
+            label="Fuente"
+            options={sources.map(s => ({ value: s, label: s }))}
+            selected={multiFilters.sources}
+            onChange={sources => setMultiFilters(prev => ({ ...prev, sources }))}
+          />
         </div>
-        {hasActiveColumnFilters && (
-          <button onClick={() => setColumnFilters(emptyFilters)} className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors">
+        {hasActiveFilters && (
+          <button onClick={() => setMultiFilters(emptyMultiFilters)} className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors">
             <X size={12} /> Limpiar filtros
           </button>
         )}
@@ -395,14 +454,13 @@ const SalesPipeline: React.FC = () => {
       {/* Main view */}
       {viewMode === 'kanban' ? (
         <LeadKanban
-          leads={leads}
           stageCounts={counts.counts}
+          search={debouncedSearch}
+          filters={multiFilters}
           onSelectLead={setSelectedLead}
           onStageChange={handleStageChange}
-          onLoadMore={loadMore}
-          hasMore={hasMore}
-          loadingMore={loadingMore}
           loading={loading}
+          refreshKey={kanbanRefreshKey}
         />
       ) : (
         <LeadTable
@@ -417,10 +475,6 @@ const SalesPipeline: React.FC = () => {
           loadingMore={loadingMore}
           loading={loading}
           total={totalLeads}
-          columnFilters={columnFilters}
-          onColumnFilterChange={updateColumnFilter}
-          assignees={assignees}
-          stageFilter={stageFilter}
         />
       )}
 
@@ -498,12 +552,12 @@ const SalesPipeline: React.FC = () => {
             <div className="space-y-2">
               {assignees.map(a => (
                 <button
-                  key={a}
+                  key={a.id}
                   disabled={bulkProcessing}
-                  onClick={() => handleBulkUpdate({ assigned_to: a } as Partial<Lead>)}
+                  onClick={() => handleBulkUpdate({ assigned_to: a.email } as Partial<Lead>)}
                   className="w-full text-left px-3 py-2 text-sm font-medium text-slate-700 bg-slate-50 border border-slate-200 rounded-lg hover:bg-indigo-50 hover:border-indigo-200 disabled:opacity-50 transition-colors"
                 >
-                  <UserCheck size={13} className="inline mr-2 text-slate-400" /> {a}
+                  <UserCheck size={13} className="inline mr-2 text-slate-400" /> {a.name ? `${a.name} (${a.email})` : a.email}
                 </button>
               ))}
               <button
@@ -513,17 +567,6 @@ const SalesPipeline: React.FC = () => {
               >
                 <X size={13} className="inline mr-2" /> Sin asignar
               </button>
-              <div className="border-t border-slate-100 pt-3 mt-3">
-                <p className="text-xs text-slate-400 mb-2">O escribe un nuevo nombre:</p>
-                <form onSubmit={e => { e.preventDefault(); const v = (e.target as HTMLFormElement).assignee.value.trim(); if (v) handleBulkUpdate({ assigned_to: v } as Partial<Lead>); }}>
-                  <div className="flex gap-2">
-                    <input name="assignee" type="text" placeholder="Nombre del vendedor..." className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none" />
-                    <button type="submit" disabled={bulkProcessing} className="px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
-                      Asignar
-                    </button>
-                  </div>
-                </form>
-              </div>
             </div>
             {bulkProcessing && (
               <div className="flex items-center justify-center gap-2 mt-3 text-sm text-slate-500">
@@ -533,8 +576,6 @@ const SalesPipeline: React.FC = () => {
           </div>
         </div>
       )}
-
-      </>)}
 
       {/* Create lead modal */}
       {showCreateLead && (
