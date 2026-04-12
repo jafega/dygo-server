@@ -19130,6 +19130,9 @@ app.post('/api/admin/leads/:id/email', authenticateRequest, requireSuperAdmin, a
       is_read: true,
       resend_id: emailResult?.data?.id || emailResult?.id || null,
       resend_status: 'sent',
+      lead_id: lead.id,
+      lead_name: lead.name || null,
+      assigned_to: lead.assigned_to || null,
       metadata: { sent_by: req.superAdminEmail, lead_id: lead.id, source: 'crm' },
     });
     if (adminEmailErr) console.error('[admin-emails] Error registering CRM email:', adminEmailErr);
@@ -19207,6 +19210,9 @@ app.post('/api/admin/leads/email-bulk', authenticateRequest, requireSuperAdmin, 
           is_read: true,
           resend_id: resendId,
           resend_status: 'sent',
+          lead_id: lead.id,
+          lead_name: lead.name || null,
+          assigned_to: lead.assigned_to || null,
           metadata: { sent_by: req.superAdminEmail, lead_id: lead.id, source: 'crm_bulk' },
         });
         if (bulkEmailErr) console.error('[admin-emails] Error registering bulk email:', bulkEmailErr);
@@ -19553,6 +19559,15 @@ app.post('/api/admin/emails/send', authenticateRequest, requireSuperAdmin, async
 
     const result = await resend.emails.send(sendPayload);
 
+    // Try to match recipient to a lead
+    let matchedLead = null;
+    if (mailbox === 'sales') {
+      for (const addr of toEmails) {
+        const { data: lm } = await supabaseAdmin.from('leads').select('id, name, assigned_to').eq('email', addr.trim()).limit(1);
+        if (lm && lm.length > 0) { matchedLead = lm[0]; break; }
+      }
+    }
+
     // Store in DB
     const { data: saved, error: saveErr } = await supabaseAdmin
       .from('admin_emails')
@@ -19572,6 +19587,9 @@ app.post('/api/admin/emails/send', authenticateRequest, requireSuperAdmin, async
         is_read: true,
         resend_id: result?.data?.id || result?.id || null,
         resend_status: 'sent',
+        lead_id: matchedLead?.id || null,
+        lead_name: matchedLead?.name || null,
+        assigned_to: matchedLead?.assigned_to || null,
         metadata: { sent_by: req.superAdminEmail },
       })
       .select()
@@ -19583,6 +19601,28 @@ app.post('/api/admin/emails/send', authenticateRequest, requireSuperAdmin, async
   } catch (err) {
     console.error('[admin-emails] Error sending:', err);
     res.status(500).json({ error: err.message || 'Error al enviar email' });
+  }
+});
+
+// --- GET /api/admin/leads/:id/emails — Get emails linked to a lead ---
+app.get('/api/admin/leads/:id/emails', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { data: lead } = await supabaseAdmin.from('leads').select('email').eq('id', req.params.id).maybeSingle();
+    if (!lead) return res.status(404).json({ error: 'Lead no encontrado' });
+
+    // Find by lead_id OR by email match
+    const { data: emails, error } = await supabaseAdmin
+      .from('admin_emails')
+      .select('*')
+      .or(`lead_id.eq.${req.params.id},from_email.eq.${lead.email},to_email.ilike.%${lead.email}%`)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (error) throw error;
+    res.json(emails || []);
+  } catch (err) {
+    console.error('[admin-emails] Error getting lead emails:', err);
+    res.status(500).json({ error: 'Error al obtener emails del lead' });
   }
 });
 
@@ -19703,16 +19743,87 @@ app.post('/api/webhooks/resend', async (req, res) => {
 
     // ── Inbound email (reply from lead or new email) ──
     if (eventType === 'email.received') {
-      const fromEmail = (data.from || '').toLowerCase().trim();
+      // Log full webhook payload for debugging
+      console.log(`[Resend Webhook] 📥 FULL email.received data:`, JSON.stringify(data, null, 2));
+
+      // Parse "Name <email>" format from webhook
+      const fromRaw = (data.from || '').trim();
+      const fromMatch = fromRaw.match(/<([^>]+)>/);
+      const fromEmail = (fromMatch ? fromMatch[1] : fromRaw).toLowerCase().trim();
+      const fromName = fromMatch ? fromRaw.replace(/<[^>]+>/, '').trim() : fromEmail.split('@')[0];
       const toRaw = data.to || [];
       const toEmails = (Array.isArray(toRaw) ? toRaw : [toRaw]).map(e => (e || '').toLowerCase().trim());
       const subject = data.subject || '(sin asunto)';
-      const htmlBody = data.html || data.text || '';
+
+      // Webhook does NOT include email body — fetch via Received Emails API
+      let htmlBody = '';
+      let textBody = null;
+      const emailId = data.email_id;
+      console.log(`[Resend Webhook] 📥 email_id from webhook: ${emailId || 'NOT FOUND'}`);
+
+      if (emailId) {
+        // Wait briefly to avoid race condition (email may not be ready yet)
+        await new Promise(r => setTimeout(r, 1500));
+
+        // Fetch email body via direct REST API call (most reliable)
+        let fetched = false;
+        try {
+          const resp = await fetch(`https://api.resend.com/emails/receiving/${emailId}`, {
+            headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+          });
+          const respText = await resp.text();
+          console.log(`[Resend Webhook] 📥 REST API response (${resp.status}):`, respText.substring(0, 500));
+          if (resp.ok) {
+            const fullEmail = JSON.parse(respText);
+            htmlBody = fullEmail.html || fullEmail.text || '';
+            textBody = fullEmail.text || null;
+            fetched = !!(htmlBody || textBody);
+            console.log(`[Resend Webhook] 📥 Fetched email body via REST API (${htmlBody.length} chars html, ${(textBody || '').length} chars text)`);
+          } else {
+            console.error(`[Resend Webhook] ❌ REST API error (${resp.status}):`, respText.substring(0, 300));
+          }
+        } catch (restEx) {
+          console.error(`[Resend Webhook] ❌ REST API exception:`, restEx.message || restEx);
+        }
+
+        // Fallback: try SDK
+        if (!fetched) {
+          try {
+            const { Resend: ResendClass } = await import('resend');
+            const resendClient = new ResendClass(process.env.RESEND_API_KEY);
+            if (resendClient.emails && resendClient.emails.receiving && typeof resendClient.emails.receiving.get === 'function') {
+              const { data: fullEmail, error: fetchErr } = await resendClient.emails.receiving.get(emailId);
+              if (fetchErr) {
+                console.error(`[Resend Webhook] ⚠️ SDK error:`, fetchErr);
+              } else if (fullEmail) {
+                htmlBody = fullEmail.html || fullEmail.text || '';
+                textBody = fullEmail.text || null;
+                fetched = !!(htmlBody || textBody);
+                console.log(`[Resend Webhook] 📥 Fetched email body via SDK (${htmlBody.length} chars html)`);
+              }
+            } else {
+              console.warn(`[Resend Webhook] ⚠️ SDK emails.receiving.get not available`);
+            }
+          } catch (sdkEx) {
+            console.error(`[Resend Webhook] ⚠️ SDK exception:`, sdkEx.message || sdkEx);
+          }
+        }
+
+        if (!fetched) {
+          console.error(`[Resend Webhook] ❌ Could not fetch email body for email_id=${emailId}`);
+        }
+      } else {
+        console.warn(`[Resend Webhook] ⚠️ No email_id in webhook data, cannot fetch body. Available keys:`, Object.keys(data));
+      }
+
+      console.log(`[Resend Webhook] 📥 Inbound: from=${fromEmail}, to=${JSON.stringify(toEmails)}, subject=${subject}, body_html_length=${htmlBody.length}`);
 
       // Determine which mailbox received the email
       let mailbox = null;
       if (toEmails.some(e => e.includes('soporte@mainds.app'))) mailbox = 'support';
       else if (toEmails.some(e => e.includes('info@mainds.app'))) mailbox = 'sales';
+
+      console.log(`[Resend Webhook] 📥 Mailbox resolved: ${mailbox || 'NONE — no match'}`);
 
       // ── Store in admin_emails table for the inbox ──
       if (mailbox && fromEmail) {
@@ -19733,22 +19844,42 @@ app.post('/api/webhooks/resend', async (req, res) => {
           }
         }
 
-        await supabaseAdmin.from('admin_emails').insert({
+        // Try to match sender to a lead
+        let matchedLead = null;
+        if (mailbox === 'sales') {
+          const { data: leadMatch } = await supabaseAdmin
+            .from('leads')
+            .select('id, name, assigned_to')
+            .eq('email', fromEmail)
+            .limit(1);
+          if (leadMatch && leadMatch.length > 0) matchedLead = leadMatch[0];
+        }
+
+        const { error: inboundErr } = await supabaseAdmin.from('admin_emails').insert({
           mailbox,
           direction: 'inbound',
           thread_id,
           from_email: fromEmail,
-          from_name: data.from_name || fromEmail.split('@')[0],
+          from_name: fromName || fromEmail.split('@')[0],
           to_email: toEmails.join(', '),
           to_name: null,
           subject,
           body_html: htmlBody,
-          body_text: data.text || null,
+          body_text: textBody,
           is_read: false,
           resend_id: data.email_id || null,
+          lead_id: matchedLead?.id || null,
+          lead_name: matchedLead?.name || null,
+          assigned_to: matchedLead?.assigned_to || null,
           metadata: { raw_to: toRaw, headers: data.headers || {} },
         });
-        console.log(`[Resend Webhook] 📥 Stored inbound email in ${mailbox} inbox from ${fromEmail}`);
+        if (inboundErr) {
+          console.error(`[Resend Webhook] ❌ Error storing inbound email:`, inboundErr);
+        } else {
+          console.log(`[Resend Webhook] ✅ Stored inbound email in ${mailbox} inbox from ${fromEmail}${matchedLead ? ` (lead: ${matchedLead.name})` : ''}`);
+        }
+      } else if (!mailbox) {
+        console.log(`[Resend Webhook] ⚠️ Inbound email didn't match any mailbox. Raw to:`, JSON.stringify(toRaw));
       }
 
       // ── Also store in leads system (existing behavior) ──
