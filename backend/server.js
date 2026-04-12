@@ -18416,15 +18416,38 @@ app.get('/api/admin/leads', authenticateRequest, requireSuperAdmin, async (req, 
   try {
     if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
     const { stage, search, sort_by, sort_dir } = req.query;
-    let query = supabaseAdmin.from('leads').select('*');
-    if (stage) query = query.eq('stage', stage);
-    if (search) query = query.or(`email.ilike.%${search}%,name.ilike.%${search}%,company.ilike.%${search}%,phone.ilike.%${search}%`);
     const sortCol = sort_by || 'created_at';
     const sortAsc = sort_dir === 'asc';
-    query = query.order(sortCol, { ascending: sortAsc });
-    const { data, error } = await query;
-    if (error) throw error;
-    res.json(data || []);
+
+    // Query per stage to avoid Supabase row limits
+    const stagesToQuery = stage ? [stage] : LEAD_STAGES;
+    const promises = stagesToQuery.map(s => {
+      let q = supabaseAdmin.from('leads').select('*').eq('stage', s);
+      if (search) q = q.or(`email.ilike.%${search}%,name.ilike.%${search}%,company.ilike.%${search}%,phone.ilike.%${search}%`);
+      return q.order(sortCol, { ascending: sortAsc }).limit(100000);
+    });
+    // Also query leads with null/unexpected stage
+    if (!stage) {
+      let qNull = supabaseAdmin.from('leads').select('*').not('stage', 'in', `(${LEAD_STAGES.join(',')})`);
+      if (search) qNull = qNull.or(`email.ilike.%${search}%,name.ilike.%${search}%,company.ilike.%${search}%,phone.ilike.%${search}%`);
+      promises.push(qNull.order(sortCol, { ascending: sortAsc }).limit(100000));
+    }
+
+    const results = await Promise.all(promises);
+    const allData = [];
+    for (const r of results) {
+      if (r.error) throw r.error;
+      if (r.data) allData.push(...r.data);
+    }
+    // Re-sort combined results
+    allData.sort((a, b) => {
+      const va = a[sortCol], vb = b[sortCol];
+      if (va == null && vb == null) return 0;
+      if (va == null) return sortAsc ? -1 : 1;
+      if (vb == null) return sortAsc ? 1 : -1;
+      return sortAsc ? (va < vb ? -1 : va > vb ? 1 : 0) : (va > vb ? -1 : va < vb ? 1 : 0);
+    });
+    res.json(allData);
   } catch (err) {
     console.error('[leads] Error listing leads:', err);
     res.status(500).json({ error: 'Error listing leads' });
@@ -18504,7 +18527,7 @@ app.post('/api/admin/leads/import', authenticateRequest, requireSuperAdmin, asyn
     if (rows.length > 2000) return res.status(400).json({ error: 'Máximo 2000 leads por importación' });
 
     // Get existing lead emails for dedup
-    const { data: existingLeads } = await supabaseAdmin.from('leads').select('email');
+    const { data: existingLeads } = await supabaseAdmin.from('leads').select('email').limit(100000);
     const existingEmails = new Set((existingLeads || []).map(l => l.email.toLowerCase()));
 
     // Check app users
@@ -18776,7 +18799,7 @@ ${chunk}`;
           }));
 
         // Dedup against existing leads
-        const { data: existingLeads } = await supabaseAdmin.from('leads').select('email');
+        const { data: existingLeads } = await supabaseAdmin.from('leads').select('email').limit(100000);
         const existingEmails = new Set((existingLeads || []).map(l => l.email.toLowerCase()));
         const deduped = validLeads.map(l => ({
           ...l,
