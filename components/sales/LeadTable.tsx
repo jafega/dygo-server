@@ -1,6 +1,7 @@
-import React from 'react';
-import { Lead, LEAD_STAGES } from './types';
-import { Mail, Phone, Building2, Calendar, Smartphone, Trash2 } from 'lucide-react';
+import React, { useRef, useEffect } from 'react';
+import { Lead, LEAD_STAGES, LeadStage } from './types';
+import { Mail, Phone, Building2, Calendar, Smartphone, Trash2, Loader2, UserCheck } from 'lucide-react';
+import type { ColumnFilters } from './SalesPipeline';
 
 interface Props {
   leads: Lead[];
@@ -10,11 +11,31 @@ interface Props {
   onSelectAll: () => void;
   onDelete: (id: string) => void;
   loading: boolean;
+  onLoadMore: () => void;
+  hasMore: boolean;
+  loadingMore: boolean;
+  total: number;
+  columnFilters: ColumnFilters;
+  onColumnFilterChange: (key: keyof ColumnFilters, value: string) => void;
+  assignees: string[];
+  stageFilter: LeadStage | '';
 }
 
 const stageMap = Object.fromEntries(LEAD_STAGES.map(s => [s.id, s]));
+const filterInputClass = 'w-full px-2 py-1 text-xs border border-slate-200 rounded focus:ring-1 focus:ring-indigo-200 focus:border-indigo-300 outline-none bg-white placeholder-slate-300';
 
-export const LeadTable: React.FC<Props> = ({ leads, selectedIds, onSelectLead, onToggleSelect, onSelectAll, onDelete, loading }) => {
+export const LeadTable: React.FC<Props> = ({ leads, selectedIds, onSelectLead, onToggleSelect, onSelectAll, onDelete, loading, onLoadMore, hasMore, loadingMore, total, columnFilters, onColumnFilterChange, assignees, stageFilter }) => {
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!sentinelRef.current || !hasMore) return;
+    const observer = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting) onLoadMore();
+    }, { rootMargin: '200px' });
+    observer.observe(sentinelRef.current);
+    return () => observer.disconnect();
+  }, [hasMore, onLoadMore]);
+
   if (loading) {
     return (
       <div className="bg-white border border-slate-200 rounded-xl p-12 text-center">
@@ -51,10 +72,54 @@ export const LeadTable: React.FC<Props> = ({ leads, selectedIds, onSelectLead, o
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide hidden md:table-cell">Teléfono</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide hidden lg:table-cell">Empresa</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Estado</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide hidden md:table-cell">Asignado</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide hidden md:table-cell">En App</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide hidden lg:table-cell">Fuente</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide hidden lg:table-cell">Creado</th>
-              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wide">Acciones</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wide w-10"></th>
+            </tr>
+            {/* Column filter row */}
+            <tr className="border-b border-slate-100 bg-slate-25">
+              <td className="px-4 py-1.5"></td>
+              <td className="px-4 py-1.5">
+                <input type="text" placeholder="Filtrar..." value={columnFilters.name} onChange={e => onColumnFilterChange('name', e.target.value)} className={filterInputClass} />
+              </td>
+              <td className="px-4 py-1.5">
+                <input type="text" placeholder="Filtrar..." value={columnFilters.email} onChange={e => onColumnFilterChange('email', e.target.value)} className={filterInputClass} />
+              </td>
+              <td className="px-4 py-1.5 hidden md:table-cell">
+                <input type="text" placeholder="Filtrar..." value={columnFilters.phone} onChange={e => onColumnFilterChange('phone', e.target.value)} className={filterInputClass} />
+              </td>
+              <td className="px-4 py-1.5 hidden lg:table-cell">
+                <input type="text" placeholder="Filtrar..." value={columnFilters.company} onChange={e => onColumnFilterChange('company', e.target.value)} className={filterInputClass} />
+              </td>
+              <td className="px-4 py-1.5">
+                {!stageFilter && (
+                  <select value="" onChange={e => { /* stage filter is in parent toolbar */ }} disabled className={`${filterInputClass} opacity-40`}>
+                    <option value="">Toolbar</option>
+                  </select>
+                )}
+              </td>
+              <td className="px-4 py-1.5 hidden md:table-cell">
+                <select value={columnFilters.assigned_to} onChange={e => onColumnFilterChange('assigned_to', e.target.value)} className={filterInputClass}>
+                  <option value="">Todos</option>
+                  <option value="__unassigned__">Sin asignar</option>
+                  {assignees.map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+              </td>
+              <td className="px-4 py-1.5 hidden md:table-cell">
+                <select value={columnFilters.app_status} onChange={e => onColumnFilterChange('app_status', e.target.value)} className={filterInputClass}>
+                  <option value="">Todos</option>
+                  <option value="registered">Registrado</option>
+                  <option value="subscribed">Suscrito</option>
+                  <option value="none">No</option>
+                </select>
+              </td>
+              <td className="px-4 py-1.5 hidden lg:table-cell">
+                <input type="text" placeholder="Filtrar..." value={columnFilters.source} onChange={e => onColumnFilterChange('source', e.target.value)} className={filterInputClass} />
+              </td>
+              <td className="px-4 py-1.5 hidden lg:table-cell"></td>
+              <td className="px-4 py-1.5"></td>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -103,6 +168,15 @@ export const LeadTable: React.FC<Props> = ({ leads, selectedIds, onSelectLead, o
                     )}
                   </td>
                   <td className="px-4 py-3 hidden md:table-cell">
+                    {lead.assigned_to ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                        <UserCheck size={10} /> {lead.assigned_to}
+                      </span>
+                    ) : (
+                      <span className="text-slate-300 text-xs">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 hidden md:table-cell">
                     {lead.app_user_id ? (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700">
                         <Smartphone size={10} /> {lead.app_is_subscribed ? 'Suscrito' : 'Registrado'}
@@ -131,6 +205,18 @@ export const LeadTable: React.FC<Props> = ({ leads, selectedIds, onSelectLead, o
           </tbody>
         </table>
       </div>
+      {/* Infinite scroll sentinel */}
+      <div ref={sentinelRef} />
+      {loadingMore && (
+        <div className="flex items-center justify-center py-3 text-slate-400 text-sm gap-2">
+          <Loader2 size={14} className="animate-spin" /> Cargando más...
+        </div>
+      )}
+      {!hasMore && leads.length > 0 && (
+        <div className="text-center py-2 text-xs text-slate-400">
+          {leads.length} de {total} leads cargados
+        </div>
+      )}
     </div>
   );
 };

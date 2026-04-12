@@ -18411,46 +18411,68 @@ const requireSuperAdmin = async (req, res, next) => {
   next();
 };
 
-// --- GET /api/admin/leads — List leads with filters ---
+// --- GET /api/admin/leads — List leads with pagination and server-side search ---
 app.get('/api/admin/leads', authenticateRequest, requireSuperAdmin, async (req, res) => {
   try {
     if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
-    const { stage, search, sort_by, sort_dir } = req.query;
+    const { stage, search, sort_by, sort_dir, offset: offsetStr, limit: limitStr,
+            name, email, phone, company, source, assigned_to, app_status } = req.query;
     const sortCol = sort_by || 'created_at';
     const sortAsc = sort_dir === 'asc';
+    const offset = Math.max(0, parseInt(offsetStr) || 0);
+    const limit = Math.min(200, Math.max(1, parseInt(limitStr) || 50));
 
-    // Query per stage to avoid Supabase row limits
-    const stagesToQuery = stage ? [stage] : LEAD_STAGES;
-    const promises = stagesToQuery.map(s => {
-      let q = supabaseAdmin.from('leads').select('*').eq('stage', s);
-      if (search) q = q.or(`email.ilike.%${search}%,name.ilike.%${search}%,company.ilike.%${search}%,phone.ilike.%${search}%`);
-      return q.order(sortCol, { ascending: sortAsc }).limit(100000);
-    });
-    // Also query leads with null/unexpected stage
-    if (!stage) {
-      let qNull = supabaseAdmin.from('leads').select('*').not('stage', 'in', `(${LEAD_STAGES.join(',')})`);
-      if (search) qNull = qNull.or(`email.ilike.%${search}%,name.ilike.%${search}%,company.ilike.%${search}%,phone.ilike.%${search}%`);
-      promises.push(qNull.order(sortCol, { ascending: sortAsc }).limit(100000));
-    }
+    let query = supabaseAdmin.from('leads').select('*', { count: 'exact' });
+    if (stage) query = query.eq('stage', stage);
+    if (search) query = query.or(`email.ilike.%${search}%,name.ilike.%${search}%,company.ilike.%${search}%,phone.ilike.%${search}%`);
+    // Column-level filters
+    if (name) query = query.ilike('name', `%${name}%`);
+    if (email) query = query.ilike('email', `%${email}%`);
+    if (phone) query = query.ilike('phone', `%${phone}%`);
+    if (company) query = query.ilike('company', `%${company}%`);
+    if (source) query = query.ilike('source', `%${source}%`);
+    if (assigned_to === '__unassigned__') query = query.is('assigned_to', null);
+    else if (assigned_to) query = query.eq('assigned_to', assigned_to);
+    if (app_status === 'registered') query = query.not('app_user_id', 'is', null);
+    else if (app_status === 'subscribed') query = query.eq('app_is_subscribed', true);
+    else if (app_status === 'none') query = query.is('app_user_id', null);
+    query = query.order(sortCol, { ascending: sortAsc }).range(offset, offset + limit - 1);
 
-    const results = await Promise.all(promises);
-    const allData = [];
-    for (const r of results) {
-      if (r.error) throw r.error;
-      if (r.data) allData.push(...r.data);
-    }
-    // Re-sort combined results
-    allData.sort((a, b) => {
-      const va = a[sortCol], vb = b[sortCol];
-      if (va == null && vb == null) return 0;
-      if (va == null) return sortAsc ? -1 : 1;
-      if (vb == null) return sortAsc ? 1 : -1;
-      return sortAsc ? (va < vb ? -1 : va > vb ? 1 : 0) : (va > vb ? -1 : va < vb ? 1 : 0);
-    });
-    res.json(allData);
+    const { data, error, count } = await query;
+    if (error) throw error;
+    res.json({ data: data || [], total: count || 0, offset, limit });
   } catch (err) {
     console.error('[leads] Error listing leads:', err);
     res.status(500).json({ error: 'Error listing leads' });
+  }
+});
+
+// --- GET /api/admin/leads/counts — Stage counts (always full, ignores pagination) ---
+app.get('/api/admin/leads/counts', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { search } = req.query;
+
+    const promises = LEAD_STAGES.map(async s => {
+      let q = supabaseAdmin.from('leads').select('id', { count: 'exact', head: true }).eq('stage', s);
+      if (search) q = q.or(`email.ilike.%${search}%,name.ilike.%${search}%,company.ilike.%${search}%,phone.ilike.%${search}%`);
+      const { count } = await q;
+      return { stage: s, count: count || 0 };
+    });
+
+    // Also count in-app leads
+    let appQ = supabaseAdmin.from('leads').select('id', { count: 'exact', head: true }).not('app_user_id', 'is', null);
+    if (search) appQ = appQ.or(`email.ilike.%${search}%,name.ilike.%${search}%,company.ilike.%${search}%,phone.ilike.%${search}%`);
+    const appPromise = appQ.then(r => r.count || 0);
+
+    const [stageResults, inApp] = await Promise.all([Promise.all(promises), appPromise]);
+    const counts = {};
+    let total = 0;
+    for (const r of stageResults) { counts[r.stage] = r.count; total += r.count; }
+    res.json({ counts, total, inApp });
+  } catch (err) {
+    console.error('[leads] Error counting leads:', err);
+    res.status(500).json({ error: 'Error counting leads' });
   }
 });
 
@@ -18874,6 +18896,70 @@ app.delete('/api/admin/leads/:id', authenticateRequest, requireSuperAdmin, async
   } catch (err) {
     console.error('[leads] Error deleting lead:', err);
     res.status(500).json({ error: 'Error deleting lead' });
+  }
+});
+
+// --- PUT /api/admin/leads/bulk — Bulk update leads (stage, assigned_to) ---
+app.put('/api/admin/leads/bulk', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { ids, updates } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'No lead IDs provided' });
+    if (ids.length > 500) return res.status(400).json({ error: 'Máximo 500 leads por operación' });
+    if (!updates || typeof updates !== 'object') return res.status(400).json({ error: 'No updates provided' });
+
+    // Only allow safe fields
+    const allowed = {};
+    if (updates.stage) {
+      if (!LEAD_STAGES.includes(updates.stage)) return res.status(400).json({ error: 'Stage inválido' });
+      allowed.stage = updates.stage;
+    }
+    if (updates.assigned_to !== undefined) {
+      allowed.assigned_to = updates.assigned_to || null;
+    }
+    if (Object.keys(allowed).length === 0) return res.status(400).json({ error: 'No valid fields to update' });
+    allowed.updated_at = new Date().toISOString();
+
+    // Log stage changes
+    if (allowed.stage) {
+      const { data: current } = await supabaseAdmin.from('leads').select('id, stage').in('id', ids);
+      const activities = (current || [])
+        .filter(l => l.stage !== allowed.stage)
+        .map(l => ({
+          lead_id: l.id,
+          type: 'stage_change',
+          title: `Movido de "${l.stage}" a "${allowed.stage}" (masivo)`,
+          metadata: { from_stage: l.stage, to_stage: allowed.stage, bulk: true },
+          created_by: req.superAdminEmail,
+        }));
+      if (activities.length > 0) {
+        const batchSize = 500;
+        for (let i = 0; i < activities.length; i += batchSize) {
+          await supabaseAdmin.from('lead_activities').insert(activities.slice(i, i + batchSize));
+        }
+      }
+    }
+
+    const { error } = await supabaseAdmin.from('leads').update(allowed).in('id', ids);
+    if (error) throw error;
+    res.json({ ok: true, updated: ids.length });
+  } catch (err) {
+    console.error('[leads] Error bulk updating leads:', err);
+    res.status(500).json({ error: 'Error en actualización masiva' });
+  }
+});
+
+// --- GET /api/admin/leads/assignees — List unique assigned_to values ---
+app.get('/api/admin/leads/assignees', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { data, error } = await supabaseAdmin.from('leads').select('assigned_to').not('assigned_to', 'is', null);
+    if (error) throw error;
+    const unique = [...new Set((data || []).map(r => r.assigned_to).filter(Boolean))].sort();
+    res.json(unique);
+  } catch (err) {
+    console.error('[leads] Error listing assignees:', err);
+    res.status(500).json({ error: 'Error listing assignees' });
   }
 });
 

@@ -1,11 +1,15 @@
 import React from 'react';
 import { Lead, LEAD_STAGES, PIPELINE_STAGES, CLOSED_STAGES, LeadStage } from './types';
-import { Mail, Phone, Smartphone, GripVertical, Building2 } from 'lucide-react';
+import { Mail, Phone, Smartphone, GripVertical, Building2, Loader2 } from 'lucide-react';
 
 interface Props {
   leads: Lead[];
+  stageCounts: Record<string, number>;
   onSelectLead: (lead: Lead) => void;
   onStageChange: (leadId: string, newStage: LeadStage) => void;
+  onLoadMore: () => void;
+  hasMore: boolean;
+  loadingMore: boolean;
   loading: boolean;
 }
 
@@ -68,9 +72,10 @@ const KanbanColumn: React.FC<{
   bgColor: string;
   borderColor: string;
   leads: Lead[];
+  totalCount: number;
   onSelectLead: (lead: Lead) => void;
   onDrop: (leadId: string, stage: LeadStage) => void;
-}> = ({ stageId, label, color, bgColor, borderColor, leads, onSelectLead, onDrop }) => {
+}> = ({ stageId, label, color, bgColor, borderColor, leads, totalCount, onSelectLead, onDrop }) => {
   const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; };
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -88,7 +93,7 @@ const KanbanColumn: React.FC<{
         <div className="flex items-center gap-2">
           <span className={`font-semibold text-sm ${color}`}>{label}</span>
           <span className={`inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-xs font-bold ${bgColor} ${color} border ${borderColor}`}>
-            {leads.length}
+            {totalCount}
           </span>
         </div>
       </div>
@@ -106,7 +111,7 @@ const KanbanColumn: React.FC<{
   );
 };
 
-export const LeadKanban: React.FC<Props> = ({ leads, onSelectLead, onStageChange, loading }) => {
+export const LeadKanban: React.FC<Props> = ({ leads, stageCounts, onSelectLead, onStageChange, onLoadMore, hasMore, loadingMore, loading }) => {
   if (loading) {
     return (
       <div className="bg-white border border-slate-200 rounded-xl p-12 text-center">
@@ -119,20 +124,34 @@ export const LeadKanban: React.FC<Props> = ({ leads, onSelectLead, onStageChange
   const leadsByStage = (stageId: LeadStage) => leads.filter(l => l.stage === stageId);
 
   return (
-    <div className="flex gap-3 overflow-x-auto pb-2">
-      {LEAD_STAGES.map(stage => (
-        <KanbanColumn
-          key={stage.id}
-          stageId={stage.id}
-          label={stage.label}
-          color={stage.color}
-          bgColor={stage.bgColor}
-          borderColor={stage.borderColor}
-          leads={leadsByStage(stage.id)}
-          onSelectLead={onSelectLead}
-          onDrop={onStageChange}
-        />
-      ))}
+    <div>
+      <div className="flex gap-3 overflow-x-auto pb-2">
+        {LEAD_STAGES.map(stage => (
+          <KanbanColumn
+            key={stage.id}
+            stageId={stage.id}
+            label={stage.label}
+            color={stage.color}
+            bgColor={stage.bgColor}
+            borderColor={stage.borderColor}
+            leads={leadsByStage(stage.id)}
+            totalCount={stageCounts[stage.id] || leadsByStage(stage.id).length}
+            onSelectLead={onSelectLead}
+            onDrop={onStageChange}
+          />
+        ))}
+      </div>
+      {hasMore && (
+        <div className="flex justify-center mt-3">
+          <button
+            onClick={onLoadMore}
+            disabled={loadingMore}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 disabled:opacity-50 transition-colors"
+          >
+            {loadingMore ? <><Loader2 size={14} className="animate-spin" /> Cargando...</> : 'Cargar más leads'}
+          </button>
+        </div>
+      )}
     </div>
   );
 };

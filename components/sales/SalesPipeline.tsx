@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Lead, LeadEmailTemplate, LEAD_STAGES, LeadStage } from './types';
 import { LeadTable } from './LeadTable';
 import { LeadKanban } from './LeadKanban';
@@ -10,6 +10,7 @@ import { apiFetch } from '../../services/authService';
 import {
   LayoutGrid, Table2, Upload, RefreshCcw, Plus, Search, Filter,
   Mail, Zap, X, Users, TrendingUp, Target, Ban, FileText, Loader2,
+  ArrowRightLeft, UserCheck,
 } from 'lucide-react';
 
 const TemplatesPanel = React.lazy(() => import('./TemplatesPanel'));
@@ -17,14 +18,34 @@ const TemplatesPanel = React.lazy(() => import('./TemplatesPanel'));
 type ViewMode = 'kanban' | 'table';
 type SalesTab = 'pipeline' | 'templates';
 
+const PAGE_SIZE = 50;
+
+export interface ColumnFilters {
+  name: string;
+  email: string;
+  phone: string;
+  company: string;
+  source: string;
+  assigned_to: string;
+  app_status: string;
+}
+
+const emptyFilters: ColumnFilters = { name: '', email: '', phone: '', company: '', source: '', assigned_to: '', app_status: '' };
+
 const SalesPipeline: React.FC = () => {
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [totalLeads, setTotalLeads] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [templates, setTemplates] = useState<LeadEmailTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>('kanban');
   const [activeTab, setActiveTab] = useState<SalesTab>('pipeline');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [stageFilter, setStageFilter] = useState<LeadStage | ''>('');
+  const [columnFilters, setColumnFilters] = useState<ColumnFilters>(emptyFilters);
+  const [debouncedColumnFilters, setDebouncedColumnFilters] = useState<ColumnFilters>(emptyFilters);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
   const [showImport, setShowImport] = useState(false);
@@ -32,18 +53,76 @@ const SalesPipeline: React.FC = () => {
   const [showCreateLead, setShowCreateLead] = useState(false);
   const [newLead, setNewLead] = useState({ email: '', name: '', phone: '', company: '', details: '' });
   const [creating, setCreating] = useState(false);
+  const [counts, setCounts] = useState<{ counts: Record<string, number>; total: number; inApp: number }>({ counts: {}, total: 0, inApp: 0 });
+  const [assignees, setAssignees] = useState<string[]>([]);
+  const [bulkAction, setBulkAction] = useState<'stage' | 'assign' | null>(null);
+  const [bulkProcessing, setBulkProcessing] = useState(false);
 
-  const loadLeads = useCallback(async () => {
-    setLoading(true);
+  // Debounce search
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => setDebouncedSearch(search), 350);
+    return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
+  }, [search]);
+
+  // Debounce column filters
+  const colFilterTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (colFilterTimer.current) clearTimeout(colFilterTimer.current);
+    colFilterTimer.current = setTimeout(() => setDebouncedColumnFilters(columnFilters), 350);
+    return () => { if (colFilterTimer.current) clearTimeout(colFilterTimer.current); };
+  }, [columnFilters]);
+
+  const loadLeads = useCallback(async (append = false) => {
+    if (!append) setLoading(true);
+    else setLoadingMore(true);
     try {
+      const offset = append ? leads.length : 0;
       const params = new URLSearchParams();
       if (stageFilter) params.set('stage', stageFilter);
-      if (search) params.set('search', search);
+      if (debouncedSearch) params.set('search', debouncedSearch);
+      // Column filters
+      for (const [k, v] of Object.entries(debouncedColumnFilters)) {
+        if (v) params.set(k, v);
+      }
+      params.set('offset', String(offset));
+      params.set('limit', String(PAGE_SIZE));
       const res = await apiFetch(`${API_URL}/admin/leads?${params}`);
-      if (res.ok) setLeads(await res.json());
+      if (res.ok) {
+        const result = await res.json();
+        if (append) {
+          setLeads(prev => [...prev, ...result.data]);
+        } else {
+          setLeads(result.data);
+        }
+        setTotalLeads(result.total);
+        setHasMore(offset + result.data.length < result.total);
+      }
     } catch (e) { console.error('Error loading leads:', e); }
-    setLoading(false);
-  }, [stageFilter, search]);
+    if (!append) setLoading(false);
+    else setLoadingMore(false);
+  }, [stageFilter, debouncedSearch, debouncedColumnFilters, leads.length]);
+
+  const loadCounts = useCallback(async () => {
+    try {
+      const params = new URLSearchParams();
+      if (debouncedSearch) params.set('search', debouncedSearch);
+      const res = await apiFetch(`${API_URL}/admin/leads/counts?${params}`);
+      if (res.ok) setCounts(await res.json());
+    } catch (e) { console.error('Error loading counts:', e); }
+  }, [debouncedSearch]);
+
+  const loadAssignees = useCallback(async () => {
+    try {
+      const res = await apiFetch(`${API_URL}/admin/leads/assignees`);
+      if (res.ok) setAssignees(await res.json());
+    } catch (e) { console.error('Error loading assignees:', e); }
+  }, []);
+
+  const loadMore = useCallback(() => {
+    if (!loadingMore && hasMore) loadLeads(true);
+  }, [loadingMore, hasMore, loadLeads]);
 
   const loadTemplates = useCallback(async () => {
     try {
@@ -52,7 +131,49 @@ const SalesPipeline: React.FC = () => {
     } catch (e) { console.error('Error loading templates:', e); }
   }, []);
 
-  useEffect(() => { loadLeads(); loadTemplates(); }, [loadLeads, loadTemplates]);
+  // Reset and reload when filters change
+  useEffect(() => {
+    setLeads([]);
+    setHasMore(true);
+    loadLeads(false);
+    loadCounts();
+  }, [stageFilter, debouncedSearch, debouncedColumnFilters]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { loadTemplates(); loadAssignees(); }, [loadTemplates, loadAssignees]);
+
+  const refreshAll = () => {
+    setLeads([]);
+    setHasMore(true);
+    loadLeads(false);
+    loadCounts();
+    loadAssignees();
+  };
+
+  const handleBulkUpdate = async (updates: Partial<Lead>) => {
+    if (selectedLeadIds.size === 0) return;
+    setBulkProcessing(true);
+    try {
+      const res = await apiFetch(`${API_URL}/admin/leads/bulk`, {
+        method: 'PUT',
+        body: JSON.stringify({ ids: Array.from(selectedLeadIds), updates }),
+      });
+      if (res.ok) {
+        setSelectedLeadIds(new Set());
+        setBulkAction(null);
+        refreshAll();
+      } else {
+        const err = await res.json();
+        alert(err.error || 'Error en actualización masiva');
+      }
+    } catch (e) { console.error('Error bulk updating:', e); }
+    setBulkProcessing(false);
+  };
+
+  const updateColumnFilter = (key: keyof ColumnFilters, value: string) => {
+    setColumnFilters(prev => ({ ...prev, [key]: value }));
+  };
+
+  const hasActiveColumnFilters = Object.values(columnFilters).some(Boolean);
 
   const handleCreateLead = async () => {
     if (!newLead.email || !newLead.name.trim()) return;
@@ -65,7 +186,7 @@ const SalesPipeline: React.FC = () => {
       if (res.ok) {
         setShowCreateLead(false);
         setNewLead({ email: '', name: '', phone: '', company: '', details: '' });
-        loadLeads();
+        refreshAll();
       } else {
         const err = await res.json();
         alert(err.error || 'Error creando lead');
@@ -105,7 +226,7 @@ const SalesPipeline: React.FC = () => {
       if (res.ok) {
         const result = await res.json();
         alert(`Sincronizados: ${result.synced} leads`);
-        loadLeads();
+        refreshAll();
       }
     } catch (e) { console.error('Error syncing:', e); }
   };
@@ -130,14 +251,14 @@ const SalesPipeline: React.FC = () => {
     }
   };
 
-  // KPI calculations
+  // KPI calculations (from server counts)
   const kpis = {
-    total: leads.length,
-    pipeline: leads.filter(l => ['new', 'prueba', 'contacted', 'demo'].includes(l.stage)).length,
-    won: leads.filter(l => l.stage === 'won').length,
-    lost: leads.filter(l => l.stage === 'lost').length,
-    cancelled: leads.filter(l => l.stage === 'cancelled').length,
-    inApp: leads.filter(l => l.app_user_id).length,
+    total: counts.total,
+    pipeline: (counts.counts['new'] || 0) + (counts.counts['prueba'] || 0) + (counts.counts['contacted'] || 0) + (counts.counts['demo'] || 0),
+    won: counts.counts['won'] || 0,
+    lost: counts.counts['lost'] || 0,
+    cancelled: counts.counts['cancelled'] || 0,
+    inApp: counts.inApp || 0,
   };
 
   return (
@@ -175,7 +296,7 @@ const SalesPipeline: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Pipeline de Ventas</h1>
-          <p className="text-sm text-slate-500 mt-0.5">{leads.length} leads · {kpis.pipeline} en pipeline</p>
+          <p className="text-sm text-slate-500 mt-0.5">{totalLeads} leads · {kpis.pipeline} en pipeline{leads.length < totalLeads ? ` · mostrando ${leads.length}` : ''}</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button onClick={handleSyncAppStatus} className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors" title="Sincronizar estado de leads con usuarios de la app">
@@ -185,14 +306,22 @@ const SalesPipeline: React.FC = () => {
             <Upload size={15} /> Importar
           </button>
           {selectedLeadIds.size > 0 && (
-            <button onClick={() => setShowBulkEmail(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 transition-colors">
-              <Mail size={15} /> Email ({selectedLeadIds.size})
-            </button>
+            <>
+              <button onClick={() => setShowBulkEmail(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 transition-colors">
+                <Mail size={15} /> Email ({selectedLeadIds.size})
+              </button>
+              <button onClick={() => setBulkAction('stage')} className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition-colors">
+                <ArrowRightLeft size={15} /> Mover ({selectedLeadIds.size})
+              </button>
+              <button onClick={() => setBulkAction('assign')} className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 transition-colors">
+                <UserCheck size={15} /> Asignar ({selectedLeadIds.size})
+              </button>
+            </>
           )}
           <button onClick={() => setShowCreateLead(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors">
             <Plus size={15} /> Nuevo Lead
           </button>
-          <button onClick={loadLeads} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
+          <button onClick={refreshAll} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
             <RefreshCcw size={16} className={loading ? 'animate-spin' : ''} />
           </button>
         </div>
@@ -242,6 +371,11 @@ const SalesPipeline: React.FC = () => {
             {LEAD_STAGES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
           </select>
         </div>
+        {hasActiveColumnFilters && (
+          <button onClick={() => setColumnFilters(emptyFilters)} className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors">
+            <X size={12} /> Limpiar filtros
+          </button>
+        )}
         <div className="flex items-center gap-1 ml-auto bg-slate-100 rounded-lg p-1">
           <button
             onClick={() => setViewMode('kanban')}
@@ -262,8 +396,12 @@ const SalesPipeline: React.FC = () => {
       {viewMode === 'kanban' ? (
         <LeadKanban
           leads={leads}
+          stageCounts={counts.counts}
           onSelectLead={setSelectedLead}
           onStageChange={handleStageChange}
+          onLoadMore={loadMore}
+          hasMore={hasMore}
+          loadingMore={loadingMore}
           loading={loading}
         />
       ) : (
@@ -274,7 +412,15 @@ const SalesPipeline: React.FC = () => {
           onToggleSelect={toggleSelect}
           onSelectAll={selectAll}
           onDelete={handleDeleteLead}
+          onLoadMore={loadMore}
+          hasMore={hasMore}
+          loadingMore={loadingMore}
           loading={loading}
+          total={totalLeads}
+          columnFilters={columnFilters}
+          onColumnFilterChange={updateColumnFilter}
+          assignees={assignees}
+          stageFilter={stageFilter}
         />
       )}
 
@@ -286,7 +432,7 @@ const SalesPipeline: React.FC = () => {
           onClose={() => setSelectedLead(null)}
           onUpdate={handleUpdateLead}
           onDelete={handleDeleteLead}
-          onRefresh={loadLeads}
+          onRefresh={refreshAll}
         />
       )}
 
@@ -294,7 +440,7 @@ const SalesPipeline: React.FC = () => {
       {showImport && (
         <LeadImportModal
           onClose={() => setShowImport(false)}
-          onImported={loadLeads}
+          onImported={refreshAll}
         />
       )}
 
@@ -306,8 +452,86 @@ const SalesPipeline: React.FC = () => {
           leads={leads.filter(l => selectedLeadIds.has(l.id))}
           templates={templates}
           onClose={() => { setShowBulkEmail(false); setSelectedLeadIds(new Set()); }}
-          onSent={() => { setShowBulkEmail(false); setSelectedLeadIds(new Set()); loadLeads(); }}
+          onSent={() => { setShowBulkEmail(false); setSelectedLeadIds(new Set()); refreshAll(); }}
         />
+      )}
+
+      {/* Bulk stage change modal */}
+      {bulkAction === 'stage' && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setBulkAction(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-slate-900">Mover {selectedLeadIds.size} leads</h3>
+              <button onClick={() => setBulkAction(null)} className="p-1 rounded-lg hover:bg-slate-100 text-slate-400"><X size={18} /></button>
+            </div>
+            <p className="text-sm text-slate-500 mb-4">Selecciona el nuevo estado para los {selectedLeadIds.size} leads seleccionados:</p>
+            <div className="grid grid-cols-2 gap-2">
+              {LEAD_STAGES.map(s => (
+                <button
+                  key={s.id}
+                  disabled={bulkProcessing}
+                  onClick={() => handleBulkUpdate({ stage: s.id } as Partial<Lead>)}
+                  className={`px-3 py-2.5 text-sm font-medium rounded-lg border transition-colors disabled:opacity-50 ${s.bgColor} ${s.color} ${s.borderColor} hover:opacity-80`}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+            {bulkProcessing && (
+              <div className="flex items-center justify-center gap-2 mt-3 text-sm text-slate-500">
+                <Loader2 size={14} className="animate-spin" /> Procesando...
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Bulk assign modal */}
+      {bulkAction === 'assign' && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setBulkAction(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-slate-900">Asignar {selectedLeadIds.size} leads</h3>
+              <button onClick={() => setBulkAction(null)} className="p-1 rounded-lg hover:bg-slate-100 text-slate-400"><X size={18} /></button>
+            </div>
+            <p className="text-sm text-slate-500 mb-3">Asigna un responsable de ventas:</p>
+            <div className="space-y-2">
+              {assignees.map(a => (
+                <button
+                  key={a}
+                  disabled={bulkProcessing}
+                  onClick={() => handleBulkUpdate({ assigned_to: a } as Partial<Lead>)}
+                  className="w-full text-left px-3 py-2 text-sm font-medium text-slate-700 bg-slate-50 border border-slate-200 rounded-lg hover:bg-indigo-50 hover:border-indigo-200 disabled:opacity-50 transition-colors"
+                >
+                  <UserCheck size={13} className="inline mr-2 text-slate-400" /> {a}
+                </button>
+              ))}
+              <button
+                disabled={bulkProcessing}
+                onClick={() => handleBulkUpdate({ assigned_to: null } as Partial<Lead>)}
+                className="w-full text-left px-3 py-2 text-sm font-medium text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50 transition-colors"
+              >
+                <X size={13} className="inline mr-2" /> Sin asignar
+              </button>
+              <div className="border-t border-slate-100 pt-3 mt-3">
+                <p className="text-xs text-slate-400 mb-2">O escribe un nuevo nombre:</p>
+                <form onSubmit={e => { e.preventDefault(); const v = (e.target as HTMLFormElement).assignee.value.trim(); if (v) handleBulkUpdate({ assigned_to: v } as Partial<Lead>); }}>
+                  <div className="flex gap-2">
+                    <input name="assignee" type="text" placeholder="Nombre del vendedor..." className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none" />
+                    <button type="submit" disabled={bulkProcessing} className="px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                      Asignar
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+            {bulkProcessing && (
+              <div className="flex items-center justify-center gap-2 mt-3 text-sm text-slate-500">
+                <Loader2 size={14} className="animate-spin" /> Procesando...
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       </>)}
