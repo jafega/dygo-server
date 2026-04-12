@@ -19118,7 +19118,7 @@ app.post('/api/admin/leads/:id/email', authenticateRequest, requireSuperAdmin, a
     }]).select().single();
 
     // Register in admin_emails (sales inbox)
-    await supabaseAdmin.from('admin_emails').insert({
+    const { error: adminEmailErr } = await supabaseAdmin.from('admin_emails').insert({
       mailbox: 'sales',
       direction: 'outbound',
       from_email: 'info@mainds.app',
@@ -19128,10 +19128,11 @@ app.post('/api/admin/leads/:id/email', authenticateRequest, requireSuperAdmin, a
       subject: personalizedSubject,
       body_html: personalizedHtml,
       is_read: true,
-      resend_id: emailResult?.id || emailResult?.data?.id || null,
+      resend_id: emailResult?.data?.id || emailResult?.id || null,
       resend_status: 'sent',
       metadata: { sent_by: req.superAdminEmail, lead_id: lead.id, source: 'crm' },
-    }).then(() => {}).catch(e => console.error('[admin-emails] Error registering CRM email:', e));
+    });
+    if (adminEmailErr) console.error('[admin-emails] Error registering CRM email:', adminEmailErr);
 
     // Update last_contacted_at
     await supabaseAdmin.from('leads').update({ last_contacted_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', lead.id);
@@ -19194,7 +19195,7 @@ app.post('/api/admin/leads/email-bulk', authenticateRequest, requireSuperAdmin, 
         }]);
 
         // Register in admin_emails (sales inbox)
-        await supabaseAdmin.from('admin_emails').insert({
+        const { error: bulkEmailErr } = await supabaseAdmin.from('admin_emails').insert({
           mailbox: 'sales',
           direction: 'outbound',
           from_email: 'info@mainds.app',
@@ -19207,7 +19208,8 @@ app.post('/api/admin/leads/email-bulk', authenticateRequest, requireSuperAdmin, 
           resend_id: resendId,
           resend_status: 'sent',
           metadata: { sent_by: req.superAdminEmail, lead_id: lead.id, source: 'crm_bulk' },
-        }).catch(e => console.error('[admin-emails] Error registering bulk email:', e));
+        });
+        if (bulkEmailErr) console.error('[admin-emails] Error registering bulk email:', bulkEmailErr);
 
         results.sent++;
         results.details.push({ email: lead.email, status: 'sent', resend_id: resendId });
