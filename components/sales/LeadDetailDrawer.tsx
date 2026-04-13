@@ -131,7 +131,7 @@ export const LeadDetailDrawer: React.FC<Props> = ({ lead, templates, onClose, on
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto min-w-0">
           {/* Lead info */}
           <div className="p-5 space-y-4 border-b border-slate-100">
             {/* Stage */}
@@ -387,7 +387,9 @@ export const LeadDetailDrawer: React.FC<Props> = ({ lead, templates, onClose, on
                       {act.body && (
                         <div className={`text-xs text-slate-600 mt-1 ${act.type === 'email_sent' || act.type === 'email_bulk' ? 'bg-blue-50 rounded-lg p-2 border border-blue-100' : act.type === 'note' ? 'bg-yellow-50 rounded-lg p-2 border border-yellow-100' : ''}`}>
                           {act.type === 'email_sent' || act.type === 'email_bulk' ? (
-                            <div dangerouslySetInnerHTML={{ __html: act.body }} className="prose prose-xs max-w-none" />
+                            <div className="overflow-x-auto max-w-full">
+                              <div dangerouslySetInnerHTML={{ __html: act.body }} className="prose prose-xs max-w-none" />
+                            </div>
                           ) : (
                             <p className="whitespace-pre-wrap">{act.body}</p>
                           )}
