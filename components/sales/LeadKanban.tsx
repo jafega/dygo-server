@@ -106,7 +106,11 @@ const KanbanColumn: React.FC<{
       if (res.ok) {
         const result = await res.json();
         if (append) {
-          setLeads(prev => [...prev, ...result.data]);
+          setLeads(prev => {
+            const existingIds = new Set(prev.map(l => l.id));
+            const newLeads = result.data.filter((l: Lead) => !existingIds.has(l.id));
+            return [...prev, ...newLeads];
+          });
         } else {
           setLeads(result.data);
         }
