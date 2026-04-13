@@ -24,13 +24,13 @@ export const LeadTable: React.FC<Props> = ({ leads, selectedIds, onSelectLead, o
   onLoadMoreRef.current = onLoadMore;
 
   useEffect(() => {
-    if (!sentinelRef.current || !hasMore) return;
+    if (!sentinelRef.current || !hasMore || loading) return;
     const observer = new IntersectionObserver(entries => {
       if (entries[0].isIntersecting) onLoadMoreRef.current();
     }, { rootMargin: '200px' });
     observer.observe(sentinelRef.current);
     return () => observer.disconnect();
-  }, [hasMore]);
+  }, [hasMore, loading]);
 
   if (loading) {
     return (
