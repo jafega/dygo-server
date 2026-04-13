@@ -4,7 +4,7 @@ import {
   ArrowLeft, Reply, MailPlus, X,
   CheckSquare, Square, Eye, EyeOff,
   Headphones, MessageSquare, ChevronDown, ChevronUp,
-  User, ExternalLink, Tag,
+  User, ExternalLink, Tag, Sparkles, Loader2,
 } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
@@ -126,6 +126,9 @@ const EmailInbox: React.FC<EmailInboxProps> = ({ onOpenLead }) => {
   const [composeBody, setComposeBody] = useState('');
   const [composeSending, setComposeSending] = useState(false);
   const [composeReplyTo, setComposeReplyTo] = useState<string | null>(null);
+
+  // AI reply
+  const [aiLoading, setAiLoading] = useState(false);
 
   // Selection
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -251,6 +254,35 @@ const EmailInbox: React.FC<EmailInboxProps> = ({ onOpenLead }) => {
     setComposeReplyTo(email.id);
     setShowCompose(true);
     setTimeout(() => { if (composerRef.current) { composerRef.current.innerHTML = quotedBody; composerRef.current.focus(); } }, 50);
+  };
+
+  const generateAiReply = async () => {
+    if (aiLoading || !selectedEmail) return;
+    setAiLoading(true);
+    try {
+      const res = await apiFetch(`${API_URL}/admin/emails/ai-reply`, {
+        method: 'POST',
+        body: JSON.stringify({ email_id: selectedEmail.id, thread, mailbox }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.suggestion && composerRef.current) {
+          // Insert AI suggestion before the quoted reply
+          const currentContent = composerRef.current.innerHTML;
+          const quoteIdx = currentContent.indexOf('<br><br><div style="border-left');
+          if (quoteIdx > -1) {
+            composerRef.current.innerHTML = data.suggestion + currentContent.substring(quoteIdx);
+          } else {
+            composerRef.current.innerHTML = data.suggestion + currentContent;
+          }
+          setComposeBody(composerRef.current.innerHTML);
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || 'Error al generar respuesta IA');
+      }
+    } catch { alert('Error de conexión al generar respuesta IA'); }
+    setAiLoading(false);
   };
 
   const sendEmail = async () => {
@@ -421,18 +453,18 @@ const EmailInbox: React.FC<EmailInboxProps> = ({ onOpenLead }) => {
                       } ${isLast ? 'shadow-sm' : ''}`}>
                         {/* Message header — always visible */}
                         <div
-                          className={`flex items-center gap-3 px-4 py-3 ${!isCollapsed ? 'border-b border-slate-100/80' : ''} cursor-pointer hover:bg-slate-50/50 transition-colors rounded-t-xl`}
+                          className={`flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 ${!isCollapsed ? 'border-b border-slate-100/80' : ''} cursor-pointer hover:bg-slate-50/50 transition-colors rounded-t-xl`}
                           onClick={() => {
                             if (isCollapsed) setCollapsedMessages(prev => { const n = new Set(prev); n.delete(msg.id); return n; });
                             else if (!isLast) setCollapsedMessages(prev => new Set(prev).add(msg.id));
                           }}
                         >
-                          <div className={`w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0 bg-gradient-to-br ${colorCls}`}>
+                          <div className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-white text-xs sm:text-sm font-bold flex-shrink-0 bg-gradient-to-br ${colorCls}`}>
                             {senderInitial}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-sm font-semibold text-slate-800">
+                            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                              <span className="text-xs sm:text-sm font-semibold text-slate-800 truncate">
                                 {msg.from_name || msg.from_email.split('@')[0]}
                               </span>
                               {msg.direction === 'outbound' && (
@@ -468,22 +500,22 @@ const EmailInbox: React.FC<EmailInboxProps> = ({ onOpenLead }) => {
 
                         {/* Message body — hidden when collapsed */}
                         {!isCollapsed && (
-                          <div className="px-4 sm:px-6 py-4">
+                          <div className="px-3 sm:px-6 py-3 sm:py-4">
                             {msg.body_html ? (
                               <div
-                                className="prose prose-sm sm:prose-base max-w-none text-slate-700 [&_a]:text-indigo-600 [&_a]:underline [&_img]:max-w-full [&_img]:rounded-lg [&_blockquote]:border-l-slate-300 [&_blockquote]:text-slate-500"
+                                className="prose prose-sm max-w-none text-slate-700 [&_a]:text-indigo-600 [&_a]:underline [&_img]:max-w-full [&_img]:rounded-lg [&_blockquote]:border-l-slate-300 [&_blockquote]:text-slate-500 overflow-x-auto break-words"
                                 dangerouslySetInnerHTML={{ __html: msg.body_html }}
                               />
                             ) : (
-                              <pre className="text-sm text-slate-700 whitespace-pre-wrap font-sans leading-relaxed">{msg.body_text || '(sin contenido)'}</pre>
+                              <pre className="text-sm text-slate-700 whitespace-pre-wrap font-sans leading-relaxed break-words">{msg.body_text || '(sin contenido)'}</pre>
                             )}
 
                             {/* Reply button at bottom of last message */}
                             {isLast && (
-                              <div className="mt-6 pt-4 border-t border-slate-100">
+                              <div className="mt-4 sm:mt-6 pt-3 sm:pt-4 border-t border-slate-100 flex flex-wrap gap-2">
                                 <button
                                   onClick={() => openReply(msg)}
-                                  className="flex items-center gap-2 px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-all"
+                                  className="flex items-center gap-2 px-3 sm:px-4 py-2 sm:py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-all"
                                 >
                                   <Reply size={15} /> Responder
                                 </button>
@@ -709,18 +741,31 @@ const EmailInbox: React.FC<EmailInboxProps> = ({ onOpenLead }) => {
             </div>
 
             {/* Footer */}
-            <div className="flex items-center justify-between px-5 py-3 border-t border-slate-100 bg-slate-50/50 flex-shrink-0">
+            <div className="flex items-center justify-between px-3 sm:px-5 py-2.5 sm:py-3 border-t border-slate-100 bg-slate-50/50 flex-shrink-0 gap-2">
               <button onClick={() => setShowCompose(false)} className="px-3 py-1.5 text-xs font-medium text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
                 Descartar
               </button>
-              <button
-                onClick={sendEmail}
-                disabled={composeSending || !composeTo.trim() || !composeSubject.trim()}
-                className="flex items-center gap-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {composeSending ? <RefreshCcw size={14} className="animate-spin" /> : <Send size={14} />}
-                Enviar
-              </button>
+              <div className="flex items-center gap-2">
+                {composeReplyTo && (
+                  <button
+                    onClick={generateAiReply}
+                    disabled={aiLoading}
+                    className="flex items-center gap-1.5 px-3 sm:px-4 py-2 bg-gradient-to-r from-violet-500 to-indigo-500 hover:from-violet-600 hover:to-indigo-600 text-white text-xs sm:text-sm font-semibold rounded-xl transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Generar respuesta con IA"
+                  >
+                    {aiLoading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                    <span className="hidden sm:inline">IA</span>
+                  </button>
+                )}
+                <button
+                  onClick={sendEmail}
+                  disabled={composeSending || !composeTo.trim() || !composeSubject.trim()}
+                  className="flex items-center gap-2 px-4 sm:px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-semibold rounded-xl transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {composeSending ? <RefreshCcw size={14} className="animate-spin" /> : <Send size={14} />}
+                  Enviar
+                </button>
+              </div>
             </div>
           </div>
         </div>

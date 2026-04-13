@@ -19688,6 +19688,130 @@ app.delete('/api/admin/emails/:id', authenticateRequest, requireSuperAdmin, asyn
   }
 });
 
+// --- POST /api/admin/emails/ai-reply — Generate AI reply suggestion ---
+app.post('/api/admin/emails/ai-reply', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    const genAI = await getGenAI();
+    if (!genAI) return res.status(503).json({ error: 'IA no disponible. Configure GEMINI_API_KEY.' });
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+
+    const { email_id, thread, mailbox } = req.body;
+    if (!email_id || !thread || !Array.isArray(thread)) {
+      return res.status(400).json({ error: 'email_id y thread son obligatorios' });
+    }
+
+    // Find the target email to reply to
+    const targetEmail = thread.find(e => e.id === email_id) || thread[thread.length - 1];
+    const senderEmail = targetEmail.direction === 'inbound' ? targetEmail.from_email : targetEmail.to_email;
+
+    // Gather lead info if available
+    let leadContext = '';
+    if (targetEmail.lead_id) {
+      const { data: lead } = await supabaseAdmin.from('leads')
+        .select('name, email, phone, company, source, stage, details, notes, assigned_to, created_at')
+        .eq('id', targetEmail.lead_id)
+        .maybeSingle();
+      if (lead) {
+        leadContext = `\n--- INFORMACIÓN DEL LEAD ---\n`;
+        leadContext += `Nombre: ${lead.name || 'Desconocido'}\n`;
+        if (lead.email) leadContext += `Email: ${lead.email}\n`;
+        if (lead.phone) leadContext += `Teléfono: ${lead.phone}\n`;
+        if (lead.company) leadContext += `Empresa: ${lead.company}\n`;
+        if (lead.source) leadContext += `Fuente: ${lead.source}\n`;
+        if (lead.stage) leadContext += `Etapa: ${lead.stage}\n`;
+        if (lead.details) leadContext += `Detalles: ${lead.details}\n`;
+        if (lead.notes) leadContext += `Notas: ${lead.notes}\n`;
+        if (lead.assigned_to) leadContext += `Asignado a: ${lead.assigned_to}\n`;
+        leadContext += `Lead desde: ${lead.created_at}\n`;
+      }
+
+      // Get lead activities for more context
+      const { data: activities } = await supabaseAdmin.from('lead_activities')
+        .select('type, title, body, created_at')
+        .eq('lead_id', targetEmail.lead_id)
+        .order('created_at', { ascending: false })
+        .limit(10);
+      if (activities && activities.length > 0) {
+        leadContext += `\n--- HISTORIAL DE ACTIVIDADES ---\n`;
+        for (const act of activities) {
+          leadContext += `[${act.created_at}] ${act.type}: ${act.title || ''}${act.body ? ' — ' + act.body.substring(0, 200) : ''}\n`;
+        }
+      }
+    } else {
+      // Try to find lead by email 
+      const { data: leadMatch } = await supabaseAdmin.from('leads')
+        .select('id, name, email, phone, company, source, stage, details, notes')
+        .eq('email', senderEmail)
+        .maybeSingle();
+      if (leadMatch) {
+        leadContext = `\n--- INFORMACIÓN DEL LEAD ---\n`;
+        leadContext += `Nombre: ${leadMatch.name || 'Desconocido'}\n`;
+        if (leadMatch.company) leadContext += `Empresa: ${leadMatch.company}\n`;
+        if (leadMatch.source) leadContext += `Fuente: ${leadMatch.source}\n`;
+        if (leadMatch.stage) leadContext += `Etapa: ${leadMatch.stage}\n`;
+        if (leadMatch.details) leadContext += `Detalles: ${leadMatch.details}\n`;
+        if (leadMatch.notes) leadContext += `Notas: ${leadMatch.notes}\n`;
+      }
+    }
+
+    // Also get previous emails from this sender (beyond current thread)
+    let previousEmailsContext = '';
+    const { data: prevEmails } = await supabaseAdmin.from('admin_emails')
+      .select('direction, subject, body_text, body_html, created_at')
+      .or(`from_email.eq.${senderEmail},to_email.ilike.%${senderEmail}%`)
+      .order('created_at', { ascending: false })
+      .limit(15);
+    if (prevEmails && prevEmails.length > 0) {
+      previousEmailsContext = `\n--- EMAILS PREVIOS CON ${senderEmail} ---\n`;
+      for (const pe of prevEmails) {
+        const body = pe.body_text || (pe.body_html ? pe.body_html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 300) : '');
+        previousEmailsContext += `[${pe.created_at}] ${pe.direction === 'inbound' ? '← Recibido' : '→ Enviado'}: ${pe.subject}\n${body ? '  ' + body.substring(0, 300) + '\n' : ''}`;
+      }
+    }
+
+    // Build thread context
+    let threadContext = '--- HILO DE CONVERSACIÓN ACTUAL ---\n';
+    for (const msg of thread) {
+      const body = msg.body_text || (msg.body_html ? msg.body_html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : '');
+      threadContext += `\n[${msg.created_at}] ${msg.direction === 'inbound' ? '← ' + (msg.from_name || msg.from_email) : '→ Nosotros'}\nAsunto: ${msg.subject}\n${body || '(sin contenido)'}\n`;
+    }
+
+    const prompt = `Eres un asistente de ventas consultivo para Mainds, una plataforma de gestión para psicólogos (agenda, sesiones, pacientes, documentos, facturación). Tu objetivo es ayudar a convertir leads en clientes usando un enfoque consultivo orientado a la solución.
+
+CONTEXTO DE LA EMPRESA:
+- Mainds es una app de gestión integral para psicólogos
+- Planes: Starter (€9.99/mes, ≤10 pacientes), Mainder (€19.99/mes, ≤30 pacientes), Supermainder (€29.99/mes, ilimitados)
+- 14 días de prueba gratis
+- Funcionalidades: agenda, sesiones clínicas con IA, gestión de pacientes, documentos/plantillas con firma digital, facturación, diario de voz para pacientes
+
+${leadContext}
+${previousEmailsContext}
+${threadContext}
+
+INSTRUCCIONES:
+1. Analiza el tono del último mensaje recibido y responde en un tono similar (formal/informal/cercano)
+2. Si el lead tiene preguntas, respóndelas de forma clara y útil
+3. Usa un enfoque consultivo: entiende sus necesidades, ofrece soluciones específicas
+4. Si es posible, guía hacia la conversión (prueba gratis o demo)
+5. Sé conciso y natural, no suenes como un bot
+6. NO uses saludos genéricos tipo "Estimado/a", usa el nombre si lo conoces
+7. Responde SOLO el cuerpo del email, sin asunto ni firma
+8. El email sale de ${mailbox === 'sales' ? 'info@mainds.app' : 'soporte@mainds.app'}
+9. Responde en el idioma del email recibido
+
+Genera el cuerpo del email de respuesta en HTML simple (usa <p>, <br>, <strong>, <ul>/<li> si necesitas):`;
+
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const result = await model.generateContent(prompt);
+    const reply = result.response.text();
+
+    res.json({ suggestion: reply });
+  } catch (err) {
+    console.error('[admin-emails] Error generating AI reply:', err);
+    res.status(500).json({ error: 'Error al generar respuesta IA' });
+  }
+});
+
 // --- Resend Webhook (inbound-ready) — POST /api/webhooks/resend ---
 app.post('/api/webhooks/resend', async (req, res) => {
   try {
