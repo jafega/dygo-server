@@ -123,14 +123,14 @@ interface KpiCardProps {
   textLabel: string;
 }
 const KpiCard: React.FC<KpiCardProps> = ({ label, value, sub, icon, from, to, border, textMain, textLabel }) => (
-  <div className={`bg-gradient-to-br ${from} ${to} ${border} border rounded-2xl p-5 shadow-sm`}>
+  <div className={`bg-gradient-to-br ${from} ${to} ${border} border rounded-2xl p-3 sm:p-5 shadow-sm overflow-hidden`}>
     <div className="flex items-start justify-between gap-2">
-      <div>
-        <p className={`text-xs font-semibold uppercase tracking-wide ${textLabel}`}>{label}</p>
-        <p className={`text-3xl font-bold ${textMain} mt-1`}>{value}</p>
-        {sub && <p className={`text-xs mt-0.5 ${textLabel} opacity-80`}>{sub}</p>}
+      <div className="min-w-0 flex-1">
+        <p className={`text-[10px] sm:text-xs font-semibold uppercase tracking-wide ${textLabel} truncate`}>{label}</p>
+        <p className={`text-xl sm:text-3xl font-bold ${textMain} mt-1 truncate`}>{value}</p>
+        {sub && <p className={`text-[10px] sm:text-xs mt-0.5 ${textLabel} opacity-80 truncate`}>{sub}</p>}
       </div>
-      <div className="bg-white/70 p-3 rounded-xl shadow-sm">{icon}</div>
+      <div className="bg-white/70 p-2 sm:p-3 rounded-xl shadow-sm flex-shrink-0">{icon}</div>
     </div>
   </div>
 );
@@ -213,7 +213,7 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 overflow-x-hidden">
       {/* Refresh button — hidden on email tab (has its own) */}
       {tab !== 'email' && (
       <div className="flex justify-end">
@@ -240,13 +240,13 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
           ) : stats ? (
             <>
               {/* KPI grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-4">
                 <KpiCard
                   label="Psicólogos activos"
                   value={stats.overview.totalPsychologists}
                   from="from-indigo-50" to="to-indigo-100" border="border-indigo-200"
                   textMain="text-indigo-900" textLabel="text-indigo-600"
-                  icon={<Shield size={22} className="text-indigo-600" />}
+                  icon={<Shield size={18} className="text-indigo-600 sm:w-[22px] sm:h-[22px]" />}
                 />
                 <KpiCard
                   label="En periodo de prueba"
@@ -254,14 +254,14 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                   sub={`de ${stats.overview.totalPsychologists} psicólogos`}
                   from="from-sky-50" to="to-sky-100" border="border-sky-200"
                   textMain="text-sky-900" textLabel="text-sky-600"
-                  icon={<Calendar size={22} className="text-sky-600" />}
+                  icon={<Calendar size={18} className="text-sky-600 sm:w-[22px] sm:h-[22px]" />}
                 />
                 <KpiCard
                   label="Con plan contratado"
                   value={stats.overview.paidCount}
                   from="from-emerald-50" to="to-emerald-100" border="border-emerald-200"
                   textMain="text-emerald-900" textLabel="text-emerald-600"
-                  icon={<CreditCard size={22} className="text-emerald-600" />}
+                  icon={<CreditCard size={18} className="text-emerald-600 sm:w-[22px] sm:h-[22px]" />}
                 />
                 <KpiCard
                   label="MRR estimado"
@@ -269,14 +269,14 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                   sub="ingresos mensuales recurrentes"
                   from="from-amber-50" to="to-amber-100" border="border-amber-200"
                   textMain="text-amber-900" textLabel="text-amber-600"
-                  icon={<BadgeEuro size={22} className="text-amber-600" />}
+                  icon={<BadgeEuro size={18} className="text-amber-600 sm:w-[22px] sm:h-[22px]" />}
                 />
                 <KpiCard
                   label="Total pacientes"
                   value={stats.overview.totalPatients}
                   from="from-purple-50" to="to-purple-100" border="border-purple-200"
                   textMain="text-purple-900" textLabel="text-purple-600"
-                  icon={<Users size={22} className="text-purple-600" />}
+                  icon={<Users size={18} className="text-purple-600 sm:w-[22px] sm:h-[22px]" />}
                 />
                 <KpiCard
                   label="Media pacientes/psicólogo"
@@ -284,7 +284,7 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                   sub="sólo psicólogos con pacientes"
                   from="from-rose-50" to="to-rose-100" border="border-rose-200"
                   textMain="text-rose-900" textLabel="text-rose-600"
-                  icon={<TrendingUp size={22} className="text-rose-600" />}
+                  icon={<TrendingUp size={18} className="text-rose-600 sm:w-[22px] sm:h-[22px]" />}
                 />
                 <KpiCard
                   label="Inactivos (trial agotado)"
@@ -292,19 +292,19 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                   sub="prueba expirada sin plan"
                   from="from-red-50" to="to-red-100" border="border-red-200"
                   textMain="text-red-900" textLabel="text-red-600"
-                  icon={<UserX size={22} className="text-red-600" />}
+                  icon={<UserX size={18} className="text-red-600 sm:w-[22px] sm:h-[22px]" />}
                 />
                 <KpiCard
                   label="Total usuarios"
                   value={stats.overview.totalUsers}
                   from="from-slate-50" to="to-slate-100" border="border-slate-200"
                   textMain="text-slate-900" textLabel="text-slate-500"
-                  icon={<Activity size={22} className="text-slate-500" />}
+                  icon={<Activity size={18} className="text-slate-500 sm:w-[22px] sm:h-[22px]" />}
                 />
               </div>
 
               {/* Weekly registrations chart */}
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6 overflow-hidden">
                 <h3 className="text-sm font-semibold text-slate-700 mb-4 uppercase tracking-wide">
                   Nuevos psicólogos por semana · últimas 8 semanas
                 </h3>
@@ -323,7 +323,7 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
               </div>
 
               {/* Weekly paid psychologists chart */}
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6 overflow-hidden">
                 <h3 className="text-sm font-semibold text-slate-700 mb-1 uppercase tracking-wide">
                   Psicólogos con plan activo por semana · últimas 8 semanas
                 </h3>
@@ -343,7 +343,7 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
               </div>
 
               {/* Monthly MRR chart */}
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6 overflow-hidden">
                 <h3 className="text-sm font-semibold text-slate-700 mb-1 uppercase tracking-wide">
                   Ingresos por suscripciones de psicólogos · últimos 12 meses
                 </h3>
@@ -370,7 +370,7 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
 
               {/* Plan breakdown */}
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                <div className="px-6 py-4 border-b border-slate-100">
+                <div className="px-4 sm:px-6 py-4 border-b border-slate-100">
                   <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">
                     Distribución por plan · psicólogos de pago
                   </h3>
@@ -383,11 +383,11 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                     const base = stats.overview.paidCount;
                     const pct = base > 0 ? Math.round((count / base) * 100) : 0;
                     return (
-                      <div key={planId} className="px-4 sm:px-6 py-3 flex items-center gap-3">
-                        <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold w-24 sm:w-28 text-center flex-shrink-0 ${PLAN_COLORS[planId]}`}>
+                      <div key={planId} className="px-3 sm:px-6 py-3 flex items-center gap-2 sm:gap-3">
+                        <span className={`px-2 sm:px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold w-20 sm:w-28 text-center flex-shrink-0 ${PLAN_COLORS[planId]}`}>
                           {planNames[planId]}
                         </span>
-                        <span className="text-xs text-slate-400 w-14 sm:w-16 flex-shrink-0">{planPrices[planId]}/mes</span>
+                        <span className="text-[10px] sm:text-xs text-slate-400 w-12 sm:w-16 flex-shrink-0">{planPrices[planId]}/mes</span>
                         <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden min-w-0">
                           <div
                             className={`h-full rounded-full transition-all ${planId === 'starter' ? 'bg-blue-400' : planId === 'mainder' ? 'bg-violet-400' : 'bg-amber-400'}`}
@@ -619,11 +619,11 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
           onClick={() => setSelectedPsych(null)}
         >
           <div
-            className="bg-white w-full max-w-sm h-full overflow-y-auto shadow-2xl flex flex-col"
+            className="bg-white w-full max-w-[100vw] sm:max-w-sm h-full overflow-y-auto shadow-2xl flex flex-col"
             onClick={e => e.stopPropagation()}
           >
             {/* Drawer header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+            <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-slate-100">
               <h3 className="font-bold text-slate-900 text-lg">Detalle psicólogo</h3>
               <button
                 onClick={() => setSelectedPsych(null)}
@@ -633,7 +633,7 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
               </button>
             </div>
 
-            <div className="flex-1 p-6 space-y-6">
+            <div className="flex-1 p-4 sm:p-6 space-y-6 overflow-hidden">
               {/* Avatar + name */}
               <div className="flex items-center gap-4">
                 <div className="w-14 h-14 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center text-white text-2xl font-bold shadow-md">
