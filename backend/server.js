@@ -19142,10 +19142,12 @@ app.post('/api/admin/leads/:id/email', authenticateRequest, requireSuperAdmin, a
     });
     if (adminEmailErr) console.error('[admin-emails] Error registering CRM email:', adminEmailErr);
 
-    // Update last_contacted_at
-    await supabaseAdmin.from('leads').update({ last_contacted_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', lead.id);
+    // Update last_contacted_at + auto-advance new → contacted
+    const updateFields = { last_contacted_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+    if (lead.stage === 'new') updateFields.stage = 'contacted';
+    await supabaseAdmin.from('leads').update(updateFields).eq('id', lead.id);
 
-    res.json({ ok: true, activity, resend_id: emailResult?.id });
+    res.json({ ok: true, activity, resend_id: emailResult?.id, stage_changed: lead.stage === 'new' ? 'contacted' : null });
   } catch (err) {
     console.error('[leads] Error sending email:', err);
     res.status(500).json({ error: 'Error sending email' });
@@ -19161,7 +19163,7 @@ app.post('/api/admin/leads/email-bulk', authenticateRequest, requireSuperAdmin, 
     if (!subject || !body_html) return res.status(400).json({ error: 'Subject y body son obligatorios' });
     if (lead_ids.length > 200) return res.status(400).json({ error: 'Máximo 200 emails por envío' });
 
-    const { data: leads } = await supabaseAdmin.from('leads').select('id, email, name').in('id', lead_ids);
+    const { data: leads } = await supabaseAdmin.from('leads').select('id, email, name, stage').in('id', lead_ids);
     if (!leads || leads.length === 0) return res.status(404).json({ error: 'No leads found' });
 
     const fromName = sender_name || 'mainds';
@@ -19230,9 +19232,16 @@ app.post('/api/admin/leads/email-bulk', authenticateRequest, requireSuperAdmin, 
       }
     }
 
-    // Update last_contacted_at for all
+    // Update last_contacted_at for all + auto-advance new → contacted
     const now = new Date().toISOString();
+    const sentLeadIds = leads.filter(l => results.details.find(d => d.email === l.email && d.status === 'sent')).map(l => l.id);
     await supabaseAdmin.from('leads').update({ last_contacted_at: now, updated_at: now }).in('id', lead_ids);
+    // Auto-advance leads in 'new' stage to 'contacted'
+    const newStageIds = leads.filter(l => l.stage === 'new' && sentLeadIds.includes(l.id)).map(l => l.id);
+    if (newStageIds.length > 0) {
+      await supabaseAdmin.from('leads').update({ stage: 'contacted', updated_at: now }).in('id', newStageIds);
+      results.stage_advanced = newStageIds.length;
+    }
 
     res.json(results);
   } catch (err) {
