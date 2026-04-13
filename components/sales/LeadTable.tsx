@@ -23,14 +23,17 @@ export const LeadTable: React.FC<Props> = ({ leads, selectedIds, onSelectLead, o
   const onLoadMoreRef = useRef(onLoadMore);
   onLoadMoreRef.current = onLoadMore;
 
+  // Re-create observer when leads.length changes (after each page) so it
+  // re-evaluates sentinel visibility inside the scrollable <main> container.
   useEffect(() => {
     if (!sentinelRef.current || !hasMore || loading) return;
+    const el = sentinelRef.current;
     const observer = new IntersectionObserver(entries => {
       if (entries[0].isIntersecting) onLoadMoreRef.current();
-    }, { rootMargin: '200px' });
-    observer.observe(sentinelRef.current);
+    }, { rootMargin: '400px' });
+    observer.observe(el);
     return () => observer.disconnect();
-  }, [hasMore, loading]);
+  }, [hasMore, loading, leads.length]);
 
   if (loading) {
     return (
