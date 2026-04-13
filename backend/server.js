@@ -18463,7 +18463,7 @@ app.get('/api/admin/leads', authenticateRequest, requireSuperAdmin, async (req, 
         if (orParts.length) query = query.or(orParts.join(','));
       }
     }
-    query = query.order(sortCol, { ascending: sortAsc }).range(offset, offset + limit - 1);
+    query = query.order(sortCol, { ascending: sortAsc }).order('id', { ascending: true }).range(offset, offset + limit - 1);
 
     const { data, error, count } = await query;
     if (error) throw error;
@@ -18877,55 +18877,6 @@ ${chunk}`;
   }
 });
 
-// --- PUT /api/admin/leads/:id — Update lead ---
-app.put('/api/admin/leads/:id', authenticateRequest, requireSuperAdmin, async (req, res) => {
-  try {
-    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
-    const { id } = req.params;
-    const updates = req.body;
-    // Validate stage if provided
-    if (updates.stage && !LEAD_STAGES.includes(updates.stage)) {
-      return res.status(400).json({ error: 'Stage inválido' });
-    }
-
-    // If stage is changing, record in timeline
-    if (updates.stage) {
-      const { data: current } = await supabaseAdmin.from('leads').select('stage').eq('id', id).single();
-      if (current && current.stage !== updates.stage) {
-        await supabaseAdmin.from('lead_activities').insert([{
-          lead_id: id,
-          type: 'stage_change',
-          title: `Movido de "${current.stage}" a "${updates.stage}"`,
-          metadata: { from_stage: current.stage, to_stage: updates.stage },
-          created_by: req.superAdminEmail,
-        }]);
-      }
-    }
-
-    updates.updated_at = new Date().toISOString();
-    const { data: lead, error } = await supabaseAdmin.from('leads').update(updates).eq('id', id).select().single();
-    if (error) throw error;
-    if (!lead) return res.status(404).json({ error: 'Lead no encontrado' });
-    res.json(lead);
-  } catch (err) {
-    console.error('[leads] Error updating lead:', err);
-    res.status(500).json({ error: 'Error updating lead' });
-  }
-});
-
-// --- DELETE /api/admin/leads/:id ---
-app.delete('/api/admin/leads/:id', authenticateRequest, requireSuperAdmin, async (req, res) => {
-  try {
-    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
-    const { error } = await supabaseAdmin.from('leads').delete().eq('id', req.params.id);
-    if (error) throw error;
-    res.json({ ok: true });
-  } catch (err) {
-    console.error('[leads] Error deleting lead:', err);
-    res.status(500).json({ error: 'Error deleting lead' });
-  }
-});
-
 // --- PUT /api/admin/leads/bulk — Bulk update leads (stage, assigned_to) ---
 app.put('/api/admin/leads/bulk', authenticateRequest, requireSuperAdmin, async (req, res) => {
   try {
@@ -18973,6 +18924,60 @@ app.put('/api/admin/leads/bulk', authenticateRequest, requireSuperAdmin, async (
   } catch (err) {
     console.error('[leads] Error bulk updating leads:', err);
     res.status(500).json({ error: 'Error en actualización masiva' });
+  }
+});
+
+// --- PUT /api/admin/leads/:id — Update lead ---
+app.put('/api/admin/leads/:id', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { id } = req.params;
+    const updates = { ...req.body };
+
+    // Skip non-lead fields that might leak in
+    delete updates.id;
+    delete updates.created_at;
+
+    // Validate stage if provided
+    if (updates.stage && !LEAD_STAGES.includes(updates.stage)) {
+      return res.status(400).json({ error: 'Stage inválido' });
+    }
+
+    // If stage is changing, record in timeline
+    if (updates.stage) {
+      const { data: current } = await supabaseAdmin.from('leads').select('stage').eq('id', id).single();
+      if (current && current.stage !== updates.stage) {
+        await supabaseAdmin.from('lead_activities').insert([{
+          lead_id: id,
+          type: 'stage_change',
+          title: `Movido de "${current.stage}" a "${updates.stage}"`,
+          metadata: { from_stage: current.stage, to_stage: updates.stage },
+          created_by: req.superAdminEmail,
+        }]);
+      }
+    }
+
+    updates.updated_at = new Date().toISOString();
+    const { data: lead, error } = await supabaseAdmin.from('leads').update(updates).eq('id', id).select().single();
+    if (error) throw error;
+    if (!lead) return res.status(404).json({ error: 'Lead no encontrado' });
+    res.json(lead);
+  } catch (err) {
+    console.error('[leads] Error updating lead:', err);
+    res.status(500).json({ error: 'Error updating lead' });
+  }
+});
+
+// --- DELETE /api/admin/leads/:id ---
+app.delete('/api/admin/leads/:id', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { error } = await supabaseAdmin.from('leads').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[leads] Error deleting lead:', err);
+    res.status(500).json({ error: 'Error deleting lead' });
   }
 });
 

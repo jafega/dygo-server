@@ -21,6 +21,8 @@ export interface Lead {
   tags: string[];
   notes_count: number;
   last_contacted_at: string | null;
+  lead_score: number | null;
+  lead_score_updated_at: string | null;
 }
 
 export type LeadActivityType =

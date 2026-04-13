@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Lead, LEAD_STAGES, PIPELINE_STAGES, CLOSED_STAGES, LeadStage } from './types';
-import { Mail, Phone, Smartphone, GripVertical, Building2, Loader2 } from 'lucide-react';
+import { Mail, Phone, Smartphone, GripVertical, Building2, Loader2, TrendingUp } from 'lucide-react';
 import { API_URL } from '../../services/config';
 import { apiFetch } from '../../services/authService';
 import type { MultiFilters } from './SalesPipeline';
@@ -15,7 +15,7 @@ interface Props {
   refreshKey: number;
 }
 
-const KANBAN_PAGE_SIZE = 30;
+const KANBAN_PAGE_SIZE = 50;
 
 const stageMap = Object.fromEntries(LEAD_STAGES.map(s => [s.id, s]));
 
@@ -52,6 +52,15 @@ const LeadCard: React.FC<{ lead: Lead; onClick: () => void }> = ({ lead, onClick
     </div>
 
     <div className="flex items-center gap-2 mt-2">
+      {lead.lead_score != null && (
+        <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+          lead.lead_score >= 8 ? 'bg-emerald-100 text-emerald-700' :
+          lead.lead_score >= 5 ? 'bg-amber-100 text-amber-700' :
+          'bg-red-100 text-red-700'
+        }`} title={`Score: ${lead.lead_score}/10`}>
+          <TrendingUp size={9} /> {lead.lead_score}
+        </span>
+      )}
       {lead.app_user_id ? (
         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700">
           <Smartphone size={9} /> {lead.app_is_subscribed ? 'Suscrito' : 'En App'}
@@ -88,12 +97,16 @@ const KanbanColumn: React.FC<{
   const [initialLoading, setInitialLoading] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const cursorRef = useRef(0);
+  const loadingRef = useRef(false);
 
   const loadLeads = useCallback(async (append = false) => {
-    if (!append) setInitialLoading(true);
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+    if (!append) { setInitialLoading(true); cursorRef.current = 0; }
     else setLoadingMore(true);
     try {
-      const offset = append ? leads.length : 0;
+      const offset = append ? cursorRef.current : 0;
       const params = new URLSearchParams();
       params.set('stage', stageId);
       if (search) params.set('search', search);
@@ -105,38 +118,45 @@ const KanbanColumn: React.FC<{
       const res = await apiFetch(`${API_URL}/admin/leads?${params}`);
       if (res.ok) {
         const result = await res.json();
+        const nextCursor = offset + result.data.length;
         if (append) {
-          setLeads(prev => {
-            const existingIds = new Set(prev.map(l => l.id));
-            const newLeads = result.data.filter((l: Lead) => !existingIds.has(l.id));
-            return [...prev, ...newLeads];
-          });
+          setLeads(prev => [...prev, ...result.data.filter((l: Lead) => !prev.some(p => p.id === l.id))]);
         } else {
           setLeads(result.data);
         }
-        setHasMore(offset + result.data.length < result.total);
+        cursorRef.current = nextCursor;
+        setHasMore(nextCursor < result.total && result.data.length > 0);
       }
     } catch (e) { console.error(`Error loading leads for ${stageId}:`, e); }
     if (!append) setInitialLoading(false);
     else setLoadingMore(false);
-  }, [stageId, search, filters, leads.length]);
+    loadingRef.current = false;
+  }, [stageId, search, filters]);
 
   // Reset when search, filters or refreshKey changes
   useEffect(() => {
     setLeads([]);
     setHasMore(true);
+    cursorRef.current = 0;
+    loadingRef.current = false;
     loadLeads(false);
   }, [stageId, search, filters, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Stable ref for loadMore to avoid observer churn
+  const loadMoreRef = useRef(() => {});
+  loadMoreRef.current = () => {
+    if (!loadingRef.current && hasMore) loadLeads(true);
+  };
 
   // Infinite scroll within column
   useEffect(() => {
     if (!sentinelRef.current || !hasMore || initialLoading) return;
     const observer = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting && !loadingMore) loadLeads(true);
+      if (entries[0].isIntersecting) loadMoreRef.current();
     }, { root: scrollRef.current, rootMargin: '100px' });
     observer.observe(sentinelRef.current);
     return () => observer.disconnect();
-  }, [hasMore, loadingMore, initialLoading, loadLeads]);
+  }, [hasMore, initialLoading]);
 
   const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; };
   const handleDrop = (e: React.DragEvent) => {

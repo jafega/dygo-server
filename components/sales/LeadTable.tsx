@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { Lead, LEAD_STAGES, LeadStage } from './types';
-import { Mail, Phone, Building2, Calendar, Smartphone, Trash2, Loader2, UserCheck } from 'lucide-react';
+import { Mail, Phone, Building2, Calendar, Smartphone, Trash2, Loader2, UserCheck, TrendingUp } from 'lucide-react';
 
 interface Props {
   leads: Lead[];
@@ -20,15 +20,17 @@ const stageMap = Object.fromEntries(LEAD_STAGES.map(s => [s.id, s]));
 
 export const LeadTable: React.FC<Props> = ({ leads, selectedIds, onSelectLead, onToggleSelect, onSelectAll, onDelete, loading, onLoadMore, hasMore, loadingMore, total }) => {
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const onLoadMoreRef = useRef(onLoadMore);
+  onLoadMoreRef.current = onLoadMore;
 
   useEffect(() => {
     if (!sentinelRef.current || !hasMore) return;
     const observer = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting) onLoadMore();
+      if (entries[0].isIntersecting) onLoadMoreRef.current();
     }, { rootMargin: '200px' });
     observer.observe(sentinelRef.current);
     return () => observer.disconnect();
-  }, [hasMore, onLoadMore]);
+  }, [hasMore]);
 
   if (loading) {
     return (
@@ -65,6 +67,7 @@ export const LeadTable: React.FC<Props> = ({ leads, selectedIds, onSelectLead, o
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Email</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide hidden md:table-cell">Teléfono</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide hidden lg:table-cell">Empresa</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Score</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Estado</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide hidden md:table-cell">Asignado</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide hidden md:table-cell">En App</th>
@@ -112,6 +115,17 @@ export const LeadTable: React.FC<Props> = ({ leads, selectedIds, onSelectLead, o
                     ) : <span className="text-slate-300">—</span>}
                   </td>
                   <td className="px-4 py-3">
+                    {lead.lead_score != null ? (
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold ${
+                        lead.lead_score >= 8 ? 'bg-emerald-100 text-emerald-700' :
+                        lead.lead_score >= 5 ? 'bg-amber-100 text-amber-700' :
+                        'bg-red-100 text-red-700'
+                      }`} title={`Score: ${lead.lead_score}/10`}>
+                        <TrendingUp size={10} /> {lead.lead_score}
+                      </span>
+                    ) : <span className="text-slate-300 text-xs">—</span>}
+                  </td>
+                  <td className="px-4 py-3">
                     {st && (
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${st.bgColor} ${st.color}`}>
                         {st.label}
@@ -157,7 +171,7 @@ export const LeadTable: React.FC<Props> = ({ leads, selectedIds, onSelectLead, o
         </table>
       </div>
       {/* Infinite scroll sentinel */}
-      <div ref={sentinelRef} />
+      <div ref={sentinelRef} className="h-1" />
       {loadingMore && (
         <div className="flex items-center justify-center py-3 text-slate-400 text-sm gap-2">
           <Loader2 size={14} className="animate-spin" /> Cargando más...

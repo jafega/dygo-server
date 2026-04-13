@@ -15,7 +15,7 @@ import {
 
 type ViewMode = 'kanban' | 'table';
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 100;
 
 export interface MasterUser {
   id: string;
@@ -125,6 +125,8 @@ const SalesPipeline: React.FC = () => {
   const [bulkAction, setBulkAction] = useState<'stage' | 'assign' | null>(null);
   const [bulkProcessing, setBulkProcessing] = useState(false);
   const [kanbanRefreshKey, setKanbanRefreshKey] = useState(0);
+  const cursorRef = useRef(0);
+  const loadingRef = useRef(false);
 
   // Debounce search
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -135,10 +137,12 @@ const SalesPipeline: React.FC = () => {
   }, [search]);
 
   const loadLeads = useCallback(async (append = false) => {
-    if (!append) setLoading(true);
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+    if (!append) { setLoading(true); cursorRef.current = 0; }
     else setLoadingMore(true);
     try {
-      const offset = append ? leads.length : 0;
+      const offset = append ? cursorRef.current : 0;
       const params = new URLSearchParams();
       if (multiFilters.stages.length) params.set('stage', multiFilters.stages.join(','));
       if (debouncedSearch) params.set('search', debouncedSearch);
@@ -150,22 +154,21 @@ const SalesPipeline: React.FC = () => {
       const res = await apiFetch(`${API_URL}/admin/leads?${params}`);
       if (res.ok) {
         const result = await res.json();
+        const nextCursor = offset + result.data.length;
         if (append) {
-          setLeads(prev => {
-            const existingIds = new Set(prev.map(l => l.id));
-            const newLeads = result.data.filter((l: Lead) => !existingIds.has(l.id));
-            return [...prev, ...newLeads];
-          });
+          setLeads(prev => [...prev, ...result.data.filter((l: Lead) => !prev.some(p => p.id === l.id))]);
         } else {
           setLeads(result.data);
         }
+        cursorRef.current = nextCursor;
         setTotalLeads(result.total);
-        setHasMore(offset + result.data.length < result.total);
+        setHasMore(nextCursor < result.total && result.data.length > 0);
       }
     } catch (e) { console.error('Error loading leads:', e); }
     if (!append) setLoading(false);
     else setLoadingMore(false);
-  }, [multiFilters, debouncedSearch, leads.length]);
+    loadingRef.current = false;
+  }, [multiFilters, debouncedSearch]);
 
   const loadCounts = useCallback(async () => {
     try {
@@ -190,9 +193,11 @@ const SalesPipeline: React.FC = () => {
     } catch (e) { console.error('Error loading sources:', e); }
   }, []);
 
-  const loadMore = useCallback(() => {
-    if (!loadingMore && hasMore) loadLeads(true);
-  }, [loadingMore, hasMore, loadLeads]);
+  const loadMoreRef = useRef(() => {});
+  loadMoreRef.current = () => {
+    if (!loadingRef.current && hasMore) loadLeads(true);
+  };
+  const loadMore = useCallback(() => loadMoreRef.current(), []);
 
   const loadTemplates = useCallback(async () => {
     try {
@@ -205,6 +210,8 @@ const SalesPipeline: React.FC = () => {
   useEffect(() => {
     setLeads([]);
     setHasMore(true);
+    cursorRef.current = 0;
+    loadingRef.current = false;
     loadLeads(false);
     loadCounts();
   }, [multiFilters, debouncedSearch]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -214,6 +221,8 @@ const SalesPipeline: React.FC = () => {
   const refreshAll = () => {
     setLeads([]);
     setHasMore(true);
+    cursorRef.current = 0;
+    loadingRef.current = false;
     loadLeads(false);
     loadCounts();
     loadAssignees();
@@ -273,6 +282,11 @@ const SalesPipeline: React.FC = () => {
         const updated = await res.json();
         setLeads(prev => prev.map(l => l.id === id ? updated : l));
         if (selectedLead?.id === id) setSelectedLead(updated);
+        // Refresh kanban so column data is up to date
+        setKanbanRefreshKey(k => k + 1);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        console.error('Error updating lead:', res.status, err);
       }
     } catch (e) { console.error('Error updating lead:', e); }
   };
