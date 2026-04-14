@@ -633,7 +633,7 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
               </button>
             </div>
 
-            <div className="flex-1 p-4 sm:p-6 space-y-6 overflow-hidden">
+            <div className="flex-1 p-4 sm:p-6 space-y-6 overflow-y-auto">
               {/* Avatar + name */}
               <div className="flex items-center gap-4">
                 <div className="w-14 h-14 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center text-white text-2xl font-bold shadow-md">
