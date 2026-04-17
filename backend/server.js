@@ -19163,12 +19163,21 @@ app.post('/api/admin/leads/email-bulk', authenticateRequest, requireSuperAdmin, 
     if (!subject || !body_html) return res.status(400).json({ error: 'Subject y body son obligatorios' });
     if (lead_ids.length > 200) return res.status(400).json({ error: 'Máximo 200 emails por envío' });
 
-    const { data: leads } = await supabaseAdmin.from('leads').select('id, email, name, stage').in('id', lead_ids);
+    const { data: leads } = await supabaseAdmin.from('leads').select('id, email, name, stage, assigned_to').in('id', lead_ids);
     if (!leads || leads.length === 0) return res.status(404).json({ error: 'No leads found' });
 
     const fromName = sender_name || 'mainds';
     const fromAddr = `${fromName} <info@mainds.app>`;
     const results = { sent: 0, failed: 0, details: [] };
+    const adminEmailRows = [];
+    const activityRows = [];
+
+    // Pre-load Resend SDK once outside the loop
+    let resendClient = null;
+    if (process.env.RESEND_API_KEY) {
+      const { Resend } = await import('resend');
+      resendClient = new Resend(process.env.RESEND_API_KEY);
+    }
 
     for (const lead of leads) {
       try {
@@ -19181,10 +19190,8 @@ app.post('/api/admin/leads/email-bulk', authenticateRequest, requireSuperAdmin, 
           .replace(/\{\{email\}\}/gi, lead.email);
 
         let resendId = null;
-        if (process.env.RESEND_API_KEY) {
-          const { Resend } = await import('resend');
-          const resend = new Resend(process.env.RESEND_API_KEY);
-          const result = await resend.emails.send({
+        if (resendClient) {
+          const result = await resendClient.emails.send({
             from: fromAddr,
             to: lead.email,
             reply_to: 'info@mainds.app',
@@ -19194,18 +19201,18 @@ app.post('/api/admin/leads/email-bulk', authenticateRequest, requireSuperAdmin, 
           resendId = result?.data?.id || result?.id;
         }
 
-        // Record in timeline
-        await supabaseAdmin.from('lead_activities').insert([{
+        // Collect timeline activity
+        activityRows.push({
           lead_id: lead.id,
           type: 'email_bulk',
           title: personalizedSubject,
           body: personalizedHtml,
           metadata: { resend_id: resendId, from: fromAddr, to: lead.email, sender_name: fromName, bulk: true },
           created_by: req.superAdminEmail,
-        }]);
+        });
 
-        // Register in admin_emails (sales inbox)
-        const { error: bulkEmailErr } = await supabaseAdmin.from('admin_emails').insert({
+        // Collect admin_email row for sales inbox
+        adminEmailRows.push({
           mailbox: 'sales',
           direction: 'outbound',
           from_email: 'info@mainds.app',
@@ -19222,13 +19229,34 @@ app.post('/api/admin/leads/email-bulk', authenticateRequest, requireSuperAdmin, 
           assigned_to: lead.assigned_to || null,
           metadata: { sent_by: req.superAdminEmail, lead_id: lead.id, source: 'crm_bulk' },
         });
-        if (bulkEmailErr) console.error('[admin-emails] Error registering bulk email:', bulkEmailErr);
 
         results.sent++;
         results.details.push({ email: lead.email, status: 'sent', resend_id: resendId });
       } catch (emailErr) {
         results.failed++;
         results.details.push({ email: lead.email, status: 'failed', error: emailErr.message });
+      }
+    }
+
+    // Batch-insert timeline activities
+    if (activityRows.length > 0) {
+      const { error: actErr } = await supabaseAdmin.from('lead_activities').insert(activityRows);
+      if (actErr) console.error('[lead_activities] Error batch-inserting activities:', actErr);
+    }
+
+    // Batch-insert admin_emails (sales inbox sent folder)
+    if (adminEmailRows.length > 0) {
+      const { error: bulkEmailErr } = await supabaseAdmin.from('admin_emails').insert(adminEmailRows);
+      if (bulkEmailErr) {
+        console.error('[admin-emails] Error batch-inserting bulk emails:', bulkEmailErr);
+        // Fallback: try inserting one-by-one to identify the problematic row
+        let insertedCount = 0;
+        for (const row of adminEmailRows) {
+          const { error: singleErr } = await supabaseAdmin.from('admin_emails').insert(row);
+          if (singleErr) console.error('[admin-emails] Row insert failed:', singleErr, row.to_email);
+          else insertedCount++;
+        }
+        console.log(`[admin-emails] Fallback: inserted ${insertedCount}/${adminEmailRows.length} rows`);
       }
     }
 
