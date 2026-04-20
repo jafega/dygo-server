@@ -29,6 +29,8 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
   const streamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  // Ref espejo de isMuted para evitar stale closure dentro del procesador de audio
+  const isMutedRef = useRef<boolean>(false);
   
   // Buffer para agrupar transcripciones del usuario y evitar duplicados
   const userTranscriptBufferRef = useRef<string>('');
@@ -307,9 +309,10 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
               setStatus('connected');
               console.log('[VoiceSession] Status set to connected');
               
-              // Disparar turno inicial para que la IA salude primero
+              // Disparar turno inicial para que la IA salude primero y guardar sessionRef cuanto antes
               sessionPromise.then(session => {
-                session.sendClientContent({ turnComplete: true });
+                sessionRef.current = session;
+                try { session.sendClientContent({ turnComplete: true }); } catch (e) { console.warn('[VoiceSession] initial turnComplete failed', e); }
               });
 
               // Start Timer
@@ -339,17 +342,19 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
               const source = inputAudioContext.createMediaStreamSource(stream);
               sourceRef.current = source;
               
-              // Aumentado de 4096 a 8192 para procesar chunks más grandes y reducir overhead
-              const processor = inputAudioContext.createScriptProcessor(8192, 1, 1);
+              // 4096 samples @16kHz ≈ 256ms: buen balance latencia/CPU para turn-taking
+              const processor = inputAudioContext.createScriptProcessor(4096, 1, 1);
               processorRef.current = processor;
-              
+
               processor.onaudioprocess = (e) => {
-                if (isMuted) return; // Don't send data if muted
+                // Usar ref para evitar stale closure al togglear mute
+                if (isMutedRef.current) return;
                 const inputData = e.inputBuffer.getChannelData(0);
                 const pcmBlob = createPcmBlob(inputData);
-                sessionPromise.then(session => {
-                   session.sendRealtimeInput({ media: pcmBlob });
-                });
+                const session = sessionRef.current;
+                if (session) {
+                  try { session.sendRealtimeInput({ media: pcmBlob }); } catch (err) { /* ignore transient send errors */ }
+                }
               };
               
               source.connect(processor);
@@ -387,26 +392,32 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
                 setTranscriptWarning(false);
               }
 
-              // Handle Audio Output
-              const audioData = msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
-              if (audioData) {
-                setIsAiSpeaking(true);
-                const ctx = audioContextRef.current!;
-                nextStartTimeRef.current = Math.max(nextStartTimeRef.current, ctx.currentTime);
-                
-                const buffer = await decodeAudioData(base64ToUint8Array(audioData), ctx);
-                const source = ctx.createBufferSource();
-                source.buffer = buffer;
-                source.connect(ctx.destination);
-                
-                source.onended = () => {
-                  sourcesRef.current.delete(source);
-                  if (sourcesRef.current.size === 0) setIsAiSpeaking(false);
-                };
-                
-                source.start(nextStartTimeRef.current);
-                nextStartTimeRef.current += buffer.duration;
-                sourcesRef.current.add(source);
+              // Handle Audio Output — iterar TODAS las parts (Gemini envía varias inlineData por turno)
+              const parts = msg.serverContent?.modelTurn?.parts;
+              if (parts && parts.length > 0) {
+                const ctx = audioContextRef.current;
+                if (ctx) {
+                  for (const part of parts) {
+                    const audioData = part?.inlineData?.data;
+                    if (!audioData) continue;
+                    setIsAiSpeaking(true);
+                    nextStartTimeRef.current = Math.max(nextStartTimeRef.current, ctx.currentTime);
+
+                    const buffer = await decodeAudioData(base64ToUint8Array(audioData), ctx);
+                    const source = ctx.createBufferSource();
+                    source.buffer = buffer;
+                    source.connect(ctx.destination);
+
+                    source.onended = () => {
+                      sourcesRef.current.delete(source);
+                      if (sourcesRef.current.size === 0) setIsAiSpeaking(false);
+                    };
+
+                    source.start(nextStartTimeRef.current);
+                    nextStartTimeRef.current += buffer.duration;
+                    sourcesRef.current.add(source);
+                  }
+                }
               }
 
               // Handle Interruption
@@ -428,20 +439,19 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
           },
           config: {
             responseModalities: [Modality.AUDIO],
-            systemInstruction: `Eres mainds, compañero de diario empático y conversacional. Cuando se inicie la sesión, saluda con calidez y pregunta cómo está el usuario y cómo le fue el día. Si hay nota del psicólogo (marcada [PRIORIDAD]), profundiza en ese tema primero. Estilo: natural y cercano, usa 2-4 oraciones por respuesta, haz siempre una pregunta de seguimiento mostrando curiosidad genuina, explora las emociones con profundidad, mantén la conversación activa y fluida. No aconsejes ni juzgues. Idioma: ${languageInstruction}.${patientRel?.ai_instructions ? `
-
-INSTRUCCIONES DEL PSICÓLOGO PARA ESTA SESIÓN:
-${patientRel.ai_instructions}` : ''}
-
-Contexto:
-${contextStr}`,
+            temperature: 0.8,
+            systemInstruction: `Eres mainds, compañero de diario empático y conversacional. Cuando se inicie la sesión, saluda con calidez y pregunta cómo está el usuario y cómo le fue el día. Si hay nota del psicólogo (marcada [PRIORIDAD]), profundiza en ese tema primero. Estilo: natural y cercano, 2-4 oraciones por respuesta, termina con una pregunta de seguimiento genuina, explora emociones con profundidad, mantén la conversación fluida. No aconsejes ni juzgues. Idioma: ${languageInstruction}.${patientRel?.ai_instructions ? `\n\nINSTRUCCIONES DEL PSICÓLOGO PARA ESTA SESIÓN:\n${patientRel.ai_instructions}` : ''}\n\nContexto:\n${contextStr}`,
 
             speechConfig: {
               voiceConfig: { prebuiltVoiceConfig: { voiceName: selectedVoice } }
             },
-            // Habilitar transcripción tanto de entrada como de salida
-            inputAudioTranscription: { language: selectedLanguage },
-            outputAudioTranscription: { language: selectedLanguage },
+            // Transcripciones activadas (config sin parámetros; Gemini deduce idioma del speechConfig/systemInstruction)
+            inputAudioTranscription: {},
+            outputAudioTranscription: {},
+            // Compresión de ventana de contexto: clave para optimizar tokens en sesiones largas
+            contextWindowCompression: {
+              slidingWindow: { targetTokens: '12800' },
+            },
           }
         });
         
@@ -552,7 +562,16 @@ ${contextStr}`,
   };
 
   const toggleMute = () => {
-    setIsMuted(!isMuted);
+    setIsMuted(prev => {
+      const next = !prev;
+      isMutedRef.current = next;
+      // Silenciar tambi\u00e9n a nivel de la pista del micr\u00f3fono (defensa en profundidad)
+      const stream = streamRef.current;
+      if (stream) {
+        stream.getAudioTracks().forEach(t => { t.enabled = !next; });
+      }
+      return next;
+    });
   };
 
   return (

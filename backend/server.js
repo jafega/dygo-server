@@ -9433,24 +9433,36 @@ app.post('/api/invoices/:id/rectify', authenticateRequest, async (req, res) => {
           rectificativaNumber = `${rectPrefix}${String(maxRectNumber + 1).padStart(5, '0')}`;
         }
         
-        // Crear factura rectificativa (con valores en negativo)
+        // Crear factura rectificativa (con valores en negativo, mismo valor absoluto que la original)
+        // Las TASAS (taxRate, irpf %) se mantienen iguales; los IMPORTES (amount, tax, total, irpfAmount,
+        // cantidades de línea) se invierten de signo para que sumen exactamente lo contrario de la original.
+        const negateAmount = (v) => {
+          const n = parseFloat(v);
+          if (!Number.isFinite(n)) return v;
+          return n === 0 ? 0 : -n;
+        };
         const rectificativa = {
           id: Date.now().toString(),
           invoiceNumber: rectificativaNumber,
           patientId: originalInvoice.patientId,
           patient_user_id: originalInvoice.patient_user_id,
           patientName: originalInvoice.patientName,
-          amount: -originalInvoice.amount, // Negativo
-          tax: originalInvoice.tax ? -originalInvoice.tax : undefined,
-          total: originalInvoice.total ? -originalInvoice.total : undefined,
-          taxRate: originalInvoice.taxRate,
+          amount: negateAmount(originalInvoice.amount), // Subtotal en negativo
+          tax: originalInvoice.tax !== undefined && originalInvoice.tax !== null
+            ? negateAmount(originalInvoice.tax)
+            : undefined, // Importe de IVA en negativo
+          total: originalInvoice.total !== undefined && originalInvoice.total !== null
+            ? negateAmount(originalInvoice.total)
+            : undefined, // Total en negativo
+          taxRate: originalInvoice.taxRate, // Tipo de IVA (%) — se mantiene
+          irpf: originalInvoice.irpf, // Tipo de IRPF (%) — se mantiene; el importe se recalcula sobre subtotal negativo
           date: new Date().toISOString().split('T')[0],
           dueDate: new Date().toISOString().split('T')[0],
           status: 'paid', // Las rectificativas se marcan como pagadas automáticamente
           description: `Factura rectificativa de ${originalInvoice.invoiceNumber}`,
           items: (originalInvoice.items || []).map(item => ({
             ...item,
-            quantity: -item.quantity // Cantidades negativas
+            quantity: negateAmount(item.quantity) // Cantidades negativas (mismo valor absoluto)
           })),
           psychologist_user_id: originalInvoice.psychologist_user_id,
           psychologistId: originalInvoice.psychologistId,
@@ -10986,10 +10998,10 @@ app.get('/api/invoices/:id/pdf', authenticateRequest, async (req, res) => {
           <span class="total-label">IVA (${invoice.taxRate || 21}%):</span>
           <span class="total-value">${iva.toFixed(2)} €</span>
         </div>
-        ${invoice.invoice_type === 'center' && irpfAmount > 0 ? `
+        ${invoice.invoice_type === 'center' && irpfAmount !== 0 ? `
         <div class="total-row">
           <span class="total-label">IRPF (${invoice.irpf || 0}%):</span>
-          <span class="total-value" style="color: #dc2626;">-${irpfAmount.toFixed(2)} €</span>
+          <span class="total-value" style="color: #dc2626;">${(-irpfAmount).toFixed(2)} €</span>
         </div>
         ` : ''}
         <div class="total-row">
@@ -11353,7 +11365,7 @@ function buildInvoiceHTML(invoice, psychProfile, patientData, subtotal, iva, irp
       <div class="totals-box">
         <div class="total-row"><span class="total-label">Subtotal (Base imponible):</span><span class="total-value">${subtotal.toFixed(2)} €</span></div>
         <div class="total-row"><span class="total-label">IVA (${invoice.taxRate || 21}%):</span><span class="total-value">${iva.toFixed(2)} €</span></div>
-        ${invoice.invoice_type === 'center' && irpfAmount > 0 ? `<div class="total-row"><span class="total-label">IRPF (${invoice.irpf || 0}%):</span><span class="total-value" style="color: #dc2626;">-${irpfAmount.toFixed(2)} €</span></div>` : ''}
+        ${invoice.invoice_type === 'center' && irpfAmount !== 0 ? `<div class="total-row"><span class="total-label">IRPF (${invoice.irpf || 0}%):</span><span class="total-value" style="color: #dc2626;">${(-irpfAmount).toFixed(2)} €</span></div>` : ''}
         <div class="total-row"><span class="total-label">TOTAL:</span><span class="total-value">${totalAmount.toFixed(2)} €</span></div>
       </div>
     </div>
