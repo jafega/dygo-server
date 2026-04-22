@@ -2,10 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { 
   Users, Calendar, FileText, CheckCircle, Circle, ArrowRight, 
   Clock, DollarSign, TrendingUp, UserPlus, CalendarPlus, 
-  ClipboardList, Zap
+  ClipboardList, Zap, FilePlus
 } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
+import AddEntryFromHomeModal from './AddEntryFromHomeModal';
 
 interface SubscriptionInfo {
   is_subscribed: boolean;
@@ -66,6 +67,7 @@ const PsychologistHome: React.FC<PsychologistHomeProps> = ({
   const [onboardingDismissed, setOnboardingDismissed] = useState(() => 
     sessionStorage.getItem(getOnboardingDismissKey(psychologistId)) === 'true'
   );
+  const [showAddEntryModal, setShowAddEntryModal] = useState(false);
 
   useEffect(() => {
     // Re-read the dismiss state when the user changes (e.g. switching accounts)
@@ -242,6 +244,48 @@ const PsychologistHome: React.FC<PsychologistHomeProps> = ({
           </button>
         </div>
       )}
+
+      {/* Quick Actions — moved to top */}
+      <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-5">
+        <h2 className="text-sm sm:text-base font-bold text-slate-900 mb-3">Acciones rápidas</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+          <button
+            onClick={() => onNavigate('patients')}
+            className="flex flex-col items-center gap-2 p-3 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 transition-colors"
+          >
+            <UserPlus size={20} />
+            <span className="text-xs font-medium">Nuevo paciente</span>
+          </button>
+          <button
+            onClick={() => onNavigate('schedule')}
+            className="flex flex-col items-center gap-2 p-3 rounded-lg bg-green-50 hover:bg-green-100 text-green-700 transition-colors"
+          >
+            <CalendarPlus size={20} />
+            <span className="text-xs font-medium">Nueva sesión</span>
+          </button>
+          <button
+            onClick={() => setShowAddEntryModal(true)}
+            className="flex flex-col items-center gap-2 p-3 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition-colors"
+          >
+            <FilePlus size={20} />
+            <span className="text-xs font-medium">Añadir entrada</span>
+          </button>
+          <button
+            onClick={() => onNavigate('billing')}
+            className="flex flex-col items-center gap-2 p-3 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition-colors"
+          >
+            <FileText size={20} />
+            <span className="text-xs font-medium">Nueva factura</span>
+          </button>
+          <button
+            onClick={() => onNavigate('ai-assistant')}
+            className="flex flex-col items-center gap-2 p-3 rounded-lg bg-violet-50 hover:bg-violet-100 text-violet-700 transition-colors"
+          >
+            <Zap size={20} />
+            <span className="text-xs font-medium">Asistente IA</span>
+          </button>
+        </div>
+      </div>
 
       {/* Onboarding Checklist */}
       {showOnboarding && (
@@ -476,40 +520,18 @@ const PsychologistHome: React.FC<PsychologistHomeProps> = ({
         </div>
       </div>
 
-      {/* Quick Actions */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-5">
-        <h2 className="text-sm sm:text-base font-bold text-slate-900 mb-3">Acciones rápidas</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          <button
-            onClick={() => onNavigate('patients')}
-            className="flex flex-col items-center gap-2 p-3 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 transition-colors"
-          >
-            <UserPlus size={20} />
-            <span className="text-xs font-medium">Nuevo paciente</span>
-          </button>
-          <button
-            onClick={() => onNavigate('schedule')}
-            className="flex flex-col items-center gap-2 p-3 rounded-lg bg-green-50 hover:bg-green-100 text-green-700 transition-colors"
-          >
-            <CalendarPlus size={20} />
-            <span className="text-xs font-medium">Nueva sesión</span>
-          </button>
-          <button
-            onClick={() => onNavigate('billing')}
-            className="flex flex-col items-center gap-2 p-3 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition-colors"
-          >
-            <FileText size={20} />
-            <span className="text-xs font-medium">Nueva factura</span>
-          </button>
-          <button
-            onClick={() => onNavigate('ai-assistant')}
-            className="flex flex-col items-center gap-2 p-3 rounded-lg bg-violet-50 hover:bg-violet-100 text-violet-700 transition-colors"
-          >
-            <Zap size={20} />
-            <span className="text-xs font-medium">Asistente IA</span>
-          </button>
-        </div>
-      </div>
+      {/* Add Entry Modal */}
+      {showAddEntryModal && (
+        <AddEntryFromHomeModal
+          psychologistId={psychologistId}
+          patients={patients}
+          onClose={() => setShowAddEntryModal(false)}
+          onSaved={() => {
+            setShowAddEntryModal(false);
+            loadData();
+          }}
+        />
+      )}
     </div>
   );
 };
