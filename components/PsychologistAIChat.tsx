@@ -359,9 +359,9 @@ ASISTENTE:`;
   };
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-160px)] sm:h-[calc(100dvh-120px)] max-h-[900px] min-h-[400px] sm:min-h-[500px]">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3">
+    <div className="flex flex-col h-[calc(100dvh-140px)] sm:h-[calc(100dvh-120px)] max-h-[900px] min-h-[420px] sm:min-h-[500px]">
+      {/* Header - compact, hidden on mobile since outer page header already shows 'Asistente IA' */}
+      <div className="hidden sm:flex items-center justify-between mb-3">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-gradient-to-br from-violet-600 to-indigo-600 rounded-xl flex items-center justify-center shadow-sm">
             <Bot size={20} className="text-white" />
@@ -412,10 +412,45 @@ ASISTENTE:`;
         </div>
       </div>
 
+      {/* Mobile-only compact action bar */}
+      <div className="flex sm:hidden items-center justify-between gap-2 mb-2">
+        <div className="flex items-center gap-1.5 text-[11px] text-slate-500 min-w-0">
+          <Lock size={11} className="text-emerald-600 flex-shrink-0" />
+          <span className="text-emerald-600 font-medium">Privado</span>
+          {isLoadingData && <span className="text-slate-400 truncate">· Cargando…</span>}
+          {dataLoaded && !isLoadingData && (
+            <span className="text-slate-400 truncate">
+              · {patients.filter(p => p.active !== false).length}p · {sessions.filter(s => s.status !== 'available').length}s · {invoices.length}f
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {messages.length > 0 && (
+            <button
+              onClick={clearChat}
+              className="p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+              title="Limpiar chat"
+              aria-label="Limpiar chat"
+            >
+              <RefreshCw size={15} />
+            </button>
+          )}
+          <button
+            onClick={loadPsychologistData}
+            disabled={isLoadingData}
+            className="p-2 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors disabled:opacity-50"
+            title="Actualizar datos"
+            aria-label="Actualizar datos"
+          >
+            <RefreshCw size={15} className={isLoadingData ? 'animate-spin' : ''} />
+          </button>
+        </div>
+      </div>
+
       {/* Web search toggle + privacy bar */}
-      <div className="flex items-center gap-2 mb-3">
-        {/* Privacy pill */}
-        <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-700 flex-1 min-w-0">
+      <div className="flex items-center gap-2 mb-2 sm:mb-3">
+        {/* Privacy pill - hidden on mobile (shown in compact bar above) */}
+        <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-700 flex-1 min-w-0">
           <Lock size={11} className="flex-shrink-0" />
           <span className="truncate"><strong>Privacidad:</strong> solo tus pacientes, sesiones y facturas. Nunca datos de otras cuentas.</span>
         </div>
@@ -423,20 +458,20 @@ ASISTENTE:`;
         <button
           onClick={() => setWebSearchEnabled(v => !v)}
           title={webSearchEnabled ? 'Desactivar búsqueda web' : 'Activar búsqueda web (para consultas sobre técnicas, normativa, formación...)'}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all flex-shrink-0 ${
+          className={`flex items-center justify-center gap-1.5 px-3 py-2 sm:py-1.5 rounded-lg text-xs font-medium border transition-all flex-1 sm:flex-shrink-0 sm:flex-none ${
             webSearchEnabled
               ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
               : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600'
           }`}
         >
           <Globe size={13} />
-          {webSearchEnabled ? 'Web ON' : 'Web OFF'}
+          {webSearchEnabled ? 'Búsqueda web: ON' : 'Búsqueda web: OFF'}
         </button>
       </div>
 
-      {/* Web search info banner (shown when active) */}
+      {/* Web search info banner (shown when active) - hidden on mobile to save space */}
       {webSearchEnabled && (
-        <div className="flex items-start gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700 mb-3">
+        <div className="hidden sm:flex items-start gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700 mb-3">
           <Search size={13} className="mt-0.5 flex-shrink-0" />
           <span>
             <strong>Búsqueda web activa.</strong> El asistente puede consultar internet para temas clínicos, normativos o formativos. Las fuentes se mostrarán en cada respuesta. Los datos de tus pacientes siguen siendo privados.
@@ -453,7 +488,7 @@ ASISTENTE:`;
       )}
 
       {/* Chat area */}
-      <div className="flex-1 overflow-y-auto space-y-4 pr-1 mb-4">
+      <div className="flex-1 overflow-y-auto space-y-3 sm:space-y-4 pr-1 mb-3 sm:mb-4">
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-6 py-8">
             <div className="text-center">
@@ -511,10 +546,10 @@ ASISTENTE:`;
             {messages.map((message) => (
               <div
                 key={message.id}
-                className={`flex gap-3 ${message.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}
+                className={`flex gap-2 sm:gap-3 ${message.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}
               >
                 {/* Avatar */}
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${
+                <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${
                   message.role === 'user'
                     ? 'bg-indigo-600'
                     : 'bg-gradient-to-br from-violet-600 to-indigo-600'
@@ -526,8 +561,8 @@ ASISTENTE:`;
                 </div>
 
                 {/* Bubble */}
-                <div className={`flex flex-col gap-1 max-w-[80%] ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
-                  <div className={`px-4 py-3 rounded-2xl text-sm leading-relaxed ${
+                <div className={`flex flex-col gap-1 max-w-[85%] sm:max-w-[80%] min-w-0 ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
+                  <div className={`px-3 py-2.5 sm:px-4 sm:py-3 rounded-2xl text-sm leading-relaxed break-words ${
                     message.role === 'user'
                       ? 'bg-indigo-600 text-white rounded-tr-sm'
                       : 'bg-white border border-slate-200 text-slate-800 rounded-tl-sm shadow-sm'
@@ -580,8 +615,8 @@ ASISTENTE:`;
 
             {/* Typing indicator */}
             {isLoading && (
-              <div className="flex gap-3">
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center flex-shrink-0 mt-0.5">
+              <div className="flex gap-2 sm:gap-3">
+                <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center flex-shrink-0 mt-0.5">
                   {webSearchEnabled ? <Globe size={14} className="text-white" /> : <Bot size={14} className="text-white" />}
                 </div>
                 <div className="bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
@@ -631,7 +666,8 @@ ASISTENTE:`;
           <button
             type="submit"
             disabled={!input.trim() || isLoading}
-            className={`w-9 h-9 disabled:bg-slate-200 text-white disabled:text-slate-400 rounded-xl flex items-center justify-center transition-colors flex-shrink-0 ${
+            aria-label="Enviar"
+            className={`w-10 h-10 sm:w-9 sm:h-9 disabled:bg-slate-200 text-white disabled:text-slate-400 rounded-xl flex items-center justify-center transition-colors flex-shrink-0 ${
               webSearchEnabled ? 'bg-blue-600 hover:bg-blue-700' : 'bg-indigo-600 hover:bg-indigo-700'
             }`}
           >
@@ -641,7 +677,7 @@ ASISTENTE:`;
             }
           </button>
         </div>
-        <p className="text-xs text-slate-400 mt-1.5 text-center">
+        <p className="hidden sm:block text-xs text-slate-400 mt-1.5 text-center">
           {webSearchEnabled
             ? 'Web ON · Las fuentes aparecerán bajo cada respuesta · Privacidad siempre activa'
             : 'Solo tus datos · Asistente basado en Gemini'
