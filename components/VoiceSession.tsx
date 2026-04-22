@@ -42,8 +42,13 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
   const nextStartTimeRef = useRef<number>(0);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
 
-  // Refs for accumulation
+  // Refs for accumulation — consolidamos por hablante para que no queden trocitos sueltos
   const fullTranscriptRef = useRef<string>('');
+  const currentSpeakerRef = useRef<'user' | 'ai' | null>(null);
+  const currentLineRef = useRef<string>('');
+  // Flags para saber si Gemini entregó transcripción real y decidir si usamos Web Speech como fallback
+  const geminiUserTranscriptReceivedRef = useRef<boolean>(false);
+  const geminiAiTranscriptReceivedRef = useRef<boolean>(false);
   const timerRef = useRef<number | null>(null);
   const sessionLimitRef = useRef<NodeJS.Timeout | null>(null);
   const isMounted = useRef(true);
@@ -59,6 +64,34 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
     const mins = Math.floor(secs / 60);
     const remainingSecs = secs % 60;
     return `${mins.toString().padStart(2, '0')}:${remainingSecs.toString().padStart(2, '0')}`;
+  };
+
+  // Añade texto al turno actual del hablante; si cambia de hablante, cierra el turno anterior
+  const appendTranscriptChunk = (speaker: 'user' | 'ai', text: string) => {
+    const clean = (text || '').trim();
+    if (!clean) return;
+    if (currentSpeakerRef.current && currentSpeakerRef.current !== speaker) {
+      // Cambio de hablante: cerrar línea anterior
+      const label = currentSpeakerRef.current === 'user' ? 'Usuario' : 'IA';
+      if (currentLineRef.current.trim()) {
+        fullTranscriptRef.current += `${label}: ${currentLineRef.current.trim()}\n`;
+      }
+      currentLineRef.current = '';
+    }
+    currentSpeakerRef.current = speaker;
+    // Concatenar con espacio si hace falta
+    const sep = currentLineRef.current && !currentLineRef.current.endsWith(' ') ? ' ' : '';
+    currentLineRef.current += sep + clean;
+  };
+
+  // Vuelca cualquier línea pendiente al transcript final
+  const flushCurrentLine = () => {
+    if (currentSpeakerRef.current && currentLineRef.current.trim()) {
+      const label = currentSpeakerRef.current === 'user' ? 'Usuario' : 'IA';
+      fullTranscriptRef.current += `${label}: ${currentLineRef.current.trim()}\n`;
+    }
+    currentLineRef.current = '';
+    currentSpeakerRef.current = null;
   };
 
   // Helper to extract text from feedback union type
@@ -200,27 +233,12 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
               }
             }
             
-            // GUARDAR TODO INMEDIATAMENTE
+            // GUARDAR TODO INMEDIATAMENTE (solo en el ref de fallback; no tocamos fullTranscriptRef
+            // para no mezclarse con las líneas "IA:"/"Usuario:" que produce Gemini)
             if (fullText.trim()) {
               userSpeechTranscriptRef.current = fullText;
-              console.log('[VoiceSession] 💾💾💾 FORCE SAVED to userSpeechTranscriptRef. Length:', fullText.length);
+              console.log('[VoiceSession] 💾 Web Speech fallback buffer updated. Length:', fullText.length);
               setTranscriptWarning(false);
-              
-              // También actualizar fullTranscript
-              const userPrefix = 'Usuario: ';
-              const lines = fullTranscriptRef.current.split('\n');
-              const lastUserLineIndex = lines.findIndex(line => line.startsWith(userPrefix));
-              
-              if (lastUserLineIndex === -1) {
-                // Primera vez, agregar
-                fullTranscriptRef.current += `Usuario: ${fullText.trim()}\n`;
-              } else {
-                // Actualizar la última línea de usuario
-                lines[lastUserLineIndex] = `Usuario: ${fullText.trim()}`;
-                fullTranscriptRef.current = lines.join('\n');
-              }
-              
-              console.log('[VoiceSession] 📊 fullTranscriptRef updated. Length:', fullTranscriptRef.current.length);
             }
           };
           
@@ -390,22 +408,24 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
               
               if (msg.serverContent?.outputTranscription?.text) {
                 const text = msg.serverContent.outputTranscription.text;
-                console.log('[VoiceSession] 🎤 IA transcript:', text);
-                fullTranscriptRef.current += `IA: ${text}\n`;
+                console.log('[VoiceSession] 🎤 IA transcript chunk:', text);
+                geminiAiTranscriptReceivedRef.current = true;
+                appendTranscriptChunk('ai', text);
                 setTranscript(prev => prev + text);
-                setTranscriptWarning(false); // Reset warning if we get transcription
+                setTranscriptWarning(false);
               }
-              
+
               if (msg.serverContent?.inputTranscription?.text) {
                 const text = msg.serverContent.inputTranscription.text;
-                console.log('[VoiceSession] 👤 User transcript from Gemini:', text);
-                console.log('[VoiceSession] 📊 Current fullTranscriptRef length BEFORE:', fullTranscriptRef.current.length);
-                
-                // Guardar INMEDIATAMENTE sin buffer para asegurar que se capture
-                fullTranscriptRef.current += `Usuario: ${text}\n`;
-                console.log('[VoiceSession] 💾 Saved Gemini transcript IMMEDIATELY');
-                console.log('[VoiceSession] 📊 fullTranscriptRef length AFTER:', fullTranscriptRef.current.length, 'chars');
+                console.log('[VoiceSession] 👤 User transcript chunk:', text);
+                geminiUserTranscriptReceivedRef.current = true;
+                appendTranscriptChunk('user', text);
                 setTranscriptWarning(false);
+              }
+
+              // Cierre de turno: consolidamos la línea actual
+              if (msg.serverContent?.turnComplete || msg.serverContent?.interrupted) {
+                flushCurrentLine();
               }
 
               // Handle Audio Output — iterar TODAS las parts (Gemini envía varias inlineData por turno)
@@ -563,24 +583,28 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
       }
     }
     
-    // Esperar solo 500ms y luego FORZAR el uso de lo capturado
+    // Esperar solo 500ms y luego consolidar
     setTimeout(() => {
-      console.log('[VoiceSession] ⏱️ Timeout completed, forcing transcript save');
-      console.log('[VoiceSession] 📊 userSpeechTranscriptRef:', userSpeechTranscriptRef.current.length, 'chars');
-      console.log('[VoiceSession] 📊 fullTranscriptRef:', fullTranscriptRef.current.length, 'chars');
-      
-      // FORZAR: Si Web Speech capturó algo, usarlo SIEMPRE
-      if (userSpeechTranscriptRef.current.trim().length > 0) {
-        console.log('[VoiceSession] ✅ Using Web Speech capture:', userSpeechTranscriptRef.current);
-        fullTranscriptRef.current = `Usuario: ${userSpeechTranscriptRef.current.trim()}\n`;
+      console.log('[VoiceSession] ⏱️ Timeout completed, finalizing transcript');
+
+      // Cerrar cualquier línea pendiente (turno en curso)
+      flushCurrentLine();
+
+      // Fallback: si Gemini NO transcribió al usuario pero Web Speech sí, añadirlo SIN borrar lo de la IA
+      if (!geminiUserTranscriptReceivedRef.current && userSpeechTranscriptRef.current.trim().length > 0) {
+        console.log('[VoiceSession] ℹ️ Gemini no aportó transcripción del usuario; usando Web Speech como fallback');
+        fullTranscriptRef.current = `Usuario: ${userSpeechTranscriptRef.current.trim()}\n` + fullTranscriptRef.current;
       }
-      
-      // Si aún está vacío, poner un mensaje de error
+
+      console.log('[VoiceSession] 📊 Final transcript length:', fullTranscriptRef.current.length, 'chars');
+      console.log('[VoiceSession] 📊 Gemini captured — user:', geminiUserTranscriptReceivedRef.current, ' | ai:', geminiAiTranscriptReceivedRef.current);
+
+      // Si sigue vacío, marcar explícitamente
       if (fullTranscriptRef.current.trim().length < 5) {
-        console.error('[VoiceSession] 💀💀💀 NO AUDIO CAPTURED AT ALL!');
+        console.error('[VoiceSession] 💀 NO TRANSCRIPT CAPTURED');
         fullTranscriptRef.current = '';
       }
-      
+
       cleanup();
       const finalTranscript = fullTranscriptRef.current;
       console.log('[VoiceSession] 📤 Sending transcript. Length:', finalTranscript.length);
