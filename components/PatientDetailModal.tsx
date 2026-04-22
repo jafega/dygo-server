@@ -11,6 +11,7 @@ import BonosPanel from './BonosPanel';
 import { AddressAutocomplete } from './AddressAutocomplete';
 import UpgradeModal from './UpgradeModal';
 import SessionDetailsModal from './SessionDetailsModal';
+import NonSessionEntryModal from './NonSessionEntryModal';
 import { HistoricalDocument, HistoricalDocumentsSummary } from '../types';
 import { normalizePhone, detectDefaultPrefix } from '../services/phoneUtils';
 
@@ -100,7 +101,9 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   const [sessionsForPicker, setSessionsForPicker] = useState<any[]>([]);
   const [isLoadingSessionsForPicker, setIsLoadingSessionsForPicker] = useState(false);
   const [sessionEntryEditor, setSessionEntryEditor] = useState<any | null>(null);
-
+  // Non-session entry flow
+  const [showEntryTypeChooser, setShowEntryTypeChooser] = useState(false);
+  const [nonSessionEntryEditor, setNonSessionEntryEditor] = useState<{ existingId?: string } | null>(null);
   // LOPD / RGPD compliance state
   const [isLoadingLOPD, setIsLoadingLOPD] = useState(false);
   const [lopdSessions, setLopdSessions] = useState<any[]>([]);
@@ -233,33 +236,44 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
     
     setIsLoadingHistory(true);
     try {
-      const response = await apiFetch(`${API_URL}/session-entries?target_user_id=${patientUserId}`);
-      if (response.ok) {
-        const entries = await response.json();
-        // Cargar las sesiones asociadas para obtener las fechas
-        const entriesWithDates = await Promise.all(entries.map(async (entry: any) => {
-          if (entry.data?.session_id) {
+      const [sessionEntriesRes, nonSessionEntriesRes] = await Promise.all([
+        apiFetch(`${API_URL}/session-entries?target_user_id=${patientUserId}`),
+        apiFetch(`${API_URL}/non-session-entries?target_user_id=${patientUserId}`),
+      ]);
+
+      let sessionEntries: any[] = [];
+      if (sessionEntriesRes.ok) {
+        const entries = await sessionEntriesRes.json();
+        sessionEntries = await Promise.all(entries.map(async (entry: any) => {
+          const sid = entry.session_id || entry.data?.session_id;
+          if (sid) {
             try {
-              const sessionResponse = await apiFetch(`${API_URL}/sessions/${entry.data.session_id}`);
+              const sessionResponse = await apiFetch(`${API_URL}/sessions/${sid}`);
               if (sessionResponse.ok) {
                 const session = await sessionResponse.json();
-                return { ...entry, sessionDate: session.starts_on };
+                return { ...entry, sessionDate: session.starts_on, __kind: 'session' };
               }
             } catch (error) {
               console.error('Error loading session date:', error);
             }
           }
-          return { ...entry, sessionDate: entry.created_at };
+          return { ...entry, sessionDate: entry.created_at, __kind: 'session' };
         }));
-        
-        // Ordenar por fecha de sesión descendente (más reciente primero)
-        const sortedEntries = entriesWithDates.sort((a: any, b: any) => {
-          const dateA = new Date(a.sessionDate || a.created_at || 0).getTime();
-          const dateB = new Date(b.sessionDate || b.created_at || 0).getTime();
-          return dateB - dateA;
-        });
-        setClinicalHistory(sortedEntries);
       }
+
+      let nonSessionEntries: any[] = [];
+      if (nonSessionEntriesRes.ok) {
+        const entries = await nonSessionEntriesRes.json();
+        nonSessionEntries = entries.map((e: any) => ({ ...e, __kind: 'non_session', sessionDate: e.created_at }));
+      }
+
+      const merged = [...sessionEntries, ...nonSessionEntries];
+      const sortedEntries = merged.sort((a: any, b: any) => {
+        const dateA = new Date(a.sessionDate || a.created_at || 0).getTime();
+        const dateB = new Date(b.sessionDate || b.created_at || 0).getTime();
+        return dateB - dateA;
+      });
+      setClinicalHistory(sortedEntries);
     } catch (error) {
       console.error('Error loading clinical history:', error);
     }
@@ -301,8 +315,19 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   };
 
   const handleOpenSessionPicker = async () => {
+    // Mostrar primero el selector de tipo de entrada (con sesión / sin sesión)
+    setShowEntryTypeChooser(true);
+  };
+
+  const handleChooseWithSession = async () => {
+    setShowEntryTypeChooser(false);
     await loadSessionsForEntryPicker();
     setShowSessionPicker(true);
+  };
+
+  const handleChooseWithoutSession = () => {
+    setShowEntryTypeChooser(false);
+    setNonSessionEntryEditor({ existingId: undefined });
   };
 
   const handleSelectSessionForEntry = async (sessionFromPicker: any) => {
@@ -320,6 +345,10 @@ const PatientDetailModal: React.FC<PatientDetailModalProps> = ({ patient, onClos
   };
 
   const handleEditEntryFromHistory = async (entry: any) => {
+    if (entry.__kind === 'non_session') {
+      setNonSessionEntryEditor({ existingId: entry.id });
+      return;
+    }
     const sessionId = entry.data?.session_id || entry.session_id;
     if (!sessionId) return;
     try {
@@ -3170,8 +3199,13 @@ tr:nth-child(even) td{background:#f8fafc}
                               <div className="flex items-center justify-between gap-2">
                                 <div className="flex items-center gap-2">
                                   <span className="text-sm sm:text-base font-semibold text-slate-900">
-                                    Sesión {entryDate.toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}
+                                    {entry.__kind === 'non_session' ? 'Entrada' : 'Sesión'} {entryDate.toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}
                                   </span>
+                                  {entry.__kind === 'non_session' && (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-medium bg-indigo-100 text-indigo-700">
+                                      Sin sesión
+                                    </span>
+                                  )}
                                   <span className={`px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-medium ${
                                     status === 'done' 
                                       ? 'bg-green-100 text-green-700'
@@ -3786,6 +3820,55 @@ tr:nth-child(even) td{background:#f8fafc}
         />
       )}
 
+      {/* Entry Type Chooser — decide between "linked to a session" or "standalone" */}
+      {showEntryTypeChooser && (
+        <div
+          className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4"
+          onClick={(e) => { e.stopPropagation(); setShowEntryTypeChooser(false); }}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
+              <div className="flex items-center gap-2">
+                <Plus size={20} className="text-indigo-600" />
+                <h3 className="text-base font-bold text-slate-800">Nueva entrada</h3>
+              </div>
+              <button onClick={() => setShowEntryTypeChooser(false)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-4 space-y-3">
+              <button
+                onClick={handleChooseWithSession}
+                className="w-full text-left p-4 rounded-xl border-2 border-slate-200 hover:border-indigo-500 hover:bg-indigo-50 transition-all flex items-start gap-3"
+              >
+                <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
+                  <Calendar size={18} className="text-indigo-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-slate-900">Asociada a una sesión</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Vincula esta entrada a una sesión completada existente</p>
+                </div>
+              </button>
+              <button
+                onClick={handleChooseWithoutSession}
+                className="w-full text-left p-4 rounded-xl border-2 border-slate-200 hover:border-purple-500 hover:bg-purple-50 transition-all flex items-start gap-3"
+              >
+                <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0">
+                  <FileText size={18} className="text-purple-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-slate-900">Sin sesión asociada</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Añade una entrada suelta a la historia clínica</p>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Session Picker Modal — select a completed session to add/edit its entry */}
       {showSessionPicker && (
         <div
@@ -3860,6 +3943,23 @@ tr:nth-child(even) td{background:#f8fafc}
             onClose={() => setSessionEntryEditor(null)}
             onSave={() => {
               setSessionEntryEditor(null);
+              loadClinicalHistory();
+            }}
+          />
+        </div>
+      )}
+
+      {/* Non-Session Entry Editor — standalone clinical history entry */}
+      {nonSessionEntryEditor && patientUserId && (
+        <div onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+          <NonSessionEntryModal
+            patientUserId={patientUserId}
+            patientName={patient.name}
+            psychologistUserId={currentPsychologistId || ''}
+            existingEntryId={nonSessionEntryEditor.existingId}
+            onClose={() => setNonSessionEntryEditor(null)}
+            onSave={() => {
+              setNonSessionEntryEditor(null);
               loadClinicalHistory();
             }}
           />

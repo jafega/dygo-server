@@ -309,10 +309,26 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
               setStatus('connected');
               console.log('[VoiceSession] Status set to connected');
               
-              // Disparar turno inicial para que la IA salude primero y guardar sessionRef cuanto antes
+              // Asegurar que el AudioContext de salida esté activo (algunos navegadores lo suspenden)
+              try {
+                if (outputAudioContext.state === 'suspended') {
+                  outputAudioContext.resume().then(() => console.log('[VoiceSession] ▶️ Output AudioContext resumed'));
+                }
+              } catch (e) { console.warn('[VoiceSession] Could not resume output context', e); }
+
+              // Disparar turno inicial para que la IA salude primero
+              // IMPORTANTE: Hay que enviar un turno con contenido (no solo turnComplete) para que la IA responda
               sessionPromise.then(session => {
                 sessionRef.current = session;
-                try { session.sendClientContent({ turnComplete: true }); } catch (e) { console.warn('[VoiceSession] initial turnComplete failed', e); }
+                try {
+                  session.sendClientContent({
+                    turns: [{ role: 'user', parts: [{ text: 'Inicia la sesión ahora: salúdame con calidez y pregúntame cómo estoy y cómo me fue el día.' }] }],
+                    turnComplete: true
+                  });
+                  console.log('[VoiceSession] 👋 Initial greeting trigger sent');
+                } catch (e) {
+                  console.warn('[VoiceSession] initial greeting send failed', e);
+                }
               });
 
               // Start Timer
@@ -397,9 +413,18 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
               if (parts && parts.length > 0) {
                 const ctx = audioContextRef.current;
                 if (ctx) {
+                  // Asegurar que el contexto esté activo antes de reproducir
+                  if (ctx.state === 'suspended') {
+                    try { await ctx.resume(); } catch (e) { console.warn('[VoiceSession] resume failed', e); }
+                  }
+                  let audioPartsCount = 0;
                   for (const part of parts) {
                     const audioData = part?.inlineData?.data;
-                    if (!audioData) continue;
+                    if (!audioData) {
+                      console.log('[VoiceSession] 📦 Part without inlineData:', Object.keys(part || {}));
+                      continue;
+                    }
+                    audioPartsCount++;
                     setIsAiSpeaking(true);
                     nextStartTimeRef.current = Math.max(nextStartTimeRef.current, ctx.currentTime);
 
@@ -416,6 +441,9 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
                     source.start(nextStartTimeRef.current);
                     nextStartTimeRef.current += buffer.duration;
                     sourcesRef.current.add(source);
+                  }
+                  if (audioPartsCount > 0) {
+                    console.log(`[VoiceSession] 🔊 Playing ${audioPartsCount} audio part(s) from AI`);
                   }
                 }
               }

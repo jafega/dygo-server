@@ -95,6 +95,7 @@ const SUPABASE_TABLES_TO_ENSURE = [
   'settings',
   'sessions',
   'session_entry',
+  'non_session_entry',
   'dispo',
   'care_relationships',
   'invoices',
@@ -1116,6 +1117,39 @@ const ensureSessionEntryTable = async () => {
     }
   } catch (err) {
     console.error('❌ Error asegurando tabla session_entry:', err?.message || err);
+  }
+};
+
+const ensureNonSessionEntryTable = async () => {
+  if (!supabaseAdmin || !SUPABASE_SQL_ENDPOINT || !SUPABASE_SERVICE_ROLE_KEY) return;
+
+  try {
+    const { error } = await supabaseAdmin.from('non_session_entry').select('id').limit(1);
+    if (error && isMissingRelationError(error)) {
+      const sql = `
+        CREATE TABLE IF NOT EXISTS public.non_session_entry (
+          id TEXT PRIMARY KEY,
+          data JSONB NOT NULL DEFAULT '{}'::jsonb,
+          creator_user_id TEXT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+          target_user_id TEXT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+          status TEXT NOT NULL DEFAULT 'pending',
+          summary TEXT,
+          transcript TEXT,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_non_session_entry_creator ON public.non_session_entry(creator_user_id);
+        CREATE INDEX IF NOT EXISTS idx_non_session_entry_target ON public.non_session_entry(target_user_id);
+        CREATE INDEX IF NOT EXISTS idx_non_session_entry_status ON public.non_session_entry(status);
+
+        ALTER TABLE public.non_session_entry ENABLE ROW LEVEL SECURITY;
+      `;
+      await executeSupabaseSql(sql);
+      console.log('✅ Tabla non_session_entry creada en Supabase');
+    }
+  } catch (err) {
+    console.error('❌ Error asegurando tabla non_session_entry:', err?.message || err);
   }
 };
 
@@ -16717,6 +16751,298 @@ app.post('/api/session-entries/cleanup-duplicates', authenticateRequest, async (
   } catch (err) {
     console.error('❌ Error in cleanup-duplicates:', err);
     return res.status(500).json({ error: err?.message || 'Error durante la limpieza' });
+  }
+});
+
+// --- NON-SESSION ENTRIES ---
+// Entradas de historia clínica que NO están ligadas a una sesión programada.
+// Estructura idéntica a session_entry pero sin session_id.
+app.post('/api/non-session-entries', authenticateRequest, async (req, res) => {
+  try {
+    const db = getDb();
+    if (!db.nonSessionEntries) db.nonSessionEntries = [];
+
+    const userId = req.authenticatedUserId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Usuario no autenticado' });
+    }
+
+    const {
+      creator_user_id,
+      target_user_id,
+      transcript,
+      summary,
+      status,
+      file,
+      file_name,
+      file_type,
+      entry_type
+    } = req.body;
+
+    if (!target_user_id) {
+      return res.status(400).json({ error: 'target_user_id es requerido' });
+    }
+    if (transcript === undefined || summary === undefined) {
+      return res.status(400).json({
+        error: 'transcript y summary deben estar presentes (pueden ser cadenas vacías)'
+      });
+    }
+
+    const entryId = crypto.randomUUID();
+    const nowIso = new Date().toISOString();
+    const entryData = {
+      file,
+      file_name,
+      file_type,
+      entry_type: entry_type || 'non_session_note',
+      created_at: nowIso
+    };
+
+    if (supabaseAdmin) {
+      try {
+        await ensureNonSessionEntryTable();
+
+        const { error: insertError } = await supabaseAdmin
+          .from('non_session_entry')
+          .insert({
+            id: entryId,
+            creator_user_id: creator_user_id || userId,
+            target_user_id,
+            status: status || 'pending',
+            summary: summary || null,
+            transcript: transcript || null,
+            data: entryData
+          });
+
+        if (insertError) {
+          console.error('❌ Error insertando non_session_entry en Supabase:', insertError);
+          throw insertError;
+        }
+        console.log('✅ Non_session_entry creada en Supabase:', entryId);
+      } catch (supabaseErr) {
+        console.error('❌ Error en operaciones de Supabase:', supabaseErr);
+        throw supabaseErr;
+      }
+    }
+
+    const entry = {
+      id: entryId,
+      creator_user_id: creator_user_id || userId,
+      target_user_id,
+      status: status || 'pending',
+      summary: summary || null,
+      transcript: transcript || null,
+      data: { ...entryData },
+      created_at: nowIso
+    };
+    db.nonSessionEntries.push(entry);
+
+    return res.json(entry);
+  } catch (err) {
+    console.error('❌ Error creating non-session entry', err);
+    return res.status(500).json({ error: err?.message || 'No se pudo crear la entrada' });
+  }
+});
+
+app.get('/api/non-session-entries', authenticateRequest, async (req, res) => {
+  try {
+    const { target_user_id, creator_user_id, ids } = req.query;
+    const db = getDb();
+    if (!db.nonSessionEntries) db.nonSessionEntries = [];
+
+    let entries = db.nonSessionEntries;
+
+    if (ids) {
+      const idList = String(ids).split(',').map(s => s.trim()).filter(Boolean);
+      entries = entries.filter(e => idList.includes(e.id));
+    }
+    if (target_user_id) {
+      entries = entries.filter(e => e.target_user_id === target_user_id);
+    }
+    if (creator_user_id) {
+      entries = entries.filter(e => e.creator_user_id === creator_user_id);
+    }
+
+    if (supabaseAdmin && (target_user_id || creator_user_id || ids)) {
+      try {
+        let query = supabaseAdmin.from('non_session_entry').select('*');
+        if (ids) {
+          const idList = String(ids).split(',').map(s => s.trim()).filter(Boolean);
+          query = query.in('id', idList);
+        }
+        if (target_user_id) query = query.eq('target_user_id', target_user_id);
+        if (creator_user_id) query = query.eq('creator_user_id', creator_user_id);
+
+        const { data: rows, error } = await query;
+        if (!error && rows) {
+          const normalized = rows.map(row => {
+            const n = normalizeSupabaseRow(row);
+            if (row.status) { n.status = row.status; if (n.data) n.data.status = row.status; }
+            if (row.transcript !== undefined) n.transcript = row.transcript;
+            if (row.summary !== undefined) n.summary = row.summary;
+            n.created_at = row.created_at || row.data?.created_at || null;
+            return n;
+          });
+          const existingIds = new Set(entries.map(e => e.id));
+          for (const n of normalized) {
+            if (!existingIds.has(n.id)) entries.push(n);
+            const idx = db.nonSessionEntries.findIndex(e => e.id === n.id);
+            if (idx === -1) db.nonSessionEntries.push(n);
+            else db.nonSessionEntries[idx] = n;
+          }
+        } else if (error && !isMissingRelationError(error)) {
+          console.error('❌ [GET /api/non-session-entries] Supabase error:', error);
+        }
+      } catch (supabaseErr) {
+        console.error('❌ [GET /api/non-session-entries] Exception:', supabaseErr);
+      }
+    }
+
+    return res.json(entries);
+  } catch (err) {
+    console.error('❌ Error fetching non-session entries', err);
+    return res.status(500).json({ error: err?.message || 'No se pudieron obtener las entradas' });
+  }
+});
+
+app.get('/api/non-session-entries/:id', authenticateRequest, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const db = getDb();
+    if (!db.nonSessionEntries) db.nonSessionEntries = [];
+
+    let entry = db.nonSessionEntries.find(e => e.id === id);
+
+    if (!entry && supabaseAdmin) {
+      try {
+        const { data, error } = await supabaseAdmin
+          .from('non_session_entry')
+          .select('*')
+          .eq('id', id)
+          .limit(1);
+        if (!error && data && data.length > 0) {
+          const row = data[0];
+          entry = normalizeSupabaseRow(row);
+          if (row.status) { entry.status = row.status; if (entry.data) entry.data.status = row.status; }
+          if (row.transcript !== undefined) entry.transcript = row.transcript;
+          if (row.summary !== undefined) entry.summary = row.summary;
+          entry.created_at = row.created_at || row.data?.created_at || null;
+          db.nonSessionEntries.push(entry);
+        }
+      } catch (supabaseErr) {
+        console.error(`❌ [GET /api/non-session-entries/${id}] Exception:`, supabaseErr);
+      }
+    }
+
+    if (!entry) return res.status(404).json({ error: 'Non-session entry not found' });
+    return res.json(entry);
+  } catch (err) {
+    console.error('❌ Error fetching non-session entry by ID', err);
+    return res.status(500).json({ error: err?.message || 'No se pudo obtener la entrada' });
+  }
+});
+
+app.patch('/api/non-session-entries/:id', authenticateRequest, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const db = getDb();
+    if (!db.nonSessionEntries) db.nonSessionEntries = [];
+
+    let idx = db.nonSessionEntries.findIndex(e => e.id === id);
+
+    if (idx === -1 && supabaseAdmin) {
+      try {
+        const { data: rows, error } = await supabaseAdmin
+          .from('non_session_entry')
+          .select('*')
+          .eq('id', id)
+          .limit(1);
+        if (!error && rows && rows.length > 0) {
+          const row = rows[0];
+          const normalized = normalizeSupabaseRow(row);
+          if (row.status) { normalized.status = row.status; if (normalized.data) normalized.data.status = row.status; }
+          if (row.transcript !== undefined) normalized.transcript = row.transcript;
+          if (row.summary !== undefined) normalized.summary = row.summary;
+          if (row.created_at !== undefined) normalized.created_at = row.created_at;
+          if (row.updated_at !== undefined) normalized.updated_at = row.updated_at;
+          db.nonSessionEntries.push(normalized);
+          idx = db.nonSessionEntries.length - 1;
+        }
+      } catch (loadErr) {
+        console.error(`❌ [PATCH non-session-entry] Error loading ${id}:`, loadErr);
+      }
+    }
+
+    if (idx === -1) {
+      return res.status(404).json({ error: 'Non-session entry no encontrada' });
+    }
+
+    const { summary, status, transcript, file, file_name, file_type } = req.body;
+    const entry = db.nonSessionEntries[idx];
+    const updates = {};
+    const dataUpdates = { ...entry.data };
+
+    if (summary !== undefined) updates.summary = summary;
+    if (transcript !== undefined) updates.transcript = transcript;
+    if (status !== undefined) { updates.status = status; dataUpdates.status = status; }
+    if (file !== undefined) dataUpdates.file = file;
+    if (file_name !== undefined) dataUpdates.file_name = file_name;
+    if (file_type !== undefined) dataUpdates.file_type = file_type;
+
+    dataUpdates.updated_at = new Date().toISOString();
+    updates.data = dataUpdates;
+
+    if (supabaseAdmin) {
+      try {
+        const { error: updateError } = await supabaseAdmin
+          .from('non_session_entry')
+          .update(updates)
+          .eq('id', id);
+        if (updateError) {
+          console.error('❌ [PATCH non-session-entry] Supabase error:', updateError);
+          throw updateError;
+        }
+      } catch (supabaseErr) {
+        console.error('❌ [PATCH non-session-entry] Exception:', supabaseErr);
+        throw supabaseErr;
+      }
+    }
+
+    db.nonSessionEntries[idx] = { ...entry, ...updates };
+    db.nonSessionEntries[idx].data = dataUpdates;
+    return res.json(db.nonSessionEntries[idx]);
+  } catch (err) {
+    console.error('❌ Error updating non-session entry', err);
+    return res.status(500).json({ error: err?.message || 'No se pudo actualizar la entrada' });
+  }
+});
+
+app.delete('/api/non-session-entries/:id', authenticateRequest, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const db = getDb();
+    if (!db.nonSessionEntries) db.nonSessionEntries = [];
+
+    if (supabaseAdmin) {
+      try {
+        const { error } = await supabaseAdmin
+          .from('non_session_entry')
+          .delete()
+          .eq('id', id);
+        if (error && !isMissingRelationError(error)) {
+          console.error('❌ [DELETE non-session-entry] Supabase error:', error);
+          return res.status(500).json({ error: error.message });
+        }
+      } catch (supabaseErr) {
+        console.error('❌ [DELETE non-session-entry] Exception:', supabaseErr);
+      }
+    }
+
+    db.nonSessionEntries = db.nonSessionEntries.filter(e => e.id !== id);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('❌ Error deleting non-session entry', err);
+    return res.status(500).json({ error: err?.message || 'No se pudo eliminar la entrada' });
   }
 });
 
