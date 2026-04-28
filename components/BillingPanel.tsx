@@ -4,6 +4,7 @@ import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
 import { AddressAutocomplete } from './AddressAutocomplete';
 import { includesNormalized, isTempEmail } from '../services/textUtils';
+import { downloadInvoicePdf } from '../services/printUtils';
 const BulkBillingPanel = lazy(() => import('./BulkBillingPanel'));
 
 interface Invoice {
@@ -1406,14 +1407,8 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
       if (!response.ok) {
         throw new Error(`Error ${response.status}`);
       }
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      const invoice = invoices.find(inv => inv.id === invoiceId);
+      await downloadInvoicePdf(response, invoice?.invoiceNumber);
     } catch (error) {
       console.error('Error opening PDF:', error);
       alert('Error al abrir la factura');

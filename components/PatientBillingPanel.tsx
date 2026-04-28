@@ -2,6 +2,7 @@
 import { Download, FileText, Check, Clock, AlertCircle, X } from 'lucide-react';
 import { getCurrentUser, apiFetch } from '../services/authService';
 import { API_URL } from '../services/config';
+import { downloadInvoicePdf } from '../services/printUtils';
 
 interface Invoice {
   id: string;
@@ -61,14 +62,8 @@ export default function PatientBillingPanel() {
       if (!response.ok) {
         throw new Error(`Error ${response.status}`);
       }
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      const invoice = invoices.find(inv => inv.id === invoiceId);
+      await downloadInvoicePdf(response, invoice?.invoiceNumber);
     } catch (error) {
       console.error('Error opening PDF:', error);
       alert('Error al abrir la factura');
