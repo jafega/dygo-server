@@ -951,6 +951,9 @@ const computeAccess = (sub, userCreatedAt) => {
 const checkPsychAccess = (db, psychUserId) => {
   const masterUser = (db.users || []).find(u => u.id === psychUserId);
   if (masterUser?.master === true) return { allowed: true, isSubscribed: true, trialActive: false, trialDaysLeft: 0, isMaster: true };
+  // Superadmin emails (env-configured) are treated as master/unlimited automatically
+  const masterEmail = masterUser?.email || masterUser?.user_email || masterUser?.data?.email;
+  if (isSuperAdmin(masterEmail)) return { allowed: true, isSubscribed: true, trialActive: false, trialDaysLeft: 0, isMaster: true };
   const sub = getPsychSub(db, psychUserId);
   // Sync: use cached createdAt from local db users (may be inaccurate)
   const user = (db.users || []).find(u => u.id === psychUserId);
@@ -968,16 +971,25 @@ const checkPsychAccessAsync = async (db, psychUserId) => {
     try {
       const { data: supaUser, error } = await supabaseAdmin
         .from('users')
-        .select('master')
+        .select('master, user_email, data')
         .eq('id', String(psychUserId))
         .single();
-      if (!error && supaUser && supaUser.master === true) {
-        return { allowed: true, isSubscribed: true, trialActive: false, trialDaysLeft: 0, isMaster: true };
+      if (!error && supaUser) {
+        if (supaUser.master === true) {
+          return { allowed: true, isSubscribed: true, trialActive: false, trialDaysLeft: 0, isMaster: true };
+        }
+        const supaEmail = supaUser.user_email || supaUser.data?.email;
+        if (isSuperAdmin(supaEmail)) {
+          return { allowed: true, isSubscribed: true, trialActive: false, trialDaysLeft: 0, isMaster: true };
+        }
       }
     } catch (e) { /* fall through */ }
   }
   const masterUser = (db.users || []).find(u => u.id === psychUserId);
   if (masterUser?.master === true) return { allowed: true, isSubscribed: true, trialActive: false, trialDaysLeft: 0, isMaster: true };
+  // Superadmin emails (env-configured) are treated as master/unlimited automatically
+  const masterEmail = masterUser?.email || masterUser?.user_email || masterUser?.data?.email;
+  if (isSuperAdmin(masterEmail)) return { allowed: true, isSubscribed: true, trialActive: false, trialDaysLeft: 0, isMaster: true };
   const sub = getPsychSub(db, psychUserId);
   const userCreatedAt = await getSupabaseUserCreatedAt(psychUserId);
   return computeAccess(sub, userCreatedAt);
@@ -4607,7 +4619,7 @@ app.get('/api/admin/stats', authenticateRequest, async (req, res) => {
     const psychDetails = psychUsers.map(u => {
       const sub = subsByPsychId[u.id] || { plan_id: DEFAULT_PSYCH_PLAN, stripe_status: null, access_blocked: false };
       const createdAt = getCreatedAt(u);
-      const isMaster = u.master === true;
+      const isMaster = u.master === true || isSuperAdmin(u.email || u.user_email || u.data?.email);
       const plan = PSYCH_PLANS[sub.plan_id] || PSYCH_PLANS[DEFAULT_PSYCH_PLAN];
 
       let access;

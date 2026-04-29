@@ -446,7 +446,8 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
           </button>
           {onSwitchToAdmin && [
             'garryjavi@gmail.com',
-            'daniel.m.mendezv@gmail.com'
+            'daniel.m.mendezv@gmail.com',
+            'info@mainds.app'
           ].includes(userEmail?.toLowerCase() || '') && (
             <button
               onClick={onSwitchToAdmin}
