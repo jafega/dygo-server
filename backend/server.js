@@ -4679,8 +4679,10 @@ app.get('/api/admin/stats', authenticateRequest, async (req, res) => {
       weeklyPaidData.push({ semana: label, pagantes: count });
     }
 
-    // Monthly MRR contribution – last 12 months, by registration date of currently-paid psychologists
+    // Monthly revenue – last 12 months, based on actual paid Stripe invoices for psychologist subscriptions.
+    // Falls back to a registration-date estimate if Stripe is not configured.
     const monthlyMrrData = [];
+    const monthBuckets = []; // [{ start, end, label, mrr }]
     const todayMidnight = new Date(now);
     todayMidnight.setDate(1);
     todayMidnight.setHours(0, 0, 0, 0);
@@ -4690,14 +4692,72 @@ app.get('/api/admin/stats', authenticateRequest, async (req, res) => {
       const monthEnd = new Date(monthStart);
       monthEnd.setMonth(monthStart.getMonth() + 1);
       const label = monthStart.toLocaleDateString('es-ES', { month: 'short', year: '2-digit' });
-      const monthMrr = psychDetails
-        .filter(p => {
-          if (!p.isSubscribed && !p.isMaster) return false;
-          const ca = p.createdAt;
-          return ca && ca >= monthStart.getTime() && ca < monthEnd.getTime();
-        })
-        .reduce((sum, p) => sum + (p.isMaster ? 0 : p.planPrice), 0);
-      monthlyMrrData.push({ mes: label, mrr: Math.round(monthMrr * 100) / 100 });
+      monthBuckets.push({ start: monthStart.getTime(), end: monthEnd.getTime(), label, mrr: 0 });
+    }
+
+    const psychPriceIds = new Set([
+      STRIPE_PRICE_IDS.starter,
+      STRIPE_PRICE_IDS.mainder,
+      STRIPE_PRICE_IDS.supermainder,
+    ].filter(Boolean));
+
+    let stripeRevenueOk = false;
+    if (process.env.STRIPE_SECRET_KEY) {
+      try {
+        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2022-11-15' });
+        const sinceSec = Math.floor(monthBuckets[0].start / 1000);
+        let starting_after;
+        let pageCount = 0;
+        const MAX_PAGES = 20; // safety cap (20 * 100 = 2000 invoices)
+        while (pageCount < MAX_PAGES) {
+          const params = {
+            status: 'paid',
+            limit: 100,
+            created: { gte: sinceSec },
+          };
+          if (starting_after) params.starting_after = starting_after;
+          const page = await stripe.invoices.list(params);
+          for (const inv of page.data) {
+            // Only count psychologist plan invoices (skip patient_premium and others)
+            const lineItems = inv.lines?.data || [];
+            const isPsychInvoice = lineItems.some(li => {
+              const priceId = li.price?.id || li.plan?.id;
+              return priceId && psychPriceIds.has(priceId);
+            });
+            if (!isPsychInvoice) continue;
+            const paidTs = (inv.status_transitions?.paid_at || inv.created || 0) * 1000;
+            if (!paidTs) continue;
+            const bucket = monthBuckets.find(b => paidTs >= b.start && paidTs < b.end);
+            if (bucket) {
+              const amount = (inv.amount_paid || 0) / 100;
+              bucket.mrr += amount;
+            }
+          }
+          if (!page.has_more || page.data.length === 0) break;
+          starting_after = page.data[page.data.length - 1].id;
+          pageCount++;
+        }
+        stripeRevenueOk = true;
+      } catch (e) {
+        console.error('[admin/stats] Stripe invoices fetch failed, falling back to registration estimate:', e?.message || e);
+      }
+    }
+
+    if (!stripeRevenueOk) {
+      // Fallback: estimate by registration date (legacy behavior)
+      for (const bucket of monthBuckets) {
+        bucket.mrr = psychDetails
+          .filter(p => {
+            if (!p.isSubscribed && !p.isMaster) return false;
+            const ca = p.createdAt;
+            return ca && ca >= bucket.start && ca < bucket.end;
+          })
+          .reduce((sum, p) => sum + (p.isMaster ? 0 : p.planPrice), 0);
+      }
+    }
+
+    for (const bucket of monthBuckets) {
+      monthlyMrrData.push({ mes: bucket.label, mrr: Math.round(bucket.mrr * 100) / 100 });
     }
 
     return res.json({

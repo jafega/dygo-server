@@ -347,7 +347,7 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                 <h3 className="text-sm font-semibold text-slate-700 mb-1 uppercase tracking-wide">
                   Ingresos por suscripciones de psicólogos · últimos 12 meses
                 </h3>
-                <p className="text-xs text-slate-400 mb-4">MRR acumulado por mes de alta de suscriptores activos</p>
+                <p className="text-xs text-slate-400 mb-4">Facturación real cobrada vía Stripe en cada mes</p>
                 <ResponsiveContainer width="100%" height={200}>
                   <AreaChart data={stats.monthlyMrr} margin={{ top: 4, right: 4, left: -4, bottom: 0 }}>
                     <defs>
