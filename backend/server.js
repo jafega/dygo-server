@@ -5102,6 +5102,7 @@ const handleCreateCheckoutSession = async (req, res) => {
         customer: stripeCustomerId,
         success_url: successUrl,
         cancel_url: cancelUrl,
+        allow_promotion_codes: true,
         subscription_data: patientSubscriptionData,
         metadata: { patient_user_id: requesterId, subscription_type: 'patient', plan_id: 'patient_premium' }
       });
@@ -5138,6 +5139,7 @@ const handleCreateCheckoutSession = async (req, res) => {
       customer: sub.stripe_customer_id,
       success_url: successUrl,
       cancel_url: cancelUrl,
+      allow_promotion_codes: true,
       metadata: { psychologist_user_id: requesterId, subscription_type: 'psychologist', plan_id: requestedPlanId },
       subscription_data: {
         metadata: { psychologist_user_id: requesterId, subscription_type: 'psychologist', plan_id: requestedPlanId }
