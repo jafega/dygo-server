@@ -149,7 +149,8 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
     percent_psych: 100,
     bonus_id: undefined as string | undefined,
     paymentMethod: '' as string,
-    recurrence: 'none' as 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly',
+    recurrence: 'none' as 'none' | 'daily' | 'weekly' | 'custom_weekly' | 'monthly',
+    recurrenceWeeks: 2,
     recurrenceEndDate: '',
     reminder_enabled: false,
     whatsapp_reminder_enabled: false
@@ -710,8 +711,9 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
           current = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 1);
         } else if (newSession.recurrence === 'weekly') {
           current = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 7);
-        } else if (newSession.recurrence === 'biweekly') {
-          current = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 14);
+        } else if (newSession.recurrence === 'custom_weekly') {
+          const weeks = Math.max(1, Number(newSession.recurrenceWeeks) || 2);
+          current = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 7 * weeks);
         } else if (newSession.recurrence === 'monthly') {
           current = new Date(current.getFullYear(), current.getMonth() + 1, current.getDate());
         }
@@ -3567,7 +3569,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                       { value: 'none', label: 'Sin repetición' },
                       { value: 'daily', label: 'Diariamente' },
                       { value: 'weekly', label: 'Semanalmente' },
-                      { value: 'biweekly', label: 'Cada 2 semanas' },
+                      { value: 'custom_weekly', label: 'Cada X semanas' },
                       { value: 'monthly', label: 'Mensualmente' }
                     ] as const).map(opt => (
                       <button
@@ -3585,6 +3587,30 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                     ))}
                   </div>
                 </div>
+
+                {newSession.recurrence === 'custom_weekly' && (
+                  <div>
+                    <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">
+                      Repetir cada
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min={1}
+                        max={52}
+                        value={newSession.recurrenceWeeks}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value, 10);
+                          setNewSession({ ...newSession, recurrenceWeeks: Number.isFinite(v) && v > 0 ? v : 1 });
+                        }}
+                        className="w-20 px-2 sm:px-3 py-2 sm:py-2.5 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent touch-manipulation bg-white"
+                      />
+                      <span className="text-xs sm:text-sm text-slate-700">
+                        {newSession.recurrenceWeeks === 1 ? 'semana' : 'semanas'}
+                      </span>
+                    </div>
+                  </div>
+                )}
 
                 {newSession.recurrence !== 'none' && (
                   <div>
@@ -3607,7 +3633,10 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                       while (true) {
                         if (newSession.recurrence === 'daily') current = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 1);
                         else if (newSession.recurrence === 'weekly') current = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 7);
-                        else if (newSession.recurrence === 'biweekly') current = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 14);
+                        else if (newSession.recurrence === 'custom_weekly') {
+                          const weeks = Math.max(1, Number(newSession.recurrenceWeeks) || 2);
+                          current = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 7 * weeks);
+                        }
                         else if (newSession.recurrence === 'monthly') current = new Date(current.getFullYear(), current.getMonth() + 1, current.getDate());
                         if (current > endDate) break;
                         count++;
