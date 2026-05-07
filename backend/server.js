@@ -4892,26 +4892,152 @@ app.get('/api/admin/stats', authenticateRequest, async (req, res) => {
       : 0;
 
     // Weekly paid psychologists – last 8 weeks, Mon-Sun
-    // - weeklyPaidData (legacy): nuevos psicólogos de pago agrupados por su semana de alta
-    // - weeklyActivePaidData: total acumulado de psicólogos de pago activos al final de cada semana
+    // - weeklyPaidData: nuevos psicólogos de pago agrupados por su semana de alta
+    // - weeklyActivePaidData: total acumulado de psicólogos de pago activos al final
+    //   de cada semana, calculado a partir del historial real de Stripe (fallback a
+    //   estimación local basada en createdAt si Stripe no está configurado).
     const weeklyPaidData = [];
     const weeklyActivePaidData = [];
+    const weekRanges = [];
     for (let i = 7; i >= 0; i--) {
       const weekStart = new Date(thisMonday.getTime() - i * 7 * 86400000);
       const weekEnd   = new Date(weekStart.getTime() + 7 * 86400000);
       const label = weekStart.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
+      weekRanges.push({ weekStart: weekStart.getTime(), weekEnd: weekEnd.getTime(), label });
+    }
+
+    const masterIds = new Set(psychDetails.filter(p => p.isMaster).map(p => p.id));
+    const psychIdSet = new Set(psychDetails.map(p => p.id));
+    let cumulativeFromStripe = null;
+    let newPaidFromStripe = null;
+    // subWindows: paid windows + plan info per psychologist subscription, used
+    // for weekly cumulative, weekly new paid, and monthly MRR evolution.
+    let subWindows = null;
+    if (process.env.STRIPE_SECRET_KEY) {
+      try {
+        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2022-11-15' });
+        const subs = [];
+        let starting_after;
+        let pageCount = 0;
+        const MAX_PAGES = 30;
+        while (pageCount < MAX_PAGES) {
+          const params = { status: 'all', limit: 100, expand: ['data.customer', 'data.items.data.price'] };
+          if (starting_after) params.starting_after = starting_after;
+          const page = await stripe.subscriptions.list(params);
+          for (const s of page.data) subs.push(s);
+          if (!page.has_more || page.data.length === 0) break;
+          starting_after = page.data[page.data.length - 1].id;
+          pageCount++;
+        }
+        // Build paid windows per subscription, mapped to a psychologist user id.
+        // A sub is "de pago" from trial_end (or start_date if no trial) until
+        // ended_at. If cancel_at_period_end and not yet ended, the effective
+        // end is current_period_end (won't renew past that).
+        subWindows = [];
+        for (const s of subs) {
+          const customer = s.customer && typeof s.customer === 'object' ? s.customer : null;
+          const subType = s.metadata?.subscription_type || customer?.metadata?.subscription_type;
+          if (subType === 'patient') continue;
+          const psychId = s.metadata?.psychologist_user_id || customer?.metadata?.user_id || null;
+          if (!psychId || !psychIdSet.has(psychId)) continue;
+          if (masterIds.has(psychId)) continue;
+          const startMs = (s.start_date || s.created || 0) * 1000;
+          if (!startMs) continue;
+          const trialEndMs = s.trial_end ? s.trial_end * 1000 : null;
+          const paidStartMs = trialEndMs && trialEndMs > startMs ? trialEndMs : startMs;
+          const endedAtMs = s.ended_at ? s.ended_at * 1000 : null;
+          if (endedAtMs && endedAtMs <= paidStartMs) continue; // never reached paid period
+          const cpeMs = s.current_period_end ? s.current_period_end * 1000 : null;
+          // Effective end: hard end (ended_at) wins; else if cancel_at_period_end
+          // and we know current_period_end, the sub will end at that point.
+          let effectiveEndMs = endedAtMs;
+          if (!effectiveEndMs && s.cancel_at_period_end && cpeMs) effectiveEndMs = cpeMs;
+          // Monthly price in EUR (sums all recurring items priced per month).
+          let monthlyEur = 0;
+          for (const it of (s.items?.data || [])) {
+            const pr = it.price;
+            const amount = (pr?.unit_amount || 0) / 100;
+            const qty = it.quantity || 1;
+            const interval = pr?.recurring?.interval;
+            const intervalCount = pr?.recurring?.interval_count || 1;
+            if (interval === 'month') monthlyEur += (amount * qty) / intervalCount;
+            else if (interval === 'year') monthlyEur += (amount * qty) / (12 * intervalCount);
+            else if (interval === 'week') monthlyEur += (amount * qty * 4.345) / intervalCount;
+            else monthlyEur += amount * qty; // one-time fallback
+          }
+          subWindows.push({
+            psychId,
+            startMs: paidStartMs,
+            endMs: endedAtMs,
+            effectiveEndMs,
+            cancelAtPeriodEnd: !!s.cancel_at_period_end,
+            currentPeriodEndMs: cpeMs,
+            status: s.status,
+            monthlyEur,
+          });
+        }
+        cumulativeFromStripe = weekRanges.map(({ weekEnd, label }) => {
+          const active = new Set();
+          for (const w of subWindows) {
+            if (w.startMs < weekEnd && (w.endMs === null || w.endMs > weekEnd)) {
+              active.add(w.psychId);
+            }
+          }
+          return { semana: label, pagantes: active.size };
+        });
+        // Nuevos psicólogos de pago por semana: agrupados por la fecha en la que
+        // empezó su primera subscripción de pago (paidStartMs), no por su alta.
+        const firstPaidByPsych = new Map();
+        for (const w of subWindows) {
+          const prev = firstPaidByPsych.get(w.psychId);
+          if (prev === undefined || w.startMs < prev) firstPaidByPsych.set(w.psychId, w.startMs);
+        }
+        newPaidFromStripe = weekRanges.map(({ weekStart, weekEnd, label }) => {
+          let count = 0;
+          for (const ts of firstPaidByPsych.values()) {
+            if (ts >= weekStart && ts < weekEnd) count++;
+          }
+          return { semana: label, pagantes: count };
+        });
+      } catch (e) {
+        console.error('[admin/stats] Stripe subs fetch for weekly cumulative failed:', e?.message || e);
+        cumulativeFromStripe = null;
+        newPaidFromStripe = null;
+        subWindows = null;
+      }
+    }
+
+    for (const { weekStart, weekEnd, label } of weekRanges) {
+      // Fallback: cuenta psicólogos hoy de pago agrupados por su fecha de alta
+      // (no es exacto, pero es lo único disponible sin Stripe)
       const newCount = psychDetails.filter(p => {
-        if (!p.isSubscribed && !p.isMaster) return false;
+        if (p.isMaster) return false;
+        if (!p.isSubscribed) return false;
         const ca = p.createdAt;
-        return ca && ca >= weekStart.getTime() && ca < weekEnd.getTime();
-      }).length;
-      const cumulativeCount = psychDetails.filter(p => {
-        if (!p.isSubscribed && !p.isMaster) return false;
-        const ca = p.createdAt;
-        return ca && ca < weekEnd.getTime();
+        return ca && ca >= weekStart && ca < weekEnd;
       }).length;
       weeklyPaidData.push({ semana: label, pagantes: newCount });
-      weeklyActivePaidData.push({ semana: label, pagantes: cumulativeCount });
+    }
+
+    // Si Stripe está disponible, sobreescribimos weeklyPaidData con la fecha real
+    // en la que empezó el período de pago (trial_end o start_date).
+    if (newPaidFromStripe) {
+      weeklyPaidData.length = 0;
+      for (const row of newPaidFromStripe) weeklyPaidData.push(row);
+    }
+
+    if (cumulativeFromStripe) {
+      for (const row of cumulativeFromStripe) weeklyActivePaidData.push(row);
+    } else {
+      for (const { weekEnd, label } of weekRanges) {
+        const cumulativeCount = psychDetails.filter(p => {
+          if (p.isMaster) return false;
+          if (!p.isSubscribed) return false;
+          const ca = p.createdAt;
+          return ca && ca < weekEnd;
+        }).length;
+        weeklyActivePaidData.push({ semana: label, pagantes: cumulativeCount });
+      }
     }
 
     // Monthly revenue – last 12 months, based on actual paid Stripe invoices for psychologist subscriptions.
@@ -4929,83 +5055,30 @@ app.get('/api/admin/stats', authenticateRequest, async (req, res) => {
       const label = monthStart.toLocaleDateString('es-ES', { month: 'short', year: '2-digit' });
       monthBuckets.push({ start: monthStart.getTime(), end: monthEnd.getTime(), label, mrr: 0 });
     }
+    const nextMonthStart = new Date(todayMidnight);
+    nextMonthStart.setMonth(todayMidnight.getMonth() + 1);
+    const nextMonthEnd = new Date(nextMonthStart);
+    nextMonthEnd.setMonth(nextMonthStart.getMonth() + 1);
+    const nextMonthLabel = nextMonthStart.toLocaleDateString('es-ES', { month: 'short', year: '2-digit' });
 
-    // Build the set of price IDs that count as a psychologist subscription.
-    // We start from env-configured prices and ALSO learn the price ID of every
-    // active subscription that maps to a known psychologist (covers the case
-    // where a customer was created against an old price that's no longer in
-    // the env vars).
-    const psychPriceIds = new Set([
-      STRIPE_PRICE_IDS.starter,
-      STRIPE_PRICE_IDS.mainder,
-      STRIPE_PRICE_IDS.supermainder,
-    ].filter(Boolean));
-    const psychPriceToPlan = new Map();
-    for (const [planId, priceId] of Object.entries(STRIPE_PRICE_IDS)) {
-      if (PSYCH_PLAN_IDS.includes(planId) && priceId && !priceId.includes('placeholder')) {
-        psychPriceToPlan.set(priceId, planId);
-      }
-    }
-    // Augment with prices used by tracked subscriptions so legacy/old prices count too.
-    for (const psy of psychDetails) {
-      // psy.stripeStatus is non-null only for synced subs; we don't have the
-      // price id at this point, so we'll learn it lazily inside the loop below
-      // by inspecting each invoice's metadata.
-      void psy;
-    }
-
-    let stripeRevenueOk = false;
-    if (process.env.STRIPE_SECRET_KEY) {
-      try {
-        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2022-11-15' });
-        const sinceSec = Math.floor(monthBuckets[0].start / 1000);
-        let starting_after;
-        let pageCount = 0;
-        const MAX_PAGES = 20; // safety cap (20 * 100 = 2000 invoices)
-        while (pageCount < MAX_PAGES) {
-          const params = {
-            status: 'paid',
-            limit: 100,
-            created: { gte: sinceSec },
-          };
-          if (starting_after) params.starting_after = starting_after;
-          const page = await stripe.invoices.list(params);
-          for (const inv of page.data) {
-            // Count an invoice as a psychologist subscription when ANY of:
-            //   - one of its line items references a known psych price id
-            //   - parent.subscription_details.metadata.subscription_type === 'psychologist'
-            //   - any line item metadata.subscription_type === 'psychologist'
-            // The metadata-based path is essential because we set it on every
-            // checkout, regardless of which Stripe price is used.
-            const lineItems = inv.lines?.data || [];
-            const isPsychInvoice = lineItems.some(li => {
-              const priceId = li.price?.id || li.plan?.id;
-              if (priceId && psychPriceIds.has(priceId)) return true;
-              const liMeta = li.metadata || {};
-              if (liMeta.subscription_type === 'psychologist') return true;
-              return false;
-            }) || (inv.subscription_details?.metadata?.subscription_type === 'psychologist')
-              || (inv.parent?.subscription_details?.metadata?.subscription_type === 'psychologist');
-            if (!isPsychInvoice) continue;
-            const paidTs = (inv.status_transitions?.paid_at || inv.created || 0) * 1000;
-            if (!paidTs) continue;
-            const bucket = monthBuckets.find(b => paidTs >= b.start && paidTs < b.end);
-            if (bucket) {
-              const amount = (inv.amount_paid || 0) / 100;
-              bucket.mrr += amount;
-            }
+    // Compute MRR per month from Stripe subscription state. For each month we
+    // sum the monthly price of every psychologist subscription whose paid
+    // window covers that month (paid_start < monthEnd AND effectiveEnd > monthStart).
+    // The next-month projection uses the same logic, so a sub scheduled to
+    // cancel before next month starts is automatically excluded.
+    let monthlyFromSubs = false;
+    if (subWindows && subWindows.length > 0) {
+      for (const bucket of monthBuckets) {
+        let total = 0;
+        for (const w of subWindows) {
+          if (w.startMs < bucket.end && (w.effectiveEndMs === null || w.effectiveEndMs > bucket.start)) {
+            total += w.monthlyEur;
           }
-          if (!page.has_more || page.data.length === 0) break;
-          starting_after = page.data[page.data.length - 1].id;
-          pageCount++;
         }
-        stripeRevenueOk = true;
-      } catch (e) {
-        console.error('[admin/stats] Stripe invoices fetch failed, falling back to registration estimate:', e?.message || e);
+        bucket.mrr = total;
       }
-    }
-
-    if (!stripeRevenueOk) {
+      monthlyFromSubs = true;
+    } else {
       // Fallback: estimate by registration date (legacy behavior)
       for (const bucket of monthBuckets) {
         bucket.mrr = psychDetails
@@ -5023,29 +5096,26 @@ app.get('/api/admin/stats', authenticateRequest, async (req, res) => {
     }
 
     // ── Expected revenue for NEXT month ────────────────────────────────────
-    // Forward-looking projection: sum of plan prices for psychologists who are
-    // currently active/trialing, not master, not scheduled to cancel, and
-    // whose subscription is expected to be billed inside that month.
-    // Trialing subs only count if their trial ends before the end of next
-    // month (otherwise they won't generate an invoice that month).
-    const nextMonthStart = new Date(todayMidnight);
-    nextMonthStart.setMonth(todayMidnight.getMonth() + 1);
-    const nextMonthEnd = new Date(nextMonthStart);
-    nextMonthEnd.setMonth(nextMonthStart.getMonth() + 1);
-    const nextMonthLabel = nextMonthStart.toLocaleDateString('es-ES', { month: 'short', year: '2-digit' });
     let expectedMrr = 0;
-    for (const p of psychDetails) {
-      if (p.isMaster) continue;
-      const status = p.stripeStatus;
-      if (status !== 'active' && status !== 'trialing') continue;
-      if (p.cancelAtPeriodEnd) continue; // will not renew
-      if (status === 'trialing') {
-        // Only count if the trial ends before next month wraps up (so an
-        // invoice is expected within that window).
-        const cpeMs = p.currentPeriodEnd ? p.currentPeriodEnd * 1000 : null;
-        if (!cpeMs || cpeMs >= nextMonthEnd.getTime()) continue;
+    if (monthlyFromSubs) {
+      for (const w of subWindows) {
+        if (w.startMs < nextMonthEnd.getTime() && (w.effectiveEndMs === null || w.effectiveEndMs > nextMonthStart.getTime())) {
+          expectedMrr += w.monthlyEur;
+        }
       }
-      expectedMrr += p.planPrice || 0;
+    } else {
+      // Fallback projection from cached subscriptions
+      for (const p of psychDetails) {
+        if (p.isMaster) continue;
+        const status = p.stripeStatus;
+        if (status !== 'active' && status !== 'trialing') continue;
+        if (p.cancelAtPeriodEnd) continue;
+        if (status === 'trialing') {
+          const cpeMs = p.currentPeriodEnd ? p.currentPeriodEnd * 1000 : null;
+          if (!cpeMs || cpeMs >= nextMonthEnd.getTime()) continue;
+        }
+        expectedMrr += p.planPrice || 0;
+      }
     }
     monthlyMrrData.push({
       mes: nextMonthLabel,
