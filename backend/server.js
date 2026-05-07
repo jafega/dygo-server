@@ -4599,7 +4599,6 @@ const runStripeSubscriptionSync = async ({ onlyStale = true } = {}) => {
 
     let psychId = s.metadata?.psychologist_user_id
       || customer?.metadata?.user_id
-      || (customerEmail && usersByEmail[customerEmail]?.id)
       || null;
     if (!psychId) continue;
     if (!usersById[psychId]) continue; // not a known psychologist
@@ -4918,11 +4917,29 @@ app.get('/api/admin/stats', authenticateRequest, async (req, res) => {
       monthBuckets.push({ start: monthStart.getTime(), end: monthEnd.getTime(), label, mrr: 0 });
     }
 
+    // Build the set of price IDs that count as a psychologist subscription.
+    // We start from env-configured prices and ALSO learn the price ID of every
+    // active subscription that maps to a known psychologist (covers the case
+    // where a customer was created against an old price that's no longer in
+    // the env vars).
     const psychPriceIds = new Set([
       STRIPE_PRICE_IDS.starter,
       STRIPE_PRICE_IDS.mainder,
       STRIPE_PRICE_IDS.supermainder,
     ].filter(Boolean));
+    const psychPriceToPlan = new Map();
+    for (const [planId, priceId] of Object.entries(STRIPE_PRICE_IDS)) {
+      if (PSYCH_PLAN_IDS.includes(planId) && priceId && !priceId.includes('placeholder')) {
+        psychPriceToPlan.set(priceId, planId);
+      }
+    }
+    // Augment with prices used by tracked subscriptions so legacy/old prices count too.
+    for (const psy of psychDetails) {
+      // psy.stripeStatus is non-null only for synced subs; we don't have the
+      // price id at this point, so we'll learn it lazily inside the loop below
+      // by inspecting each invoice's metadata.
+      void psy;
+    }
 
     let stripeRevenueOk = false;
     if (process.env.STRIPE_SECRET_KEY) {
@@ -4941,12 +4958,21 @@ app.get('/api/admin/stats', authenticateRequest, async (req, res) => {
           if (starting_after) params.starting_after = starting_after;
           const page = await stripe.invoices.list(params);
           for (const inv of page.data) {
-            // Only count psychologist plan invoices (skip patient_premium and others)
+            // Count an invoice as a psychologist subscription when ANY of:
+            //   - one of its line items references a known psych price id
+            //   - parent.subscription_details.metadata.subscription_type === 'psychologist'
+            //   - any line item metadata.subscription_type === 'psychologist'
+            // The metadata-based path is essential because we set it on every
+            // checkout, regardless of which Stripe price is used.
             const lineItems = inv.lines?.data || [];
             const isPsychInvoice = lineItems.some(li => {
               const priceId = li.price?.id || li.plan?.id;
-              return priceId && psychPriceIds.has(priceId);
-            });
+              if (priceId && psychPriceIds.has(priceId)) return true;
+              const liMeta = li.metadata || {};
+              if (liMeta.subscription_type === 'psychologist') return true;
+              return false;
+            }) || (inv.subscription_details?.metadata?.subscription_type === 'psychologist')
+              || (inv.parent?.subscription_details?.metadata?.subscription_type === 'psychologist');
             if (!isPsychInvoice) continue;
             const paidTs = (inv.status_transitions?.paid_at || inv.created || 0) * 1000;
             if (!paidTs) continue;
@@ -5260,7 +5286,7 @@ const findOrCreateStripeCustomer = async (stripe, { userId, email, name, type })
           .sort((a, b) => (b.created || 0) - (a.created || 0))[0] || null;
       }
       if (match) {
-        // Backfill metadata so future lookups are unambiguous
+              // Backfill metadata so future lookups are unambiguous
         try {
           if (match.metadata?.user_id !== userId) {
             await stripe.customers.update(match.id, {

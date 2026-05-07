@@ -379,7 +379,7 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                   {(['starter', 'mainder', 'supermainder'] as const).map(planId => {
                     const planNames: Record<string, string> = { starter: 'Starter', mainder: 'Mainder', supermainder: 'Supermainder' };
                     const planPrices: Record<string, string> = { starter: '€9.99', mainder: '€19.99', supermainder: '€29.99' };
-                    const count = stats.psychologists.filter(p => p.plan === planId && (p.isSubscribed || p.isMaster)).length;
+                    const count = stats.psychologists.filter(p => p.plan === planId && p.isSubscribed && !p.isMaster).length;
                     const base = stats.overview.paidCount;
                     const pct = base > 0 ? Math.round((count / base) * 100) : 0;
                     return (
