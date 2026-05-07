@@ -4533,80 +4533,147 @@ const runStripeSubscriptionSync = async ({ onlyStale = true } = {}) => {
   }
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2022-11-15' });
 
-  let rows = [];
+  // Strategy: list ALL subscriptions in Stripe (paginated). Match each one back
+  // to a psychologist via:
+  //   1. subscription.metadata.psychologist_user_id  (set on checkout)
+  //   2. customer.metadata.user_id
+  //   3. customer email → users.user_email
+  // This is much cheaper than querying Stripe per user, because the set of
+  // subscriptions is small (only paying users) while the set of users may be large.
+
+  // Build user lookup tables
+  let usersById = {};
+  let usersByEmail = {};
+  let subRowsById = {};
   if (supabaseAdmin) {
-    const { data, error } = await supabaseAdmin.from('subscriptions').select('id, data');
-    if (error) throw error;
-    rows = (data || []).map(r => ({ id: r.id, ...(r.data || {}) }));
+    const [subsRes, usersRes] = await Promise.all([
+      supabaseAdmin.from('subscriptions').select('id, data'),
+      supabaseAdmin.from('users').select('id, user_email, data, is_psychologist').eq('is_psychologist', true)
+    ]);
+    if (subsRes.error) throw subsRes.error;
+    if (usersRes.error) throw usersRes.error;
+    for (const r of subsRes.data || []) subRowsById[r.id] = { id: r.id, ...(r.data || {}) };
+    for (const u of usersRes.data || []) {
+      const email = (u.user_email || u.data?.email || '').toLowerCase();
+      const rec = { id: u.id, email };
+      usersById[u.id] = rec;
+      if (email) usersByEmail[email] = rec;
+    }
   } else {
     const db = getDb();
-    rows = (db.subscriptions || []).map(s => ({ id: s.psychologist_user_id, ...s }));
+    for (const s of (db.subscriptions || [])) {
+      subRowsById[s.psychologist_user_id] = { id: s.psychologist_user_id, ...s };
+    }
+    for (const u of (db.users || [])) {
+      if (!u.is_psychologist) continue;
+      const email = (u.email || '').toLowerCase();
+      const rec = { id: u.id, email };
+      usersById[u.id] = rec;
+      if (email) usersByEmail[email] = rec;
+    }
+  }
+
+  // Fetch all Stripe subscriptions (paginated)
+  const stripeSubs = [];
+  try {
+    let starting_after;
+    let safety = 0;
+    do {
+      const page = await stripe.subscriptions.list({ status: 'all', limit: 100, starting_after, expand: ['data.customer'] });
+      for (const s of page.data) stripeSubs.push(s);
+      starting_after = page.has_more ? page.data[page.data.length - 1].id : null;
+      safety++;
+    } while (starting_after && safety < 50);
+  } catch (e) {
+    console.error('[runStripeSubscriptionSync] Stripe list failed:', e?.message || e);
+    return { ok: false, reason: e?.message || 'stripe_list_failed', total: 0, updated: 0, results: [] };
+  }
+
+  // Resolve each subscription to a psychologist user id
+  // Pick the most recent active/trialing per user; fall back to most recent.
+  const byUser = new Map();
+  for (const s of stripeSubs) {
+    const customer = s.customer && typeof s.customer === 'object' ? s.customer : null;
+    const customerId = customer ? customer.id : (typeof s.customer === 'string' ? s.customer : null);
+    const customerEmail = customer?.email ? String(customer.email).toLowerCase() : null;
+
+    let psychId = s.metadata?.psychologist_user_id
+      || customer?.metadata?.user_id
+      || (customerEmail && usersByEmail[customerEmail]?.id)
+      || null;
+    if (!psychId) continue;
+    if (!usersById[psychId]) continue; // not a known psychologist
+    // Skip patient subscriptions
+    if (s.metadata?.subscription_type === 'patient' || customer?.metadata?.subscription_type === 'patient') continue;
+
+    const prev = byUser.get(psychId);
+    const isActiveLike = ['active', 'trialing', 'past_due', 'incomplete'].includes(s.status);
+    if (!prev) {
+      byUser.set(psychId, { sub: s, customerId, isActiveLike });
+    } else {
+      // Prefer active over inactive; otherwise the most recent
+      if (isActiveLike && !prev.isActiveLike) byUser.set(psychId, { sub: s, customerId, isActiveLike });
+      else if (isActiveLike === prev.isActiveLike && (s.created || 0) > (prev.sub.created || 0)) {
+        byUser.set(psychId, { sub: s, customerId, isActiveLike });
+      }
+    }
   }
 
   const results = [];
-  for (const row of rows) {
-    const customerId = row.stripe_customer_id;
-    if (!customerId) {
-      results.push({ id: row.id, skipped: 'no_customer' });
+  for (const [psychId, info] of byUser.entries()) {
+    const row = subRowsById[psychId] || { id: psychId };
+    const activeSub = info.sub;
+    const customerId = info.customerId;
+
+    if (onlyStale && row.stripe_status === activeSub.status && row.stripe_subscription_id === activeSub.id && row.stripe_customer_id === customerId) {
+      results.push({ id: psychId, skipped: 'already_synced', stripe_status: row.stripe_status });
       continue;
     }
-    if (onlyStale && row.stripe_status && row.stripe_subscription_id) {
-      results.push({ id: row.id, skipped: 'already_synced', stripe_status: row.stripe_status });
-      continue;
+
+    const next = {
+      psychologist_user_id: psychId,
+      stripe_customer_id: customerId,
+      stripe_subscription_id: activeSub.id,
+      stripe_status: activeSub.status,
+      plan_id: row.plan_id || DEFAULT_PSYCH_PLAN,
+      access_blocked: !['active', 'trialing'].includes(activeSub.status),
+      quantity: activeSub.items?.data?.[0]?.quantity ?? row.quantity ?? 0,
+      cancel_at_period_end: activeSub.cancel_at_period_end ?? false,
+      current_period_end: activeSub.current_period_end ?? null
+    };
+
+    const activePriceId = activeSub.items?.data?.[0]?.price?.id;
+    if (activePriceId) {
+      const resolvedPlanId = Object.entries(STRIPE_PRICE_IDS).find(([, pid]) => pid === activePriceId)?.[0];
+      if (resolvedPlanId && PSYCH_PLAN_IDS.includes(resolvedPlanId)) next.plan_id = resolvedPlanId;
+    } else if (activeSub.metadata?.plan_id && PSYCH_PLAN_IDS.includes(activeSub.metadata.plan_id)) {
+      next.plan_id = activeSub.metadata.plan_id;
     }
 
     try {
-      const list = await stripe.subscriptions.list({ customer: customerId, status: 'all', limit: 10 });
-      const ranked = list.data.slice().sort((a, b) => (b.created || 0) - (a.created || 0));
-      const activeSub = ranked.find(s => ['active', 'trialing', 'past_due', 'incomplete'].includes(s.status))
-        || ranked[0]
-        || null;
-
-      const next = {
-        psychologist_user_id: row.id,
-        stripe_customer_id: customerId,
-        stripe_subscription_id: activeSub ? activeSub.id : null,
-        stripe_status: activeSub ? activeSub.status : null,
-        plan_id: row.plan_id || DEFAULT_PSYCH_PLAN,
-        access_blocked: activeSub ? !['active', 'trialing'].includes(activeSub.status) : false,
-        quantity: activeSub?.items?.data?.[0]?.quantity ?? row.quantity ?? 0,
-        cancel_at_period_end: activeSub?.cancel_at_period_end ?? false,
-        current_period_end: activeSub?.current_period_end ?? null
-      };
-
-      const activePriceId = activeSub?.items?.data?.[0]?.price?.id;
-      if (activePriceId) {
-        const resolvedPlanId = Object.entries(STRIPE_PRICE_IDS).find(([, pid]) => pid === activePriceId)?.[0];
-        if (resolvedPlanId && PSYCH_PLAN_IDS.includes(resolvedPlanId)) next.plan_id = resolvedPlanId;
-      } else if (activeSub?.metadata?.plan_id && PSYCH_PLAN_IDS.includes(activeSub.metadata.plan_id)) {
-        next.plan_id = activeSub.metadata.plan_id;
-      }
-
-      await upsertPsychSubToSupabase(row.id, next);
-
+      await upsertPsychSubToSupabase(psychId, next);
       try {
         const db = getDb();
-        const localSub = (db.subscriptions || []).find(s => s.psychologist_user_id === row.id);
+        const localSub = (db.subscriptions || []).find(s => s.psychologist_user_id === psychId);
         if (localSub) Object.assign(localSub, next);
         else (db.subscriptions = db.subscriptions || []).push(next);
         saveDb(db);
       } catch (_) { /* ignore */ }
-
       results.push({
-        id: row.id,
+        id: psychId,
         updated: true,
         stripe_status: next.stripe_status,
         stripe_subscription_id: next.stripe_subscription_id,
         plan_id: next.plan_id
       });
     } catch (err) {
-      console.error(`[runStripeSubscriptionSync] error for ${row.id}:`, err?.message || err);
-      results.push({ id: row.id, error: err?.message || String(err) });
+      console.error(`[runStripeSubscriptionSync] upsert error for ${psychId}:`, err?.message || err);
+      results.push({ id: psychId, error: err?.message || String(err) });
     }
   }
 
   const updated = results.filter(r => r.updated).length;
-  return { ok: true, total: rows.length, updated, results };
+  return { ok: true, total: stripeSubs.length, matched: byUser.size, updated, results };
 };
 
 app.post('/api/admin/sync-stripe-subscriptions', authenticateRequest, async (req, res) => {
@@ -5124,6 +5191,100 @@ const STRIPE_PRICE_IDS = {
 }
 
 /**
+ * Finds an existing Stripe customer for a Mainds user, or creates one.
+ * Lookup order:
+ *   1. Persisted stripe_customer_id in Supabase (subscriptions / patient_subscriptions).
+ *   2. Local in-memory cache (covers non-Supabase deployments).
+ *   3. Stripe customers.list({ email }) — match by metadata.user_id, falling
+ *      back to the most recently created customer with that email.
+ *   4. Create a new customer with metadata.user_id set so future lookups match.
+ *
+ * This prevents duplicate Stripe customers being created on each checkout
+ * attempt (the previous logic only consulted a serverless in-memory cache that
+ * frequently lost the persisted id between invocations).
+ */
+const findOrCreateStripeCustomer = async (stripe, { userId, email, name, type }) => {
+  if (!userId) throw new Error('findOrCreateStripeCustomer: userId is required');
+  const isPatient = type === 'patient';
+  const table = isPatient ? 'patient_subscriptions' : 'subscriptions';
+
+  // 1) Supabase persisted id
+  if (supabaseAdmin) {
+    try {
+      if (isPatient) {
+        const { data } = await supabaseAdmin
+          .from('patient_subscriptions')
+          .select('stripe_customer_id')
+          .eq('patient_user_id', userId)
+          .limit(1);
+        const cid = data?.[0]?.stripe_customer_id;
+        if (cid) return cid;
+      } else {
+        const { data } = await supabaseAdmin
+          .from('subscriptions')
+          .select('id, data')
+          .eq('id', userId)
+          .maybeSingle();
+        const cid = data?.data?.stripe_customer_id;
+        if (cid) return cid;
+      }
+    } catch (e) {
+      console.warn(`[findOrCreateStripeCustomer] Supabase lookup failed (${table}):`, e?.message || e);
+    }
+  }
+
+  // 2) Local cache
+  try {
+    const db = getDb();
+    if (isPatient) {
+      const patSub = (db.patientSubscriptions || []).find(s => s.patient_user_id === userId);
+      if (patSub?.stripe_customer_id) return patSub.stripe_customer_id;
+    } else {
+      const sub = (db.subscriptions || []).find(s => s.psychologist_user_id === userId);
+      if (sub?.stripe_customer_id) return sub.stripe_customer_id;
+    }
+  } catch (_) { /* ignore */ }
+
+  // 3) Search Stripe by email — handles users created in Stripe before this
+  // helper existed (or whose persisted row got lost).
+  if (email) {
+    try {
+      const list = await stripe.customers.list({ email, limit: 100 });
+      const candidates = list.data || [];
+      // Prefer exact metadata match
+      let match = candidates.find(c => c.metadata?.user_id === userId);
+      // Fall back to most recently created with matching subscription_type
+      if (!match) {
+        match = candidates
+          .filter(c => !c.deleted)
+          .sort((a, b) => (b.created || 0) - (a.created || 0))[0] || null;
+      }
+      if (match) {
+        // Backfill metadata so future lookups are unambiguous
+        try {
+          if (match.metadata?.user_id !== userId) {
+            await stripe.customers.update(match.id, {
+              metadata: { ...(match.metadata || {}), user_id: userId, subscription_type: isPatient ? 'patient' : 'psychologist' }
+            });
+          }
+        } catch (e) { /* ignore metadata update errors */ }
+        return match.id;
+      }
+    } catch (e) {
+      console.warn('[findOrCreateStripeCustomer] Stripe customer search failed:', e?.message || e);
+    }
+  }
+
+  // 4) Create new
+  const created = await stripe.customers.create({
+    email,
+    name: name || email,
+    metadata: { user_id: userId, subscription_type: isPatient ? 'patient' : 'psychologist' }
+  });
+  return created.id;
+};
+
+/**
  * Gets or creates a patient subscription record (for patient premium plan).
  */
 const getPatientSub = (db, patientUserId) => {
@@ -5174,33 +5335,17 @@ const handleCreateCheckoutSession = async (req, res) => {
 
       // Read patient subscription directly from Supabase (cache may not have it after restart)
       const userEmail = user.email || user.user_email;
-      let stripeCustomerId = null;
 
+      const stripeCustomerId = await findOrCreateStripeCustomer(stripe, {
+        userId: requesterId,
+        email: userEmail,
+        name: user.name || userEmail,
+        type: 'patient'
+      });
+
+      // Persist the customer id so subsequent lookups are instant
       if (supabaseAdmin) {
-        const { data: subRows } = await supabaseAdmin
-          .from('patient_subscriptions')
-          .select('*')
-          .eq('patient_user_id', requesterId)
-          .limit(1);
-        if (subRows && subRows.length > 0) {
-          stripeCustomerId = subRows[0].stripe_customer_id || null;
-        }
-      } else {
-        // Fallback: local cache
-        const patSub = getPatientSub(db, requesterId);
-        stripeCustomerId = patSub.stripe_customer_id || null;
-      }
-
-      if (!stripeCustomerId) {
-        const customer = await stripe.customers.create({
-          email: userEmail,
-          name: user.name || userEmail,
-          metadata: { user_id: requesterId, subscription_type: 'patient' }
-        });
-        stripeCustomerId = customer.id;
-
-        // Persist to Supabase or local cache
-        if (supabaseAdmin) {
+        try {
           await supabaseAdmin
             .from('patient_subscriptions')
             .upsert([{
@@ -5210,11 +5355,11 @@ const handleCreateCheckoutSession = async (req, res) => {
               plan_id: 'patient_premium',
               access_blocked: false
             }]);
-        } else {
-          const patSub = getPatientSub(db, requesterId);
-          patSub.stripe_customer_id = stripeCustomerId;
-          saveDb(db);
-        }
+        } catch (e) { console.warn('[checkout/patient] persist customer id failed:', e?.message || e); }
+      } else {
+        const patSub = getPatientSub(db, requesterId);
+        patSub.stripe_customer_id = stripeCustomerId;
+        saveDb(db);
       }
 
       const priceId = STRIPE_PRICE_IDS.patient_premium;
@@ -5273,15 +5418,21 @@ const handleCreateCheckoutSession = async (req, res) => {
 
     const sub = getPsychSub(db, requesterId);
 
-    // Create or reuse Stripe customer
+    // Find existing Stripe customer (Supabase → cache → Stripe lookup by email)
+    // before falling back to creating a new one. Prevents duplicate customers
+    // when serverless invocations don't share the in-memory cache.
     if (!sub.stripe_customer_id) {
-      const customer = await stripe.customers.create({
+      sub.stripe_customer_id = await findOrCreateStripeCustomer(stripe, {
+        userId: requesterId,
         email: user.email,
         name: user.name || user.email,
-        metadata: { user_id: requesterId, subscription_type: 'psychologist' }
+        type: 'psychologist'
       });
-      sub.stripe_customer_id = customer.id;
       saveDb(db);
+      // Also persist to Supabase right away so the next checkout reuses it.
+      try {
+        await upsertPsychSubToSupabase(requesterId, sub);
+      } catch (e) { console.warn('[checkout/psych] persist customer id failed:', e?.message || e); }
     }
 
     const priceId = STRIPE_PRICE_IDS[requestedPlanId];
