@@ -353,7 +353,25 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
-app.use(express.json({ limit: '5mb' })); // Body limitado para prevenir DoS por payload
+
+// IMPORTANT: Stripe webhook routes must receive the raw body so that
+// stripe.webhooks.constructEvent can verify the signature. We register the raw
+// parser FIRST and skip JSON parsing for those paths. Adding the express.raw
+// middleware on the route alone is not enough: express.json() below would
+// consume the stream first and req.body would arrive as a parsed object.
+const STRIPE_WEBHOOK_PATHS = new Set([
+  '/webhook',
+  '/api/webhook',
+  '/api/stripe/webhook',
+  '/api/stripe-webhook',
+  '/api/webhooks/stripe'
+]);
+app.use((req, res, next) => {
+  if (STRIPE_WEBHOOK_PATHS.has(req.path)) {
+    return express.raw({ type: 'application/json', limit: '5mb' })(req, res, next);
+  }
+  return express.json({ limit: '5mb' })(req, res, next);
+});
 
 // --- HELMET: Security headers (OWASP best practice) ---
 app.use(helmet({
@@ -4498,6 +4516,130 @@ app.post('/api/admin/cleanup-user-data', authenticateRequest, async (req, res) =
   }
 });
 
+// --- SUPERADMIN: Backfill subscription status from Stripe ---
+// Fixes psychologists whose Supabase 'subscriptions' row has a stripe_customer_id
+// but stale/null stripe_status / stripe_subscription_id (typically when webhook
+// events were missed). Queries Stripe for each customer and updates the row.
+//
+// `onlyStale: true` (the default for automatic invocations) limits the scan to
+// rows whose stripe_status is missing/null — this keeps the cost of running it
+// on every dashboard load negligible.
+const runStripeSubscriptionSync = async ({ onlyStale = true } = {}) => {
+  if (!supabaseAdmin && !pgPool && !sqliteDb && !DISALLOW_LOCAL_PERSISTENCE) {
+    // No persistence layer beyond local file — nothing to backfill remotely.
+  }
+  if (!process.env.STRIPE_SECRET_KEY) {
+    return { ok: false, reason: 'stripe_not_configured', total: 0, updated: 0, results: [] };
+  }
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2022-11-15' });
+
+  let rows = [];
+  if (supabaseAdmin) {
+    const { data, error } = await supabaseAdmin.from('subscriptions').select('id, data');
+    if (error) throw error;
+    rows = (data || []).map(r => ({ id: r.id, ...(r.data || {}) }));
+  } else {
+    const db = getDb();
+    rows = (db.subscriptions || []).map(s => ({ id: s.psychologist_user_id, ...s }));
+  }
+
+  const results = [];
+  for (const row of rows) {
+    const customerId = row.stripe_customer_id;
+    if (!customerId) {
+      results.push({ id: row.id, skipped: 'no_customer' });
+      continue;
+    }
+    if (onlyStale && row.stripe_status && row.stripe_subscription_id) {
+      results.push({ id: row.id, skipped: 'already_synced', stripe_status: row.stripe_status });
+      continue;
+    }
+
+    try {
+      const list = await stripe.subscriptions.list({ customer: customerId, status: 'all', limit: 10 });
+      const ranked = list.data.slice().sort((a, b) => (b.created || 0) - (a.created || 0));
+      const activeSub = ranked.find(s => ['active', 'trialing', 'past_due', 'incomplete'].includes(s.status))
+        || ranked[0]
+        || null;
+
+      const next = {
+        psychologist_user_id: row.id,
+        stripe_customer_id: customerId,
+        stripe_subscription_id: activeSub ? activeSub.id : null,
+        stripe_status: activeSub ? activeSub.status : null,
+        plan_id: row.plan_id || DEFAULT_PSYCH_PLAN,
+        access_blocked: activeSub ? !['active', 'trialing'].includes(activeSub.status) : false,
+        quantity: activeSub?.items?.data?.[0]?.quantity ?? row.quantity ?? 0,
+        cancel_at_period_end: activeSub?.cancel_at_period_end ?? false,
+        current_period_end: activeSub?.current_period_end ?? null
+      };
+
+      const activePriceId = activeSub?.items?.data?.[0]?.price?.id;
+      if (activePriceId) {
+        const resolvedPlanId = Object.entries(STRIPE_PRICE_IDS).find(([, pid]) => pid === activePriceId)?.[0];
+        if (resolvedPlanId && PSYCH_PLAN_IDS.includes(resolvedPlanId)) next.plan_id = resolvedPlanId;
+      } else if (activeSub?.metadata?.plan_id && PSYCH_PLAN_IDS.includes(activeSub.metadata.plan_id)) {
+        next.plan_id = activeSub.metadata.plan_id;
+      }
+
+      await upsertPsychSubToSupabase(row.id, next);
+
+      try {
+        const db = getDb();
+        const localSub = (db.subscriptions || []).find(s => s.psychologist_user_id === row.id);
+        if (localSub) Object.assign(localSub, next);
+        else (db.subscriptions = db.subscriptions || []).push(next);
+        saveDb(db);
+      } catch (_) { /* ignore */ }
+
+      results.push({
+        id: row.id,
+        updated: true,
+        stripe_status: next.stripe_status,
+        stripe_subscription_id: next.stripe_subscription_id,
+        plan_id: next.plan_id
+      });
+    } catch (err) {
+      console.error(`[runStripeSubscriptionSync] error for ${row.id}:`, err?.message || err);
+      results.push({ id: row.id, error: err?.message || String(err) });
+    }
+  }
+
+  const updated = results.filter(r => r.updated).length;
+  return { ok: true, total: rows.length, updated, results };
+};
+
+app.post('/api/admin/sync-stripe-subscriptions', authenticateRequest, async (req, res) => {
+  try {
+    const requesterId = req.authenticatedUserId;
+
+    // Superadmin gate
+    let requesterEmail = '';
+    if (supabaseAdmin) {
+      const { data: reqUser } = await supabaseAdmin.from('users')
+        .select('user_email, data')
+        .eq('id', requesterId)
+        .maybeSingle();
+      requesterEmail = reqUser?.user_email || (reqUser?.data || {}).email || '';
+    } else {
+      const db = getDb();
+      const reqUser = (db.users || []).find(u => u.id === String(requesterId));
+      requesterEmail = reqUser?.email || '';
+    }
+    if (!isSuperAdmin(requesterEmail)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const onlyStale = String(req.query.onlyStale || req.body?.onlyStale || '') === '1';
+    const out = await runStripeSubscriptionSync({ onlyStale });
+    if (!out.ok) return res.status(500).json({ error: out.reason || 'sync_failed' });
+    return res.json(out);
+  } catch (err) {
+    console.error('[sync-stripe-subscriptions] fatal:', err?.message || err);
+    return res.status(500).json({ error: err?.message || 'Error interno' });
+  }
+});
+
 // --- SUPERADMIN STATS DASHBOARD ---
 app.get('/api/admin/stats', authenticateRequest, async (req, res) => {
   try {
@@ -4518,6 +4660,20 @@ app.get('/api/admin/stats', authenticateRequest, async (req, res) => {
     }
     if (!isSuperAdmin(requesterEmail)) {
       return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    // Auto-sync stale Stripe subscription rows before computing stats. This makes
+    // the dashboard self-healing: any psychologist whose webhook event was missed
+    // (e.g. before the webhook URL was fixed) gets refreshed from Stripe on every
+    // load. We only touch rows with a stripe_customer_id and missing stripe_status,
+    // so the cost is one Stripe API call per stale row (zero in steady state).
+    try {
+      const syncOut = await runStripeSubscriptionSync({ onlyStale: true });
+      if (syncOut?.updated) {
+        console.log(`[admin/stats] Auto-synced ${syncOut.updated} stale Stripe subscription(s)`);
+      }
+    } catch (syncErr) {
+      console.warn('[admin/stats] Stripe auto-sync failed:', syncErr?.message || syncErr);
     }
 
     const db = getDb();
@@ -5231,6 +5387,11 @@ app.post('/api/stripe/sync-subscription', authenticateRequest, async (req, res) 
     }
 
     saveDb(db);
+    // Also persist directly to Supabase so SuperAdmin / other reads see the update
+    // immediately (saveDb's cached batch writes can miss serverless updates).
+    if (typeof upsertPsychSubToSupabase === 'function') {
+      await upsertPsychSubToSupabase(requesterId, sub);
+    }
 
     const access = await checkPsychAccessAsync(db, requesterId);
     return res.json({
@@ -5919,8 +6080,49 @@ app.get('/api/patient-subscription', authenticateRequest, async (req, res) => {
 });
 
 // --- STRIPE: webhook to keep subscription status in sync ---
-// Use raw body for signature verification
-app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+// Use raw body for signature verification.
+// Mounted on both '/webhook' (legacy / local dev) and '/api/webhook' (production on
+// Vercel — only '/api/*' is routed to the serverless function). Update the URL
+// configured in Stripe to '/api/webhook' for production deployments.
+//
+// Helper: persist a psychologist subscription update directly to Supabase.
+// saveDb()'s in-memory cache can lose writes between serverless invocations, so we
+// also write the row explicitly to make sure the SuperAdmin dashboard sees it.
+const upsertPsychSubToSupabase = async (psychId, sub) => {
+  if (!supabaseAdmin || !psychId) return;
+  try {
+    const payload = {
+      id: String(psychId),
+      data: cleanDataForStorage({ ...sub, psychologist_user_id: String(psychId) }, SUBSCRIPTION_TABLE_COLUMNS)
+    };
+    const { error } = await supabaseAdmin.from('subscriptions').upsert([payload], { onConflict: 'id' });
+    if (error) console.warn('[upsertPsychSubToSupabase] Supabase error:', error.message || error);
+  } catch (e) {
+    console.warn('[upsertPsychSubToSupabase] Error:', e?.message || e);
+  }
+};
+
+const upsertPatientSubToSupabase = async (patientId, patSub) => {
+  if (!supabaseAdmin || !patientId) return;
+  try {
+    const { error } = await supabaseAdmin.from('patient_subscriptions').upsert([{
+      id: String(patientId),
+      patient_user_id: String(patientId),
+      stripe_subscription_id: patSub.stripe_subscription_id || null,
+      stripe_customer_id: patSub.stripe_customer_id || null,
+      stripe_status: patSub.stripe_status || null,
+      plan_id: patSub.plan_id || 'patient_premium',
+      access_blocked: !!patSub.access_blocked
+    }]);
+    if (error) console.warn('[upsertPatientSubToSupabase] Supabase error:', error.message || error);
+  } catch (e) {
+    console.warn('[upsertPatientSubToSupabase] Error:', e?.message || e);
+  }
+};
+
+app.post(
+  ['/webhook', '/api/webhook', '/api/stripe/webhook', '/api/stripe-webhook', '/api/webhooks/stripe'],
+  async (req, res) => {
   const sig = req.headers['stripe-signature'];
   const payload = req.body;
 
@@ -5997,6 +6199,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
           sub.plan_id = planId;
           sub.access_blocked = false;
           saveDb(db);
+          await upsertPsychSubToSupabase(psychId, sub);
           console.log(`[Webhook] checkout.session.completed: psychologist ${psychId} subscribed (plan: ${planId})`);
         }
         break;
@@ -6016,6 +6219,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
             patSub.stripe_status = subscription.status;
             patSub.access_blocked = !['active', 'trialing'].includes(subscription.status);
             saveDb(db);
+            await upsertPatientSubToSupabase(patSub.patient_user_id || patientId, patSub);
             console.log(`[Webhook] patient subscription.created: ${subscription.id} → status=${subscription.status}`);
           }
         } else {
@@ -6031,6 +6235,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
             if (planId) sub.plan_id = planId;
             sub.access_blocked = !['active', 'trialing'].includes(subscription.status);
             saveDb(db);
+            await upsertPsychSubToSupabase(sub.psychologist_user_id || psychId, sub);
             console.log(`[Webhook] subscription.created: ${subscription.id} → status=${subscription.status}, plan=${sub.plan_id}`);
           }
         }
@@ -6057,6 +6262,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
             sub.plan_id = subscription.metadata.plan_id;
           }
           saveDb(db);
+          await upsertPsychSubToSupabase(sub.psychologist_user_id, sub);
           console.log(`[Webhook] subscription.updated: ${subscription.id} → status=${subscription.status}, plan=${sub.plan_id}`);
 
           // CRM: Auto-move lead to 'won' on active subscription, 'cancelled' on cancel
@@ -6096,6 +6302,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
             patSub.cancel_at_period_end = subscription.cancel_at_period_end ?? false;
             patSub.current_period_end = subscription.current_period_end ?? null;
             saveDb(db);
+            await upsertPatientSubToSupabase(patSub.patient_user_id, patSub);
             console.log(`[Webhook] patient subscription.updated: ${subscription.id} → status=${subscription.status}`);
           }
         }
@@ -6110,6 +6317,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
           sub.quantity = 0;
           sub.access_blocked = false;
           saveDb(db);
+          await upsertPsychSubToSupabase(sub.psychologist_user_id, sub);
           console.log(`[Webhook] subscription.deleted: ${subscription.id}`);
 
           // CRM: Move lead to cancelled
@@ -6135,6 +6343,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
             patSub.stripe_subscription_id = null;
             patSub.access_blocked = false;
             saveDb(db);
+            await upsertPatientSubToSupabase(patSub.patient_user_id, patSub);
             console.log(`[Webhook] patient subscription.deleted: ${subscription.id}`);
           }
         }
@@ -6147,6 +6356,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
           sub.stripe_status = 'active';
           sub.access_blocked = false;
           saveDb(db);
+          await upsertPsychSubToSupabase(sub.psychologist_user_id, sub);
           console.log(`[Webhook] invoice.payment_succeeded for subscription ${invoice.subscription}`);
         } else {
           const patSub = (db.patientSubscriptions || []).find(s =>
@@ -6156,6 +6366,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
             patSub.stripe_status = 'active';
             patSub.access_blocked = false;
             saveDb(db);
+            await upsertPatientSubToSupabase(patSub.patient_user_id, patSub);
             console.log(`[Webhook] patient invoice.payment_succeeded for subscription ${invoice.subscription}`);
           }
         }
