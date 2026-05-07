@@ -4852,8 +4852,10 @@ app.get('/api/admin/stats', authenticateRequest, async (req, res) => {
       }
 
       if (isMaster || access.isSubscribed) {
-        paidCount++;
-        if (!isMaster) mrr += plan.price;
+        if (!isMaster) {
+          paidCount++;
+          mrr += plan.price;
+        }
       } else if (access.trialActive) {
         trialCount++;
       } else {
@@ -4889,18 +4891,27 @@ app.get('/api/admin/stats', authenticateRequest, async (req, res) => {
       ? psychsWithPatients.reduce((sum, p) => sum + p.careRelationshipsCount, 0) / psychsWithPatients.length
       : 0;
 
-    // Weekly active paid psychologists (not trial) – last 8 weeks, Mon-Sun
+    // Weekly paid psychologists – last 8 weeks, Mon-Sun
+    // - weeklyPaidData (legacy): nuevos psicólogos de pago agrupados por su semana de alta
+    // - weeklyActivePaidData: total acumulado de psicólogos de pago activos al final de cada semana
     const weeklyPaidData = [];
+    const weeklyActivePaidData = [];
     for (let i = 7; i >= 0; i--) {
       const weekStart = new Date(thisMonday.getTime() - i * 7 * 86400000);
       const weekEnd   = new Date(weekStart.getTime() + 7 * 86400000);
       const label = weekStart.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
-      const count = psychDetails.filter(p => {
+      const newCount = psychDetails.filter(p => {
         if (!p.isSubscribed && !p.isMaster) return false;
         const ca = p.createdAt;
         return ca && ca >= weekStart.getTime() && ca < weekEnd.getTime();
       }).length;
-      weeklyPaidData.push({ semana: label, pagantes: count });
+      const cumulativeCount = psychDetails.filter(p => {
+        if (!p.isSubscribed && !p.isMaster) return false;
+        const ca = p.createdAt;
+        return ca && ca < weekEnd.getTime();
+      }).length;
+      weeklyPaidData.push({ semana: label, pagantes: newCount });
+      weeklyActivePaidData.push({ semana: label, pagantes: cumulativeCount });
     }
 
     // Monthly revenue – last 12 months, based on actual paid Stripe invoices for psychologist subscriptions.
@@ -5055,6 +5066,7 @@ app.get('/api/admin/stats', authenticateRequest, async (req, res) => {
       },
       weeklyRegistrations: weeklyData,
       weeklyPaidPsychs: weeklyPaidData,
+      weeklyActivePaidPsychs: weeklyActivePaidData,
       monthlyMrr: monthlyMrrData,
       psychologists: psychDetails,
     });

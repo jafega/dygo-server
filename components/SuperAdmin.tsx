@@ -38,6 +38,8 @@ interface PsychologistStat {
   isSubscribed: boolean;
   isMaster: boolean;
   createdAt: number | null;
+  cancelAtPeriodEnd?: boolean;
+  currentPeriodEnd?: number | null;
   careRelationshipsCount: number;
 }
 
@@ -54,6 +56,7 @@ interface AdminStats {
   };
   weeklyRegistrations: { semana: string; psicologos: number }[];
   weeklyPaidPsychs: { semana: string; pagantes: number }[];
+  weeklyActivePaidPsychs?: { semana: string; pagantes: number }[];
   monthlyMrr: { mes: string; mrr: number; expected?: boolean }[];
   psychologists: PsychologistStat[];
 }
@@ -104,6 +107,8 @@ const getPlanDisplay = (p: PsychologistStat): { label: string; className: string
 const StatusBadge: React.FC<{ p: PsychologistStat }> = ({ p }) => {
   if (p.isMaster)
     return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-700">Master</span>;
+  if (p.isSubscribed && p.cancelAtPeriodEnd)
+    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700"><Clock size={10} />Offboarding</span>;
   if (p.isSubscribed)
     return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700"><Activity size={10} />Activo</span>;
   if (p.trialActive)
@@ -191,8 +196,22 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
       return matchesQuery && matchesType;
     })
     .sort((a, b) => {
-      const aDate = getPsychStat(a.id)?.createdAt ?? null;
-      const bDate = getPsychStat(b.id)?.createdAt ?? null;
+      const aStat = getPsychStat(a.id);
+      const bStat = getPsychStat(b.id);
+      // Status priority: Activo (0) > Offboarding (1) > Prueba (2) > Inactivo (3) > no-psych (4)
+      const statusRank = (s?: PsychologistStat) => {
+        if (!s) return 4;
+        if (s.isMaster) return 0;
+        if (s.isSubscribed && s.cancelAtPeriodEnd) return 1;
+        if (s.isSubscribed) return 0;
+        if (s.trialActive) return 2;
+        return 3;
+      };
+      const rA = statusRank(aStat);
+      const rB = statusRank(bStat);
+      if (rA !== rB) return rA - rB;
+      const aDate = aStat?.createdAt ?? null;
+      const bDate = bStat?.createdAt ?? null;
       if (aDate === null && bDate === null) return 0;
       if (aDate === null) return 1;
       if (bDate === null) return -1;
@@ -322,12 +341,38 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                 </ResponsiveContainer>
               </div>
 
-              {/* Weekly paid psychologists chart */}
+              {/* Weekly cumulative active paid psychologists chart */}
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6 overflow-hidden">
                 <h3 className="text-sm font-semibold text-slate-700 mb-1 uppercase tracking-wide">
-                  Psicólogos con plan activo por semana · últimas 8 semanas
+                  Psicólogos de pago activos (acumulado) · últimas 8 semanas
                 </h3>
-                <p className="text-xs text-slate-400 mb-4">Registros de psicólogos actualmente de pago, agrupados por semana de alta</p>
+                <p className="text-xs text-slate-400 mb-4">Total de psicólogos actualmente de pago al final de cada semana</p>
+                <ResponsiveContainer width="100%" height={200}>
+                  <AreaChart data={stats.weeklyActivePaidPsychs || []} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="activePaidGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0.03} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                    <XAxis dataKey="semana" tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                    <Tooltip
+                      contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }}
+                      formatter={(v: number) => [v, 'Psicólogos de pago activos']}
+                    />
+                    <Area dataKey="pagantes" stroke="#10b981" strokeWidth={2} fill="url(#activePaidGradient)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Weekly new paid psychologists chart */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6 overflow-hidden">
+                <h3 className="text-sm font-semibold text-slate-700 mb-1 uppercase tracking-wide">
+                  Nuevos psicólogos de pago por semana · últimas 8 semanas
+                </h3>
+                <p className="text-xs text-slate-400 mb-4">Psicólogos que actualmente tienen plan activo, agrupados por su semana de alta</p>
                 <ResponsiveContainer width="100%" height={200}>
                   <BarChart data={stats.weeklyPaidPsychs} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
@@ -335,7 +380,7 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                     <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
                     <Tooltip
                       contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }}
-                      formatter={(v: number) => [v, 'Psicólogos de pago']}
+                      formatter={(v: number) => [v, 'Nuevos psicólogos de pago']}
                     />
                     <Bar dataKey="pagantes" fill="#10b981" radius={[6, 6, 0, 0]} maxBarSize={48} />
                   </BarChart>
