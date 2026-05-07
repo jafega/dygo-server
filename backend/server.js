@@ -4878,6 +4878,8 @@ app.get('/api/admin/stats', authenticateRequest, async (req, res) => {
         isSubscribed: access.isSubscribed || false,
         isMaster,
         createdAt,
+        cancelAtPeriodEnd: sub.cancel_at_period_end === true,
+        currentPeriodEnd: sub.current_period_end || null,
         careRelationshipsCount: relCounts[u.id] || 0,
       };
     });
@@ -5008,6 +5010,37 @@ app.get('/api/admin/stats', authenticateRequest, async (req, res) => {
     for (const bucket of monthBuckets) {
       monthlyMrrData.push({ mes: bucket.label, mrr: Math.round(bucket.mrr * 100) / 100 });
     }
+
+    // ── Expected revenue for NEXT month ────────────────────────────────────
+    // Forward-looking projection: sum of plan prices for psychologists who are
+    // currently active/trialing, not master, not scheduled to cancel, and
+    // whose subscription is expected to be billed inside that month.
+    // Trialing subs only count if their trial ends before the end of next
+    // month (otherwise they won't generate an invoice that month).
+    const nextMonthStart = new Date(todayMidnight);
+    nextMonthStart.setMonth(todayMidnight.getMonth() + 1);
+    const nextMonthEnd = new Date(nextMonthStart);
+    nextMonthEnd.setMonth(nextMonthStart.getMonth() + 1);
+    const nextMonthLabel = nextMonthStart.toLocaleDateString('es-ES', { month: 'short', year: '2-digit' });
+    let expectedMrr = 0;
+    for (const p of psychDetails) {
+      if (p.isMaster) continue;
+      const status = p.stripeStatus;
+      if (status !== 'active' && status !== 'trialing') continue;
+      if (p.cancelAtPeriodEnd) continue; // will not renew
+      if (status === 'trialing') {
+        // Only count if the trial ends before next month wraps up (so an
+        // invoice is expected within that window).
+        const cpeMs = p.currentPeriodEnd ? p.currentPeriodEnd * 1000 : null;
+        if (!cpeMs || cpeMs >= nextMonthEnd.getTime()) continue;
+      }
+      expectedMrr += p.planPrice || 0;
+    }
+    monthlyMrrData.push({
+      mes: nextMonthLabel,
+      mrr: Math.round(expectedMrr * 100) / 100,
+      expected: true,
+    });
 
     return res.json({
       overview: {

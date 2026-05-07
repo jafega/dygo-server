@@ -54,7 +54,7 @@ interface AdminStats {
   };
   weeklyRegistrations: { semana: string; psicologos: number }[];
   weeklyPaidPsychs: { semana: string; pagantes: number }[];
-  monthlyMrr: { mes: string; mrr: number }[];
+  monthlyMrr: { mes: string; mrr: number; expected?: boolean }[];
   psychologists: PsychologistStat[];
 }
 
@@ -345,9 +345,9 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
               {/* Monthly MRR chart */}
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6 overflow-hidden">
                 <h3 className="text-sm font-semibold text-slate-700 mb-1 uppercase tracking-wide">
-                  Ingresos por suscripciones de psicólogos · últimos 12 meses
+                  Ingresos por suscripciones de psicólogos · últimos 12 meses + previsión
                 </h3>
-                <p className="text-xs text-slate-400 mb-4">Facturación real cobrada vía Stripe en cada mes</p>
+                <p className="text-xs text-slate-400 mb-4">Facturación real cobrada vía Stripe. El último punto es la previsión del próximo mes (suscripciones activas que no han cancelado).</p>
                 <ResponsiveContainer width="100%" height={200}>
                   <AreaChart data={stats.monthlyMrr} margin={{ top: 4, right: 4, left: -4, bottom: 0 }}>
                     <defs>
@@ -357,13 +357,45 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                    <XAxis dataKey="mes" tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                    <XAxis
+                      dataKey="mes"
+                      tick={(props: any) => {
+                        const { x, y, payload, index } = props;
+                        const isExpected = stats.monthlyMrr[index]?.expected === true;
+                        return (
+                          <text x={x} y={y + 10} textAnchor="middle" fontSize={10} fill={isExpected ? '#f59e0b' : '#94a3b8'} fontStyle={isExpected ? 'italic' : 'normal'}>
+                            {payload.value}{isExpected ? ' (prev.)' : ''}
+                          </text>
+                        );
+                      }}
+                    />
                     <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} tickFormatter={(v: number) => `€${v}`} />
                     <Tooltip
                       contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }}
-                      formatter={(v: number) => [`€${v.toFixed(2)}`, 'Ingresos']}
+                      formatter={(v: number, _name: string, ctx: any) => [`€${v.toFixed(2)}`, ctx?.payload?.expected ? 'Previsión' : 'Ingresos']}
                     />
-                    <Area dataKey="mrr" stroke="#f59e0b" strokeWidth={2} fill="url(#mrrGradient)" dot={{ r: 3, fill: '#f59e0b' }} />
+                    <Area
+                      dataKey="mrr"
+                      stroke="#f59e0b"
+                      strokeWidth={2}
+                      fill="url(#mrrGradient)"
+                      dot={(props: any) => {
+                        const { cx, cy, index, key } = props;
+                        const isExpected = stats.monthlyMrr[index]?.expected === true;
+                        return (
+                          <circle
+                            key={key}
+                            cx={cx}
+                            cy={cy}
+                            r={isExpected ? 4 : 3}
+                            fill={isExpected ? '#fff' : '#f59e0b'}
+                            stroke="#f59e0b"
+                            strokeWidth={isExpected ? 2 : 0}
+                            strokeDasharray={isExpected ? '2 2' : undefined}
+                          />
+                        );
+                      }}
+                    />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
