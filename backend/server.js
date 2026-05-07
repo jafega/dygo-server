@@ -5061,17 +5061,17 @@ app.get('/api/admin/stats', authenticateRequest, async (req, res) => {
     nextMonthEnd.setMonth(nextMonthStart.getMonth() + 1);
     const nextMonthLabel = nextMonthStart.toLocaleDateString('es-ES', { month: 'short', year: '2-digit' });
 
-    // Compute MRR per month from Stripe subscription state. For each month we
-    // sum the monthly price of every psychologist subscription whose paid
-    // window covers that month (paid_start < monthEnd AND effectiveEnd > monthStart).
-    // The next-month projection uses the same logic, so a sub scheduled to
-    // cancel before next month starts is automatically excluded.
+    // Compute MRR per month from Stripe subscription state. Una sub contribuye
+    // a un mes M si va a generar facturación dentro de M, lo que equivale a que
+    // siga activa al final de M (paid_start < monthEnd AND effectiveEnd >= monthEnd).
+    // Así, una sub cancelada cuyo período acaba el 5 de junio cuenta para mayo
+    // (último cobro) pero NO para junio (no habrá nuevo cobro).
     let monthlyFromSubs = false;
     if (subWindows && subWindows.length > 0) {
       for (const bucket of monthBuckets) {
         let total = 0;
         for (const w of subWindows) {
-          if (w.startMs < bucket.end && (w.effectiveEndMs === null || w.effectiveEndMs > bucket.start)) {
+          if (w.startMs < bucket.end && (w.effectiveEndMs === null || w.effectiveEndMs >= bucket.end)) {
             total += w.monthlyEur;
           }
         }
@@ -5099,7 +5099,7 @@ app.get('/api/admin/stats', authenticateRequest, async (req, res) => {
     let expectedMrr = 0;
     if (monthlyFromSubs) {
       for (const w of subWindows) {
-        if (w.startMs < nextMonthEnd.getTime() && (w.effectiveEndMs === null || w.effectiveEndMs > nextMonthStart.getTime())) {
+        if (w.startMs < nextMonthEnd.getTime() && (w.effectiveEndMs === null || w.effectiveEndMs >= nextMonthEnd.getTime())) {
           expectedMrr += w.monthlyEur;
         }
       }
