@@ -1494,8 +1494,15 @@ tr:nth-child(even) td{background:#f8fafc}
         })
       });
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Error desconocido');
+        // 413 (payload too large) and some proxy errors return HTML, so guard JSON parse.
+        let errMsg = '';
+        try {
+          const errData = await res.json();
+          errMsg = errData?.error || '';
+        } catch {
+          if (res.status === 413) errMsg = 'El archivo es demasiado grande para subir';
+        }
+        throw new Error(errMsg || `Error ${res.status} al subir el documento`);
       }
       setShowUploadExternalDoc(false);
       setExternalDocTitle('');

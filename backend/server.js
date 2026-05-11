@@ -370,7 +370,9 @@ app.use((req, res, next) => {
   if (STRIPE_WEBHOOK_PATHS.has(req.path)) {
     return express.raw({ type: 'application/json', limit: '5mb' })(req, res, next);
   }
-  return express.json({ limit: '5mb' })(req, res, next);
+  // 25mb supports base64-encoded uploads up to ~18MB binary (e.g. signed
+  // consent documents, session files, historical documents).
+  return express.json({ limit: '25mb' })(req, res, next);
 });
 
 // --- HELMET: Security headers (OWASP best practice) ---
@@ -7650,8 +7652,8 @@ app.post('/api/upload-avatar', authenticateRequest, async (req, res) => {
         }
       }
 
-      // Extraer el tipo MIME y los datos del base64
-      const matches = base64Image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+      // Extraer el tipo MIME y los datos del base64 (MIME puede contener dots/digits)
+      const matches = base64Image.match(/^data:([\w.+\-\/]+);base64,(.+)$/);
       if (!matches || matches.length !== 3) {
         throw new Error('Formato de imagen base64 inválido');
       }
@@ -7743,8 +7745,8 @@ app.post('/api/upload-session-file', authenticateRequest, async (req, res) => {
         }
       }
 
-      // Extraer el tipo MIME y los datos del base64
-      const matches = base64File.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+      // Extraer el tipo MIME y los datos del base64 (MIME puede contener dots/digits)
+      const matches = base64File.match(/^data:([\w.+\-\/]+);base64,(.+)$/);
       if (!matches || matches.length !== 3) {
         throw new Error('Formato de archivo base64 inválido');
       }
@@ -18580,8 +18582,8 @@ app.post('/api/signatures/external', authenticateRequest, async (req, res) => {
       return res.status(501).json({ error: 'Solo disponible con Supabase' });
     }
 
-    // Parse base64 data
-    const matches = base64File.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
+    // Parse base64 data (MIME types may include dots/digits e.g. application/vnd.openxmlformats-...)
+    const matches = base64File.match(/^data:([\w.+\-\/]+);base64,(.+)$/);
     if (!matches || matches.length !== 3) {
       return res.status(400).json({ error: 'Formato de archivo base64 inválido' });
     }

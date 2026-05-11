@@ -58,6 +58,19 @@ interface Invoice {
   is_rectificativa?: boolean;
 }
 
+interface SessionEntry {
+  id: string;
+  session_id?: string;
+  target_user_id?: string;
+  creator_user_id?: string;
+  summary?: string;
+  transcript?: string;
+  status?: string;
+  created_at?: string;
+  timestamp?: number;
+  date?: string;
+}
+
 interface PsychologistAIChatProps {
   psychologistId: string;
   psychologistName?: string;
@@ -79,6 +92,7 @@ const PsychologistAIChat: React.FC<PsychologistAIChatProps> = ({ psychologistId,
   const [patients, setPatients] = useState<Patient[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [sessionEntries, setSessionEntries] = useState<SessionEntry[]>([]);
   const [dataLoaded, setDataLoaded] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
@@ -99,19 +113,22 @@ const PsychologistAIChat: React.FC<PsychologistAIChatProps> = ({ psychologistId,
     setDataError(null);
     try {
       // All fetches include psychologistId to scope data server-side
-      const [patientsRes, sessionsRes, invoicesRes] = await Promise.all([
+      const [patientsRes, sessionsRes, invoicesRes, entriesRes] = await Promise.all([
         apiFetch(`${API_URL}/psychologist/${encodeURIComponent(psychologistId)}/patients`),
-        apiFetch(`${API_URL}/sessions?psychologistId=${encodeURIComponent(psychologistId)}&limit=200`),
-        apiFetch(`${API_URL}/invoices?psychologistId=${encodeURIComponent(psychologistId)}&limit=200`),
+        apiFetch(`${API_URL}/sessions?psychologistId=${encodeURIComponent(psychologistId)}&limit=500`),
+        apiFetch(`${API_URL}/invoices?psychologistId=${encodeURIComponent(psychologistId)}&limit=500`),
+        apiFetch(`${API_URL}/session-entries?creator_user_id=${encodeURIComponent(psychologistId)}`),
       ]);
 
       const patientsData = patientsRes.ok ? await patientsRes.json() : [];
       const sessionsData = sessionsRes.ok ? await sessionsRes.json() : [];
       const invoicesData = invoicesRes.ok ? await invoicesRes.json() : [];
+      const entriesData = entriesRes.ok ? await entriesRes.json() : [];
 
       setPatients(Array.isArray(patientsData) ? patientsData : []);
       setSessions(Array.isArray(sessionsData) ? sessionsData : []);
       setInvoices(Array.isArray(invoicesData) ? invoicesData : []);
+      setSessionEntries(Array.isArray(entriesData) ? entriesData : []);
       setDataLoaded(true);
     } catch (err) {
       console.error('[AIChat] Error loading psychologist data:', err);
@@ -127,79 +144,288 @@ const PsychologistAIChat: React.FC<PsychologistAIChatProps> = ({ psychologistId,
   }, [loadPsychologistData]);
 
   // Build a privacy-scoped context string. Only includes data fetched for this psychologist.
-  const buildContext = (): string => {
-    const today = new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' });
+  const buildContext = (userQuestion?: string): string => {
+    const now = new Date();
+    const today = now.toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' });
+    const todayIso = now.toISOString().slice(0, 10);
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const ms30 = 30 * 24 * 60 * 60 * 1000;
+    const ms90 = 90 * 24 * 60 * 60 * 1000;
+
+    const getSessionDate = (s: Session): Date | null => {
+      const raw = s.starts_on || s.date;
+      if (!raw) return null;
+      const d = new Date(raw);
+      return isNaN(d.getTime()) ? null : d;
+    };
+    const getInvoiceDate = (inv: Invoice): Date | null => {
+      const raw = inv.invoice_date || inv.date || inv.created_at;
+      if (!raw) return null;
+      const d = new Date(raw);
+      return isNaN(d.getTime()) ? null : d;
+    };
 
     const activePatients = patients.filter(p => p.active !== false);
+    const inactivePatients = patients.filter(p => p.active === false);
 
-    const recentSessions = sessions
-      .filter(s => s.status !== 'available')
-      .sort((a, b) => {
-        const da = new Date(a.starts_on || a.date || 0).getTime();
-        const db = new Date(b.starts_on || b.date || 0).getTime();
-        return db - da;
-      })
-      .slice(0, 100);
+    // Only real sessions (exclude availability slots)
+    const realSessions = sessions.filter(s => s.status !== 'available');
 
-    const recentInvoices = invoices
-      .sort((a, b) => {
-        const da = new Date(a.invoice_date || a.date || a.created_at || 0).getTime();
-        const db = new Date(b.invoice_date || b.date || b.created_at || 0).getTime();
-        return db - da;
-      })
-      .slice(0, 100);
+    // Build patient lookup
+    const patientById = new Map<string, Patient>();
+    patients.forEach(p => patientById.set(p.id, p));
+    const resolvePatientName = (s: Session | SessionEntry | Invoice): string => {
+      if ('patientName' in s && s.patientName) return s.patientName!;
+      const pid = (s as any).patient_user_id || (s as any).patientId || (s as any).target_user_id;
+      if (pid && patientById.has(pid)) return patientById.get(pid)!.name;
+      return 'Paciente';
+    };
 
-    const patientsBlock = activePatients.length > 0
-      ? activePatients.map(p => `- ${p.name}${p.tags?.length ? ` [tags: ${p.tags.join(', ')}]` : ''}`).join('\n')
+    // Per-patient aggregates
+    const sessionsByPatient = new Map<string, Session[]>();
+    realSessions.forEach(s => {
+      const pid = s.patient_user_id || s.patientId;
+      if (!pid) return;
+      if (!sessionsByPatient.has(pid)) sessionsByPatient.set(pid, []);
+      sessionsByPatient.get(pid)!.push(s);
+    });
+    sessionsByPatient.forEach(arr => arr.sort((a, b) => {
+      const da = getSessionDate(a)?.getTime() ?? 0;
+      const db = getSessionDate(b)?.getTime() ?? 0;
+      return db - da;
+    }));
+
+    const entriesByPatient = new Map<string, SessionEntry[]>();
+    sessionEntries.forEach(e => {
+      const pid = e.target_user_id;
+      if (!pid) return;
+      if (!entriesByPatient.has(pid)) entriesByPatient.set(pid, []);
+      entriesByPatient.get(pid)!.push(e);
+    });
+    entriesByPatient.forEach(arr => arr.sort((a, b) => {
+      const da = new Date(a.created_at || a.date || a.timestamp || 0).getTime();
+      const db = new Date(b.created_at || b.date || b.timestamp || 0).getTime();
+      return db - da;
+    }));
+
+    // === STATISTICS ===
+    const sessionsThisMonth = realSessions.filter(s => {
+      const d = getSessionDate(s);
+      return d && d >= startOfMonth && d <= now;
+    });
+    const completedThisMonth = sessionsThisMonth.filter(s => s.status === 'completed');
+    const upcomingSessions = realSessions.filter(s => {
+      const d = getSessionDate(s);
+      return d && d > now && (s.status === 'scheduled' || s.status === 'confirmed' || !s.status);
+    }).sort((a, b) => (getSessionDate(a)?.getTime() ?? 0) - (getSessionDate(b)?.getTime() ?? 0));
+    const next7DaysSessions = upcomingSessions.filter(s => {
+      const d = getSessionDate(s)!;
+      return d.getTime() - now.getTime() <= 7 * 24 * 60 * 60 * 1000;
+    });
+
+    const invoicesThisMonth = invoices.filter(inv => {
+      const d = getInvoiceDate(inv);
+      return d && d >= startOfMonth;
+    });
+    const billedThisMonth = invoicesThisMonth
+      .filter(inv => inv.status !== 'draft' && !inv.is_rectificativa)
+      .reduce((sum, inv) => sum + (inv.total ?? inv.amount ?? 0), 0);
+    const pendingInvoices = invoices.filter(inv => inv.status === 'sent' || inv.status === 'pending');
+    const pendingAmount = pendingInvoices.reduce((sum, inv) => sum + (inv.total ?? inv.amount ?? 0), 0);
+    const overdueInvoices = pendingInvoices.filter(inv => {
+      const d = getInvoiceDate(inv);
+      return d && now.getTime() - d.getTime() > 30 * 24 * 60 * 60 * 1000;
+    });
+
+    // Patients without recent session (>30 days)
+    const patientsWithoutRecent: { p: Patient; lastDate: Date | null }[] = [];
+    const patientsActiveByRecency: { p: Patient; lastDate: Date | null; count30: number }[] = [];
+    activePatients.forEach(p => {
+      const list = sessionsByPatient.get(p.id) || [];
+      const lastDate = list.length > 0 ? getSessionDate(list[0]) : null;
+      const count30 = list.filter(s => {
+        const d = getSessionDate(s);
+        return d && now.getTime() - d.getTime() <= ms30;
+      }).length;
+      patientsActiveByRecency.push({ p, lastDate, count30 });
+      if (!lastDate || now.getTime() - lastDate.getTime() > ms30) {
+        patientsWithoutRecent.push({ p, lastDate });
+      }
+    });
+    patientsActiveByRecency.sort((a, b) => (b.lastDate?.getTime() ?? 0) - (a.lastDate?.getTime() ?? 0));
+
+    // === BUILD BLOCKS ===
+    const fmtDate = (d: Date | null) => d ? d.toLocaleDateString('es-ES') : 'sin fecha';
+    const daysAgo = (d: Date | null) => d ? Math.floor((now.getTime() - d.getTime()) / (24 * 60 * 60 * 1000)) : null;
+
+    const statsBlock = `- Pacientes activos: ${activePatients.length}${inactivePatients.length ? ` (+${inactivePatients.length} inactivos)` : ''}
+- Sesiones este mes: ${sessionsThisMonth.length} (${completedThisMonth.length} completadas)
+- Sesiones próximos 7 días: ${next7DaysSessions.length}
+- Próximas sesiones programadas (total futuras): ${upcomingSessions.length}
+- Facturado este mes (no rectificativas, no borradores): ${billedThisMonth.toFixed(2)}€
+- Facturas pendientes de cobro: ${pendingInvoices.length} (${pendingAmount.toFixed(2)}€)
+- Facturas vencidas (>30 días sin pagar): ${overdueInvoices.length}`;
+
+    const patientsBlock = patientsActiveByRecency.length > 0
+      ? patientsActiveByRecency.slice(0, 80).map(({ p, lastDate, count30 }) => {
+          const d = daysAgo(lastDate);
+          const lastStr = lastDate ? `última sesión hace ${d}d (${fmtDate(lastDate)})` : 'sin sesiones';
+          const tags = p.tags?.length ? ` [${p.tags.join(', ')}]` : '';
+          return `- ${p.name} | ${lastStr} | ${count30} ses. últimos 30d${tags}`;
+        }).join('\n')
       : 'Sin pacientes activos registrados.';
+
+    const upcomingBlock = next7DaysSessions.length > 0
+      ? next7DaysSessions.slice(0, 30).map(s => {
+          const d = getSessionDate(s);
+          const when = d ? d.toLocaleString('es-ES', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+          return `- ${when} | ${resolvePatientName(s)} | Estado: ${s.status || 'scheduled'}${s.type ? ` | ${s.type}` : ''}`;
+        }).join('\n')
+      : 'Sin sesiones programadas en los próximos 7 días.';
+
+    // Recent sessions with NOTES (truncated). Latest 40.
+    const recentSessions = [...realSessions].sort((a, b) => {
+      const da = getSessionDate(a)?.getTime() ?? 0;
+      const db = getSessionDate(b)?.getTime() ?? 0;
+      return db - da;
+    }).slice(0, 40);
 
     const sessionsBlock = recentSessions.length > 0
       ? recentSessions.map(s => {
-          const dateStr = s.starts_on
-            ? new Date(s.starts_on).toLocaleDateString('es-ES')
-            : s.date;
+          const d = getSessionDate(s);
+          const dateStr = fmtDate(d);
           const price = s.price != null ? ` | ${s.price}€` : '';
-          const paid = s.paid != null ? (s.paid ? ' | Pagado' : ' | Pendiente pago') : '';
-          return `- ${dateStr} | ${s.patientName || 'Paciente'} | Estado: ${s.status}${price}${paid}`;
+          const paid = s.paid != null ? (s.paid ? ' | Pagado' : ' | Pendiente') : '';
+          const notes = s.notes ? ` | Notas: "${String(s.notes).slice(0, 180).replace(/\s+/g, ' ').trim()}"` : '';
+          return `- ${dateStr} | ${resolvePatientName(s)} | ${s.status}${price}${paid}${notes}`;
         }).join('\n')
       : 'Sin sesiones registradas.';
 
+    // Clinical notes (session-entries) — most recent 25 with their summary
+    const recentClinicalNotes = [...sessionEntries].sort((a, b) => {
+      const da = new Date(a.created_at || a.date || a.timestamp || 0).getTime();
+      const db = new Date(b.created_at || b.date || b.timestamp || 0).getTime();
+      return db - da;
+    }).slice(0, 25);
+
+    const clinicalNotesBlock = recentClinicalNotes.length > 0
+      ? recentClinicalNotes.map(e => {
+          const d = e.created_at || e.date;
+          const dateStr = d ? new Date(d).toLocaleDateString('es-ES') : '—';
+          const summary = (e.summary || '').replace(/\s+/g, ' ').trim().slice(0, 350);
+          return summary ? `- ${dateStr} | ${resolvePatientName(e)} | ${summary}` : null;
+        }).filter(Boolean).join('\n')
+      : 'Sin notas clínicas registradas.';
+
+    const recentInvoices = [...invoices].sort((a, b) => {
+      const da = getInvoiceDate(a)?.getTime() ?? 0;
+      const db = getInvoiceDate(b)?.getTime() ?? 0;
+      return db - da;
+    }).slice(0, 40);
+
     const invoicesBlock = recentInvoices.length > 0
       ? recentInvoices.map(inv => {
-          const dateStr = inv.invoice_date || inv.date
-            ? new Date(inv.invoice_date || inv.date || '').toLocaleDateString('es-ES')
-            : '—';
+          const dateStr = fmtDate(getInvoiceDate(inv));
           const total = (inv.total ?? inv.amount ?? 0).toFixed(2);
-          return `- ${inv.invoiceNumber || inv.id.slice(0, 8)} | ${inv.patientName || 'Cliente'} | ${total}€ | Estado: ${inv.status} | Fecha: ${dateStr}${inv.is_rectificativa ? ' [RECTIFICATIVA]' : ''}`;
+          return `- ${inv.invoiceNumber || inv.id.slice(0, 8)} | ${resolvePatientName(inv)} | ${total}€ | ${inv.status} | ${dateStr}${inv.is_rectificativa ? ' [RECTIF.]' : ''}`;
         }).join('\n')
       : 'Sin facturas registradas.';
 
-    return `
-FECHA ACTUAL: ${today}
+    const patientsWithoutRecentBlock = patientsWithoutRecent.length > 0
+      ? patientsWithoutRecent
+          .sort((a, b) => (a.lastDate?.getTime() ?? 0) - (b.lastDate?.getTime() ?? 0))
+          .slice(0, 30)
+          .map(({ p, lastDate }) => `- ${p.name} | ${lastDate ? `hace ${daysAgo(lastDate)}d` : 'nunca'}`).join('\n')
+      : 'Todos los pacientes activos han tenido sesión recientemente.';
+
+    // === ON-DEMAND PATIENT DEEP DIVE ===
+    // If user mentions a patient name, include their full recent history.
+    let deepDiveBlock = '';
+    if (userQuestion) {
+      const q = userQuestion.toLowerCase();
+      const matched = patients.filter(p => {
+        if (!p.name) return false;
+        const tokens = p.name.toLowerCase().split(/\s+/).filter(t => t.length >= 3);
+        return tokens.some(t => q.includes(t));
+      }).slice(0, 3);
+
+      if (matched.length > 0) {
+        deepDiveBlock = matched.map(p => {
+          const ses = (sessionsByPatient.get(p.id) || []).slice(0, 15);
+          const ents = (entriesByPatient.get(p.id) || []).slice(0, 10);
+          const sLines = ses.length > 0
+            ? ses.map(s => {
+                const d = getSessionDate(s);
+                const notes = s.notes ? ` — "${String(s.notes).slice(0, 220).replace(/\s+/g, ' ').trim()}"` : '';
+                return `  · ${fmtDate(d)} | ${s.status}${notes}`;
+              }).join('\n')
+            : '  · (sin sesiones)';
+          const eLines = ents.length > 0
+            ? ents.map(e => {
+                const d = e.created_at || e.date;
+                const dateStr = d ? new Date(d).toLocaleDateString('es-ES') : '—';
+                const summary = (e.summary || '').replace(/\s+/g, ' ').trim().slice(0, 400);
+                return `  · ${dateStr} — ${summary || '(sin resumen)'}`;
+              }).join('\n')
+            : '  · (sin notas clínicas)';
+          return `### Paciente: ${p.name}${p.active === false ? ' [INACTIVO]' : ''}${p.tags?.length ? ` [tags: ${p.tags.join(', ')}]` : ''}
+Sesiones recientes (${ses.length}):
+${sLines}
+Notas clínicas recientes (${ents.length}):
+${eLines}`;
+        }).join('\n\n');
+      }
+    }
+
+    let block = `FECHA ACTUAL: ${today} (${todayIso})
 
 PSICÓLOGO: ${psychologistName || 'Usuario'}
-ID (solo para referencia interna): ${psychologistId}
 
-=== PACIENTES ACTIVOS (${activePatients.length}) ===
+=== INDICADORES CLAVE ===
+${statsBlock}
+
+=== PACIENTES ACTIVOS POR RECENCIA (${activePatients.length}) ===
 ${patientsBlock}
 
-=== SESIONES RECIENTES (últimas ${recentSessions.length}) ===
+=== PACIENTES SIN SESIÓN EN ÚLTIMOS 30 DÍAS (${patientsWithoutRecent.length}) ===
+${patientsWithoutRecentBlock}
+
+=== PRÓXIMAS SESIONES (7 días) ===
+${upcomingBlock}
+
+=== SESIONES RECIENTES CON NOTAS (últimas ${recentSessions.length}) ===
 ${sessionsBlock}
 
+=== NOTAS CLÍNICAS RECIENTES (resúmenes, últimas ${recentClinicalNotes.length}) ===
+${clinicalNotesBlock}
+
 === FACTURAS RECIENTES (últimas ${recentInvoices.length}) ===
-${invoicesBlock}
-    `.trim();
+${invoicesBlock}`;
+
+    if (deepDiveBlock) {
+      block += `\n\n=== DETALLE DE PACIENTES MENCIONADOS EN LA PREGUNTA ===\n${deepDiveBlock}`;
+    }
+
+    return block.trim();
   };
 
   const buildSystemPrompt = (withWebSearch: boolean) => {
     const base = `Eres un asistente de IA especializado para psicólogos clínicos, integrado en la plataforma mainds.
 
 Tu función es ayudar al psicólogo con:
-- Análisis de su actividad clínica y administrativa
-- Generación de reportes y resúmenes
-- Identificación de pacientes que requieren atención
-- Sugerencia de próximos pasos clínicos y administrativos
-- Respuesta a preguntas sobre sus pacientes, sesiones y facturación`;
+- Análisis de su actividad clínica y administrativa con los datos privados que se te facilitan
+- Generación de reportes, resúmenes y comparativas (mes actual, últimos 30 días, etc.)
+- Identificación de pacientes que requieren atención o seguimiento
+- Recomendación de próximos pasos clínicos y administrativos
+- Respuesta a preguntas concretas sobre pacientes, sesiones, notas clínicas y facturación
+
+CÓMO RESPONDER:
+- Usa SIEMPRE los datos del bloque "DATOS PRIVADOS" para responder; nunca inventes nombres, fechas o cifras.
+- Si la información no está en los datos, dilo claramente ("no consta en tus datos") y sugiere qué registrar.
+- Cita fechas y cifras concretas cuando las tengas (€, nº de sesiones, días sin verse, etc.).
+- Usa formato Markdown: encabezados con \`##\`, listas con \`-\`, negrita con \`**\`. Sé conciso y claro.
+- Cuando hables de un paciente concreto, usa su nombre tal como aparece en los datos.
+- Si te preguntan por un periodo (este mes, últimas 4 semanas...), úsalo como referencia con la FECHA ACTUAL dada.`;
 
     const webSearchSection = withWebSearch ? `
 - Búsqueda de información actualizada en internet sobre temas clínicos, legales, formativos o de gestión relacionados con la psicología
@@ -218,7 +444,7 @@ REGLAS ESTRICTAS DE PRIVACIDAD Y SEGURIDAD (SIEMPRE ACTIVAS, CON O SIN BÚSQUEDA
 2. NUNCA reveles datos de otros psicólogos, pacientes de otros psicólogos, ni cruces información entre cuentas.
 3. La búsqueda web es solo para información general (técnicas terapéuticas, normativa, formación, etc.), NUNCA para buscar datos de pacientes o personas reales.
 4. No incluyas datos clínicos sensibles en respuestas que no los soliciten explícitamente.
-5. Las notas clínicas de sesiones son confidenciales; no las reproduzcas textualmente salvo estricta necesidad.
+5. Las notas clínicas de sesiones son confidenciales; no las reproduzcas textualmente salvo estricta necesidad. Resume.
 6. Mantén siempre un tono profesional y clínico apropiado.
 
 Responde siempre en español. Sé conciso, claro y útil.`;
@@ -249,8 +475,17 @@ Responde siempre en español. Sé conciso, claro y útil.`;
     setInput('');
     setIsLoading(true);
 
+    // Create a placeholder assistant message that we'll fill in via streaming
+    const assistantId = crypto.randomUUID();
+    setMessages(prev => [...prev, {
+      id: assistantId,
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+    }]);
+
     try {
-      const context = buildContext();
+      const context = buildContext(userInput);
       const systemPrompt = buildSystemPrompt(webSearchEnabled);
 
       // Build conversation history for multi-turn chat
@@ -281,16 +516,29 @@ ASISTENTE:`;
         requestConfig.tools = [{ googleSearch: {} }];
       }
 
-      const response = await ai.models.generateContent({
+      // Stream the response so the UI updates progressively
+      const stream = await ai.models.generateContentStream({
         model: 'gemini-2.5-flash',
         contents: fullPrompt,
         config: Object.keys(requestConfig).length > 0 ? requestConfig : undefined,
       });
 
-      const assistantContent = response.text?.trim() || 'No se pudo generar una respuesta. Intenta reformular tu pregunta.';
+      let acc = '';
+      let lastChunk: any = null;
+      for await (const chunk of stream) {
+        lastChunk = chunk;
+        const t = (chunk as any).text;
+        if (t) {
+          acc += t;
+          // Update placeholder content incrementally
+          setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: acc } : m));
+        }
+      }
 
-      // Extract grounding metadata (sources) from Google Search grounding
-      const candidate = (response as any).candidates?.[0];
+      const assistantContent = acc.trim() || 'No se pudo generar una respuesta. Intenta reformular tu pregunta.';
+
+      // Extract grounding metadata (sources) from Google Search grounding (last chunk)
+      const candidate = lastChunk?.candidates?.[0];
       const groundingMeta = candidate?.groundingMetadata;
       const rawSources: GroundingSource[] = (groundingMeta?.groundingChunks || [])
         .filter((c: any) => c?.web?.uri)
@@ -300,23 +548,19 @@ ASISTENTE:`;
         .slice(0, 8);
       const searchQueries: string[] = groundingMeta?.webSearchQueries || [];
 
-      setMessages(prev => [...prev, {
-        id: crypto.randomUUID(),
-        role: 'assistant',
+      setMessages(prev => prev.map(m => m.id === assistantId ? {
+        ...m,
         content: assistantContent,
-        timestamp: Date.now(),
         sources: rawSources.length > 0 ? rawSources : undefined,
         searchQueries: searchQueries.length > 0 ? searchQueries : undefined,
         usedWebSearch: webSearchEnabled && (rawSources.length > 0 || searchQueries.length > 0),
-      }]);
+      } : m));
     } catch (err) {
       console.error('[AIChat] Error calling Gemini:', err);
-      setMessages(prev => [...prev, {
-        id: crypto.randomUUID(),
-        role: 'assistant',
+      setMessages(prev => prev.map(m => m.id === assistantId ? {
+        ...m,
         content: 'Hubo un error al conectar con el asistente de IA. Por favor, intenta de nuevo.',
-        timestamp: Date.now(),
-      }]);
+      } : m));
     } finally {
       setIsLoading(false);
     }
@@ -342,20 +586,118 @@ ASISTENTE:`;
     return new Date(timestamp).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
   };
 
-  // Renders markdown-like bold (**text**) simply
+  // Lightweight markdown renderer supporting headings, bullets, numbered lists, bold and inline code.
+  const renderInline = (text: string, keyBase: string) => {
+    // Split by **bold** and `code` while preserving order
+    const tokens: React.ReactNode[] = [];
+    const regex = /(\*\*[^*]+\*\*|`[^`]+`)/g;
+    let lastIndex = 0;
+    let m: RegExpExecArray | null;
+    let idx = 0;
+    while ((m = regex.exec(text)) !== null) {
+      if (m.index > lastIndex) tokens.push(text.slice(lastIndex, m.index));
+      const t = m[0];
+      if (t.startsWith('**')) {
+        tokens.push(<strong key={`${keyBase}-b-${idx++}`}>{t.slice(2, -2)}</strong>);
+      } else {
+        tokens.push(
+          <code key={`${keyBase}-c-${idx++}`} className="px-1 py-0.5 bg-slate-100 rounded text-[0.85em] font-mono text-slate-700">
+            {t.slice(1, -1)}
+          </code>
+        );
+      }
+      lastIndex = m.index + t.length;
+    }
+    if (lastIndex < text.length) tokens.push(text.slice(lastIndex));
+    return tokens;
+  };
+
   const renderContent = (text: string) => {
     const lines = text.split('\n');
-    return lines.map((line, i) => {
-      const parts = line.split(/\*\*(.*?)\*\*/g);
-      return (
-        <React.Fragment key={i}>
-          {parts.map((part, j) =>
-            j % 2 === 1 ? <strong key={j}>{part}</strong> : part
-          )}
-          {i < lines.length - 1 && <br />}
-        </React.Fragment>
+    const blocks: React.ReactNode[] = [];
+    let i = 0;
+    let pIdx = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      // Heading
+      const h = /^(#{1,3})\s+(.+)$/.exec(trimmed);
+      if (h) {
+        const level = h[1].length;
+        const content = h[2];
+        const cls = level === 1
+          ? 'text-base font-semibold mt-2 mb-1'
+          : level === 2
+          ? 'text-sm font-semibold mt-2 mb-1'
+          : 'text-sm font-semibold mt-1.5 mb-0.5';
+        blocks.push(<div key={`h-${i}`} className={cls}>{renderInline(content, `h-${i}`)}</div>);
+        i++;
+        continue;
+      }
+
+      // Bullet list
+      if (/^[-*•]\s+/.test(trimmed)) {
+        const items: string[] = [];
+        while (i < lines.length && /^[-*•]\s+/.test(lines[i].trim())) {
+          items.push(lines[i].trim().replace(/^[-*•]\s+/, ''));
+          i++;
+        }
+        blocks.push(
+          <ul key={`ul-${i}`} className="list-disc pl-5 my-1 space-y-0.5">
+            {items.map((it, j) => (
+              <li key={`li-${i}-${j}`}>{renderInline(it, `li-${i}-${j}`)}</li>
+            ))}
+          </ul>
+        );
+        continue;
+      }
+
+      // Numbered list
+      if (/^\d+\.\s+/.test(trimmed)) {
+        const items: string[] = [];
+        while (i < lines.length && /^\d+\.\s+/.test(lines[i].trim())) {
+          items.push(lines[i].trim().replace(/^\d+\.\s+/, ''));
+          i++;
+        }
+        blocks.push(
+          <ol key={`ol-${i}`} className="list-decimal pl-5 my-1 space-y-0.5">
+            {items.map((it, j) => (
+              <li key={`oli-${i}-${j}`}>{renderInline(it, `oli-${i}-${j}`)}</li>
+            ))}
+          </ol>
+        );
+        continue;
+      }
+
+      // Blank line
+      if (trimmed === '') {
+        blocks.push(<div key={`sp-${i}`} className="h-2" />);
+        i++;
+        continue;
+      }
+
+      // Paragraph (collect consecutive non-special lines)
+      const paraLines: string[] = [];
+      while (i < lines.length) {
+        const t = lines[i].trim();
+        if (t === '' || /^(#{1,3})\s+/.test(t) || /^[-*•]\s+/.test(t) || /^\d+\.\s+/.test(t)) break;
+        paraLines.push(lines[i]);
+        i++;
+      }
+      const pkey = `p-${pIdx++}`;
+      blocks.push(
+        <p key={pkey} className="my-1">
+          {paraLines.map((pl, k) => (
+            <React.Fragment key={`${pkey}-l-${k}`}>
+              {renderInline(pl, `${pkey}-l-${k}`)}
+              {k < paraLines.length - 1 && <br />}
+            </React.Fragment>
+          ))}
+        </p>
       );
-    });
+    }
+    return blocks;
   };
 
   return (
@@ -567,7 +909,22 @@ ASISTENTE:`;
                       ? 'bg-indigo-600 text-white rounded-tr-sm'
                       : 'bg-white border border-slate-200 text-slate-800 rounded-tl-sm shadow-sm'
                   }`}>
-                    {renderContent(message.content)}
+                    {message.role === 'assistant' && !message.content && isLoading ? (
+                      webSearchEnabled ? (
+                        <div className="flex items-center gap-2">
+                          <Search size={13} className="text-blue-500 animate-pulse" />
+                          <span className="text-xs text-blue-600">Buscando en internet...</span>
+                        </div>
+                      ) : (
+                        <div className="flex gap-1 items-center h-4">
+                          <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce [animation-delay:0ms]"></span>
+                          <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce [animation-delay:150ms]"></span>
+                          <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce [animation-delay:300ms]"></span>
+                        </div>
+                      )
+                    ) : (
+                      renderContent(message.content)
+                    )}
                   </div>
 
                   {/* Sources from web search */}
@@ -612,29 +969,6 @@ ASISTENTE:`;
                 </div>
               </div>
             ))}
-
-            {/* Typing indicator */}
-            {isLoading && (
-              <div className="flex gap-2 sm:gap-3">
-                <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center flex-shrink-0 mt-0.5">
-                  {webSearchEnabled ? <Globe size={14} className="text-white" /> : <Bot size={14} className="text-white" />}
-                </div>
-                <div className="bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
-                  {webSearchEnabled ? (
-                    <div className="flex items-center gap-2">
-                      <Search size={13} className="text-blue-500 animate-pulse" />
-                      <span className="text-xs text-blue-600">Buscando en internet...</span>
-                    </div>
-                  ) : (
-                    <div className="flex gap-1 items-center h-4">
-                      <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce [animation-delay:0ms]"></span>
-                      <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce [animation-delay:150ms]"></span>
-                      <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce [animation-delay:300ms]"></span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
           </>
         )}
         <div ref={messagesEndRef} />
