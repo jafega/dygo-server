@@ -391,7 +391,7 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
       let markdown = '';
 
       if (ext === 'pdf') {
-        if (!ai) throw new Error('API de IA no configurada (falta VITE_GEMINI_API_KEY)');
+        if (!ai) throw new Error('API de IA no configurada en el servidor');
         const arrayBuffer = await file.arrayBuffer();
         const bytes = new Uint8Array(arrayBuffer);
         let binary = '';
@@ -409,7 +409,7 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({ psychologistId, canCrea
         });
         markdown = (response as any).text ?? '';
       } else if (ext === 'docx' || ext === 'doc') {
-        if (!ai) throw new Error('API de IA no configurada (falta VITE_GEMINI_API_KEY)');
+        if (!ai) throw new Error('API de IA no configurada en el servidor');
         const mammothModule = await import('mammoth');
         const mammoth = (mammothModule as any).default ?? mammothModule;
         const arrayBuffer = await file.arrayBuffer();

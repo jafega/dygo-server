@@ -1,10 +1,120 @@
-import { GoogleGenAI, Type } from "@google/genai";
 import { JournalEntry, Goal, WeeklyReport, EmotionStructure } from "../types";
 import pako from 'pako';
+import { API_URL } from './config';
+import { getAuthHeaders } from './authService';
 
-const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+// Schema "Type" values — strings that match the @google/genai Type enum.
+// We re-export them so components don't need to import the SDK in the browser.
+// SECURITY: the Gemini API key never reaches the frontend; all calls go through
+// the backend proxy at `${API_URL}/ai/*`.
+export const Type = {
+  STRING: 'STRING',
+  NUMBER: 'NUMBER',
+  INTEGER: 'INTEGER',
+  BOOLEAN: 'BOOLEAN',
+  ARRAY: 'ARRAY',
+  OBJECT: 'OBJECT',
+  TYPE_UNSPECIFIED: 'TYPE_UNSPECIFIED',
+} as const;
 
-export const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
+interface AiGenerateRequest {
+  model: string;
+  contents: any;
+  config?: any;
+}
+
+interface AiGenerateResponse {
+  text: string;
+  candidates?: any[];
+  usageMetadata?: any;
+}
+
+async function proxyGenerateContent(req: AiGenerateRequest): Promise<AiGenerateResponse> {
+  const res = await fetch(`${API_URL}/ai/generate-content`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) {
+    let msg = `AI proxy ${res.status}`;
+    try { const j = await res.json(); msg = j.error || msg; } catch {}
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
+// Stream a generateContent call via SSE from the backend.
+async function* proxyGenerateContentStream(req: AiGenerateRequest): AsyncGenerator<{ text: string; candidates?: any[] }> {
+  const res = await fetch(`${API_URL}/ai/generate-content-stream`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(req),
+  });
+  if (!res.ok || !res.body) {
+    let msg = `AI stream ${res.status}`;
+    try { const j = await res.json(); msg = j.error || msg; } catch {}
+    throw new Error(msg);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let currentEvent = 'message';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    // Split by SSE record separator (blank line)
+    let idx: number;
+    while ((idx = buffer.indexOf('\n\n')) !== -1) {
+      const raw = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      const lines = raw.split('\n');
+      let dataLine = '';
+      currentEvent = 'message';
+      for (const line of lines) {
+        if (line.startsWith('event:')) currentEvent = line.slice(6).trim();
+        else if (line.startsWith('data:')) dataLine += line.slice(5).trim();
+      }
+      if (!dataLine) continue;
+      let payload: any;
+      try { payload = JSON.parse(dataLine); } catch { continue; }
+      if (currentEvent === 'chunk') {
+        yield { text: payload.text || '', candidates: payload.candidates };
+      } else if (currentEvent === 'error') {
+        throw new Error(payload.error || 'Error en streaming de IA');
+      } else if (currentEvent === 'done') {
+        return;
+      }
+    }
+  }
+}
+
+// Shim that mirrors the @google/genai SDK surface used by the app, but routes
+// every call through the backend proxy so the API key stays server-side.
+export const ai = {
+  models: {
+    generateContent: (req: AiGenerateRequest) => proxyGenerateContent(req),
+    generateContentStream: (req: AiGenerateRequest) => proxyGenerateContentStream(req),
+  },
+};
+
+// Fetch an ephemeral auth token from the backend, used only by the Live
+// (voice) WebSocket connection. The token is short-lived and single-use.
+export async function fetchEphemeralAiToken(): Promise<string> {
+  const res = await fetch(`${API_URL}/ai/ephemeral-token`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) {
+    let msg = `Ephemeral token ${res.status}`;
+    try { const j = await res.json(); msg = j.error || msg; } catch {}
+    throw new Error(msg);
+  }
+  const j = await res.json();
+  if (!j.token) throw new Error('Token efímero no recibido');
+  return j.token as string;
+}
 
 // Función para comprimir transcripts largos antes de guardar
 function compressTranscript(transcript: string): string {

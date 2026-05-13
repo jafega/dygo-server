@@ -458,7 +458,7 @@ Responde siempre en español. Sé conciso, claro y útil.`;
       setMessages(prev => [...prev, {
         id: crypto.randomUUID(),
         role: 'assistant',
-        content: '⚠️ El asistente de IA no está disponible. Configura la variable de entorno VITE_GEMINI_API_KEY para activarlo.',
+        content: '⚠️ El asistente de IA no está disponible. Configura GEMINI_API_KEY en el servidor para activarlo.',
         timestamp: Date.now(),
       }]);
       return;

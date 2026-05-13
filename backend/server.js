@@ -51,6 +51,7 @@ try {
 
 // --- LAZY SINGLETONS for heavy libraries ---
 let _genAI = null;
+let _genAIv2 = null; // @google/genai (new SDK) — used by /api/ai/* proxy
 let _googleApis = null;
 
 async function getGenAI() {
@@ -60,6 +61,17 @@ async function getGenAI() {
     _genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
   }
   return _genAI;
+}
+
+// New SDK (@google/genai) — same interface as the frontend, used to proxy
+// frontend AI calls so the API key never leaves the server.
+async function getGenAIv2() {
+  if (!process.env.GEMINI_API_KEY) return null;
+  if (!_genAIv2) {
+    const { GoogleGenAI } = await import('@google/genai');
+    _genAIv2 = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  }
+  return _genAIv2;
 }
 
 async function getGoogleApis() {
@@ -13834,6 +13846,156 @@ app.delete('/api/relationships/:id/historical-documents/:docId', authenticateReq
   } catch (err) {
     console.error('❌ Error deleting historical document:', err);
     return res.status(500).json({ error: err?.message || 'No se pudo eliminar el documento' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GENERIC GEMINI PROXY (so the API key never reaches the browser)
+// Frontend uses these endpoints instead of calling generativelanguage.googleapis.com
+// directly. Mirrors the @google/genai SDK shape: { model, contents, config }.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Hard ceiling for request body to avoid abuse via huge inlineData payloads.
+const AI_PROXY_MAX_BYTES = 25 * 1024 * 1024; // 25 MB
+const aiProxyJson = express.json({ limit: AI_PROXY_MAX_BYTES });
+
+// Per-user rate limiter for AI proxy calls
+const aiProxyLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60, // 60 requests / minute / user
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.authenticatedUserId || req.ip,
+  message: { error: 'Demasiadas peticiones a la IA. Espera unos segundos.' }
+});
+
+// Normalize { model, contents, config } payload sent by the frontend
+function normalizeAiRequest(body) {
+  if (!body || typeof body !== 'object') throw new Error('Body inválido');
+  const model = typeof body.model === 'string' && body.model.trim()
+    ? body.model
+    : 'gemini-2.5-flash';
+  // contents may be a string, an array of strings/parts, or an array of { role, parts }
+  const contents = body.contents;
+  if (contents === undefined || contents === null) {
+    throw new Error('Falta el campo "contents"');
+  }
+  const config = body.config && typeof body.config === 'object' ? body.config : undefined;
+  return { model, contents, config };
+}
+
+// POST /api/ai/generate-content — non-streaming
+app.post('/api/ai/generate-content', authenticateRequest, aiProxyLimiter, aiProxyJson, async (req, res) => {
+  try {
+    const genai = await getGenAIv2();
+    if (!genai) {
+      return res.status(503).json({ error: 'Servicio de IA no disponible. Configure GEMINI_API_KEY en el servidor.' });
+    }
+    let payload;
+    try { payload = normalizeAiRequest(req.body); }
+    catch (e) { return res.status(400).json({ error: e.message || 'Body inválido' }); }
+
+    const response = await genai.models.generateContent(payload);
+    // Extract serializable fields. `response.text` is a getter on the SDK object.
+    const text = typeof response.text === 'string' ? response.text : (response.text ?? '');
+    const candidates = response.candidates || undefined;
+    const usageMetadata = response.usageMetadata || undefined;
+    return res.json({ text, candidates, usageMetadata });
+  } catch (err) {
+    const status = err?.status || err?.response?.status || 500;
+    const message = err?.message || 'Error al llamar a la IA';
+    console.error('[POST /api/ai/generate-content] ❌', status, message);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({ error: message });
+  }
+});
+
+// POST /api/ai/generate-content-stream — Server-Sent Events streaming
+app.post('/api/ai/generate-content-stream', authenticateRequest, aiProxyLimiter, aiProxyJson, async (req, res) => {
+  try {
+    const genai = await getGenAIv2();
+    if (!genai) {
+      return res.status(503).json({ error: 'Servicio de IA no disponible. Configure GEMINI_API_KEY en el servidor.' });
+    }
+    let payload;
+    try { payload = normalizeAiRequest(req.body); }
+    catch (e) { return res.status(400).json({ error: e.message || 'Body inválido' }); }
+
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+
+    const writeEvent = (event, data) => {
+      try {
+        res.write(`event: ${event}\n`);
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+      } catch {}
+    };
+
+    let closed = false;
+    req.on('close', () => { closed = true; });
+
+    try {
+      const stream = await genai.models.generateContentStream(payload);
+      for await (const chunk of stream) {
+        if (closed) break;
+        const text = typeof chunk.text === 'string' ? chunk.text : (chunk.text ?? '');
+        writeEvent('chunk', {
+          text,
+          candidates: chunk.candidates || undefined,
+        });
+      }
+      writeEvent('done', { ok: true });
+    } catch (err) {
+      console.error('[POST /api/ai/generate-content-stream] ❌', err?.message || err);
+      writeEvent('error', { error: err?.message || 'Error en streaming' });
+    } finally {
+      try { res.end(); } catch {}
+    }
+  } catch (err) {
+    console.error('[POST /api/ai/generate-content-stream] ❌ outer', err);
+    if (!res.headersSent) {
+      return res.status(500).json({ error: err?.message || 'Error al iniciar streaming' });
+    }
+    try { res.end(); } catch {}
+  }
+});
+
+// POST /api/ai/ephemeral-token — mint a short-lived auth token for Gemini Live API
+// The browser uses this to open the WebSocket to Gemini directly; the master
+// GEMINI_API_KEY stays on the server.
+app.post('/api/ai/ephemeral-token', authenticateRequest, aiProxyLimiter, express.json({ limit: '32kb' }), async (req, res) => {
+  try {
+    const genai = await getGenAIv2();
+    if (!genai) {
+      return res.status(503).json({ error: 'Servicio de IA no disponible. Configure GEMINI_API_KEY en el servidor.' });
+    }
+    if (!genai.authTokens || typeof genai.authTokens.create !== 'function') {
+      return res.status(501).json({ error: 'Ephemeral tokens no soportados por esta versión del SDK.' });
+    }
+
+    // Token vida corta: 30 min de validez del token, sesión iniciada en <2 min.
+    const nowSec = Math.floor(Date.now() / 1000);
+    const config = {
+      uses: 1,
+      expireTime: new Date((nowSec + 30 * 60) * 1000).toISOString(),
+      newSessionExpireTime: new Date((nowSec + 2 * 60) * 1000).toISOString(),
+      httpOptions: { apiVersion: 'v1alpha' },
+    };
+
+    const token = await genai.authTokens.create({ config });
+    // SDK returns { name: 'authTokens/...' } — that string is the ephemeral key
+    const name = token?.name || token?.token || '';
+    if (!name) {
+      console.error('[POST /api/ai/ephemeral-token] ❌ Token without name', token);
+      return res.status(500).json({ error: 'No se pudo emitir el token efímero' });
+    }
+    return res.json({ token: name, expiresAt: config.expireTime });
+  } catch (err) {
+    const status = err?.status || err?.response?.status || 500;
+    console.error('[POST /api/ai/ephemeral-token] ❌', status, err?.message || err);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({ error: err?.message || 'No se pudo emitir el token efímero' });
   }
 });
 

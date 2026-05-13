@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { LiveServerMessage, Modality } from '@google/genai';
-import { ai } from '../services/genaiService';
+import { LiveServerMessage, Modality, GoogleGenAI } from '@google/genai';
+import { fetchEphemeralAiToken } from '../services/genaiService';
 import { createPcmBlob, decodeAudioData, base64ToUint8Array } from '../services/audioUtils';
 import { getLastDaysEntriesSummary, getPatientActiveRelationship } from '../services/storageService';
 import { getCurrentUser } from '../services/authService';
@@ -115,22 +115,27 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
       }
       
       isInitialized.current = true;
-      console.log('[VoiceSession] ai available:', !!ai);
-      
-      if (!ai) {
-        console.error('[VoiceSession] No AI instance - missing API key');
-        setError("Falta la API key de Gemini (VITE_GEMINI_API_KEY)");
-        setStatus("error");
+
+      // SECURITY: nunca usamos GEMINI_API_KEY en el navegador. Pedimos un token
+      // efímero al backend; el token caduca en minutos y se invalida tras la sesión.
+      let liveAi: GoogleGenAI;
+      try {
+        console.log('[VoiceSession] 🔑 Requesting ephemeral token from backend...');
+        const ephemeralToken = await fetchEphemeralAiToken();
+        console.log('[VoiceSession] ✅ Ephemeral token received');
+        liveAi = new GoogleGenAI({
+          apiKey: ephemeralToken,
+          httpOptions: { apiVersion: 'v1alpha' },
+        });
+      } catch (e: any) {
+        console.error('[VoiceSession] ❌ Could not get ephemeral token', e);
+        setError(e?.message || 'No se pudo iniciar la sesión de voz (token).');
+        setStatus('error');
         return;
       }
 
       try {
         console.log('[VoiceSession] Starting session...');
-        const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-        console.log('[VoiceSession] API key present:', !!apiKey);
-
-
-
         const user = await getCurrentUser();
         console.log('[VoiceSession] User loaded:', user?.id);
         
@@ -311,7 +316,7 @@ const VoiceSession: React.FC<VoiceSessionProps> = ({ onSessionEnd, onCancel, set
           setStatus('error');
         }, 15000); // 15 segundos timeout
         
-        const sessionPromise = ai.live.connect({
+        const sessionPromise = liveAi.live.connect({
           model: 'gemini-2.5-flash-native-audio-preview-09-2025',
           callbacks: {
             onopen: () => {

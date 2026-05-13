@@ -4,10 +4,10 @@ import {
   Loader2, X, RefreshCw, Download, FileText, Users,
   ChevronDown, ChevronUp, Info
 } from 'lucide-react';
-import { ai } from '../services/genaiService';
+import { ai, Type } from '../services/genaiService';
 import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
-import { Type } from '@google/genai';
+// Type now re-exported from genaiService (backend proxy)
 import * as XLSX from 'xlsx';
 import UpgradeModal from './UpgradeModal';
 import { User } from '../types';
@@ -149,7 +149,7 @@ const BulkImportPanel: React.FC<BulkImportPanelProps> = ({ psychologistId, curre
   const parseFile = useCallback(async (file: File) => {
     if (!ai) {
       setParseError(
-        'La clave API de Gemini (VITE_GEMINI_API_KEY) no está configurada. ' +
+        'El servicio de IA no está disponible en el servidor. ' +
         'Puedes añadir pacientes manualmente usando el botón "+ Añadir fila".'
       );
       setRows([emptyRow()]);
