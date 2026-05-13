@@ -13975,27 +13975,41 @@ app.post('/api/ai/ephemeral-token', authenticateRequest, aiProxyLimiter, express
       return res.status(501).json({ error: 'Ephemeral tokens no soportados por esta versión del SDK.' });
     }
 
-    // Token vida corta: 30 min de validez del token, sesión iniciada en <2 min.
-    const nowSec = Math.floor(Date.now() / 1000);
-    const config = {
-      uses: 1,
-      expireTime: new Date((nowSec + 30 * 60) * 1000).toISOString(),
-      newSessionExpireTime: new Date((nowSec + 2 * 60) * 1000).toISOString(),
-      httpOptions: { apiVersion: 'v1alpha' },
-    };
+    // Defaults del SDK: token válido 30 min, sesión debe iniciarse en 60s, 1 uso.
+    // Forzamos apiVersion: v1alpha (auth_tokens solo existe ahí) y damos
+    // un pelín más de margen para iniciar sesión.
+    const expireTime = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+    const newSessionExpireTime = new Date(Date.now() + 2 * 60 * 1000).toISOString();
 
-    const token = await genai.authTokens.create({ config });
-    // SDK returns { name: 'authTokens/...' } — that string is the ephemeral key
-    const name = token?.name || token?.token || '';
+    const token = await genai.authTokens.create({
+      config: {
+        uses: 1,
+        expireTime,
+        newSessionExpireTime,
+        httpOptions: { apiVersion: 'v1alpha' },
+      },
+    });
+
+    const name = token?.name || '';
     if (!name) {
       console.error('[POST /api/ai/ephemeral-token] ❌ Token without name', token);
       return res.status(500).json({ error: 'No se pudo emitir el token efímero' });
     }
-    return res.json({ token: name, expiresAt: config.expireTime });
+    return res.json({ token: name, expiresAt: expireTime });
   } catch (err) {
     const status = err?.status || err?.response?.status || 500;
-    console.error('[POST /api/ai/ephemeral-token] ❌', status, err?.message || err);
-    return res.status(status >= 400 && status < 600 ? status : 500).json({ error: err?.message || 'No se pudo emitir el token efímero' });
+    const raw = err?.message || String(err);
+    console.error('[POST /api/ai/ephemeral-token] ❌', status, raw);
+    // Intentar extraer mensaje de error de Google API para diagnóstico
+    let message = raw;
+    try {
+      const m = raw.match(/\{[\s\S]*\}$/);
+      if (m) {
+        const parsed = JSON.parse(m[0]);
+        message = parsed?.error?.message || raw;
+      }
+    } catch {}
+    return res.status(status >= 400 && status < 600 ? status : 500).json({ error: message, raw });
   }
 });
 
