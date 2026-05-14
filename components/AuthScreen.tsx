@@ -216,10 +216,35 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess, pendingSignDocum
                 : (SUPABASE_REDIRECT_URL || `${window.location.origin}/?supabase_auth=1`);
             const { data, error } = await supabase.auth.signInWithOAuth({
                 provider: 'google',
-                options: { redirectTo }
+                options: { redirectTo, skipBrowserRedirect: true }
             });
             if (error) throw error;
-            if (data?.url) window.location.href = data.url;
+            if (data?.url) {
+                // If we're inside a sandboxed iframe (e.g. preview/embed), the iframe
+                // lacks allow-same-origin / allow-scripts and the Google OAuth page
+                // would inherit the sandbox and fail. Escape to the top window when
+                // possible, falling back to opening a new tab.
+                let navigated = false;
+                try {
+                    if (window.top && window.top !== window.self) {
+                        window.top.location.href = data.url;
+                        navigated = true;
+                    }
+                } catch {
+                    // Cross-origin top — cannot access; fall through to window.open
+                }
+                if (!navigated) {
+                    try {
+                        if (window.self !== window.top) {
+                            const opened = window.open(data.url, '_blank', 'noopener,noreferrer');
+                            if (opened) navigated = true;
+                        }
+                    } catch { /* ignore */ }
+                }
+                if (!navigated) {
+                    window.location.href = data.url;
+                }
+            }
         } catch (err: any) {
             setError(err?.message || 'Error iniciando OAuth');
         } finally {

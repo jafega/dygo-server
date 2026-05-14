@@ -13966,51 +13966,76 @@ app.post('/api/ai/generate-content-stream', authenticateRequest, aiProxyLimiter,
 // The browser uses this to open the WebSocket to Gemini directly; the master
 // GEMINI_API_KEY stays on the server.
 app.post('/api/ai/ephemeral-token', authenticateRequest, aiProxyLimiter, express.json({ limit: '32kb' }), async (req, res) => {
-  try {
-    const genai = await getGenAIv2();
-    if (!genai) {
-      return res.status(503).json({ error: 'Servicio de IA no disponible. Configure GEMINI_API_KEY en el servidor.' });
-    }
-    if (!genai.authTokens || typeof genai.authTokens.create !== 'function') {
-      return res.status(501).json({ error: 'Ephemeral tokens no soportados por esta versión del SDK.' });
-    }
-
-    // Defaults del SDK: token válido 30 min, sesión debe iniciarse en 60s, 1 uso.
-    // Forzamos apiVersion: v1alpha (auth_tokens solo existe ahí) y damos
-    // un pelín más de margen para iniciar sesión.
-    const expireTime = new Date(Date.now() + 30 * 60 * 1000).toISOString();
-    const newSessionExpireTime = new Date(Date.now() + 2 * 60 * 1000).toISOString();
-
-    const token = await genai.authTokens.create({
-      config: {
-        uses: 1,
-        expireTime,
-        newSessionExpireTime,
-        httpOptions: { apiVersion: 'v1alpha' },
-      },
-    });
-
-    const name = token?.name || '';
-    if (!name) {
-      console.error('[POST /api/ai/ephemeral-token] ❌ Token without name', token);
-      return res.status(500).json({ error: 'No se pudo emitir el token efímero' });
-    }
-    return res.json({ token: name, expiresAt: expireTime });
-  } catch (err) {
-    const status = err?.status || err?.response?.status || 500;
-    const raw = err?.message || String(err);
-    console.error('[POST /api/ai/ephemeral-token] ❌', status, raw);
-    // Intentar extraer mensaje de error de Google API para diagnóstico
-    let message = raw;
-    try {
-      const m = raw.match(/\{[\s\S]*\}$/);
-      if (m) {
-        const parsed = JSON.parse(m[0]);
-        message = parsed?.error?.message || raw;
-      }
-    } catch {}
-    return res.status(status >= 400 && status < 600 ? status : 500).json({ error: message, raw });
+  if (!process.env.GEMINI_API_KEY) {
+    return res.status(503).json({ error: 'Servicio de IA no disponible. Configure GEMINI_API_KEY en el servidor.' });
   }
+
+  // Llamada DIRECTA a la API REST de Google. No usamos el SDK aquí porque algunas
+  // versiones del SDK añaden campos que la API v1alpha rechaza con INVALID_ARGUMENT.
+  // Probamos varias shapes del body para máxima compatibilidad.
+  const expireTime = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+  const newSessionExpireTime = new Date(Date.now() + 2 * 60 * 1000).toISOString();
+
+  const variants = [
+    { uses: 1, expireTime, newSessionExpireTime },
+    { uses: 1 },
+    {},
+  ];
+
+  let lastErr = null;
+  for (const body of variants) {
+    try {
+      const url = 'https://generativelanguage.googleapis.com/v1alpha/auth_tokens';
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': process.env.GEMINI_API_KEY,
+        },
+        body: JSON.stringify(body),
+      });
+      const text = await r.text();
+      if (r.ok) {
+        let parsed;
+        try { parsed = JSON.parse(text); } catch { parsed = {}; }
+        const name = parsed?.name || '';
+        if (!name) {
+          console.error('[ephemeral-token] ❌ OK response without name', text);
+          return res.status(500).json({ error: 'Respuesta sin token name', raw: text });
+        }
+        return res.json({ token: name, expiresAt: expireTime });
+      }
+      lastErr = { status: r.status, body: text, variant: body };
+      console.warn('[ephemeral-token] Variant failed', JSON.stringify(body), '->', r.status, text.slice(0, 300));
+    } catch (e) {
+      lastErr = { status: 0, body: e?.message || String(e), variant: body };
+      console.warn('[ephemeral-token] Variant threw', e?.message || e);
+    }
+  }
+
+  // Todas las variantes fallaron: devolvemos detalles completos de Google
+  let googleError = null;
+  try { googleError = JSON.parse(lastErr?.body || '{}')?.error || null; } catch {}
+  const message = googleError?.message || lastErr?.body || 'No se pudo emitir el token efímero';
+  const code = googleError?.code || lastErr?.status || 500;
+  const status = googleError?.status || '';
+  const details = googleError?.details || null;
+
+  console.error('[ephemeral-token] ❌ All variants failed:', { code, status, message, details });
+
+  // Errores típicos → mensaje amigable + acción sugerida
+  let hint = '';
+  if (status === 'PERMISSION_DENIED') hint = ' La API key está suspendida o el proyecto no tiene billing/Live API.';
+  else if (status === 'INVALID_ARGUMENT') hint = ' La API key existe pero su proyecto no soporta ephemeral tokens. Crea una key NUEVA desde https://aistudio.google.com/apikey (Gemini Developer API) — NO uses keys creadas en Google Cloud Console / Vertex AI.';
+  else if (status === 'UNAUTHENTICATED' || code === 401) hint = ' API key inválida o vacía.';
+  else if (status === 'FAILED_PRECONDITION') hint = ' El proyecto necesita tener facturación activa para usar Live API.';
+
+  return res.status(code >= 400 && code < 600 ? code : 500).json({
+    error: `${message}${hint}`,
+    googleStatus: status,
+    googleCode: code,
+    details,
+  });
 });
 
 // POST /api/relationships/:id/historical-documents/generate-summary - Generar resumen con IA
