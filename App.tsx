@@ -4,6 +4,7 @@ import * as StorageService from './services/storageService';
 import * as AuthService from './services/authService';
 import { USE_BACKEND, API_URL } from './services/config';
 import { detectDefaultPrefix } from './services/phoneUtils';
+import { setActiveCurrency } from './services/currency';
 import { isTempEmail } from './services/textUtils';
 import { analyzeJournalEntry, analyzeGoalsProgress, generateWeeklyReport } from './services/genaiService';
 import AuthScreen from './components/AuthScreen';
@@ -49,8 +50,7 @@ const MaindsLogo: React.FC<{ className?: string }> = ({ className = "w-12 h-12" 
 );
 
 const App: React.FC = () => {
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [viewState, setViewState] = useState<ViewState>(ViewState.AUTH);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);  const [viewState, setViewState] = useState<ViewState>(ViewState.AUTH);
   const [showRolePrompt, setShowRolePrompt] = useState(false);
   const [pendingRole, setPendingRole] = useState<'PATIENT' | 'PSYCHOLOGIST' | null>(null);
   const [showFirstTimeRoleModal, setShowFirstTimeRoleModal] = useState(false);
@@ -80,6 +80,32 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('maindsMenuButtonPos', JSON.stringify(menuButtonPos));
   }, [menuButtonPos]);
+
+  // Sincronizar moneda activa con el perfil del psicólogo (o EUR por defecto
+  // para pacientes). Esto permite que `formatMoney(n)` en cualquier componente
+  // utilice la moneda correcta sin tener que recibirla por props.
+  useEffect(() => {
+    if (!currentUser) return;
+    if (!currentUser.is_psychologist) {
+      // Pacientes: por ahora usamos EUR como fallback. Si en el futuro se
+      // quiere heredar la moneda del psicólogo asignado, se puede consultar
+      // aquí esa relación.
+      setActiveCurrency('EUR');
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await AuthService.apiFetch(`${API_URL}/psychologist/${currentUser.id}/profile`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setActiveCurrency(data?.currency || 'EUR');
+      } catch {
+        // ignore — usa el último valor guardado o EUR
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [currentUser?.id, currentUser?.is_psychologist]);
   
   // Ref para controlar PatientDashboard
   const patientDashboardRef = useRef<PatientDashboardHandle>(null);

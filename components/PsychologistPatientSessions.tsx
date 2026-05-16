@@ -2,6 +2,7 @@
 import { Calendar, Clock, Video, MapPin, CheckCircle, XCircle, DollarSign, Filter, Save, X, Trash2, FileText, Receipt, Ticket, Copy, Send, ExternalLink } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser, apiFetch } from '../services/authService';
+import { formatMoney, currencySymbol } from '../services/currency';
 import SessionDetailsModal from './SessionDetailsModal';
 
 interface Session {
@@ -623,17 +624,17 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
           </div>
           <div className="bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-lg sm:rounded-xl border border-indigo-200 p-2.5 sm:p-4 shadow-sm">
             <div className="text-[10px] sm:text-xs font-semibold text-indigo-700 mb-1 sm:mb-2">Valor Total</div>
-            <div className="text-xl sm:text-2xl font-bold text-indigo-900">{totalSessionValue.toFixed(2)} €</div>
+            <div className="text-xl sm:text-2xl font-bold text-indigo-900">{formatMoney(totalSessionValue)}</div>
             <div className="text-[9px] sm:text-xs text-indigo-600 mt-0.5 sm:mt-1">{completedSessions.length} sesiones</div>
           </div>
           <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 rounded-lg sm:rounded-xl border border-emerald-200 p-2.5 sm:p-4 shadow-sm">
             <div className="text-[10px] sm:text-xs font-semibold text-emerald-700 mb-1 sm:mb-2">Mi Ganancia</div>
-            <div className="text-xl sm:text-2xl font-bold text-emerald-900">{totalEarnings.toFixed(2)} €</div>
+            <div className="text-xl sm:text-2xl font-bold text-emerald-900">{formatMoney(totalEarnings)}</div>
             <div className="text-[9px] sm:text-xs text-emerald-600 mt-0.5 sm:mt-1">{completedSessions.length} sesiones</div>
           </div>
           <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg sm:rounded-xl border border-blue-200 p-2.5 sm:p-4 shadow-sm">
             <div className="text-[10px] sm:text-xs font-semibold text-blue-700 mb-1 sm:mb-2">Cobrado</div>
-            <div className="text-xl sm:text-2xl font-bold text-blue-900">{paidEarnings.toFixed(2)} €</div>
+            <div className="text-xl sm:text-2xl font-bold text-blue-900">{formatMoney(paidEarnings)}</div>
             <div className="text-[9px] sm:text-xs text-blue-600 mt-0.5 sm:mt-1">{paidSessions.length} sesiones</div>
           </div>
         </div>
@@ -754,7 +755,7 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
                       </div>
                     )}
                     <div className="text-right">
-                      <div className="text-base sm:text-lg font-bold text-purple-900">{earnings.toFixed(2)} €</div>
+                      <div className="text-base sm:text-lg font-bold text-purple-900">{formatMoney(earnings)}</div>
                       <div className="text-[9px] sm:text-xs text-slate-500">ganancia</div>
                     </div>
                   </div>
@@ -876,7 +877,7 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Precio/h (€)</label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Precio/h ({currencySymbol()})</label>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -892,7 +893,7 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
                     placeholder="0.00"
                   />
                   <p className="text-xs text-slate-500 mt-1">
-                    Total: {getSessionTotalPrice(editedSession).toFixed(2)}€
+                    Total: {formatMoney(getSessionTotalPrice(editedSession))}
                   </p>
                 </div>
                 <div>
@@ -999,7 +1000,7 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
                             <div className="flex items-center justify-between">
                               <div>
                                 <div className="text-sm font-medium text-blue-900">
-                                  Bono - {bono.total_price_bono_amount}€
+                                  Bono - {formatMoney(bono.total_price_bono_amount)}
                                 </div>
                                 <div className="text-xs text-blue-600">
                                   {bono.sessions_remaining} sesión{bono.sessions_remaining !== 1 ? 'es' : ''} disponible{bono.sessions_remaining !== 1 ? 's' : ''}
@@ -1040,10 +1041,10 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
               <div className="bg-gradient-to-br from-green-50 to-green-100 border border-green-200 rounded-xl p-4">
                 <div className="text-sm font-semibold text-green-700">Tu ganancia</div>
                 <div className="text-2xl font-bold text-green-900">
-                  {getPsychologistEarnings(editedSession).toFixed(2)} €
+                  {formatMoney(getPsychologistEarnings(editedSession))}
                 </div>
                 <div className="text-xs text-green-600 mt-1">
-                  {(editedSession.percent_psych || 0).toFixed(0)}% de {getSessionTotalPrice(editedSession).toFixed(2)}€
+                  {(editedSession.percent_psych || 0).toFixed(0)}% de {formatMoney(getSessionTotalPrice(editedSession))}
                 </div>
               </div>
             </div>

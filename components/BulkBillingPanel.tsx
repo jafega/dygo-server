@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
+import { formatMoney } from '../services/currency';
 
 // ── tipos locales ────────────────────────────────────────────────────────────
 
@@ -96,7 +97,7 @@ const formatDate = (iso: string) => {
   return new Date(iso).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
-const formatEUR = (n: number) => `€${n.toFixed(2)}`;
+const formatEUR = (n: number) => formatMoney(n);
 
 // ── componente: fila de sesión ────────────────────────────────────────────────
 

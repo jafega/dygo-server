@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { X, Download, CheckSquare, Square, FileSpreadsheet, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
+import { currencySymbol } from '../services/currency';
 import { isTempEmail } from '../services/textUtils';
 
 interface PatientExportData {
@@ -44,7 +45,7 @@ const PATIENT_COLUMNS: ColumnDef[] = [
 ];
 
 const RELATIONSHIP_COLUMNS: ColumnDef[] = [
-  { key: 'default_session_price', label: 'Precio por Sesión (€)', getValue: p => p.default_session_price != null ? String(p.default_session_price) : '' },
+  { key: 'default_session_price', label: `Precio por Sesión (${currencySymbol()})`, getValue: p => p.default_session_price != null ? String(p.default_session_price) : '' },
   { key: 'default_psych_percent', label: 'Porcentaje Psicólogo (%)', getValue: p => p.default_psych_percent != null ? String(p.default_psych_percent) : '' },
   { key: 'relationship_created_at', label: 'Fecha Alta Relación', getValue: p => {
     if (!p.relationship_created_at) return '';

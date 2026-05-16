@@ -3,6 +3,7 @@ import { Save, Building, Phone, Mail, MapPin, CreditCard, User as UserIcon, File
 import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
 import { normalizePhone, detectDefaultPrefix } from '../services/phoneUtils';
+import { CURRENCY_OPTIONS, setActiveCurrency } from '../services/currency';
 
 interface PsychologistProfile {
   // Personal Info
@@ -167,6 +168,8 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
           whatsapp_reminders_enabled: data.whatsapp_reminders_enabled ?? false,
           show_pending_sessions_badge: data.show_pending_sessions_badge ?? true
         });
+        // Mantener sincronizada la moneda activa global con la del perfil.
+        setActiveCurrency(data.currency || 'EUR');
         setGestorEmails(Array.isArray(data.gestor_emails) ? data.gestor_emails : []);
       }
     } catch (error) {
@@ -188,6 +191,7 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
 
       if (response.ok) {
         setSaveSuccess(true);
+        setActiveCurrency(profile.currency);
         setTimeout(() => setSaveSuccess(false), 3000);
       } else {
         const errorData = await response.json().catch(() => ({}));
@@ -461,10 +465,9 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
                     onChange={(e) => handleChange('currency', e.target.value)}
                     className="w-full sm:w-24 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   >
-                    <option value="EUR">EUR</option>
-                    <option value="USD">USD</option>
-                    <option value="MXN">MXN</option>
-                    <option value="ARS">ARS</option>
+                    {CURRENCY_OPTIONS.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.value}</option>
+                    ))}
                   </select>
                 </div>
                 <p className="text-xs text-slate-500 mt-1">Este precio se usará por defecto al crear facturas</p>

@@ -3,6 +3,7 @@ import { includesNormalized } from '../services/textUtils';
 import { X, User, Calendar, Phone, Mail, FileText, DollarSign, Settings, Tag, Trash2, Save, Edit2, CreditCard, MapPin, Cake, Clock as ClockIcon, BookOpen, Sparkles, CheckCircle, AlertCircle, Download, Loader2, Ticket, Building2, TrendingUp, BarChart3, Upload, File, XCircle, Send, Scroll, Eye, Award, Shield, Lock, ClipboardList, Link, ExternalLink, Plus } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser, apiFetch } from '../services/authService';
+import { formatMoney, currencySymbol } from '../services/currency';
 import InsightsPanel from './InsightsPanel';
 import BillingPanel from './BillingPanel';
 import PsychologistPatientSessions from './PsychologistPatientSessions';
@@ -1804,15 +1805,15 @@ tr:nth-child(even) td{background:#f8fafc}
                             <div className="text-xs font-semibold text-indigo-600 uppercase tracking-wider">Valor Total</div>
                           </div>
                         </div>
-                        <div className="text-4xl font-bold text-indigo-900 mb-1">€{patientStats.totalSessionValue?.toFixed(2) || '0.00'}</div>
+                        <div className="text-4xl font-bold text-indigo-900 mb-1">{formatMoney(patientStats.totalSessionValue || 0)}</div>
                         <div className="text-sm text-slate-600">De todas las sesiones</div>
                         <div className="mt-3 pt-3 border-t border-indigo-100">
                           <div className="flex items-center justify-between text-xs">
                             <span className="text-slate-600">Promedio/sesión</span>
                             <span className="font-semibold text-indigo-700">
-                              €{patientStats.completedSessions > 0 
-                                ? (patientStats.totalSessionValue / patientStats.completedSessions).toFixed(2) 
-                                : '0.00'}
+                              {formatMoney(patientStats.completedSessions > 0 
+                                ? (patientStats.totalSessionValue / patientStats.completedSessions)
+                                : 0)}
                             </span>
                           </div>
                         </div>
@@ -1828,7 +1829,7 @@ tr:nth-child(even) td{background:#f8fafc}
                             <div className="text-xs font-semibold text-green-600 uppercase tracking-wider">Mi Ganancia</div>
                           </div>
                         </div>
-                        <div className="text-4xl font-bold text-green-900 mb-1">€{patientStats.psychologistEarnings?.toFixed(2) || '0.00'}</div>
+                        <div className="text-4xl font-bold text-green-900 mb-1">{formatMoney(patientStats.psychologistEarnings || 0)}</div>
                         <div className="text-sm text-slate-600">Total ganado</div>
                         <div className="mt-3 pt-3 border-t border-green-100">
                           <div className="flex items-center justify-between text-xs">
@@ -1889,7 +1890,7 @@ tr:nth-child(even) td{background:#f8fafc}
                             <div className="text-xs font-semibold text-purple-600 uppercase tracking-wider">Total Facturado</div>
                           </div>
                         </div>
-                        <div className="text-4xl font-bold text-purple-900 mb-1">€{patientStats.totalInvoiced?.toFixed(2) || '0.00'}</div>
+                        <div className="text-4xl font-bold text-purple-900 mb-1">{formatMoney(patientStats.totalInvoiced || 0)}</div>
                         <div className="text-sm text-slate-600">En todas las facturas</div>
                         <div className="mt-3 pt-3 border-t border-purple-100">
                           <div className="flex items-center justify-between text-xs">
@@ -1909,7 +1910,7 @@ tr:nth-child(even) td{background:#f8fafc}
                             <div className="text-xs font-semibold text-teal-600 uppercase tracking-wider">Total Cobrado</div>
                           </div>
                         </div>
-                        <div className="text-4xl font-bold text-teal-900 mb-1">€{patientStats.totalCollected?.toFixed(2) || '0.00'}</div>
+                        <div className="text-4xl font-bold text-teal-900 mb-1">{formatMoney(patientStats.totalCollected || 0)}</div>
                         <div className="text-sm text-slate-600">Facturas pagadas</div>
                         <div className="mt-3 pt-3 border-t border-teal-100">
                           <div className="flex items-center justify-between text-xs">
@@ -1929,7 +1930,7 @@ tr:nth-child(even) td{background:#f8fafc}
                             <div className="text-xs font-semibold text-rose-600 uppercase tracking-wider">Por Cobrar</div>
                           </div>
                         </div>
-                        <div className="text-4xl font-bold text-rose-900 mb-1">€{patientStats.totalPending?.toFixed(2) || '0.00'}</div>
+                        <div className="text-4xl font-bold text-rose-900 mb-1">{formatMoney(patientStats.totalPending || 0)}</div>
                         <div className="text-sm text-slate-600">Pendientes de pago</div>
                         <div className="mt-3 pt-3 border-t border-rose-100">
                           <div className="flex items-center justify-between text-xs">
@@ -2027,14 +2028,14 @@ tr:nth-child(even) td{background:#f8fafc}
                                       {/* Tooltip en hover */}
                                       <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute -top-16 bg-slate-800 text-white px-3 py-2 rounded-lg text-xs whitespace-nowrap shadow-xl z-10">
                                         <div className="font-bold">{month.month}</div>
-                                        <div>€{(month.revenue || 0).toFixed(2)}</div>
+                                        <div>{formatMoney(month.revenue || 0)}</div>
                                         <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-full">
                                           <div className="border-4 border-transparent border-t-slate-800"></div>
                                         </div>
                                       </div>
                                       {/* Label encima de la barra */}
                                       <div className="text-xs font-bold text-purple-700 mb-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        €{(month.revenue || 0).toFixed(0)}
+                                        {formatMoney(month.revenue || 0, undefined, { decimals: 0 })}
                                       </div>
                                       {/* Barra */}
                                       <div
@@ -2078,7 +2079,7 @@ tr:nth-child(even) td{background:#f8fafc}
                                       {/* Tooltip en hover */}
                                       <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute -top-20 bg-slate-800 text-white px-3 py-2 rounded-lg text-xs whitespace-nowrap shadow-xl z-10">
                                         <div className="font-bold">{month.month}</div>
-                                        <div className="text-green-300">€{(month.psychEarnings || 0).toFixed(2)}</div>
+                                        <div className="text-green-300">{formatMoney(month.psychEarnings || 0)}</div>
                                         <div className="text-slate-300 text-[10px]">{month.sessions} sesiones</div>
                                         <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-full">
                                           <div className="border-4 border-transparent border-t-slate-800"></div>
@@ -2086,7 +2087,7 @@ tr:nth-child(even) td{background:#f8fafc}
                                       </div>
                                       {/* Label encima de la barra */}
                                       <div className="text-xs font-bold text-green-700 mb-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        €{(month.psychEarnings || 0).toFixed(0)}
+                                        {formatMoney(month.psychEarnings || 0, undefined, { decimals: 0 })}
                                       </div>
                                       {/* Barra con efecto de brillo */}
                                       <div
@@ -3481,7 +3482,7 @@ tr:nth-child(even) td{background:#f8fafc}
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <label className="text-sm font-semibold text-slate-600">Precio por Defecto (€/hora)</label>
+                        <label className="text-sm font-semibold text-slate-600">Precio por Defecto ({currencySymbol()}/hora)</label>
                         <input
                           type="text"
                           inputMode="decimal"

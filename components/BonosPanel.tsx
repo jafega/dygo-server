@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Ticket, Plus, Check, Clock, AlertCircle, DollarSign, Calendar, User, X, Edit2, Trash2, Mail } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
+import { formatMoney, currencySymbol } from '../services/currency';
 
 interface Bono {
   id: number;
@@ -299,10 +300,10 @@ const BonosPanel: React.FC<BonosPanelProps> = ({ patientId, psychologistId, pati
                     <div className="flex items-center gap-3">
                       <div className="text-right">
                         <div className="text-2xl font-bold text-purple-600">
-                          €{bono.total_price_bono_amount.toFixed(2)}
+                          {formatMoney(bono.total_price_bono_amount)}
                         </div>
                         <p className="text-xs text-slate-500">
-                          €{(bono.total_price_bono_amount / bono.total_sessions_amount).toFixed(2)} / sesión
+                          {formatMoney(bono.total_price_bono_amount / bono.total_sessions_amount)} / sesión
                         </p>
                       </div>
                       <div className="flex gap-1">
@@ -404,7 +405,7 @@ const BonosPanel: React.FC<BonosPanelProps> = ({ patientId, psychologistId, pati
               {/* Precio total del bono */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Precio Total del Bono (€) *
+                  Precio Total del Bono ({currencySymbol()}) *
                 </label>
                 <input
                   type="text"
@@ -444,7 +445,7 @@ const BonosPanel: React.FC<BonosPanelProps> = ({ patientId, psychologistId, pati
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium text-purple-900">Precio por sesión:</span>
                   <span className="text-xl font-bold text-purple-600">
-                    €{calculatePricePerSession().toFixed(2)}
+                    {formatMoney(calculatePricePerSession())}
                   </span>
                 </div>
                 <p className="text-xs text-purple-700 mt-1">
@@ -533,7 +534,7 @@ const BonosPanel: React.FC<BonosPanelProps> = ({ patientId, psychologistId, pati
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Precio Total (€)
+                  Precio Total ({currencySymbol()})
                 </label>
                 <div className="relative">
                   <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -570,7 +571,7 @@ const BonosPanel: React.FC<BonosPanelProps> = ({ patientId, psychologistId, pati
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-gray-600 dark:text-gray-400">Precio por sesión:</span>
                   <span className="text-lg font-semibold text-blue-600 dark:text-blue-400">
-                    {(editBono.total_price_bono_amount / selectedBono.total_sessions_amount).toFixed(2)}€
+                    {formatMoney(editBono.total_price_bono_amount / selectedBono.total_sessions_amount)}
                   </span>
                 </div>
               </div>

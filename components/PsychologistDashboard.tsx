@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
+import { formatMoney } from '../services/currency';
 
 interface Session {
   id: string;
@@ -287,11 +288,11 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
               Total
             </span>
           </div>
-          <div className="text-xl sm:text-2xl font-bold mb-0.5 sm:mb-1">{totalBilling.toFixed(2)}€</div>
+          <div className="text-xl sm:text-2xl font-bold mb-0.5 sm:mb-1">{formatMoney(totalBilling)}</div>
           <div className="text-[10px] sm:text-xs text-green-100">Facturación Total</div>
           {totalPending > 0 && (
             <div className="text-[8px] sm:text-[10px] text-green-200 mt-0.5 sm:mt-1 line-clamp-2">
-              ({totalRevenue.toFixed(2)}€ cobrado + {totalPending.toFixed(2)}€ pendiente)
+              ({formatMoney(totalRevenue)} cobrado + {formatMoney(totalPending)} pendiente)
             </div>
           )}
         </div>
@@ -306,7 +307,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
               Rango
             </span>
           </div>
-          <div className="text-xl sm:text-2xl font-bold mb-0.5 sm:mb-1">{revenueInRange.toFixed(2)}€</div>
+          <div className="text-xl sm:text-2xl font-bold mb-0.5 sm:mb-1">{formatMoney(revenueInRange)}</div>
           <div className="text-[10px] sm:text-xs text-blue-100">Facturado en Período</div>
         </div>
 
@@ -320,7 +321,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
               Pagadas
             </span>
           </div>
-          <div className="text-xl sm:text-2xl font-bold mb-0.5 sm:mb-1">{totalRevenue.toFixed(2)}€</div>
+          <div className="text-xl sm:text-2xl font-bold mb-0.5 sm:mb-1">{formatMoney(totalRevenue)}</div>
           <div className="text-[10px] sm:text-xs text-purple-100">Cobrado ({paidInvoices.length})</div>
         </div>
 
@@ -334,7 +335,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
               Pendientes
             </span>
           </div>
-          <div className="text-xl sm:text-2xl font-bold mb-0.5 sm:mb-1">{totalPending.toFixed(2)}€</div>
+          <div className="text-xl sm:text-2xl font-bold mb-0.5 sm:mb-1">{formatMoney(totalPending)}</div>
           <div className="text-[10px] sm:text-xs text-amber-100">Por Cobrar ({pendingInvoices.length})</div>
         </div>
       </div>
@@ -411,7 +412,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
                     {totalValue > 0 && (
                       <div className="absolute bg-slate-800 text-white text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0.5 rounded whitespace-nowrap z-10 font-semibold shadow-lg" 
                            style={{ bottom: `calc(${Math.max(totalPercentage, 12)}% + 4px)` }}>
-                        {totalValue >= 1000 ? `${(totalValue/1000).toFixed(1)}k€` : `${totalValue.toFixed(0)}€`}
+                        {totalValue >= 1000 ? `${(totalValue/1000).toFixed(1)}k` : `${totalValue.toFixed(0)}`}
                       </div>
                     )}
                     
@@ -429,7 +430,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
                             borderRadius: pendingValue > 0 ? '0' : '0.5rem 0.5rem 0 0',
                             minHeight: '12px'
                           }}
-                          title={`Cobrado: ${paidValue.toFixed(2)}€`}
+                          title={`Cobrado: ${formatMoney(paidValue)}`}
                         />
                       )}
                       {/* Pending portion (orange/amber) */}
@@ -440,7 +441,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
                             height: totalPercentage > 0 ? `${(pendingPercentage / totalPercentage) * 100}%` : '100%',
                             minHeight: '12px'
                           }}
-                          title={`Pendiente: ${pendingValue.toFixed(2)}€`}
+                          title={`Pendiente: ${formatMoney(pendingValue)}`}
                         />
                       )}
                     </div>
@@ -479,7 +480,7 @@ const PsychologistDashboard: React.FC<PsychologistDashboardProps> = ({ psycholog
             )}
           </div>
           <div className="text-slate-500">
-            {showTotalBilling ? `Total: ${totalBilling.toFixed(2)}€` : `Cobrado: ${totalRevenue.toFixed(2)}€`}
+            {showTotalBilling ? `Total: ${formatMoney(totalBilling)}` : `Cobrado: ${formatMoney(totalRevenue)}`}
           </div>
         </div>
       </div>

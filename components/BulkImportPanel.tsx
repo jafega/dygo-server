@@ -7,6 +7,7 @@ import {
 import { ai, Type } from '../services/genaiService';
 import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
+import { currencySymbol } from '../services/currency';
 // Type now re-exported from genaiService (backend proxy)
 import * as XLSX from 'xlsx';
 import UpgradeModal from './UpgradeModal';
@@ -773,7 +774,7 @@ REGLAS CRÍTICAS — LEE ESTO CON ATENCIÓN ANTES DE RESPONDER:
                   <th className="px-3 py-2.5 text-left font-medium text-slate-600 min-w-[120px]">F. Nacimiento</th>
                   <th className="px-3 py-2.5 text-left font-medium text-slate-600 min-w-[80px]">Nº Ficha</th>
                   <th className="px-3 py-2.5 text-left font-medium text-slate-600 min-w-[110px]">
-                    Precio (€)
+                    Precio ({currencySymbol()})
                   </th>
                   <th className="px-3 py-2.5 text-left font-medium text-slate-600 min-w-[100px]">
                     % Psic.

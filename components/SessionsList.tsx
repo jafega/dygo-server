@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Calendar, CheckCircle, XCircle, Clock, DollarSign, User, Filter, Edit2, Save, X as XIcon, FileText, Trash2, Receipt, Ticket, Copy, Send, ExternalLink, Globe, ChevronDown, Square, CheckSquare, AlertTriangle } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser, apiFetch } from '../services/authService';
+import { formatMoney, currencySymbol } from '../services/currency';
 import { normalizePhone } from '../services/phoneUtils';
 import { includesNormalized } from '../services/textUtils';
 import SessionDetailsModal from './SessionDetailsModal';
@@ -1349,7 +1350,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
               <div className="text-[10px] sm:text-xs md:text-sm font-semibold text-green-700 leading-tight">Ganancias</div>
               <DollarSign className="text-green-400 flex-shrink-0" size={14} />
             </div>
-            <div className="text-lg sm:text-2xl md:text-3xl font-bold text-green-900">{totalEarnings.toFixed(2)} €</div>
+            <div className="text-lg sm:text-2xl md:text-3xl font-bold text-green-900">{formatMoney(totalEarnings)}</div>
             <div className="text-[9px] sm:text-[10px] md:text-xs text-green-600 mt-0.5 sm:mt-1">completadas</div>
           </div>
 
@@ -1359,7 +1360,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
               <div className="text-[10px] sm:text-xs md:text-sm font-semibold text-indigo-700 leading-tight">Potenciales</div>
               <DollarSign className="text-indigo-400 flex-shrink-0" size={14} />
             </div>
-            <div className="text-lg sm:text-2xl md:text-3xl font-bold text-indigo-900">{potentialEarnings.toFixed(2)} €</div>
+            <div className="text-lg sm:text-2xl md:text-3xl font-bold text-indigo-900">{formatMoney(potentialEarnings)}</div>
             <div className="text-[9px] sm:text-[10px] md:text-xs text-indigo-600 mt-0.5 sm:mt-1">
               <span className="hidden sm:inline">{completedSessions.length + scheduledSessions.length} sesiones</span>
               <span className="sm:hidden">{completedSessions.length + scheduledSessions.length}</span>
@@ -1372,7 +1373,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
               <div className="text-[10px] sm:text-xs md:text-sm font-semibold text-blue-700 leading-tight">Cobrado</div>
               <CheckCircle className="text-blue-400 flex-shrink-0" size={14} />
             </div>
-            <div className="text-lg sm:text-2xl md:text-3xl font-bold text-blue-900">{paidEarnings.toFixed(2)} €</div>
+            <div className="text-lg sm:text-2xl md:text-3xl font-bold text-blue-900">{formatMoney(paidEarnings)}</div>
             <div className="text-[9px] sm:text-[10px] md:text-xs text-blue-600 mt-0.5 sm:mt-1">
               <span className="hidden sm:inline">{paidSessions.length} sesiones</span>
               <span className="sm:hidden">{paidSessions.length}</span>
@@ -1630,10 +1631,10 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                     <div className="text-left sm:text-right">
                       <div className="text-[8px] sm:text-[9px] md:text-xs text-slate-500 hidden sm:block">Tu ganancia</div>
                       <div className="text-base sm:text-lg md:text-2xl font-bold text-green-600 flex items-center gap-1">
-                        {earnings.toFixed(2)} €
+                        {formatMoney(earnings)}
                       </div>
                       <div className="text-[9px] sm:text-[10px] md:text-xs text-slate-400 hidden sm:block">
-                        ({session.percent_psych || 70}% de {session.price?.toFixed(2) || '0.00'}€)
+                        ({session.percent_psych || 70}% de {formatMoney(session.price ?? 0)})
                       </div>
                     </div>
                     
@@ -1800,7 +1801,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
               {/* Price and Percent */}
               <div className="grid grid-cols-2 gap-3 sm:gap-4">
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Precio/h (€)</label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Precio/h ({currencySymbol()})</label>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -1816,7 +1817,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                     placeholder="0.00"
                   />
                   <p className="text-xs text-slate-500 mt-1">
-                    {getSessionDurationHours(editedSession).toFixed(2)}h → {getSessionTotalPrice(editedSession).toFixed(2)}€
+                    {getSessionDurationHours(editedSession).toFixed(2)}h → {formatMoney(getSessionTotalPrice(editedSession))}
                   </p>
                 </div>
                 <div>
@@ -2015,7 +2016,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                             <div className="flex items-center justify-between">
                               <div>
                                 <div className="text-sm font-medium text-blue-900">
-                                  Bono - {bono.total_price_bono_amount}€
+                                  Bono - {formatMoney(bono.total_price_bono_amount)}
                                 </div>
                                 <div className="text-xs text-blue-600">
                                   {bono.sessions_remaining} sesión{bono.sessions_remaining !== 1 ? 'es' : ''} disponible{bono.sessions_remaining !== 1 ? 's' : ''}
@@ -2077,10 +2078,10 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
               <div className="bg-gradient-to-br from-green-50 to-green-100 border border-green-200 rounded-xl p-4">
                 <div className="text-sm font-semibold text-green-700 mb-1">Tu ganancia estimada</div>
                 <div className="text-2xl font-bold text-green-900">
-                  {getPsychologistEarnings(editedSession).toFixed(2)} €
+                  {formatMoney(getPsychologistEarnings(editedSession))}
                 </div>
                 <div className="text-xs text-green-600 mt-1">
-                  {(editedSession.percent_psych || 0).toFixed(0)}% de {getSessionTotalPrice(editedSession).toFixed(2)}€ ({(editedSession.price || 0).toFixed(2)}€/h × {getSessionDurationHours(editedSession).toFixed(2)}h)
+                  {(editedSession.percent_psych || 0).toFixed(0)}% de {formatMoney(getSessionTotalPrice(editedSession))} ({formatMoney(editedSession.price || 0)}/h × {getSessionDurationHours(editedSession).toFixed(2)}h)
                 </div>
               </div>
             </div>

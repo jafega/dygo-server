@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
+import { formatMoney } from '../services/currency';
 import AddEntryFromHomeModal from './AddEntryFromHomeModal';
 
 interface SubscriptionInfo {
@@ -390,7 +391,7 @@ const PsychologistHome: React.FC<PsychologistHomeProps> = ({
             </div>
             <ArrowRight className="text-slate-300 group-hover:text-emerald-400 transition-colors" size={14} />
           </div>
-          <div className="text-2xl font-bold text-slate-900">{totalRevenue.toFixed(0)}€</div>
+          <div className="text-2xl font-bold text-slate-900">{formatMoney(totalRevenue, undefined, { decimals: 0 })}</div>
           <div className="text-xs text-slate-500">Total cobrado</div>
         </button>
 
@@ -404,7 +405,7 @@ const PsychologistHome: React.FC<PsychologistHomeProps> = ({
             </div>
             <ArrowRight className="text-slate-300 group-hover:text-amber-400 transition-colors" size={14} />
           </div>
-          <div className="text-2xl font-bold text-slate-900">{totalPending.toFixed(0)}€</div>
+          <div className="text-2xl font-bold text-slate-900">{formatMoney(totalPending, undefined, { decimals: 0 })}</div>
           <div className="text-xs text-slate-500">Pendiente de cobro</div>
         </button>
       </div>
@@ -459,7 +460,7 @@ const PsychologistHome: React.FC<PsychologistHomeProps> = ({
                     </p>
                   </div>
                   {session.price != null && (
-                    <span className="text-xs font-semibold text-slate-600">{session.price}€</span>
+                    <span className="text-xs font-semibold text-slate-600">{formatMoney(session.price as number)}</span>
                   )}
                 </div>
               ))}
@@ -495,7 +496,7 @@ const PsychologistHome: React.FC<PsychologistHomeProps> = ({
             </div>
             <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
               <span className="text-sm text-slate-600">Facturado este mes</span>
-              <span className="text-lg font-bold text-emerald-600">{thisMonthRevenue.toFixed(0)}€</span>
+              <span className="text-lg font-bold text-emerald-600">{formatMoney(thisMonthRevenue, undefined, { decimals: 0 })}</span>
             </div>
             <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
               <span className="text-sm text-slate-600">Facturas pendientes</span>
@@ -503,11 +504,11 @@ const PsychologistHome: React.FC<PsychologistHomeProps> = ({
             </div>
             <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
               <span className="text-sm text-slate-600">Generado este mes</span>
-              <span className="text-lg font-bold text-emerald-600">{thisMonthCompletedRevenue.toFixed(0)}€</span>
+              <span className="text-lg font-bold text-emerald-600">{formatMoney(thisMonthCompletedRevenue, undefined, { decimals: 0 })}</span>
             </div>
             <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
               <span className="text-sm text-slate-600">Potencial este mes</span>
-              <span className="text-lg font-bold text-indigo-600">{thisMonthPotentialRevenue.toFixed(0)}€</span>
+              <span className="text-lg font-bold text-indigo-600">{formatMoney(thisMonthPotentialRevenue, undefined, { decimals: 0 })}</span>
             </div>
           </div>
         </div>

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Calendar as CalendarIcon, Clock, Plus, X, Users, Video, MapPin, ChevronLeft, ChevronRight, MessageCircle, Trash2, Save, Copy, Send, ExternalLink, CheckCircle, XCircle, Ticket, Receipt, Globe, ChevronDown, Mail, AlertTriangle, FileText } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser, apiFetch } from '../services/authService';
+import { formatMoney, currencySymbol } from '../services/currency';
 import { includesNormalized, isTempEmail } from '../services/textUtils';
 import SessionDetailsModal from './SessionDetailsModal';
 
@@ -2979,7 +2980,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
               {/* Price and Percent */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Precio por hora (€)</label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Precio por hora ({currencySymbol()})</label>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -2995,7 +2996,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                     placeholder="0.00"
                   />
                   <p className="text-xs text-slate-500 mt-1">
-                    Duración: {getSessionDurationHours(editedSession).toFixed(2)}h → Total: {getSessionTotalPrice(editedSession).toFixed(2)}€
+                    Duración: {getSessionDurationHours(editedSession).toFixed(2)}h → Total: {formatMoney(getSessionTotalPrice(editedSession))}
                   </p>
                 </div>
                 <div>
@@ -3109,10 +3110,10 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                       </div>
                       <div className="space-y-1.5 mb-3">
                         <div className="text-sm text-purple-800">
-                          <span className="font-semibold">{assignedBono.total_sessions} sesiones</span> · Precio total: {assignedBono.total_price}€
+                          <span className="font-semibold">{assignedBono.total_sessions} sesiones</span> · Precio total: {formatMoney(assignedBono.total_price)}
                         </div>
                         <div className="text-sm text-purple-700">
-                          Precio por sesión: <span className="font-bold">{(assignedBono.total_price / assignedBono.total_sessions).toFixed(2)}€</span>
+                          Precio por sesión: <span className="font-bold">{formatMoney(assignedBono.total_price / assignedBono.total_sessions)}</span>
                         </div>
                         <div className="text-xs text-purple-600">
                           Sesiones usadas: {assignedBono.used_sessions || 0} / {assignedBono.total_sessions}
@@ -3189,7 +3190,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                           <div className="flex items-center justify-between">
                             <div>
                               <div className="text-xs text-purple-700">
-                                Total: {bono.total_price}€ → {(bono.total_price / bono.total_sessions).toFixed(2)}€/sesión
+                                Total: {formatMoney(bono.total_price)} → {formatMoney(bono.total_price / bono.total_sessions)}/sesión
                               </div>
                               <div className="text-xs text-purple-600">
                                 Fecha: {new Date(bono.purchase_date).toLocaleDateString('es-ES')}
@@ -3383,10 +3384,10 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
               <div className="bg-gradient-to-br from-green-50 to-green-100 border border-green-200 rounded-xl p-4">
                 <div className="text-sm font-semibold text-green-700 mb-1">Tu ganancia estimada</div>
                 <div className="text-2xl font-bold text-green-900">
-                  {getPsychologistEarnings(editedSession).toFixed(2)} €
+                  {formatMoney(getPsychologistEarnings(editedSession))}
                 </div>
                 <div className="text-xs text-green-600 mt-1">
-                  {(editedSession.percent_psych || 0).toFixed(0)}% de {getSessionTotalPrice(editedSession).toFixed(2)}€ ({(editedSession.price || 0).toFixed(2)}€/h × {getSessionDurationHours(editedSession).toFixed(2)}h)
+                  {(editedSession.percent_psych || 0).toFixed(0)}% de {formatMoney(getSessionTotalPrice(editedSession))} ({formatMoney(editedSession.price || 0)}/h × {getSessionDurationHours(editedSession).toFixed(2)}h)
                 </div>
               </div>
             </div>
@@ -3684,7 +3685,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
               <div className="space-y-2 sm:space-y-3">
                 <div className="grid grid-cols-2 gap-2 sm:gap-3">
                   <div>
-                    <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">Precio/hora (€) *</label>
+                    <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">Precio/hora ({currencySymbol()}) *</label>
                     <input
                       type="text"
                       inputMode="decimal"
@@ -3701,7 +3702,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                     />
                     {newSession.startTime && newSession.endTime && (
                       <p className="text-[10px] sm:text-xs text-slate-500 mt-1">
-                        Total: {getSessionTotalPrice(newSession as any).toFixed(2)}€
+                        Total: {formatMoney(getSessionTotalPrice(newSession as any))}
                       </p>
                     )}
                   </div>
@@ -3788,7 +3789,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                                   )}
                                 </div>
                                 <div className="text-xs text-purple-700 mt-1">
-                                  {pricePerSession.toFixed(2)}€/sesión · {bono.total_sessions - bono.used_sessions} restantes
+                                  {formatMoney(pricePerSession)}/sesión · {bono.total_sessions - bono.used_sessions} restantes
                                 </div>
                                 <div className="text-xs text-purple-600">
                                   Comprado: {new Date(bono.purchase_date).toLocaleDateString('es-ES')}
@@ -3888,10 +3889,10 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                 <div className="bg-gradient-to-br from-green-50 to-green-100 border border-green-200 rounded-lg sm:rounded-xl p-3 sm:p-4">
                   <div className="text-xs sm:text-sm font-semibold text-green-700 mb-1">Tu ganancia estimada</div>
                   <div className="text-xl sm:text-2xl font-bold text-green-900">
-                    {(getSessionTotalPrice(newSession as any) * newSession.percent_psych / 100).toFixed(2)} €
+                    {formatMoney(getSessionTotalPrice(newSession as any) * newSession.percent_psych / 100)}
                   </div>
                   <div className="text-[10px] sm:text-xs text-green-600 mt-1">
-                    {newSession.percent_psych.toFixed(0)}% de {getSessionTotalPrice(newSession as any).toFixed(2)}€ ({newSession.price.toFixed(2)}€/h × {getSessionDurationHours(newSession as any).toFixed(2)}h)
+                    {newSession.percent_psych.toFixed(0)}% de {formatMoney(getSessionTotalPrice(newSession as any))} ({formatMoney(newSession.price)}/h × {getSessionDurationHours(newSession as any).toFixed(2)}h)
                   </div>
                 </div>
               )}

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Send, Bot, User as UserIcon, Loader2, RefreshCw, Sparkles, FileText, TrendingUp, AlertCircle, Lock, Globe, ExternalLink, Search } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
+import { formatMoney, currencySymbol } from '../services/currency';
 import { ai } from '../services/genaiService';
 
 interface GroundingSource {
@@ -262,8 +263,8 @@ const PsychologistAIChat: React.FC<PsychologistAIChatProps> = ({ psychologistId,
 - Sesiones este mes: ${sessionsThisMonth.length} (${completedThisMonth.length} completadas)
 - Sesiones próximos 7 días: ${next7DaysSessions.length}
 - Próximas sesiones programadas (total futuras): ${upcomingSessions.length}
-- Facturado este mes (no rectificativas, no borradores): ${billedThisMonth.toFixed(2)}€
-- Facturas pendientes de cobro: ${pendingInvoices.length} (${pendingAmount.toFixed(2)}€)
+- Facturado este mes (no rectificativas, no borradores): ${formatMoney(billedThisMonth)}
+- Facturas pendientes de cobro: ${pendingInvoices.length} (${formatMoney(pendingAmount)})
 - Facturas vencidas (>30 días sin pagar): ${overdueInvoices.length}`;
 
     const patientsBlock = patientsActiveByRecency.length > 0
@@ -294,7 +295,7 @@ const PsychologistAIChat: React.FC<PsychologistAIChatProps> = ({ psychologistId,
       ? recentSessions.map(s => {
           const d = getSessionDate(s);
           const dateStr = fmtDate(d);
-          const price = s.price != null ? ` | ${s.price}€` : '';
+          const price = s.price != null ? ` | ${formatMoney(s.price)}` : '';
           const paid = s.paid != null ? (s.paid ? ' | Pagado' : ' | Pendiente') : '';
           const notes = s.notes ? ` | Notas: "${String(s.notes).slice(0, 180).replace(/\s+/g, ' ').trim()}"` : '';
           return `- ${dateStr} | ${resolvePatientName(s)} | ${s.status}${price}${paid}${notes}`;
@@ -327,7 +328,7 @@ const PsychologistAIChat: React.FC<PsychologistAIChatProps> = ({ psychologistId,
       ? recentInvoices.map(inv => {
           const dateStr = fmtDate(getInvoiceDate(inv));
           const total = (inv.total ?? inv.amount ?? 0).toFixed(2);
-          return `- ${inv.invoiceNumber || inv.id.slice(0, 8)} | ${resolvePatientName(inv)} | ${total}€ | ${inv.status} | ${dateStr}${inv.is_rectificativa ? ' [RECTIF.]' : ''}`;
+          return `- ${inv.invoiceNumber || inv.id.slice(0, 8)} | ${resolvePatientName(inv)} | ${formatMoney(Number(total))} | ${inv.status} | ${dateStr}${inv.is_rectificativa ? ' [RECTIF.]' : ''}`;
         }).join('\n')
       : 'Sin facturas registradas.';
 
@@ -422,7 +423,7 @@ Tu función es ayudar al psicólogo con:
 CÓMO RESPONDER:
 - Usa SIEMPRE los datos del bloque "DATOS PRIVADOS" para responder; nunca inventes nombres, fechas o cifras.
 - Si la información no está en los datos, dilo claramente ("no consta en tus datos") y sugiere qué registrar.
-- Cita fechas y cifras concretas cuando las tengas (€, nº de sesiones, días sin verse, etc.).
+- Cita fechas y cifras concretas cuando las tengas (${currencySymbol()}, nº de sesiones, días sin verse, etc.).
 - Usa formato Markdown: encabezados con \`##\`, listas con \`-\`, negrita con \`**\`. Sé conciso y claro.
 - Cuando hables de un paciente concreto, usa su nombre tal como aparece en los datos.
 - Si te preguntan por un periodo (este mes, últimas 4 semanas...), úsalo como referencia con la FECHA ACTUAL dada.`;

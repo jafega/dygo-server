@@ -2,6 +2,7 @@
 import { X, FileText, Upload, Mic, Save, Loader, CheckCircle, Sparkles, AlertCircle, Check, XCircle } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser, apiFetch } from '../services/authService';
+import { formatMoney } from '../services/currency';
 import { ai } from '../services/genaiService';
 
 interface Session {
@@ -891,7 +892,7 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session: init
                               Bono ID: {assignedBono.id}
                             </div>
                             <div className="text-xs text-purple-600">
-                              Precio: {assignedBono.total_price_bono_amount}€ | {assignedBono.sessions_remaining || 0} sesión{assignedBono.sessions_remaining !== 1 ? 'es' : ''} restante{assignedBono.sessions_remaining !== 1 ? 's' : ''}
+                              Precio: {formatMoney(assignedBono.total_price_bono_amount)} | {assignedBono.sessions_remaining || 0} sesión{assignedBono.sessions_remaining !== 1 ? 'es' : ''} restante{assignedBono.sessions_remaining !== 1 ? 's' : ''}
                             </div>
                           </div>
                           <div className="text-xs text-purple-500">
@@ -920,7 +921,7 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session: init
                           <div className="flex items-center justify-between">
                             <div>
                               <div className="text-sm font-medium text-blue-900">
-                                Bono - {bono.total_price_bono_amount}€
+                                Bono - {formatMoney(bono.total_price_bono_amount)}
                               </div>
                               <div className="text-xs text-blue-600">
                                 {bono.sessions_remaining} sesión{bono.sessions_remaining !== 1 ? 'es' : ''} disponible{bono.sessions_remaining !== 1 ? 's' : ''}

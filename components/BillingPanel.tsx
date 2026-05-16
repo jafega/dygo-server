@@ -5,6 +5,7 @@ import { apiFetch } from '../services/authService';
 import { AddressAutocomplete } from './AddressAutocomplete';
 import { includesNormalized, isTempEmail } from '../services/textUtils';
 import { downloadInvoicePdf } from '../services/printUtils';
+import { formatMoney, currencySymbol } from '../services/currency';
 const BulkBillingPanel = lazy(() => import('./BulkBillingPanel'));
 
 interface Invoice {
@@ -1543,7 +1544,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
             </div>
             <div>
               <p className="text-sm text-slate-600 font-medium">Total Facturado</p>
-              <p className="text-2xl font-bold text-green-600">€{totalAmount.toFixed(2)}</p>
+              <p className="text-2xl font-bold text-green-600">{formatMoney(totalAmount)}</p>
             </div>
           </div>
         </div>
@@ -1789,7 +1790,7 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                   </p>
                 </div>
                 <div className="flex items-center justify-between sm:flex-col sm:items-end gap-2">
-                  <div className="text-xl font-bold text-indigo-600">€{(invoice.total || invoice.amount * 1.21).toFixed(2)}</div>
+                  <div className="text-xl font-bold text-indigo-600">{formatMoney(invoice.total || invoice.amount * 1.21, (invoice as any).currency)}</div>
                   <div className="flex gap-2">
                     {invoice.status === 'draft' && (
                       <>
@@ -2094,13 +2095,13 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                                   )}
                                   {invoiceType === 'center' && psychPercent < 100 && (
                                     <div className="text-xs text-slate-500 mt-1">
-                                      Tu porcentaje: {psychPercent}% de €{sessionPrice.toFixed(2)}
+                                      Tu porcentaje: {psychPercent}% de {formatMoney(sessionPrice)}
                                     </div>
                                   )}
                                 </div>
                                 <div className="text-right ml-4">
                                   <div className="font-semibold text-indigo-600">
-                                    €{amountToInvoice.toFixed(2)}
+                                    {formatMoney(amountToInvoice)}
                                   </div>
                                   {selectedSessionIds.has(session.id) && (
                                     <CheckSquare size={20} className="text-indigo-600 mt-1" />
@@ -2167,13 +2168,13 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                                   </div>
                                   {invoiceType === 'center' && psychPercent < 100 && (
                                     <div className="text-xs text-slate-500 mt-1">
-                                      Tu porcentaje: {psychPercent}% de €{bonoPrice.toFixed(2)}
+                                      Tu porcentaje: {psychPercent}% de {formatMoney(bonoPrice)}
                                     </div>
                                   )}
                                 </div>
                                 <div className="text-right ml-4">
                                   <div className="font-semibold text-indigo-600">
-                                    €{amountToInvoice.toFixed(2)}
+                                    {formatMoney(amountToInvoice)}
                                   </div>
                                   {selectedBonoIds.has(bono.id) && (
                                     <CheckSquare size={20} className="text-indigo-600 mt-1" />
@@ -2510,24 +2511,24 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                           <span className="text-xs text-slate-500 ml-1">(Tu porcentaje)</span>
                         )}
                       </span>
-                      <span className="font-semibold text-slate-900">€{calculateTotal().subtotal.toFixed(2)}</span>
+                      <span className="font-semibold text-slate-900">{formatMoney(calculateTotal().subtotal)}</span>
                     </div>
                     
                     <div className="flex justify-between items-center text-sm">
                       <span className="text-slate-600">IVA ({formData.taxRate}%):</span>
-                      <span className="font-semibold text-green-600">+€{calculateTotal().tax.toFixed(2)}</span>
+                      <span className="font-semibold text-green-600">+{formatMoney(calculateTotal().tax)}</span>
                     </div>
                     
                     {invoiceType === 'center' && formData.irpf > 0 && (
                       <div className="flex justify-between items-center text-sm">
                         <span className="text-slate-600">IRPF ({formData.irpf}%) - Retención:</span>
-                        <span className="font-semibold text-red-600">-€{(calculateTotal().subtotal * (formData.irpf / 100)).toFixed(2)}</span>
+                        <span className="font-semibold text-red-600">-{formatMoney(calculateTotal().subtotal * (formData.irpf / 100))}</span>
                       </div>
                     )}
                     
                     <div className="flex justify-between items-center pt-3 border-t border-slate-200">
                       <span className="text-lg font-semibold text-slate-900">Total a Cobrar:</span>
-                      <span className="text-2xl font-bold text-indigo-600">€{calculateTotal().total.toFixed(2)}</span>
+                      <span className="text-2xl font-bold text-indigo-600">{formatMoney(calculateTotal().total)}</span>
                     </div>
                     
                     {invoiceType === 'center' && (
@@ -2766,10 +2767,10 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                                   </div>
                                 </td>
                                 <td className="px-4 py-2.5 text-center text-slate-600">1</td>
-                                <td className="px-4 py-2.5 text-right text-slate-700">€{price.toFixed(2)}</td>
+                                <td className="px-4 py-2.5 text-right text-slate-700">{formatMoney(price, (selectedInvoice as any).currency)}</td>
                                 {showIva  && <td className="px-4 py-2.5 text-right text-slate-500">{taxRate}%</td>}
                                 {showIrpf && <td className="px-4 py-2.5 text-right text-rose-500">−{irpfRate}%</td>}
-                                <td className="px-4 py-2.5 text-right font-semibold text-slate-900">€{lineTotal.toFixed(2)}</td>
+                                <td className="px-4 py-2.5 text-right font-semibold text-slate-900">{formatMoney(lineTotal, (selectedInvoice as any).currency)}</td>
                               </tr>
                             );
                           })}
@@ -2812,10 +2813,10 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                                     </div>
                                   </td>
                                   <td className="px-4 py-2.5 text-center text-slate-600">1</td>
-                                  <td className="px-4 py-2.5 text-right text-slate-700">€{price.toFixed(2)}</td>
+                                  <td className="px-4 py-2.5 text-right text-slate-700">{formatMoney(price, (selectedInvoice as any).currency)}</td>
                                   {showIva  && <td className="px-4 py-2.5 text-right text-slate-500">{taxRate}%</td>}
                                   {showIrpf && <td className="px-4 py-2.5 text-right text-rose-500">−{irpfRate}%</td>}
-                                  <td className="px-4 py-2.5 text-right font-semibold text-slate-900">€{lineTotal.toFixed(2)}</td>
+                                  <td className="px-4 py-2.5 text-right font-semibold text-slate-900">{formatMoney(lineTotal, (selectedInvoice as any).currency)}</td>
                                 </tr>
                               );
                             })}
@@ -2833,28 +2834,28 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
                   <tbody>
                     <tr className="border-b border-slate-100">
                       <td className="px-4 py-2.5 text-slate-600">Base imponible</td>
-                      <td className="px-4 py-2.5 text-right font-semibold text-slate-900">€{selectedInvoice.amount.toFixed(2)}</td>
+                      <td className="px-4 py-2.5 text-right font-semibold text-slate-900">{formatMoney(selectedInvoice.amount, (selectedInvoice as any).currency)}</td>
                     </tr>
                     {(selectedInvoice.taxRate ?? 0) > 0 ? (
                       <tr className="border-b border-slate-100">
                         <td className="px-4 py-2.5 text-slate-600">IVA ({selectedInvoice.taxRate}%)</td>
-                        <td className="px-4 py-2.5 text-right font-semibold text-slate-900">€{(selectedInvoice.tax ?? selectedInvoice.amount * (selectedInvoice.taxRate ?? 0) / 100).toFixed(2)}</td>
+                        <td className="px-4 py-2.5 text-right font-semibold text-slate-900">{formatMoney(selectedInvoice.tax ?? selectedInvoice.amount * (selectedInvoice.taxRate ?? 0) / 100, (selectedInvoice as any).currency)}</td>
                       </tr>
                     ) : (
                       <tr className="border-b border-slate-100">
                         <td className="px-4 py-2.5 text-slate-400 italic text-xs">Exento de IVA</td>
-                        <td className="px-4 py-2.5 text-right text-slate-400 text-xs">€0,00</td>
+                        <td className="px-4 py-2.5 text-right text-slate-400 text-xs">{formatMoney(0, (selectedInvoice as any).currency)}</td>
                       </tr>
                     )}
                     {(selectedInvoice.irpf ?? 0) > 0 && (
                       <tr className="border-b border-slate-100">
                         <td className="px-4 py-2.5 text-slate-600">IRPF ({selectedInvoice.irpf}%)</td>
-                        <td className="px-4 py-2.5 text-right font-semibold text-rose-600">−€{(selectedInvoice.amount * (selectedInvoice.irpf ?? 0) / 100).toFixed(2)}</td>
+                        <td className="px-4 py-2.5 text-right font-semibold text-rose-600">−{formatMoney(selectedInvoice.amount * (selectedInvoice.irpf ?? 0) / 100, (selectedInvoice as any).currency)}</td>
                       </tr>
                     )}
                     <tr className="bg-slate-50">
                       <td className="px-4 py-3 text-base font-bold text-slate-900">Total</td>
-                      <td className="px-4 py-3 text-right text-2xl font-bold text-indigo-600">€{(selectedInvoice.total ?? selectedInvoice.amount).toFixed(2)}</td>
+                      <td className="px-4 py-3 text-right text-2xl font-bold text-indigo-600">{formatMoney(selectedInvoice.total ?? selectedInvoice.amount, (selectedInvoice as any).currency)}</td>
                     </tr>
                   </tbody>
                 </table>

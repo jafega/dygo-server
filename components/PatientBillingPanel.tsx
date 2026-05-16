@@ -3,6 +3,7 @@ import { Download, FileText, Check, Clock, AlertCircle, X } from 'lucide-react';
 import { getCurrentUser, apiFetch } from '../services/authService';
 import { API_URL } from '../services/config';
 import { downloadInvoicePdf } from '../services/printUtils';
+import { formatMoney } from '../services/currency';
 
 interface Invoice {
   id: string;
@@ -153,7 +154,7 @@ export default function PatientBillingPanel() {
                       {new Date(invoice.dueDate).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })}
                     </td>
                     <td className={`px-8 py-5 text-sm font-bold text-slate-900 text-right ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>
-                      €{(invoice.total || invoice.amount).toFixed(2)}
+                      {formatMoney(invoice.total || invoice.amount, (invoice as any).currency)}
                     </td>
                     <td className="px-8 py-5">
                       <div className="flex justify-center">
@@ -224,7 +225,7 @@ export default function PatientBillingPanel() {
 
                 <div className="flex items-center justify-between pt-4 border-t border-slate-100">
                   <p className={`text-lg font-bold text-slate-900 ${invoice.status === 'cancelled' ? 'line-through' : ''}`}>
-                    €{(invoice.total || invoice.amount).toFixed(2)}
+                    {formatMoney(invoice.total || invoice.amount, (invoice as any).currency)}
                   </p>
                   <button
                     onClick={() => handleDownloadPDF(invoice.id)}
