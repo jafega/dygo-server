@@ -1910,6 +1910,27 @@ function buildSupabaseEntryRow(entry) {
   };
 }
 
+// Lee la moneda configurada en el perfil del psicólogo (fallback 'EUR').
+// Usado para inyectar `currency` en invoices/bonos cuando el frontend no lo manda explícitamente.
+async function getPsychologistCurrency(userId) {
+  if (!userId) return 'EUR';
+  try {
+    if (supabaseAdmin) {
+      const { data } = await supabaseAdmin
+        .from('psychologist_profiles')
+        .select('data')
+        .eq('user_id', userId)
+        .single();
+      return (data && data.data && data.data.currency) || 'EUR';
+    }
+    const db = getDb();
+    const prof = db.psychologistProfiles && db.psychologistProfiles[userId];
+    return (prof && prof.currency) || 'EUR';
+  } catch {
+    return 'EUR';
+  }
+}
+
 // Función específica para invoices que maneja columnas directas + JSONB
 function buildSupabaseInvoiceRow(invoice) {
   const { id, psychologist_user_id, patient_user_id, amount, status, tax, total, created_at, date, invoice_date, invoiceNumber, ...restData } = invoice;
@@ -9318,6 +9339,11 @@ app.post('/api/invoices', authenticateRequest, async (req, res) => {
       invoice.status = 'draft';
     }
 
+    // Moneda: si el cliente no la envía, heredarla del perfil del psicólogo (fallback 'EUR').
+    if (!invoice.currency) {
+      invoice.currency = await getPsychologistCurrency(psychologistUserId);
+    }
+
     // ── CONTROL CRÍTICO: Generar número de factura SIEMPRE en el servidor ─────────────────
     // Esto elimina los saltos causados por fallos de red en el cliente (el cliente generaba
     // el número antes de enviarlo; si el POST fallaba, ese número se perdía y el siguiente
@@ -14376,18 +14402,34 @@ app.post('/api/bonos', authenticateRequest, async (req, res) => {
       return res.status(400).json({ error: 'total_price_bono_amount debe ser mayor a 0' });
     }
 
+    // Moneda heredada del perfil del psicólogo (si la columna existe en bono se persiste; si no, se ignora).
+    const bonoCurrency = req.body.currency || await getPsychologistCurrency(psychologist_user_id);
+
     if (supabaseAdmin) {
-      const { data, error } = await supabaseAdmin
+      const insertPayload = {
+        psychologist_user_id,
+        pacient_user_id,
+        total_sessions_amount: parseInt(total_sessions_amount),
+        total_price_bono_amount: parseFloat(total_price_bono_amount),
+        paid: Boolean(paid),
+        currency: bonoCurrency
+      };
+      let { data, error } = await supabaseAdmin
         .from('bono')
-        .insert({
-          psychologist_user_id,
-          pacient_user_id,
-          total_sessions_amount: parseInt(total_sessions_amount),
-          total_price_bono_amount: parseFloat(total_price_bono_amount),
-          paid: Boolean(paid)
-        })
+        .insert(insertPayload)
         .select()
         .single();
+
+      // Fallback si la columna currency aún no existe en la tabla bono
+      if (error && (error.code === '42703' || (error.message || '').toLowerCase().includes('currency'))) {
+        console.warn('[POST /api/bonos] columna currency no existe, insertando sin ella');
+        delete insertPayload.currency;
+        ({ data, error } = await supabaseAdmin
+          .from('bono')
+          .insert(insertPayload)
+          .select()
+          .single());
+      }
       
       if (error) {
         console.error('[POST /api/bonos] Error en Supabase:', error);

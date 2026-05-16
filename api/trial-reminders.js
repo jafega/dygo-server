@@ -187,7 +187,7 @@ function buildTrialReminderEmail({ firstName, daysLeft, appUrl }) {
       <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:20px;margin-bottom:28px">
         <p style="margin:0 0 10px;font-size:14px;font-weight:600;color:#9a3412">¿Qué pasa si no suscribo?</p>
         <p style="margin:0;font-size:13px;color:#7c2d12;line-height:1.6">
-          Solo perderás el acceso al panel — tus datos quedan guardados y se recuperan en cuanto actives el plan. Los planes empiezan desde <strong>€9.99/mes</strong>.
+          Solo perderás el acceso al panel — tus datos quedan guardados y se recuperan en cuanto actives el plan. Los planes empiezan desde el <strong>plan Starter</strong>.
         </p>
       </div>`;
   }
