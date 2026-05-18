@@ -969,8 +969,12 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
           }).catch(() => {/* silencioso: el envío de email no bloquea el flujo */});
         }
       } else {
-        const errorData = await response.json();
-        alert('Error: ' + (errorData.error || 'Error desconocido'));
+        const errorData = await response.json().catch(() => ({} as any));
+        console.error('[BillingPanel] Error guardando factura:', response.status, errorData);
+        const detail = [errorData.error, errorData.message, errorData.code, errorData.details, errorData.hint]
+          .filter(Boolean)
+          .join(' | ');
+        alert('Error: ' + (detail || `HTTP ${response.status}`));
       }
     } catch (error) {
       console.error('Error saving invoice:', error);
