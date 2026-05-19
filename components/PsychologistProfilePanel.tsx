@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Save, Building, Phone, Mail, MapPin, CreditCard, User as UserIcon, FileText, Calendar, CheckCircle, AlertCircle, Link2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Save, Building, Phone, Mail, MapPin, CreditCard, User as UserIcon, FileText, Calendar, CheckCircle, AlertCircle, Link2, Image as ImageIcon, Upload, Trash2 } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
 import { normalizePhone, detectDefaultPrefix } from '../services/phoneUtils';
@@ -30,6 +30,9 @@ interface PsychologistProfile {
   email_reminders_enabled?: boolean;
   whatsapp_reminders_enabled?: boolean;
   show_pending_sessions_badge?: boolean;
+
+  // Branding
+  logoUrl?: string;
 }
 
 interface PsychologistProfileProps {
@@ -56,10 +59,14 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
     currency: 'EUR',
     email_reminders_enabled: false,
     whatsapp_reminders_enabled: false,
-    show_pending_sessions_badge: true
+    show_pending_sessions_badge: true,
+    logoUrl: ''
   });
 
   const [isLoading, setIsLoading] = useState(false);
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const [logoError, setLogoError] = useState('');
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [activeTab, setActiveTab] = useState<'professional' | 'connections'>('professional');
@@ -166,7 +173,8 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
           currency: data.currency || 'EUR',
           email_reminders_enabled: data.email_reminders_enabled ?? false,
           whatsapp_reminders_enabled: data.whatsapp_reminders_enabled ?? false,
-          show_pending_sessions_badge: data.show_pending_sessions_badge ?? true
+          show_pending_sessions_badge: data.show_pending_sessions_badge ?? true,
+          logoUrl: data.logoUrl || ''
         });
         // Mantener sincronizada la moneda activa global con la del perfil.
         setActiveCurrency(data.currency || 'EUR');
@@ -210,6 +218,90 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
     if (field === 'show_pending_sessions_badge' && onBadgeSettingChange) {
       onBadgeSettingChange(value as boolean);
     }
+  };
+
+  const persistLogoUrl = async (logoUrl: string) => {
+    // Persistir inmediatamente el logo en el backend para que quede asociado al psicólogo.
+    try {
+      const prefix = detectDefaultPrefix();
+      const payload = { ...profile, logoUrl, phone: normalizePhone(String(profile.phone || ''), prefix) };
+      await apiFetch(`${API_URL}/psychologist/${userId}/profile`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    } catch (err) {
+      console.error('Error persistiendo logo en perfil:', err);
+    }
+  };
+
+  const handleLogoFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLogoError('');
+
+    if (!file.type.startsWith('image/')) {
+      setLogoError('El archivo debe ser una imagen (PNG, JPG, SVG, WebP).');
+      if (logoInputRef.current) logoInputRef.current.value = '';
+      return;
+    }
+    const MAX_BYTES = 5 * 1024 * 1024; // 5MB
+    if (file.size > MAX_BYTES) {
+      setLogoError('La imagen no puede superar 5MB.');
+      if (logoInputRef.current) logoInputRef.current.value = '';
+      return;
+    }
+
+    setIsUploadingLogo(true);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = String(reader.result || '');
+          const comma = result.indexOf(',');
+          resolve(comma >= 0 ? result.slice(comma + 1) : result);
+        };
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+
+      const response = await apiFetch(`${API_URL}/upload`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName: file.name,
+          fileType: file.type,
+          fileData: base64,
+          userId,
+          folder: 'psychologist-logos',
+          fileSize: file.size
+        })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || 'Error subiendo el logo');
+      }
+
+      const { url } = await response.json();
+      const updated = { ...profile, logoUrl: url };
+      setProfile(updated);
+      await persistLogoUrl(url);
+    } catch (err: any) {
+      console.error('Error uploading logo:', err);
+      setLogoError(err?.message || 'No se pudo subir el logo. Inténtalo de nuevo.');
+    } finally {
+      setIsUploadingLogo(false);
+      if (logoInputRef.current) logoInputRef.current.value = '';
+    }
+  };
+
+  const handleRemoveLogo = async () => {
+    if (!profile.logoUrl) return;
+    if (!window.confirm('¿Eliminar el logo? Las nuevas facturas dejarán de mostrarlo.')) return;
+    const updated = { ...profile, logoUrl: '' };
+    setProfile(updated);
+    await persistLogoUrl('');
   };
 
   if (isLoading) {
@@ -397,6 +489,64 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
                 <h3 className="text-base sm:text-lg font-semibold text-slate-900">Datos de Facturación</h3>
               </div>
 
+              {/* Logo */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  <ImageIcon size={14} className="inline mr-1" />
+                  Logo
+                </label>
+                <div className="flex items-start gap-4">
+                  <div className="w-24 h-24 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden shrink-0">
+                    {profile.logoUrl ? (
+                      <img
+                        src={profile.logoUrl}
+                        alt="Logo"
+                        className="w-full h-full object-contain"
+                      />
+                    ) : (
+                      <ImageIcon size={28} className="text-slate-300" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <input
+                      ref={logoInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleLogoFileSelected}
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => logoInputRef.current?.click()}
+                        disabled={isUploadingLogo}
+                        className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <Upload size={14} />
+                        {isUploadingLogo ? 'Subiendo…' : (profile.logoUrl ? 'Cambiar logo' : 'Subir logo')}
+                      </button>
+                      {profile.logoUrl && (
+                        <button
+                          type="button"
+                          onClick={handleRemoveLogo}
+                          disabled={isUploadingLogo}
+                          className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-white text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+                        >
+                          <Trash2 size={14} />
+                          Quitar
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-2">
+                      Aparecerá arriba a la izquierda en tus facturas. Si no añades ningún logo, se mantiene el formato actual. Formatos: PNG, JPG, SVG o WebP. Máximo 5MB.
+                    </p>
+                    {logoError && (
+                      <p className="text-xs text-red-600 mt-1">{logoError}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">Nombre Fiscal / Empresa</label>
                 <input
@@ -477,12 +627,23 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
               <div className="mt-6 p-3 sm:p-4 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-lg border border-indigo-200">
                 <div className="text-xs text-indigo-700 uppercase font-semibold mb-2">Vista Previa de Factura</div>
                 <div className="bg-white rounded-lg p-3 sm:p-4 space-y-2">
-                  <div className="font-semibold text-sm sm:text-base text-slate-900 break-words">{profile.businessName || 'Nombre Fiscal'}</div>
-                  <div className="text-xs text-slate-600 break-words">{profile.taxId || 'NIF/CIF'}</div>
-                  <div className="text-xs text-slate-600 break-words">
-                    {profile.address && `${profile.address}, `}
-                    {profile.postalCode && `${profile.postalCode} `}
-                    {profile.city}
+                  <div className="flex items-start gap-3">
+                    {profile.logoUrl && (
+                      <img
+                        src={profile.logoUrl}
+                        alt="Logo"
+                        className="w-12 h-12 sm:w-14 sm:h-14 object-contain shrink-0"
+                      />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold text-sm sm:text-base text-slate-900 break-words">{profile.businessName || 'Nombre Fiscal'}</div>
+                      <div className="text-xs text-slate-600 break-words">{profile.taxId || 'NIF/CIF'}</div>
+                      <div className="text-xs text-slate-600 break-words">
+                        {profile.address && `${profile.address}, `}
+                        {profile.postalCode && `${profile.postalCode} `}
+                        {profile.city}
+                      </div>
+                    </div>
                   </div>
                   <div className="pt-2 border-t border-slate-200">
                     <div className="flex justify-between items-center gap-2 text-sm flex-wrap">

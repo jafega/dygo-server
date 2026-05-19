@@ -6,6 +6,7 @@ import { formatMoney, currencySymbol } from '../services/currency';
 import { normalizePhone } from '../services/phoneUtils';
 import { includesNormalized } from '../services/textUtils';
 import SessionDetailsModal from './SessionDetailsModal';
+import EmojiPicker from './EmojiPicker';
 
 interface Session {
   id: string;
@@ -22,6 +23,7 @@ interface Session {
   percent_psych?: number;
   notes?: string;
   meetLink?: string;
+  emoji?: string;
   paid?: boolean;
   paymentMethod?: '' | 'Bizum' | 'Transferencia' | 'Efectivo';
   tags?: string[]; // Tags heredadas de la relación
@@ -739,6 +741,7 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
         percent_psych: editedSession.percent_psych ?? 70,
         notes: editedSession.notes,
         meetLink: editedSession.meetLink,
+        emoji: editedSession.emoji || '',
         reminder_enabled: (editedSession as any).reminder_enabled ?? false,
         whatsapp_reminder_enabled: (editedSession as any).whatsapp_reminder_enabled ?? false,
         // Recalcular starts_on/ends_on correctamente desde la zona horaria del psicólogo
@@ -1544,6 +1547,9 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                         <span className="font-semibold text-xs sm:text-sm md:text-sm text-slate-800 truncate">
                           {patient?.name || 'Paciente no disponible'}
                         </span>
+                        {session.emoji && (
+                          <span className="text-sm leading-none flex-shrink-0" title="Etiqueta de sesión">{session.emoji}</span>
+                        )}
                       </div>
                       <div className="text-xs sm:text-sm md:text-sm text-slate-500 flex items-center gap-1 sm:gap-1.5 mb-1 sm:mb-2 flex-wrap">
                         <Clock size={10} className="flex-shrink-0" />
@@ -1837,6 +1843,16 @@ const SessionsList: React.FC<SessionsListProps> = ({ psychologistId }) => {
                     placeholder="0.00"
                   />
                 </div>
+              </div>
+
+              {/* Emoji */}
+              <div>
+                <EmojiPicker
+                  label="Emoji (opcional)"
+                  value={editedSession.emoji}
+                  onChange={(emoji) => handleFieldChange('emoji', emoji)}
+                  placeholder="Selecciona un emoji para identificar esta sesión"
+                />
               </div>
 
               {/* Meet Link */}

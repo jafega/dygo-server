@@ -9238,7 +9238,7 @@ app.get('/api/invoices', authenticateRequest, async (req, res) => {
  * @param {string} psychologistUserId
  * @returns {Promise<string|null>} Next invoice number, or null if start number is not yet configured
  */
-async function allocateNextInvoiceNumber(psychologistUserId) {
+async function allocateNextInvoiceNumber(psychologistUserId, excludeInvoiceId = null) {
   if (!supabaseAdmin) return null;
 
   // 1. Fetch psychologist profile (configured series + start number)
@@ -9264,6 +9264,23 @@ async function allocateNextInvoiceNumber(psychologistUserId) {
     .like('invoiceNumber', `${prefix}%`)
     .neq('status', 'draft')
     .neq('status', 'cancelled');
+
+  // 2b. Fetch ALL non-cancelled invoice numbers (including drafts) to enforce uniqueness.
+  //     The unique index `invoices_unique_number_active` covers non-cancelled rows,
+  //     so any number already used by a draft (e.g. from a previous failed conversion)
+  //     would collide. We must avoid those numbers when allocating.
+  const { data: usedRows } = await supabaseAdmin
+    .from('invoices')
+    .select('id, invoiceNumber')
+    .eq('psychologist_user_id', psychologistUserId)
+    .like('invoiceNumber', `${prefix}%`)
+    .neq('status', 'cancelled');
+  const usedNumbers = new Set(
+    (usedRows || [])
+      .filter(r => !excludeInvoiceId || r.id !== excludeInvoiceId)
+      .map(r => r.invoiceNumber)
+      .filter(Boolean)
+  );
 
   if (error) throw new Error(`[allocateNextInvoiceNumber] Error consultando facturas: ${error.message}`);
 
@@ -9305,8 +9322,22 @@ async function allocateNextInvoiceNumber(psychologistUserId) {
   }).length;
   const usePadding = numbers.length > 0 && paddedCount >= (existingInvoices || []).length / 2;
 
-  const numStr = usePadding ? String(nextNumber).padStart(6, '0') : String(nextNumber);
-  return `${prefix}${numStr}`;
+  // 7. Final uniqueness guard: increment until the candidate number is NOT already in use
+  //    by any non-cancelled invoice (including drafts) for this psychologist. This protects
+  //    against rare edge cases (e.g. a draft created with an F-prefixed number from a
+  //    previous failed conversion, or external data imports) that would otherwise trip
+  //    the `invoices_unique_number_active` index and return a 500 to the client.
+  const formatCandidate = (n) => `${prefix}${usePadding ? String(n).padStart(6, '0') : String(n)}`;
+  let safety = 0;
+  while (usedNumbers.has(formatCandidate(nextNumber)) && safety < 10000) {
+    nextNumber += 1;
+    safety += 1;
+  }
+  if (safety > 0) {
+    console.warn(`⚠️ [allocateNextInvoiceNumber] Saltados ${safety} número(s) ya en uso para psicólogo ${psychologistUserId}. Asignado: ${formatCandidate(nextNumber)}`);
+  }
+
+  return formatCandidate(nextNumber);
 }
 
 app.post('/api/invoices', authenticateRequest, async (req, res) => {
@@ -9867,7 +9898,7 @@ app.patch('/api/invoices/:id', authenticateRequest, async (req, res) => {
             }
           } else {
             try {
-              const serverAllocatedNumber = await allocateNextInvoiceNumber(currentInvoice.psychologist_user_id);
+              const serverAllocatedNumber = await allocateNextInvoiceNumber(currentInvoice.psychologist_user_id, id);
               if (serverAllocatedNumber !== null) {
                 if (serverAllocatedNumber !== updatedInvoice.invoiceNumber) {
                   console.warn(`⚠️ [PATCH /api/invoices] Número corregido (draft→real): cliente="${updatedInvoice.invoiceNumber}" → servidor="${serverAllocatedNumber}"`);
@@ -11746,16 +11777,18 @@ app.get('/api/invoices/:id/pdf', authenticateRequest, async (req, res) => {
 async function prepareAndBuildInvoiceHTML(invoice, supabase) {
   // Get psychologist specialty from profile
   let psychologistSpecialty = '';
+  let psychologistLogoUrl = '';
   if (invoice.psychologist_user_id && supabase) {
     try {
       const { data: profileRows } = await supabase
         .from('psychologist_profiles')
         .select('*')
-        .eq('id', invoice.psychologist_user_id)
+        .eq('user_id', invoice.psychologist_user_id)
         .limit(1);
       if (profileRows && profileRows.length > 0) {
         const prof = normalizeSupabaseRow(profileRows[0]);
         psychologistSpecialty = prof.specialty || '';
+        psychologistLogoUrl = prof.logoUrl || '';
       }
     } catch (_) {}
   }
@@ -11766,7 +11799,8 @@ async function prepareAndBuildInvoiceHTML(invoice, supabase) {
     taxId: invoice.billing_psychologist_tax_id || '',
     address: invoice.billing_psychologist_address || '',
     city: '', postalCode: '', country: 'España', phone: '', email: '',
-    specialty: psychologistSpecialty, professionalId: '', iban: ''
+    specialty: psychologistSpecialty, professionalId: '', iban: '',
+    logoUrl: psychologistLogoUrl
   };
 
   const patientData = {
@@ -11953,6 +11987,7 @@ function buildInvoiceHTML(invoice, psychProfile, patientData, subtotal, iva, irp
     ${invoice.status === 'cancelled' ? '<div class="watermark">CANCELADA</div>' : ''}
     <div class="header">
       <div class="company-info">
+        ${psychProfile.logoUrl ? `<img src="${escapeHtml(psychProfile.logoUrl)}" alt="Logo" style="max-width:180px;max-height:90px;width:auto;height:auto;object-fit:contain;margin-bottom:14px;display:block;" />` : ''}
         <div class="company-name">${escapeHtml(psychProfile.businessName || psychProfile.name)}</div>
         <div class="company-details">
           ${psychProfile.name && psychProfile.businessName ? `<div><strong>Profesional:</strong> ${escapeHtml(psychProfile.name)}</div>` : ''}

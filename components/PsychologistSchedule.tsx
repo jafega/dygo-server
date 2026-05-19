@@ -5,6 +5,7 @@ import { getCurrentUser, apiFetch } from '../services/authService';
 import { formatMoney, currencySymbol } from '../services/currency';
 import { includesNormalized, isTempEmail } from '../services/textUtils';
 import SessionDetailsModal from './SessionDetailsModal';
+import EmojiPicker from './EmojiPicker';
 
 interface Session {
   id: string;
@@ -20,6 +21,7 @@ interface Session {
   status: 'scheduled' | 'completed' | 'cancelled' | 'available' | 'paid';
   notes?: string;
   meetLink?: string;
+  emoji?: string;
   price: number;
   paid: boolean;
   paymentMethod?: '' | 'Bizum' | 'Transferencia' | 'Efectivo';
@@ -143,6 +145,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
     endTime: '',
     type: 'online' as 'in-person' | 'online' | 'home-visit',
     notes: '',
+    emoji: '' as string,
     generateMeetLink: false,
     manualMeetLink: '',
     price: 0,
@@ -677,8 +680,8 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
   const handleCreateSession = async () => {
     if (isCreatingSessionRef.current) return; // ref guard is synchronous — no race window between click and React state update
     if (isCreatingSession) return; // Prevent double submission
-    if (!newSession.patientId || !newSession.date || !newSession.startTime || !newSession.endTime || newSession.price <= 0) {
-      alert('Por favor completa todos los campos requeridos (incluido el precio)');
+    if (!newSession.patientId || !newSession.date || !newSession.startTime || !newSession.endTime || newSession.price < 0) {
+      alert('Por favor completa todos los campos requeridos');
       return;
     }
 
@@ -751,6 +754,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
         type: newSession.type,
         status: 'scheduled',
         notes: newSession.notes,
+        emoji: newSession.emoji || undefined,
         meetLink: meetLink || undefined,
         generateMeetLink: googleCalendarConnected && newSession.type === 'online',
         price: newSession.price,
@@ -1332,6 +1336,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
         paymentMethod: editedSession.paymentMethod || '',
         percent_psych: editedSession.percent_psych ?? 70,
         notes: editedSession.notes,
+        emoji: editedSession.emoji || '',
         meetLink: editedSession.meetLink,
         reminder_enabled: editedSession.reminder_enabled ?? false,
         whatsapp_reminder_enabled: (editedSession as any).whatsapp_reminder_enabled ?? false
@@ -1479,6 +1484,7 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
       endTime: '',
       type: 'online',
       notes: '',
+      emoji: '',
       generateMeetLink: false,
       manualMeetLink: '',
       price: 0,
@@ -2206,6 +2212,9 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                                 ) : (
                                   <MapPin size={14} className="text-purple-500" />
                                 )}
+                                {session.emoji && (
+                                  <span className="text-sm leading-none" title="Etiqueta de sesión">{session.emoji}</span>
+                                )}
                                 {session.paid && (
                                   <span className="text-sm">💵</span>
                                 )}
@@ -2624,6 +2633,9 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                                       ) : (
                                         <MapPin size={9} className="text-purple-600" />
                                       )}
+                                      {session.emoji && (
+                                        <span className="text-[10px] leading-none" title="Etiqueta">{session.emoji}</span>
+                                      )}
                                       {session.paid && (
                                         <span className="text-[9px]">💵</span>
                                       )}
@@ -3016,6 +3028,16 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
                     placeholder="0.00"
                   />
                 </div>
+              </div>
+
+              {/* Emoji */}
+              <div>
+                <EmojiPicker
+                  label="Emoji (opcional)"
+                  value={editedSession.emoji}
+                  onChange={(emoji) => handleFieldChange('emoji', emoji)}
+                  placeholder="Selecciona un emoji para identificar esta sesión"
+                />
               </div>
 
               {/* Meet Link */}
@@ -3683,9 +3705,19 @@ const PsychologistSchedule: React.FC<PsychologistScheduleProps> = ({ psychologis
               </div>
 
               <div className="space-y-2 sm:space-y-3">
+                {/* Emoji opcional para distinguir la sesión */}
+                <div>
+                  <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">Emoji (opcional)</label>
+                  <EmojiPicker
+                    value={newSession.emoji}
+                    onChange={(emoji) => setNewSession({ ...newSession, emoji })}
+                    placeholder="Selecciona un emoji para identificar esta sesión"
+                  />
+                </div>
+
                 <div className="grid grid-cols-2 gap-2 sm:gap-3">
                   <div>
-                    <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">Precio/hora ({currencySymbol()}) *</label>
+                    <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">Precio/hora ({currencySymbol()})</label>
                     <input
                       type="text"
                       inputMode="decimal"

@@ -22,6 +22,7 @@ interface Session {
   session_entry_id?: string;
   invoice_id?: string;
   bonus_id?: string;
+  emoji?: string;
 }
 
 interface Bono {

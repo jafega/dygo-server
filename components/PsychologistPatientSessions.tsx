@@ -4,6 +4,7 @@ import { API_URL } from '../services/config';
 import { getCurrentUser, apiFetch } from '../services/authService';
 import { formatMoney, currencySymbol } from '../services/currency';
 import SessionDetailsModal from './SessionDetailsModal';
+import EmojiPicker from './EmojiPicker';
 
 interface Session {
   id: string;
@@ -20,6 +21,7 @@ interface Session {
   status: 'scheduled' | 'completed' | 'cancelled' | 'available' | 'paid';
   notes?: string;
   meetLink?: string;
+  emoji?: string;
   price: number;
   paid: boolean;
   paymentMethod?: '' | 'Bizum' | 'Transferencia' | 'Efectivo';
@@ -276,6 +278,7 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
         paymentMethod: editedSession.paymentMethod || '',
         percent_psych: editedSession.percent_psych ?? 70,
         notes: editedSession.notes,
+        emoji: editedSession.emoji || '',
         meetLink: editedSession.meetLink
       };
 
@@ -681,6 +684,9 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
                       <div className="text-xs sm:text-sm text-slate-500 flex items-center gap-1.5 sm:gap-2 mb-1">
                         <Clock size={12} />
                         <span className="truncate">{session.startTime} - {session.endTime}</span>
+                        {session.emoji && (
+                          <span className="text-sm leading-none flex-shrink-0" title="Etiqueta">{session.emoji}</span>
+                        )}
                       </div>
                       <div className="flex items-center gap-1 sm:gap-2 flex-wrap mb-1.5 sm:mb-2">
                         {getStatusBadge(session.status)}
@@ -913,6 +919,16 @@ const PsychologistPatientSessions: React.FC<PsychologistPatientSessionsProps> = 
                     placeholder="0.00"
                   />
                 </div>
+              </div>
+
+              {/* Emoji */}
+              <div>
+                <EmojiPicker
+                  label="Emoji (opcional)"
+                  value={editedSession.emoji}
+                  onChange={(emoji) => handleFieldChange('emoji', emoji)}
+                  placeholder="Selecciona un emoji para identificar esta sesión"
+                />
               </div>
 
               {editedSession.type === 'online' && (
