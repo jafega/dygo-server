@@ -4,6 +4,15 @@ import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
 import { formatMoney, currencySymbol } from '../services/currency';
 import { ai } from '../services/genaiService';
+import {
+  buildChatDictionary,
+  createAnonymizerState,
+  anonymize,
+  deanonymize,
+  createStreamBuffer,
+  pushStreamChunk,
+  drainStreamBuffer,
+} from '../services/chatAnonymizer';
 
 interface GroundingSource {
   uri: string;
@@ -448,6 +457,12 @@ REGLAS ESTRICTAS DE PRIVACIDAD Y SEGURIDAD (SIEMPRE ACTIVAS, CON O SIN BÚSQUEDA
 5. Las notas clínicas de sesiones son confidenciales; no las reproduzcas textualmente salvo estricta necesidad. Resume.
 6. Mantén siempre un tono profesional y clínico apropiado.
 
+ANONIMIZACIÓN (LOPD/RGPD):
+- Para proteger los datos personales, los nombres de pacientes, profesionales, emails, teléfonos, DNI/NIE e IBAN se han sustituido en el contexto por identificadores opacos entre corchetes con el formato \`[PACIENTE_001]\`, \`[PROFESIONAL_001]\`, \`[EMAIL_001]\`, \`[TELEFONO_001]\`, \`[DNI_001]\`, \`[IBAN_001]\`.
+- Trata cada identificador como si fuera el nombre o el dato real: razona, agrupa estadísticas y compara usando esos identificadores.
+- DEBES preservar los identificadores EXACTAMENTE como aparecen (mismas mayúsculas, dígitos y corchetes). No los traduzcas, no los reescribas como "Paciente 1", no los expandas y no inventes identificadores nuevos.
+- Si la pregunta del psicólogo menciona un paciente por su nombre real, ya habrá sido sustituido por su identificador antes de llegarte; refiérete a esa persona usando ese mismo identificador en la respuesta.
+
 Responde siempre en español. Sé conciso, claro y útil.`;
 
     return base + webSearchSection + privacy;
@@ -517,24 +532,46 @@ ASISTENTE:`;
         requestConfig.tools = [{ googleSearch: {} }];
       }
 
+      // LOPD/RGPD — anonymize PII before sending the prompt to Gemini.
+      // The system prompt explains the convention so the model preserves the
+      // tokens verbatim, and we de-anonymize the stream below.
+      const piiState = createAnonymizerState();
+      const piiDict = buildChatDictionary(patients, psychologistName);
+      const anonPrompt = anonymize(fullPrompt, piiDict, piiState);
+
       // Stream the response so the UI updates progressively
       const stream = await ai.models.generateContentStream({
         model: 'gemini-2.5-flash',
-        contents: fullPrompt,
+        contents: anonPrompt,
         config: Object.keys(requestConfig).length > 0 ? requestConfig : undefined,
       });
 
       let acc = '';
       let lastChunk: any = null;
+      const streamBuf = createStreamBuffer();
       for await (const chunk of stream) {
         lastChunk = chunk;
         const t = (chunk as any).text;
         if (t) {
-          acc += t;
-          // Update placeholder content incrementally
-          setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: acc } : m));
+          // Feed through the de-anonymization buffer so tokens split across
+          // chunks ("[PACIENTE_" + "001]") are never emitted half-replaced.
+          const flushed = piiState.valueByToken.size > 0
+            ? pushStreamChunk(streamBuf, t, piiState)
+            : t;
+          if (flushed) {
+            acc += flushed;
+            setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: acc } : m));
+          }
         }
       }
+      // Drain any buffered tail (last token at the end of the stream).
+      if (piiState.valueByToken.size > 0) {
+        const tail = drainStreamBuffer(streamBuf, piiState);
+        if (tail) acc += tail;
+      }
+      // Final safety pass — guarantees no leftover tokens in case the model
+      // somehow emitted them right at the boundary.
+      acc = piiState.valueByToken.size > 0 ? deanonymize(acc, piiState) : acc;
 
       const assistantContent = acc.trim() || 'No se pudo generar una respuesta. Intenta reformular tu pregunta.';
 
