@@ -15,13 +15,6 @@ import Busboy from 'busboy';
 // import { google } from 'googleapis';                        // lazy — see getGoogleApis()
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
-import {
-  buildPiiDictionary,
-  createAnonymizerState,
-  anonymizeContents,
-  deanonymizeString,
-  deanonymizeAny,
-} from './aiAnonymizer.js';
 // import archiver from 'archiver';                            // lazy — only /api/invoices/zip
 // import PDFDocument from 'pdfkit';                           // lazy — only /api/signatures/:id/send-email
 // import { Resend } from 'resend';                            // lazy — only email routes
@@ -13944,29 +13937,11 @@ app.post('/api/ai/generate-content', authenticateRequest, aiProxyLimiter, aiProx
     try { payload = normalizeAiRequest(req.body); }
     catch (e) { return res.status(400).json({ error: e.message || 'Body inválido' }); }
 
-    // LOPD/GDPR — anonymize PII before forwarding to the external LLM.
-    const piiState = createAnonymizerState();
-    try {
-      const dict = buildPiiDictionary(req.authenticatedUserId, db, supabaseDbCache);
-      payload = { ...payload, contents: anonymizeContents(payload.contents, dict, piiState) };
-      if (piiState.hits > 0) {
-        console.log(`[POST /api/ai/generate-content] 🔒 anonymized ${piiState.hits} PII occurrences (${piiState.valueByToken.size} distinct)`);
-      }
-    } catch (e) {
-      console.error('[POST /api/ai/generate-content] ⚠️ anonymizer failed, aborting to preserve LOPD compliance:', e?.message || e);
-      return res.status(500).json({ error: 'Error anonimizando datos antes de llamar a la IA' });
-    }
-
     const response = await genai.models.generateContent(payload);
     // Extract serializable fields. `response.text` is a getter on the SDK object.
-    let text = typeof response.text === 'string' ? response.text : (response.text ?? '');
-    let candidates = response.candidates || undefined;
+    const text = typeof response.text === 'string' ? response.text : (response.text ?? '');
+    const candidates = response.candidates || undefined;
     const usageMetadata = response.usageMetadata || undefined;
-    // De-anonymize before sending back to the authenticated client.
-    if (piiState.valueByToken.size > 0) {
-      text = deanonymizeString(text, piiState);
-      if (candidates) candidates = deanonymizeAny(candidates, piiState);
-    }
     return res.json({ text, candidates, usageMetadata });
   } catch (err) {
     const status = err?.status || err?.response?.status || 500;
@@ -13987,19 +13962,6 @@ app.post('/api/ai/generate-content-stream', authenticateRequest, aiProxyLimiter,
     try { payload = normalizeAiRequest(req.body); }
     catch (e) { return res.status(400).json({ error: e.message || 'Body inválido' }); }
 
-    // LOPD/GDPR — anonymize PII before forwarding to the external LLM.
-    const piiState = createAnonymizerState();
-    try {
-      const dict = buildPiiDictionary(req.authenticatedUserId, db, supabaseDbCache);
-      payload = { ...payload, contents: anonymizeContents(payload.contents, dict, piiState) };
-      if (piiState.hits > 0) {
-        console.log(`[POST /api/ai/generate-content-stream] 🔒 anonymized ${piiState.hits} PII occurrences (${piiState.valueByToken.size} distinct)`);
-      }
-    } catch (e) {
-      console.error('[POST /api/ai/generate-content-stream] ⚠️ anonymizer failed, aborting to preserve LOPD compliance:', e?.message || e);
-      return res.status(500).json({ error: 'Error anonimizando datos antes de llamar a la IA' });
-    }
-
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
@@ -14018,41 +13980,13 @@ app.post('/api/ai/generate-content-stream', authenticateRequest, aiProxyLimiter,
 
     try {
       const stream = await genai.models.generateContentStream(payload);
-      // Buffer chunk text across boundaries so a token split between two chunks
-      // (e.g. "[EMAIL_" then "001]") still gets de-anonymized correctly.
-      let pending = '';
-      const flushPending = (flushAll) => {
-        if (!pending) return '';
-        if (flushAll) {
-          const out = piiState.valueByToken.size > 0 ? deanonymizeString(pending, piiState) : pending;
-          pending = '';
-          return out;
-        }
-        // Keep up to the last 32 chars in case a token is being assembled
-        if (pending.length <= 32) return '';
-        const safe = pending.slice(0, pending.length - 32);
-        pending = pending.slice(-32);
-        return piiState.valueByToken.size > 0 ? deanonymizeString(safe, piiState) : safe;
-      };
       for await (const chunk of stream) {
         if (closed) break;
         const text = typeof chunk.text === 'string' ? chunk.text : (chunk.text ?? '');
-        let outText = text;
-        if (piiState.valueByToken.size > 0) {
-          pending += text;
-          outText = flushPending(false);
-        }
-        const candidates = chunk.candidates
-          ? (piiState.valueByToken.size > 0 ? deanonymizeAny(chunk.candidates, piiState) : chunk.candidates)
-          : undefined;
-        if (outText || candidates) {
-          writeEvent('chunk', { text: outText, candidates });
-        }
-      }
-      // Drain any buffered tail
-      if (piiState.valueByToken.size > 0) {
-        const tail = flushPending(true);
-        if (tail) writeEvent('chunk', { text: tail });
+        writeEvent('chunk', {
+          text,
+          candidates: chunk.candidates || undefined,
+        });
       }
       writeEvent('done', { ok: true });
     } catch (err) {
