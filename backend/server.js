@@ -883,11 +883,18 @@ const getSubPlan = (sub) => {
 
 /**
  * Checks whether adding one more active relationship would exceed the plan limit.
+ * During the 14-day trial (opts.trialActive === true), the limit is bypassed so
+ * the psychologist can add as many patients as they want. When they later
+ * subscribe, `handleCreateCheckoutSession` enforces that the chosen plan covers
+ * at least the current patient count.
  * Returns { allowed, currentCount, maxRelations, plan, upgradeTo }
  */
-const checkRelationLimit = async (db, psychUserId, sub) => {
+const checkRelationLimit = async (db, psychUserId, sub, opts = {}) => {
   const plan = getSubPlan(sub);
   const currentCount = await countActivePatients(db, psychUserId);
+  if (opts.trialActive) {
+    return { allowed: true, currentCount, maxRelations: Infinity, plan: plan.id, planName: plan.name, trialBypass: true };
+  }
   if (currentCount >= plan.maxRelations) {
     // Find next tier
     const sortedPlans = Object.values(PSYCH_PLANS).sort((a, b) => a.price - b.price);
@@ -3690,7 +3697,7 @@ const handleAdminCreatePatient = async (req, res) => {
     // --- PLAN RELATION LIMIT CHECK ---
     // Master users bypass all relation limits
     const psychSub = getPsychSub(db, String(psychologistId));
-    const limitCheck = access.isMaster ? { allowed: true } : await checkRelationLimit(db, String(psychologistId), psychSub);
+    const limitCheck = access.isMaster ? { allowed: true } : await checkRelationLimit(db, String(psychologistId), psychSub, { trialActive: access.trialActive });
     if (!limitCheck.allowed) {
       console.log(`❌ [handleAdminCreatePatient] Relation limit reached for psych ${psychologistId}: ${limitCheck.currentCount}/${limitCheck.maxRelations} (plan: ${limitCheck.plan})`);
       return res.status(402).json({
@@ -5590,6 +5597,31 @@ const handleCreateCheckoutSession = async (req, res) => {
     // --- PSYCHOLOGIST PLAN CHECKOUT ---
     if (!PSYCH_PLAN_IDS.includes(requestedPlanId)) {
       return res.status(400).json({ error: `Plan inválido. Planes disponibles: ${PSYCH_PLAN_IDS.join(', ')}` });
+    }
+
+    // Enforce: the chosen plan must cover at least the current active patient count.
+    // (During trial we let psychologists add unlimited patients; when they subscribe,
+    // they must pick a plan whose maxRelations >= current patients.)
+    try {
+      const currentPatients = await countActivePatients(db, requesterId);
+      const chosenPlan = PSYCH_PLANS[requestedPlanId];
+      if (chosenPlan && currentPatients > chosenPlan.maxRelations) {
+        const sortedPlans = Object.values(PSYCH_PLANS).sort((a, b) => a.price - b.price);
+        const minPlan = sortedPlans.find(p => p.maxRelations >= currentPatients) || sortedPlans[sortedPlans.length - 1];
+        return res.status(400).json({
+          error: 'plan_below_patient_count',
+          message: `Tienes ${currentPatients} pacientes activos. El plan ${chosenPlan.name} solo permite ${chosenPlan.maxRelations}. Elige al menos el plan ${minPlan.name}.`,
+          currentCount: currentPatients,
+          chosenPlan: chosenPlan.id,
+          chosenPlanName: chosenPlan.name,
+          chosenPlanMax: chosenPlan.maxRelations,
+          minPlan: minPlan.id,
+          minPlanName: minPlan.name,
+          minPlanPrice: minPlan.price
+        });
+      }
+    } catch (e) {
+      console.warn('[checkout/psych] could not validate patient count vs plan:', e?.message || e);
     }
 
     const sub = getPsychSub(db, requesterId);
@@ -8627,7 +8659,7 @@ app.post('/api/invitations', authenticateRequest, async (req, res) => {
 
     // --- PLAN RELATION LIMIT CHECK ---
     const sub = getPsychSub(db, psychUserId);
-    const limitCheck = access.isMaster ? { allowed: true } : await checkRelationLimit(db, psychUserId, sub);
+    const limitCheck = access.isMaster ? { allowed: true } : await checkRelationLimit(db, psychUserId, sub, { trialActive: access.trialActive });
     if (!limitCheck.allowed) {
       console.log(`❌ [POST /api/invitations] Relation limit reached for psych ${psychUserId}: ${limitCheck.currentCount}/${limitCheck.maxRelations} (plan: ${limitCheck.plan})`);
       return res.status(402).json({
@@ -12818,7 +12850,7 @@ app.post('/api/relationships', authenticateRequest, async (req, res) => {
 
       // --- PLAN RELATION LIMIT CHECK ---
       const sub = getPsychSub(dbCheck, psychId);
-      const limitCheck = access.isMaster ? { allowed: true } : await checkRelationLimit(dbCheck, psychId, sub);
+      const limitCheck = access.isMaster ? { allowed: true } : await checkRelationLimit(dbCheck, psychId, sub, { trialActive: access.trialActive });
       if (!limitCheck.allowed) {
         console.log(`❌ [POST /api/relationships] Relation limit reached for psych ${psychId}: ${limitCheck.currentCount}/${limitCheck.maxRelations} (plan: ${limitCheck.plan})`);
         return res.status(402).json({

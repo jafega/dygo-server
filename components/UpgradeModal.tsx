@@ -49,7 +49,7 @@ const UpgradeModal: React.FC<UpgradeModalProps> = ({ currentUser, trialDaysLeft,
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Error al iniciar el pago');
+        throw new Error(data.message || data.error || 'Error al iniciar el pago');
       }
       const { url } = await res.json();
       if (url) {
