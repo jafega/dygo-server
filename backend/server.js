@@ -7449,6 +7449,21 @@ app.patch('/api/users/:id', authenticateRequest, async (req, res) => {
     // Obtener usuario actualizado
     const updatedUser = await readSupabaseRowById('users', userId);
     console.log('✅ Usuario actualizado en Supabase:', userId);
+
+    // Sync in-memory cache so next saveDb() doesn't overwrite these changes
+    // with stale data via persistSupabaseData -> upsertTable('users', ...).
+    if (supabaseDbCache?.users && updatedUser) {
+      const cachedIdx = supabaseDbCache.users.findIndex(u => u.id === String(userId));
+      if (cachedIdx !== -1) {
+        supabaseDbCache.users[cachedIdx] = {
+          ...supabaseDbCache.users[cachedIdx],
+          ...updatedUser,
+        };
+      } else {
+        supabaseDbCache.users.push(updatedUser);
+      }
+    }
+
     return res.json(updatedUser);
   } catch (err) {
     console.error('Error in PATCH /api/users/:id', err);
