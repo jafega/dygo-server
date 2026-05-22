@@ -10223,31 +10223,86 @@ app.post('/api/invoices/:id/rectify', authenticateRequest, async (req, res) => {
           rectified_by_invoice_id: rectificativa.id
         };
         
-        // Desasignar invoice_id de sesiones y bonos de la factura original
+        // Desasignar invoice_id de sesiones y bonos de la factura original.
+        // Hacemos doble pasada: por invoice_id (canónico, robusto) y por IDs listados en
+        // sessionIds / bonoIds (cinturón y tirantes — cubre casos en los que el enlace
+        // se guardó solo en JSONB y no en la columna invoice_id, o viceversa).
+        try {
+          const { error: sessionsByInvoiceError, count: sessionsByInvoiceCount } = await supabaseAdmin
+            .from('sessions')
+            .update({ invoice_id: null }, { count: 'exact' })
+            .eq('invoice_id', id);
+          if (sessionsByInvoiceError) {
+            console.error('⚠️ Error desasignando sesiones por invoice_id:', sessionsByInvoiceError);
+          } else {
+            console.log(`✅ Desasignadas ${sessionsByInvoiceCount ?? '?'} sesiones por invoice_id=${id}`);
+          }
+        } catch (e) {
+          console.error('⚠️ Excepción desasignando sesiones por invoice_id:', e);
+        }
+
         if (originalInvoice.sessionIds && originalInvoice.sessionIds.length > 0) {
           const { error: sessionUpdateError } = await supabaseAdmin
             .from('sessions')
             .update({ invoice_id: null })
             .in('id', originalInvoice.sessionIds);
-          
+
           if (sessionUpdateError) {
-            console.error('⚠️ Error desasignando sesiones:', sessionUpdateError);
+            console.error('⚠️ Error desasignando sesiones por lista de IDs:', sessionUpdateError);
           } else {
-            console.log(`✅ Desasignadas ${originalInvoice.sessionIds.length} sesiones`);
+            console.log(`✅ Desasignadas ${originalInvoice.sessionIds.length} sesiones por lista`);
           }
         }
-        
+
+        try {
+          const { error: bonosByInvoiceError, count: bonosByInvoiceCount } = await supabaseAdmin
+            .from('bono')
+            .update({ invoice_id: null }, { count: 'exact' })
+            .eq('invoice_id', id);
+          if (bonosByInvoiceError) {
+            console.error('⚠️ Error desasignando bonos por invoice_id:', bonosByInvoiceError);
+          } else {
+            console.log(`✅ Desasignados ${bonosByInvoiceCount ?? '?'} bonos por invoice_id=${id}`);
+          }
+        } catch (e) {
+          console.error('⚠️ Excepción desasignando bonos por invoice_id:', e);
+        }
+
         if (originalInvoice.bonoIds && originalInvoice.bonoIds.length > 0) {
           const { error: bonoUpdateError } = await supabaseAdmin
             .from('bono')
             .update({ invoice_id: null })
             .in('id', originalInvoice.bonoIds);
-          
+
           if (bonoUpdateError) {
-            console.error('⚠️ Error desasignando bonos:', bonoUpdateError);
+            console.error('⚠️ Error desasignando bonos por lista de IDs:', bonoUpdateError);
           } else {
-            console.log(`✅ Desasignados ${originalInvoice.bonoIds.length} bonos`);
+            console.log(`✅ Desasignados ${originalInvoice.bonoIds.length} bonos por lista`);
           }
+        }
+
+        // Reflejar la desasignación en la caché local (db.json) para que el frontend
+        // reciba el estado correcto incluso antes de recargar desde Supabase.
+        try {
+          const dbLocal = getDb();
+          if (Array.isArray(dbLocal.sessions)) {
+            dbLocal.sessions.forEach(s => {
+              if (s && s.invoice_id === id) s.invoice_id = null;
+            });
+          }
+          if (Array.isArray(dbLocal.bonos)) {
+            dbLocal.bonos.forEach(b => {
+              if (b && b.invoice_id === id) b.invoice_id = null;
+            });
+          }
+          if (Array.isArray(dbLocal.bono)) {
+            dbLocal.bono.forEach(b => {
+              if (b && b.invoice_id === id) b.invoice_id = null;
+            });
+          }
+          saveDb(dbLocal);
+        } catch (e) {
+          console.error('⚠️ Error actualizando caché local tras desasignar sesiones/bonos:', e);
         }
         
         // Guardar ambas facturas en Supabase
@@ -10330,7 +10385,30 @@ app.post('/api/invoices/:id/rectify', authenticateRequest, async (req, res) => {
     db.invoices[idx].status = 'cancelled';
     db.invoices[idx].cancelledAt = new Date().toISOString();
     db.invoices[idx].rectified_by_invoice_id = rectificativa.id;
-    
+
+    // Desasignar invoice_id en sesiones y bonos locales (tanto por invoice_id como por listas)
+    const sessionIdSet = new Set(originalInvoice.sessionIds || []);
+    const bonoIdSet = new Set(originalInvoice.bonoIds || []);
+    if (Array.isArray(db.sessions)) {
+      db.sessions.forEach(s => {
+        if (!s) return;
+        if (s.invoice_id === originalInvoice.id || sessionIdSet.has(s.id)) {
+          s.invoice_id = null;
+        }
+      });
+    }
+    const clearBonoArr = (arr) => {
+      if (!Array.isArray(arr)) return;
+      arr.forEach(b => {
+        if (!b) return;
+        if (b.invoice_id === originalInvoice.id || bonoIdSet.has(b.id)) {
+          b.invoice_id = null;
+        }
+      });
+    };
+    clearBonoArr(db.bonos);
+    clearBonoArr(db.bono);
+
     db.invoices.push(rectificativa);
     saveDb(db);
     
