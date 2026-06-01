@@ -800,9 +800,10 @@ const BillingPanel: React.FC<BillingPanelProps> = ({ psychologistId, patientId, 
     setFormErrors({});
 
     const today = new Date().toISOString().split('T')[0];
-    // Al convertir un borrador en factura real, usar siempre la fecha de hoy
+    // Respetar siempre la fecha que el psicólogo ha introducido en el formulario,
+    // incluso al convertir un borrador en factura real.
     const isDraftConversion = !isDraft && editingInvoice?.status === 'draft';
-    const effectiveDate = isDraftConversion ? today : formData.date;
+    const effectiveDate = formData.date;
 
     // No permitir fechas futuras
     if (!isDraft && effectiveDate > today) {

@@ -11181,6 +11181,7 @@ app.get('/api/invoices/:id/pdf', authenticateRequest, async (req, res) => {
 
   // Intentar obtener la especialidad del psicólogo desde su perfil
   let psychologistSpecialty = '';
+  let psychologistLogoUrl = '';
   if (invoice.psychologist_user_id && supabaseAdmin) {
     try {
       const { data: profileRows } = await supabaseAdmin
@@ -11191,6 +11192,7 @@ app.get('/api/invoices/:id/pdf', authenticateRequest, async (req, res) => {
       if (profileRows && profileRows.length > 0) {
         const prof = normalizeSupabaseRow(profileRows[0]);
         psychologistSpecialty = prof.specialty || '';
+        psychologistLogoUrl = prof.logoUrl || prof.logo_url || '';
       }
     } catch (err) {
       console.warn('⚠️ [PDF] No se pudo obtener especialidad del psicólogo:', err.message);
@@ -11207,7 +11209,8 @@ app.get('/api/invoices/:id/pdf', authenticateRequest, async (req, res) => {
     country: 'España',
     phone: '',
     email: '',
-    specialty: psychologistSpecialty
+    specialty: psychologistSpecialty,
+    logoUrl: psychologistLogoUrl
   };
 
   const patientData = {
@@ -11419,6 +11422,7 @@ app.get('/api/invoices/:id/pdf', authenticateRequest, async (req, res) => {
 <head>
   <meta charset="UTF-8">
   <style>
+    @page { margin: 0; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { 
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
@@ -11676,6 +11680,7 @@ app.get('/api/invoices/:id/pdf', authenticateRequest, async (req, res) => {
     <!-- Header -->
     <div class="header">
       <div class="company-info">
+        ${psychProfile.logoUrl ? `<img src="${psychProfile.logoUrl}" alt="Logo" style="max-height:80px;max-width:240px;margin-bottom:12px;object-fit:contain;" />` : ''}
         <div class="company-name">${psychProfile.businessName || psychProfile.name}</div>
         <div class="company-details">
           ${psychProfile.name && psychProfile.businessName ? `<div><strong>Profesional:</strong> ${psychProfile.name}</div>` : ''}
@@ -11690,8 +11695,7 @@ app.get('/api/invoices/:id/pdf', authenticateRequest, async (req, res) => {
         </div>
       </div>
       <div class="invoice-title">
-        <h1>${invoice.is_rectificativa ? 'FACTURA RECTIFICATIVA' : 'FACTURA'}</h1>
-        <div class="invoice-number">${invoice.invoiceNumber}${invoice.is_rectificativa ? `<span class="rect-title-badge">${invoice.rectification_type || 'R4'}</span>` : ''}</div>
+        <h1>${invoice.is_rectificativa ? 'FACTURA RECTIFICATIVA' : 'FACTURA'}${invoice.is_rectificativa ? `<span class="rect-title-badge">${invoice.rectification_type || 'R4'}</span>` : ''}</h1>
       </div>
     </div>
     
@@ -11717,6 +11721,10 @@ app.get('/api/invoices/:id/pdf', authenticateRequest, async (req, res) => {
     <div class="info-section">
       <div class="info-box">
         <h3>Datos de Facturación</h3>
+        <div class="info-row">
+          <span class="info-label">Nº Factura:</span>
+          <span class="info-value">${invoice.invoiceNumber || ''}</span>
+        </div>
         <div class="info-row">
           <span class="info-label">Fecha:</span>
           <span class="info-value">${formatDateES(invoice.invoice_date || invoice.date)}</span>
@@ -17149,6 +17157,193 @@ app.post('/api/transcribe', authenticateRequest, async (req, res) => {
     return res.status(500).json({ 
       error: 'Error al procesar la solicitud: ' + (error.message || 'Error desconocido') 
     });
+  }
+});
+
+// =====================================================================
+// LARGE FILE TRANSCRIPTION (bypass Vercel 4.5MB body limit)
+// Client uploads directly to Supabase Storage via a signed URL, then
+// asks the backend to download from storage and run Gemini Files API.
+// =====================================================================
+
+// POST /api/storage/create-session-upload-url
+// Returns a one-shot signed upload URL the client can PUT directly to
+// Supabase Storage, bypassing the serverless function body limit.
+app.post('/api/storage/create-session-upload-url', authenticateRequest, express.json({ limit: '32kb' }), async (req, res) => {
+  try {
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: 'Supabase Storage no está configurado en el servidor.' });
+    }
+    const { fileName, fileType } = req.body || {};
+    if (!fileName || typeof fileName !== 'string') {
+      return res.status(400).json({ error: 'fileName requerido' });
+    }
+
+    // Ensure bucket exists with a generous size limit
+    try {
+      const { data: buckets } = await supabaseAdmin.storage.listBuckets();
+      const exists = buckets?.some(b => b.name === 'session-files');
+      if (!exists) {
+        await supabaseAdmin.storage.createBucket('session-files', {
+          public: false,
+          fileSizeLimit: 500 * 1024 * 1024 // 500MB
+        });
+      }
+    } catch (bucketErr) {
+      console.warn('⚠️ No se pudo verificar/crear bucket session-files:', bucketErr?.message || bucketErr);
+    }
+
+    const userId = req.authenticatedUserId;
+    const safeFileName = String(fileName).replace(/[^a-zA-Z0-9.-]/g, '_').slice(0, 120);
+    const objectPath = `${userId}/transcribe/${Date.now()}_${safeFileName}`;
+
+    const { data, error } = await supabaseAdmin.storage
+      .from('session-files')
+      .createSignedUploadUrl(objectPath);
+
+    if (error || !data) {
+      console.error('❌ createSignedUploadUrl error:', error);
+      return res.status(500).json({ error: error?.message || 'No se pudo generar la URL de subida' });
+    }
+
+    return res.json({
+      path: objectPath,
+      token: data.token,
+      signedUrl: data.signedUrl,
+      bucket: 'session-files',
+      fileType: fileType || null
+    });
+  } catch (err) {
+    console.error('❌ Error en /api/storage/create-session-upload-url:', err);
+    return res.status(500).json({ error: err?.message || 'Error generando URL de subida' });
+  }
+});
+
+// POST /api/ai/transcribe-from-storage
+// Downloads a previously uploaded file from Supabase Storage, sends it to
+// the Gemini Files API and returns the transcript. Designed for long
+// audio/video files (e.g. 1.5h recordings) that exceed Vercel's body limit.
+app.post('/api/ai/transcribe-from-storage', authenticateRequest, aiProxyLimiter, express.json({ limit: '32kb' }), async (req, res) => {
+  let tmpFilePath = null;
+  let geminiFileName = null;
+  let storagePath = null;
+  try {
+    const genai = await getGenAIv2();
+    if (!genai) {
+      return res.status(503).json({ error: 'Servicio de IA no disponible. Configura GEMINI_API_KEY.' });
+    }
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: 'Supabase Storage no configurado.' });
+    }
+
+    const { path, mimeType, prompt, keepStorageFile } = req.body || {};
+    if (!path || typeof path !== 'string') {
+      return res.status(400).json({ error: 'path requerido' });
+    }
+
+    // Authorize: the path must be inside the requester's namespace
+    const userId = String(req.authenticatedUserId);
+    if (!path.startsWith(`${userId}/`)) {
+      return res.status(403).json({ error: 'Acceso denegado a este archivo' });
+    }
+    storagePath = path;
+
+    // 1) Download the file from Supabase Storage
+    console.log('⬇️ Descargando archivo de Storage:', path);
+    const { data: fileBlob, error: dlErr } = await supabaseAdmin.storage
+      .from('session-files')
+      .download(path);
+    if (dlErr || !fileBlob) {
+      console.error('❌ Error descargando archivo:', dlErr);
+      return res.status(404).json({ error: dlErr?.message || 'Archivo no encontrado en Storage' });
+    }
+    const arrayBuffer = await fileBlob.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    console.log(`✅ Archivo descargado (${buffer.length} bytes)`);
+
+    // 2) Write to /tmp so the SDK can stream it to the Files API
+    const os = await import('os');
+    const fs = await import('fs/promises');
+    const nodePath = await import('path');
+    const ext = nodePath.extname(path) || '.bin';
+    tmpFilePath = nodePath.join(os.tmpdir(), `transcribe_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`);
+    await fs.writeFile(tmpFilePath, buffer);
+
+    // 3) Upload to Gemini Files API (handles files up to 2GB, much larger than inline limit)
+    console.log('☁️ Subiendo archivo a Gemini Files API...');
+    const effectiveMime = mimeType || fileBlob.type || 'application/octet-stream';
+    const uploaded = await genai.files.upload({
+      file: tmpFilePath,
+      config: { mimeType: effectiveMime }
+    });
+    geminiFileName = uploaded.name;
+
+    // 4) Wait until the file is ACTIVE (audio/video go through PROCESSING)
+    let meta = uploaded;
+    let tries = 0;
+    while (meta.state === 'PROCESSING' && tries < 90) {
+      await new Promise(r => setTimeout(r, 2000));
+      meta = await genai.files.get({ name: meta.name });
+      tries++;
+    }
+    if (meta.state === 'FAILED') {
+      throw new Error('Gemini falló procesando el archivo subido');
+    }
+    if (meta.state !== 'ACTIVE') {
+      throw new Error(`Archivo en estado inesperado: ${meta.state}`);
+    }
+    console.log('✅ Archivo ACTIVE en Gemini, generando transcripción...');
+
+    // 5) Call generateContent with a fileData reference (no inline payload)
+    const promptText = (typeof prompt === 'string' && prompt.trim())
+      ? prompt
+      : 'Transcribe el contenido de este audio/video. Devuelve únicamente la transcripción en español sin comentarios adicionales. Si detectas diferentes personas hablando, indica quién habla en cada momento.';
+
+    const response = await genai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [{
+        role: 'user',
+        parts: [
+          { text: promptText },
+          { fileData: { fileUri: meta.uri, mimeType: meta.mimeType || effectiveMime } }
+        ]
+      }]
+    });
+
+    const transcript = typeof response.text === 'string' ? response.text : (response.text ?? '');
+    console.log(`✅ Transcripción completada (${(transcript || '').length} chars)`);
+    return res.json({ transcript: transcript || '' });
+  } catch (err) {
+    const status = err?.status || err?.response?.status || 500;
+    console.error('❌ Error en /api/ai/transcribe-from-storage:', err);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      error: err?.message || 'Error transcribiendo el archivo'
+    });
+  } finally {
+    // Cleanup local tmp file
+    if (tmpFilePath) {
+      try {
+        const fs = await import('fs/promises');
+        await fs.unlink(tmpFilePath);
+      } catch {}
+    }
+    // Cleanup Gemini file
+    if (geminiFileName) {
+      try {
+        const genai = await getGenAIv2();
+        await genai.files.delete({ name: geminiFileName });
+      } catch (cleanupErr) {
+        console.warn('⚠️ No se pudo borrar archivo de Gemini:', cleanupErr?.message || cleanupErr);
+      }
+    }
+    // Cleanup Supabase Storage object unless caller asked to keep it
+    if (storagePath && !req.body?.keepStorageFile) {
+      try {
+        await supabaseAdmin.storage.from('session-files').remove([storagePath]);
+      } catch (cleanupErr) {
+        console.warn('⚠️ No se pudo borrar objeto de Storage:', cleanupErr?.message || cleanupErr);
+      }
+    }
   }
 });
 

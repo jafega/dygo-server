@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { X, FileText, Upload, Mic, Save, Loader, Sparkles, Check } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { getCurrentUser, apiFetch } from '../services/authService';
-import { ai } from '../services/genaiService';
+import { ai, transcribeLargeFile } from '../services/genaiService';
 
 interface NonSessionEntry {
   id: string;
@@ -216,28 +216,12 @@ const NonSessionEntryModal: React.FC<NonSessionEntryModalProps> = ({
         setIsTranscribing(true);
         try {
           if (!ai) throw new Error('API de IA no configurada');
-          const reader = new FileReader();
-          const audioData = await new Promise<string>((resolve, reject) => {
-            reader.onloadend = () => resolve(reader.result as string);
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
+          // Storage + Gemini Files API: soporta grabaciones largas sin chocar
+          // con el límite de 4.5MB del request body en Vercel.
+          const transcriptText = await transcribeLargeFile(blob, {
+            fileName: `recording_${Date.now()}.webm`,
+            prompt: 'Transcribe el siguiente audio. Proporciona únicamente la transcripción del contenido hablado, sin añadir comentarios adicionales.',
           });
-          const base64Data = audioData.split(',')[1];
-
-          const result = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: [
-              {
-                role: 'user',
-                parts: [
-                  { text: 'Transcribe el siguiente audio. Proporciona únicamente la transcripción del contenido hablado, sin añadir comentarios adicionales.' },
-                  { inlineData: { mimeType: 'audio/webm', data: base64Data } },
-                ],
-              },
-            ],
-          });
-
-          const transcriptText = result.text || '';
           if (!transcriptText) throw new Error('No se pudo obtener transcript de la grabación');
 
           if (transcript) {

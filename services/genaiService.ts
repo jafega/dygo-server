@@ -1,6 +1,6 @@
 import { JournalEntry, Goal, WeeklyReport, EmotionStructure } from "../types";
 import pako from 'pako';
-import { API_URL } from './config';
+import { API_URL, getSupabaseClient } from './config';
 import { getAuthHeaders } from './authService';
 
 // Schema "Type" values — strings that match the @google/genai Type enum.
@@ -578,4 +578,70 @@ export async function transcribeAudioFile(audioBlob: Blob): Promise<string> {
     console.error('Error transcribing audio:', error);
     throw new Error("Error al transcribir el audio. Intenta pegar el transcript manualmente.");
   }
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Large file transcription via Supabase Storage + Gemini Files API.
+// Use this for audio/video files that would exceed Vercel's 4.5MB request
+// body limit (i.e. essentially anything over a few MB). The file is
+// uploaded directly to Supabase Storage with a one-shot signed URL, then
+// the backend pulls it down and transcribes it with the Gemini Files API.
+// ────────────────────────────────────────────────────────────────────────
+export interface TranscribeProgress {
+  stage: 'requesting-url' | 'uploading' | 'transcribing' | 'done';
+  uploadedBytes?: number;
+  totalBytes?: number;
+}
+
+export async function transcribeLargeFile(
+  file: File | Blob,
+  options?: { prompt?: string; fileName?: string; onProgress?: (p: TranscribeProgress) => void }
+): Promise<string> {
+  const onProgress = options?.onProgress;
+  const fileName = options?.fileName
+    || (file instanceof File ? file.name : `recording_${Date.now()}.bin`);
+  const fileType = (file as any).type || 'application/octet-stream';
+
+  // 1) Ask backend for a signed upload URL
+  onProgress?.({ stage: 'requesting-url' });
+  const urlRes = await fetch(`${API_URL}/storage/create-session-upload-url`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ fileName, fileType }),
+  });
+  if (!urlRes.ok) {
+    let msg = `No se pudo obtener URL de subida (${urlRes.status})`;
+    try { const j = await urlRes.json(); msg = j.error || msg; } catch {}
+    throw new Error(msg);
+  }
+  const { path, token } = await urlRes.json();
+  if (!path || !token) throw new Error('Respuesta de subida inválida');
+
+  // 2) Upload directly to Supabase Storage (bypasses Vercel limits entirely)
+  onProgress?.({ stage: 'uploading', uploadedBytes: 0, totalBytes: (file as any).size });
+  const supabase = getSupabaseClient();
+  if (!supabase) throw new Error('Supabase no está configurado en el frontend');
+  const { error: upErr } = await supabase.storage
+    .from('session-files')
+    .uploadToSignedUrl(path, token, file, { contentType: fileType, upsert: false });
+  if (upErr) {
+    throw new Error(`Error subiendo a Storage: ${upErr.message || upErr}`);
+  }
+  onProgress?.({ stage: 'uploading', uploadedBytes: (file as any).size, totalBytes: (file as any).size });
+
+  // 3) Trigger backend transcription
+  onProgress?.({ stage: 'transcribing' });
+  const trRes = await fetch(`${API_URL}/ai/transcribe-from-storage`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ path, mimeType: fileType, prompt: options?.prompt }),
+  });
+  if (!trRes.ok) {
+    let msg = `Transcripción falló (${trRes.status})`;
+    try { const j = await trRes.json(); msg = j.error || msg; } catch {}
+    throw new Error(msg);
+  }
+  const { transcript } = await trRes.json();
+  onProgress?.({ stage: 'done' });
+  return transcript || '';
 }

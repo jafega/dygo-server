@@ -3,7 +3,7 @@ import { X, FileText, Upload, Mic, Save, Loader, CheckCircle, Sparkles, AlertCir
 import { API_URL } from '../services/config';
 import { getCurrentUser, apiFetch } from '../services/authService';
 import { formatMoney } from '../services/currency';
-import { ai } from '../services/genaiService';
+import { ai, transcribeLargeFile } from '../services/genaiService';
 
 interface Session {
   id: string;
@@ -343,46 +343,35 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session: init
       const fileType = uploadedFile.type;
       let transcriptText = '';
 
-      // Para archivos de audio/video y PDF, usar Gemini directamente
-      if (fileType.startsWith('audio/') || fileType.startsWith('video/') || fileType === 'application/pdf') {
-        console.log('🎵 Procesando archivo multimedia...');
-        
-        // Convertir el archivo a base64
+      // Audio / vídeo: SIEMPRE pasar por Supabase Storage + Gemini Files API
+      // (bypass del límite de 4.5MB de Vercel y del límite de inlineData de Gemini)
+      if (fileType.startsWith('audio/') || fileType.startsWith('video/')) {
+        console.log('🎵 Procesando archivo multimedia vía Storage…', uploadedFile.size, 'bytes');
+        transcriptText = await transcribeLargeFile(uploadedFile, {
+          onProgress: (p) => console.log('📡 Transcribe progress:', p.stage),
+        });
+      } else if (fileType === 'application/pdf') {
+        // PDFs suelen ser pequeños: ruta inline (proxy) sigue siendo válida
+        console.log('📄 Procesando PDF inline…');
         const reader = new FileReader();
         const fileData = await new Promise<string>((resolve, reject) => {
           reader.onloadend = () => resolve(reader.result as string);
           reader.onerror = reject;
           reader.readAsDataURL(uploadedFile);
         });
-
-        // Extraer solo la parte base64 (sin el prefijo data:...)
         const base64Data = fileData.split(',')[1];
-        console.log('✓ Archivo convertido a base64, tamaño:', base64Data.length);
-
-        const promptText = fileType === 'application/pdf' 
-          ? 'Extrae todo el texto de este documento PDF. Proporciona únicamente el contenido textual sin añadir comentarios adicionales.'
-          : 'Transcribe el siguiente archivo de audio/video. Proporciona únicamente la transcripción del contenido hablado, sin añadir comentarios adicionales.';
-
-        // Usar File API de Gemini
         const result = await ai.models.generateContent({
           model: 'gemini-2.5-flash',
           contents: [
             {
               role: 'user',
               parts: [
-                { text: promptText },
-                {
-                  inlineData: {
-                    mimeType: fileType,
-                    data: base64Data
-                  }
-                }
+                { text: 'Extrae todo el texto de este documento PDF. Proporciona únicamente el contenido textual sin añadir comentarios adicionales.' },
+                { inlineData: { mimeType: fileType, data: base64Data } }
               ]
             }
           ]
         });
-
-        console.log('✓ Respuesta de Gemini recibida');
         transcriptText = result.text || '';
       } else if (
         fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
@@ -426,46 +415,35 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session: init
       const fileType = uploadedFile.type;
       let transcriptText = '';
 
-      // Para archivos de audio/video y PDF, usar Gemini directamente
-      if (fileType.startsWith('audio/') || fileType.startsWith('video/') || fileType === 'application/pdf') {
-        console.log('🎵 Procesando archivo multimedia...');
-        
-        // Convertir el archivo a base64
+      // Audio / vídeo: SIEMPRE pasar por Supabase Storage + Gemini Files API
+      // (bypass del límite de 4.5MB de Vercel y del límite de inlineData de Gemini)
+      if (fileType.startsWith('audio/') || fileType.startsWith('video/')) {
+        console.log('🎵 Procesando archivo multimedia vía Storage…', uploadedFile.size, 'bytes');
+        transcriptText = await transcribeLargeFile(uploadedFile, {
+          onProgress: (p) => console.log('📡 Transcribe progress:', p.stage),
+        });
+      } else if (fileType === 'application/pdf') {
+        // PDFs suelen ser pequeños: ruta inline (proxy) sigue siendo válida
+        console.log('📄 Procesando PDF inline…');
         const reader = new FileReader();
         const fileData = await new Promise<string>((resolve, reject) => {
           reader.onloadend = () => resolve(reader.result as string);
           reader.onerror = reject;
           reader.readAsDataURL(uploadedFile);
         });
-
-        // Extraer solo la parte base64 (sin el prefijo data:...)
         const base64Data = fileData.split(',')[1];
-        console.log('✓ Archivo convertido a base64, tamaño:', base64Data.length);
-
-        const promptText = fileType === 'application/pdf' 
-          ? 'Extrae todo el texto de este documento PDF. Proporciona únicamente el contenido textual sin añadir comentarios adicionales.'
-          : 'Transcribe el siguiente archivo de audio/video. Proporciona únicamente la transcripción del contenido hablado, sin añadir comentarios adicionales.';
-
-        // Usar File API de Gemini
         const result = await ai.models.generateContent({
           model: 'gemini-2.5-flash',
           contents: [
             {
               role: 'user',
               parts: [
-                { text: promptText },
-                {
-                  inlineData: {
-                    mimeType: fileType,
-                    data: base64Data
-                  }
-                }
+                { text: 'Extrae todo el texto de este documento PDF. Proporciona únicamente el contenido textual sin añadir comentarios adicionales.' },
+                { inlineData: { mimeType: fileType, data: base64Data } }
               ]
             }
           ]
         });
-
-        console.log('✓ Respuesta de Gemini recibida');
         transcriptText = result.text || '';
       } else if (
         fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
@@ -529,39 +507,14 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({ session: init
 
           console.log('🎤 Transcribiendo grabación de audio...');
           
-          // Convertir el audio blob a base64
-          const reader = new FileReader();
-          const audioData = await new Promise<string>((resolve, reject) => {
-            reader.onloadend = () => resolve(reader.result as string);
-            reader.onerror = reject;
-            reader.readAsDataURL(audioBlob);
+          // Para grabaciones largas usamos Storage + Gemini Files API
+          // (las grabaciones de 1.5h superan ampliamente el límite inline)
+          console.log('🎙️ Transcribiendo grabación vía Storage…', audioBlob.size, 'bytes');
+          const transcriptText = await transcribeLargeFile(audioBlob, {
+            fileName: `recording_${Date.now()}.webm`,
+            prompt: 'Transcribe el siguiente audio de la sesión de terapia. Proporciona únicamente la transcripción del contenido hablado, sin añadir comentarios adicionales.',
+            onProgress: (p) => console.log('📡 Transcribe progress:', p.stage),
           });
-
-          // Extraer solo la parte base64 (sin el prefijo data:...)
-          const base64Data = audioData.split(',')[1];
-          console.log('✓ Audio convertido a base64, tamaño:', base64Data.length);
-
-          // Usar Gemini para transcribir
-          const result = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: [
-              {
-                role: 'user',
-                parts: [
-                  { text: 'Transcribe el siguiente audio de la sesión de terapia. Proporciona únicamente la transcripción del contenido hablado, sin añadir comentarios adicionales.' },
-                  {
-                    inlineData: {
-                      mimeType: 'audio/webm',
-                      data: base64Data
-                    }
-                  }
-                ]
-              }
-            ]
-          });
-
-          console.log('✓ Respuesta de Gemini recibida para grabación');
-          const transcriptText = result.text || '';
           
           if (!transcriptText) {
             throw new Error('No se pudo obtener transcript de la grabación');
