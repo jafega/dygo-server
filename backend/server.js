@@ -17179,27 +17179,40 @@ app.post('/api/storage/create-session-upload-url', authenticateRequest, express.
       return res.status(400).json({ error: 'fileName requerido' });
     }
 
-    // Ensure bucket exists with a generous size limit
-    try {
-      const { data: buckets } = await supabaseAdmin.storage.listBuckets();
-      const exists = buckets?.some(b => b.name === 'session-files');
-      if (!exists) {
-        await supabaseAdmin.storage.createBucket('session-files', {
-          public: false,
-          fileSizeLimit: 500 * 1024 * 1024 // 500MB
-        });
-      }
-    } catch (bucketErr) {
-      console.warn('⚠️ No se pudo verificar/crear bucket session-files:', bucketErr?.message || bucketErr);
-    }
-
     const userId = req.authenticatedUserId;
     const safeFileName = String(fileName).replace(/[^a-zA-Z0-9.-]/g, '_').slice(0, 120);
     const objectPath = `${userId}/transcribe/${Date.now()}_${safeFileName}`;
 
-    const { data, error } = await supabaseAdmin.storage
+    const ensureBucket = async () => {
+      const { data: bucket, error: getErr } = await supabaseAdmin.storage.getBucket('session-files');
+      if (bucket && !getErr) return { ok: true };
+      const { error: createErr } = await supabaseAdmin.storage.createBucket('session-files', {
+        public: false,
+        fileSizeLimit: 500 * 1024 * 1024 // 500MB
+      });
+      if (createErr) {
+        console.error('❌ No se pudo crear bucket session-files:', createErr);
+        return { ok: false, error: createErr };
+      }
+      return { ok: true };
+    };
+
+    const tryCreateSignedUrl = async () => supabaseAdmin.storage
       .from('session-files')
       .createSignedUploadUrl(objectPath);
+
+    let { data, error } = await tryCreateSignedUrl();
+
+    // If bucket is missing, create it and retry once.
+    if (error && /not.*(exist|found)|resource/i.test(error?.message || '')) {
+      const ensured = await ensureBucket();
+      if (!ensured.ok) {
+        return res.status(500).json({
+          error: `Bucket "session-files" no existe y no se pudo crear: ${ensured.error?.message || 'permiso denegado'}`
+        });
+      }
+      ({ data, error } = await tryCreateSignedUrl());
+    }
 
     if (error || !data) {
       console.error('❌ createSignedUploadUrl error:', error);
