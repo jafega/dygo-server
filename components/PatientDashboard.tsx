@@ -25,9 +25,19 @@ interface PatientDashboardProps {
   onImportClick?: () => void;
   canCreate?: boolean;
   onNeedUpgrade?: () => void;
+  subscriptionInfo?: {
+    is_subscribed: boolean;
+    trial_active: boolean;
+    trial_days_left: number;
+    access_blocked: boolean;
+    is_master?: boolean;
+    plan_id?: string;
+    max_relations?: number | null;
+    active_relations?: number;
+  } | null;
 }
 
-const PatientDashboard = forwardRef<PatientDashboardHandle, PatientDashboardProps>(({ onImportClick, canCreate = true, onNeedUpgrade }, ref) => {
+const PatientDashboard = forwardRef<PatientDashboardHandle, PatientDashboardProps>(({ onImportClick, canCreate = true, onNeedUpgrade, subscriptionInfo }, ref) => {
   const [patients, setPatients] = useState<PatientSummary[]>([]);
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -325,7 +335,40 @@ const PatientDashboard = forwardRef<PatientDashboardHandle, PatientDashboardProp
        </div>
 
        {/* Todas las invitaciones y conexiones con pacientes se manejan desde la pestaña Conexiones */}
-       
+
+       {/* Hint: si la prueba acabó o no hay suscripción, sugerir desactivar pacientes para bajar de plan */}
+       {(() => {
+         const s = subscriptionInfo;
+         if (!s || s.is_master) return null;
+         const noAccess = !s.is_subscribed && !s.trial_active;
+         const inTrial = s.trial_active;
+         if (!noAccess && !inTrial) return null;
+         const activeCount = typeof s.active_relations === 'number'
+           ? s.active_relations
+           : patients.filter(p => !p.isSelf).length;
+         if (activeCount <= 10) return null;
+         const title = noAccess
+           ? 'Tu prueba ha terminado'
+           : 'Estás en periodo de prueba';
+         const body = noAccess
+           ? `Tienes ${activeCount} pacientes activos. Si quieres suscribirte al plan Starter (hasta 10 pacientes), desactiva los pacientes que ya no necesites desde la pestaña Configuración de cada paciente.`
+           : `Tienes ${activeCount} pacientes activos. Cuando termine la prueba, para elegir un plan más económico (Starter ≤10, Mainder ≤30), puedes ir desactivando ahora los pacientes que ya no necesites.`;
+         return (
+           <div className={`rounded-xl border p-4 ${noAccess ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'}`}>
+             <div className="flex items-start gap-3">
+               <AlertCircle className={`${noAccess ? 'text-red-600' : 'text-amber-600'} shrink-0 mt-0.5`} size={20} />
+               <div className="flex-1">
+                 <p className={`text-sm font-semibold ${noAccess ? 'text-red-900' : 'text-amber-900'}`}>{title}</p>
+                 <p className={`text-xs mt-1 ${noAccess ? 'text-red-800' : 'text-amber-800'}`}>{body}</p>
+                 <p className={`text-xs mt-1 ${noAccess ? 'text-red-700' : 'text-amber-700'}`}>
+                   Abre un paciente y desactiva el toggle <strong>"Paciente Activo"</strong> en la pestaña Configuración. Podrás reactivarlo más adelante.
+                 </p>
+               </div>
+             </div>
+           </div>
+         );
+       })()}
+
        {/* Sección de filtros */}
        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
          <div className="flex items-center gap-2 mb-4">

@@ -1481,7 +1481,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
 
                     {psychPanelView === 'home' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><PsychologistHome psychologistId={currentUser.id} userName={currentUser.name} subscriptionInfo={psychSubscriptionInfo} isProfileIncomplete={isProfileIncomplete} onNavigate={(view) => setPsychPanelView(view as any)} onNeedUpgrade={() => setShowAppUpgradeModal(true)} /></Suspense>}
                     {psychPanelView === 'dashboard' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><PsychologistDashboard psychologistId={currentUser.id} /></Suspense>}
-                    {psychPanelView === 'patients' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><PatientDashboard ref={patientDashboardRef} onImportClick={() => setPsychPanelView('import')} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} /></Suspense>}
+                    {psychPanelView === 'patients' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><PatientDashboard ref={patientDashboardRef} onImportClick={() => setPsychPanelView('import')} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} subscriptionInfo={psychSubscriptionInfo} /></Suspense>}
                     {psychPanelView === 'sessions' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><SessionsList psychologistId={currentUser.id} /></Suspense>}
                     {psychPanelView === 'billing' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><BillingPanel psychologistId={currentUser.id} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} /></Suspense>}
                     {psychPanelView === 'centros' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><CentrosPanel ref={centrosPanelRef} psychologistId={currentUser.id} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} /></Suspense>}
@@ -1510,6 +1510,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                         returnPanel={psychPanelView}
                         currentPlanId={psychSubscriptionInfo?.plan_id}
                         activeRelations={psychSubscriptionInfo?.active_relations}
+                        onManagePatients={() => setPsychPanelView('patients')}
                       />
                     )}
                </div>

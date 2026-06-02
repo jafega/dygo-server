@@ -24,6 +24,7 @@ interface UpgradeModalProps {
   currentPlanId?: string;
   activeRelations?: number;
   suggestedPlanId?: string;
+  onManagePatients?: () => void;
 }
 
 const CheckIcon = () => (
@@ -32,7 +33,7 @@ const CheckIcon = () => (
   </svg>
 );
 
-const UpgradeModal: React.FC<UpgradeModalProps> = ({ currentUser, trialDaysLeft, onClose, returnPanel, currentPlanId, activeRelations, suggestedPlanId }) => {
+const UpgradeModal: React.FC<UpgradeModalProps> = ({ currentUser, trialDaysLeft, onClose, returnPanel, currentPlanId, activeRelations, suggestedPlanId, onManagePatients }) => {
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -82,6 +83,9 @@ const UpgradeModal: React.FC<UpgradeModalProps> = ({ currentUser, trialDaysLeft,
     return viable?.id;
   })();
 
+  // True if at least one plan is unavailable due to too many active patients
+  const hasBlockedPlans = typeof activeRelations === 'number' && PLANS.some(p => isPlanInsufficient(p));
+
   return (
     <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl p-8 relative max-h-[90vh] overflow-y-auto">
@@ -115,6 +119,33 @@ const UpgradeModal: React.FC<UpgradeModalProps> = ({ currentUser, trialDaysLeft,
             <p className="text-sm text-gray-400 mt-1">Pacientes activos: <span className="font-medium text-gray-600">{activeRelations}</span></p>
           )}
         </div>
+
+        {/* Hint: user can deactivate patients to fit a cheaper plan */}
+        {hasBlockedPlans && onManagePatients && (
+          <div className="mb-5 bg-amber-50 border border-amber-200 rounded-xl p-4">
+            <div className="flex items-start gap-3">
+              <div className="shrink-0 mt-0.5">
+                <svg className="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-amber-900">¿Quieres un plan más económico?
+                </p>
+                <p className="text-xs text-amber-800 mt-1">
+                  Tienes <span className="font-semibold">{activeRelations}</span> pacientes activos. Para elegir un plan con menos pacientes, primero desactiva los que ya no necesites desde la pestaña <strong>Configuración</strong> de cada paciente.
+                </p>
+                <button
+                  onClick={() => { onManagePatients(); onClose(); }}
+                  className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-amber-900 bg-white border border-amber-300 hover:bg-amber-100 px-3 py-1.5 rounded-lg transition-colors"
+                >
+                  Gestionar mis pacientes
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Plans grid */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
