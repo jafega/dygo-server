@@ -64,8 +64,8 @@ export default async function handler(req, res) {
     const { data } = await supabase
       .from('psychologist_profiles')
       .select('data')
-      .eq('id', psychologistId)
-      .single();
+      .eq('user_id', psychologistId)
+      .maybeSingle();
     profileCache.set(psychologistId, data);
     return data;
   };

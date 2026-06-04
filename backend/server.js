@@ -7814,11 +7814,16 @@ app.post('/api/upload-session-file', authenticateRequest, async (req, res) => {
       
       if (!sessionBucketExists) {
         console.log('📦 Creando bucket session-files...');
-        const { error: createError } = await supabaseAdmin.storage.createBucket('session-files', {
+        let { error: createError } = await supabaseAdmin.storage.createBucket('session-files', {
           public: false, // Archivos privados por defecto
           fileSizeLimit: 100 * 1024 * 1024 // 100MB limit
         });
-        
+        if (createError && /exceeded the maximum allowed size|exceeds the.*limit|max.*size/i.test(createError.message || '')) {
+          console.warn('⚠️ fileSizeLimit 100MB rechazado, reintentando sin límite explícito');
+          ({ error: createError } = await supabaseAdmin.storage.createBucket('session-files', {
+            public: false
+          }));
+        }
         if (createError && !createError.message.includes('already exists')) {
           console.error('Error creando bucket:', createError);
           throw createError;
@@ -17186,10 +17191,23 @@ app.post('/api/storage/create-session-upload-url', authenticateRequest, express.
     const ensureBucket = async () => {
       const { data: bucket, error: getErr } = await supabaseAdmin.storage.getBucket('session-files');
       if (bucket && !getErr) return { ok: true };
-      const { error: createErr } = await supabaseAdmin.storage.createBucket('session-files', {
+      // Intentar con un límite generoso; si el proyecto tiene un global file
+      // size limit menor, Supabase responde "The object exceeded the maximum
+      // allowed size". En ese caso reintentamos sin fileSizeLimit para que
+      // el bucket herede el límite global del proyecto.
+      let { error: createErr } = await supabaseAdmin.storage.createBucket('session-files', {
         public: false,
-        fileSizeLimit: 500 * 1024 * 1024 // 500MB
+        fileSizeLimit: 500 * 1024 * 1024
       });
+      if (createErr && /exceeded the maximum allowed size|exceeds the.*limit|max.*size/i.test(createErr.message || '')) {
+        console.warn('⚠️ fileSizeLimit 500MB rechazado por el proyecto, reintentando sin límite explícito');
+        ({ error: createErr } = await supabaseAdmin.storage.createBucket('session-files', {
+          public: false
+        }));
+      }
+      if (createErr && /already exists/i.test(createErr.message || '')) {
+        return { ok: true };
+      }
       if (createErr) {
         console.error('❌ No se pudo crear bucket session-files:', createErr);
         return { ok: false, error: createErr };
