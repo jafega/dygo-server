@@ -2357,7 +2357,11 @@ async function dedupeSupabaseUsers() {
       for (const id of otherIds) {
         duplicateIds.set(id, canonical.row.id);
       }
-      await supabaseAdmin.from('users').delete().in('id', otherIds);
+      // Borrado de users deshabilitado: la FK en RESTRICT lo rechaza y el
+      // reintento en cada cold-start saturó el pool de conexiones (jun-2026).
+      // Si hace falta consolidar duplicados, hay que hacerlo manualmente
+      // limpiando antes las tablas dependientes (care_relationships, etc.).
+      console.warn('[dedupeSupabaseUsers] skipping users.delete for duplicate ids (disabled):', otherIds);
     }
   }
 
@@ -4051,8 +4055,10 @@ const handleAdminCreatePatient = async (req, res) => {
 
         if (relError) {
           console.error('[handleAdminCreatePatient] ❌ Error insertando relación:', relError);
-          // Intentar eliminar el usuario si la relación falló
-          await supabaseAdmin.from('users').delete().eq('id', newPatient.id);
+          // Rollback de users.delete deshabilitado: la FK en RESTRICT lo rechaza
+          // y dispara el bucle de error que tumba las conexiones. El usuario
+          // queda creado sin relación; se podrá reutilizar en la próxima alta.
+          console.warn('[handleAdminCreatePatient] skipping users.delete rollback for user', newPatient.id);
           throw new Error(`Error al crear relación: ${relError.message}`);
         }
         console.log('[handleAdminCreatePatient] ✅ Relación insertada en Supabase');
@@ -19865,7 +19871,11 @@ app.delete('/api/gdpr/delete-my-data', authenticateRequest, async (req, res) => 
         await supabaseAdmin.from('sessions').delete().or(`psychologist_user_id.eq.${userId},patient_user_id.eq.${userId}`);
         await supabaseAdmin.from('invoices').delete().or(`psychologist_user_id.eq.${userId},patient_user_id.eq.${userId}`);
         await supabaseAdmin.from('settings').delete().eq('id', userId);
-        await supabaseAdmin.from('users').delete().eq('id', userId);
+        // Borrado de la fila en public.users deshabilitado a propósito: la FK
+        // está en RESTRICT y reintentar el delete saturó el pool de conexiones.
+        // Se mantiene la fila huérfana (sin datos asociados tras los deletes de
+        // arriba) y se debe anonimizar manualmente si se requiere por RGPD.
+        console.warn('[gdpr/delete-my-data] skipping users.delete for', userId);
       } catch (e) {
         console.error('Error deleting data from Supabase:', e.message);
       }
