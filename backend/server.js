@@ -115,6 +115,9 @@ const SUPABASE_TABLES_TO_ENSURE = [
   'subscriptions'
 ];
 let supabaseTablesEnsured = false;
+// Idempotent one-time guards so per-startup schema migrations (ALTER/UPDATE) don't
+// re-run on every serverless cold start and pile lock-taking DDL onto the database.
+let supabaseColumnMigrationsDone = false;
 
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
 
@@ -1102,16 +1105,34 @@ const executeSupabaseSql = async (sql) => {
     throw new Error('Supabase SQL endpoint no está configurado');
   }
 
-  const response = await fetch(SUPABASE_SQL_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      apikey: SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-      Prefer: 'return=minimal'
-    },
-    body: JSON.stringify({ query: sql })
-  });
+  // Guard rail: DDL (ALTER/CREATE) requests an AccessExclusive lock. If it can't
+  // grab it quickly, a stuck statement queues behind a lock and blocks EVERY read
+  // on that table, which cascades into PostgREST pool exhaustion and 522s. Bound
+  // the lock wait and total statement time so a blocked migration fails fast
+  // instead of wedging the whole database.
+  const guardedSql = `SET lock_timeout = '5s'; SET statement_timeout = '20s';\n${sql}`;
+
+  // Also bound the network call itself so a hung origin can never hang the
+  // serverless invocation indefinitely.
+  const controller = new AbortController();
+  const abortTimer = setTimeout(() => controller.abort(), 25000);
+
+  let response;
+  try {
+    response = await fetch(SUPABASE_SQL_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        Prefer: 'return=minimal'
+      },
+      body: JSON.stringify({ query: guardedSql }),
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(abortTimer);
+  }
 
   if (!response.ok) {
     const text = await response.text().catch(() => response.statusText);
@@ -1207,6 +1228,7 @@ const ensureNonSessionEntryTable = async () => {
 // Ensure historical_documents JSONB column exists on care_relationships and migrate legacy data
 const ensureEntriesCreatedAtColumn = async () => {
   if (!supabaseAdmin || !SUPABASE_SQL_ENDPOINT || !SUPABASE_SERVICE_ROLE_KEY) return;
+  if (supabaseColumnMigrationsDone) return;
   try {
     await executeSupabaseSql(
       `ALTER TABLE public.entries ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL;`
@@ -1219,6 +1241,7 @@ const ensureEntriesCreatedAtColumn = async () => {
 
 const ensureHistoricalDocumentsColumn = async () => {
   if (!supabaseAdmin || !SUPABASE_SQL_ENDPOINT || !SUPABASE_SERVICE_ROLE_KEY) return;
+  if (supabaseColumnMigrationsDone) return;
   try {
     // Step 1: Add column (IF NOT EXISTS is safe to re-run)
     await executeSupabaseSql(
@@ -1235,6 +1258,10 @@ const ensureHistoricalDocumentsColumn = async () => {
           AND historical_documents IS NULL;
     `);
     console.log('✅ Legacy historicalDocuments data migrated to dedicated column');
+
+    // Both per-startup column migrations completed for this warm instance — don't
+    // re-run their ALTER/UPDATE on subsequent cold starts of the same instance.
+    supabaseColumnMigrationsDone = true;
   } catch (err) {
     console.error('❌ Error ensuring historical_documents column:', err?.message || err);
   }
