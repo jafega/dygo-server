@@ -1528,13 +1528,17 @@ async function initializeSupabase() {
       });
       console.log('✅ Supabase REST persistence enabled (service role)');
       
-      // Run non-blocking — tables already exist in production. Fire-and-forget so the
-      // cold start of this Vercel serverless instance doesn't block on the schema check.
-      setImmediate(() => {
-        ensureSupabaseTablesExist()
-          .then(() => console.log('✅ Supabase tables verified'))
-          .catch(schemaErr => console.error('❌ Error ensuring Supabase schema', schemaErr?.message || schemaErr));
-      });
+      // Schema check disabled by default on cold start. Tables already exist in
+      // production, and running a SELECT-per-table on EVERY serverless cold start
+      // piled load onto Supabase and helped saturate the connection pool. Opt in
+      // with RUN_SCHEMA_CHECK_ON_START=true only when actually creating tables.
+      if (String(process.env.RUN_SCHEMA_CHECK_ON_START || '').toLowerCase() === 'true') {
+        setImmediate(() => {
+          ensureSupabaseTablesExist()
+            .then(() => console.log('✅ Supabase tables verified'))
+            .catch(schemaErr => console.error('❌ Error ensuring Supabase schema', schemaErr?.message || schemaErr));
+        });
+      }
       
       // Ensure entries.created_at column exists
       try {
@@ -1582,12 +1586,19 @@ async function initializeSupabase() {
         supabaseDbCache = ensureDbShape({});
       }
       
-      // Run non-blocking — deduplication is a best-effort background task.
-      setImmediate(() => {
-        dedupeSupabaseUsers()
-          .then(() => console.log('✅ Supabase users deduplicated'))
-          .catch(err => console.error('❌ Supabase dedupe failed', err?.message || err));
-      });
+      // Dedup disabled by default on cold start. It does a full `users` scan plus
+      // an upsert per duplicate email on EVERY cold start — and because the
+      // duplicate-row delete is intentionally disabled (FK RESTRICT), the same
+      // duplicates are rewritten forever, hammering Supabase on every boot. This
+      // was the exact "reintento en cada cold-start saturó el pool" failure mode.
+      // Opt in with DEDUPE_USERS_ON_START=true to run it as a one-off maintenance.
+      if (String(process.env.DEDUPE_USERS_ON_START || '').toLowerCase() === 'true') {
+        setImmediate(() => {
+          dedupeSupabaseUsers()
+            .then(() => console.log('✅ Supabase users deduplicated'))
+            .catch(err => console.error('❌ Supabase dedupe failed', err?.message || err));
+        });
+      }
     } catch (err) {
       console.error('❌ Unable to enable Supabase REST persistence', err?.message || err, err?.stack);
       supabaseAdmin = null;
