@@ -16298,6 +16298,7 @@ app.patch('/api/sessions/:id', authenticateRequest, async (req, res) => {
             .from('session_entry')
             .insert({
               id: sessionEntryId,
+              session_id: id,
               creator_user_id: creatorUserId,
               target_user_id: targetUserId,
               status: 'pending',
