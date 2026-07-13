@@ -2543,6 +2543,104 @@ async function autoCompletePassedSessions() {
   }
 }
 
+// Construye las filas con el shape exacto de cada tabla de Supabase a partir del
+// estado en memoria. Se usa tanto para el estado nuevo como para el previo, de modo
+// que saveSupabaseDb pueda hacer upsert únicamente de las filas que cambian.
+function buildSupabaseRowSets(data, { quiet = false } = {}) {
+  const warn = (...args) => { if (!quiet) console.warn(...args); };
+
+  // Users: extraer campos específicos para columnas de Supabase según el nuevo schema
+  const usersRows = (data.users || []).map(u => ({
+    id: u.id,
+    data: cleanDataForStorage(u, USER_TABLE_COLUMNS),
+    user_email: u.user_email || u.email || null,
+    is_psychologist: u.is_psychologist ?? (u.isPsychologist ?? (u.role === 'PSYCHOLOGIST' ? true : false)),
+    psychologist_profile_id: u.psychologist_profile_id || null,
+    auth_user_id: u.auth_user_id || u.supabaseId || null  // UUID de auth.users
+  }));
+
+  // Entries: extraer campos para foreign keys creator_user_id y target_user_id
+  const entriesRows = (data.entries || []).map(e => ({
+    id: e.id,
+    data: cleanDataForStorage(e, ENTRY_TABLE_COLUMNS),
+    creator_user_id: e.creator_user_id || e.userId || null,
+    target_user_id: e.target_user_id || e.targetUserId || e.userId || null
+  }));
+
+  // Goals: extraer campo patient_user_id
+  const goalsRows = (data.goals || []).map(g => ({
+    id: g.id,
+    data: cleanDataForStorage(g, GOAL_TABLE_COLUMNS),
+    patient_user_id: g.patient_user_id || null
+  }));
+
+  // Invitations: extraer campos según el nuevo schema (psychologist_user_id, patient_user_id, invited_patient_email, psychologist_email)
+  const invitationsRows = (data.invitations || []).map(i => ({
+    id: i.id,
+    data: cleanDataForStorage(i, INVITATION_TABLE_COLUMNS),
+    psychologist_user_id: i.psychologist_user_id || i.psych_user_id || i.psychologistId || null,
+    patient_user_id: i.patient_user_id || null,
+    invited_patient_email: i.patient_user_email || i.patientEmail || i.toUserEmail || null,
+    psychologist_email: i.psych_user_email || i.psychologistEmail || null
+  }));
+
+  // Settings: extraer campo user_id
+  const settings = data.settings || {};
+  const settingsRows = Object.keys(settings).map(k => ({
+    id: k,
+    data: cleanDataForStorage(settings[k], SETTINGS_TABLE_COLUMNS),
+    user_id: settings[k]?.user_id || settings[k]?.userId || null
+  }));
+
+  // Invoices: usar buildSupabaseInvoiceRow para incluir amount, tax, total, status
+  const invoicesRows = (data.invoices || [])
+    .filter(inv => inv.psychologist_user_id || inv.psychologistId) // Filtrar facturas sin psicólogo
+    .map(inv => buildSupabaseInvoiceRow(inv));
+
+  // Care relationships: extraer campos según el nuevo schema (psychologist_user_id, patient_user_id, default_session_price, default_psych_percent)
+  const relationshipsRows = (data.careRelationships || [])
+    .filter(rel => {
+      // Solo incluir relaciones que tienen los campos requeridos
+      const hasPrice = rel.default_session_price !== undefined && rel.default_session_price !== null;
+      const hasPercent = rel.default_psych_percent !== undefined && rel.default_psych_percent !== null;
+      if (!hasPrice || !hasPercent) {
+        warn(`⚠️ [saveSupabaseDb] Saltando care_relationship ${rel.id} sin default_session_price o default_psych_percent`);
+        return false;
+      }
+      return true;
+    })
+    .map(rel => ({
+      id: rel.id,
+      data: cleanDataForStorage(rel.data || rel, CARE_REL_TABLE_COLUMNS),
+      psychologist_user_id: rel.psychologist_user_id || null,
+      patient_user_id: rel.patient_user_id || null,
+      default_session_price: rel.default_session_price,
+      default_psych_percent: Math.min(rel.default_psych_percent, 100)
+      // NOTA: historical_documents NO se incluye aquí intencionalmente.
+      // Esa columna se gestiona exclusivamente via escrituras directas en los endpoints
+      // de /historical-documents para evitar que un upsert masivo con caché stale
+      // (instancia serverless diferente) la sobreescriba con null.
+    }));
+
+  // Psychologist profiles: extraer campo user_id
+  const profiles = data.psychologistProfiles || {};
+  const profilesRows = Object.keys(profiles)
+    .map(k => ({
+      id: k,
+      data: cleanDataForStorage(profiles[k], PSYCH_PROFILE_TABLE_COLUMNS),
+      user_id: profiles[k]?.user_id || profiles[k]?.userId || null
+    }))
+    .filter(p => p.user_id !== null); // Filtrar perfiles sin user_id válido
+
+  // Subscriptions: use psychologist_user_id as the row id
+  const subscriptionsRows = (data.subscriptions || []).map(s => ({
+    id: s.psychologist_user_id,
+    data: cleanDataForStorage(s, SUBSCRIPTION_TABLE_COLUMNS)
+  }));
+
+  return { usersRows, entriesRows, goalsRows, invitationsRows, settingsRows, relationshipsRows, invoicesRows, profilesRows, subscriptionsRows };
+}
+
 async function saveSupabaseDb(data, prevCache = null) {
   if (!supabaseAdmin) return;
 
@@ -2616,176 +2714,58 @@ async function saveSupabaseDb(data, prevCache = null) {
     console.log(`✅ [deleteMissing] Completada eliminación de ${toDelete.length} registros de ${table}`);
   };
 
-  // Users: extraer campos específicos para columnas de Supabase según el nuevo schema
-  const usersRows = (data.users || []).map(u => ({
-    id: u.id,
-    data: cleanDataForStorage(u, USER_TABLE_COLUMNS),
-    user_email: u.user_email || u.email || null,
-    is_psychologist: u.is_psychologist ?? (u.isPsychologist ?? (u.role === 'PSYCHOLOGIST' ? true : false)),
-    psychologist_profile_id: u.psychologist_profile_id || null,
-    auth_user_id: u.auth_user_id || u.supabaseId || null  // UUID de auth.users
-  }));
-  
-  // Entries: extraer campos para foreign keys creator_user_id y target_user_id
-  const entriesRows = (data.entries || []).map(e => ({
-    id: e.id,
-    data: cleanDataForStorage(e, ENTRY_TABLE_COLUMNS),
-    creator_user_id: e.creator_user_id || e.userId || null,
-    target_user_id: e.target_user_id || e.targetUserId || e.userId || null
-  }));
-  // Goals: extraer campo patient_user_id
-  const goalsRows = (data.goals || []).map(g => ({
-    id: g.id,
-    data: cleanDataForStorage(g, GOAL_TABLE_COLUMNS),
-    patient_user_id: g.patient_user_id || null
-  }));
-  
-  // Invitations: extraer campos según el nuevo schema (psychologist_user_id, patient_user_id, invited_patient_email, psychologist_email)
-  const invitationsRows = (data.invitations || []).map(i => ({
-    id: i.id,
-    data: cleanDataForStorage(i, INVITATION_TABLE_COLUMNS),
-    psychologist_user_id: i.psychologist_user_id || i.psych_user_id || i.psychologistId || null,
-    patient_user_id: i.patient_user_id || null,
-    invited_patient_email: i.patient_user_email || i.patientEmail || i.toUserEmail || null,
-    psychologist_email: i.psych_user_email || i.psychologistEmail || null
-  }));
-  
-  // Settings: extraer campo user_id
-  const settings = data.settings || {};
-  const settingsRows = Object.keys(settings).map(k => ({
-    id: k,
-    data: cleanDataForStorage(settings[k], SETTINGS_TABLE_COLUMNS),
-    user_id: settings[k]?.user_id || settings[k]?.userId || null
-  }));
-  
-  // Sessions: extraer campos psychologist_user_id, patient_user_id, status, starts_on, ends_on, price, percent_psych, paid
-  // Solo persistir sesiones reales con paciente (no disponibilidad)
-  const sessionsRows = (data.sessions || [])
-    .filter(s => s.patient_user_id || s.patientId) // Filtrar sesiones sin paciente
-    .map(s => {
-      // Remover campos que van en columnas separadas (no en JSONB data)
-      const { status, date, startTime, endTime, starts_on, ends_on, price, percent_psych, paid, ...cleanData } = s;
-      
-      // Extraer price, percent_psych, paid (pueden estar en el objeto o en data JSONB)
-      const finalPrice = price ?? s.data?.price ?? null;
-      const finalPercentPsych = percent_psych ?? s.data?.percent_psych ?? null;
-      const finalPaid = paid ?? s.data?.paid ?? false;
-      
-      // Validar que price y percent_psych no sean null
-      if (finalPrice === null || finalPercentPsych === null) {
-        console.warn(`⚠️ [saveSupabaseDb] Sesión ${s.id} sin price o percent_psych - saltando`);
-        return null;
-      }
-      
-      return {
-        id: s.id,
-        data: cleanSessionDataForStorage(cleanData),
-        psychologist_user_id: s.psychologist_user_id || null,
-        patient_user_id: s.patient_user_id || s.patientId || null,
-        status: s.status || 'scheduled',
-        starts_on: s.starts_on || dateTimeToISO(s.date, s.startTime) || null,
-        ends_on: s.ends_on || dateTimeToISO(s.date, s.endTime) || null,
-        price: finalPrice,
-        percent_psych: finalPercentPsych,
-        paid: finalPaid
-      };
-    })
-    .filter(s => s !== null); // Remover sesiones inválidas
-  
-  // Invoices: usar buildSupabaseInvoiceRow para incluir amount, tax, total, status
-  const invoicesRows = (data.invoices || [])
-    .filter(inv => inv.psychologist_user_id || inv.psychologistId) // Filtrar facturas sin psicólogo
-    .map(inv => buildSupabaseInvoiceRow(inv));
+  // Construir las filas del estado nuevo Y del estado previo con el mismo builder,
+  // para hacer upsert SOLO de las filas que realmente cambiaron. Antes se reescribía
+  // TODA la tabla (todos los users, todas las relaciones...) en cada saveDb() — con
+  // ~94 llamadas repartidas por el código, cualquier cambio pequeño generaba una
+  // avalancha de escrituras idénticas (WAL masivo que llenaba el disco de Supabase)
+  // y permitía que una instancia serverless con caché stale pisara filas que otra
+  // instancia acababa de actualizar.
+  const nextRowSets = buildSupabaseRowSets(data);
+  const { usersRows, entriesRows, goalsRows, invitationsRows, settingsRows, relationshipsRows, invoicesRows, profilesRows, subscriptionsRows } = nextRowSets;
 
-  // Session entry: session_id, status, summary, transcript en columnas; resto en data
-  const sessionEntriesRows = (data.sessionEntries || []).map(se => {
-    const seData = se.data || se;
-    return {
-      id: se.id,
-      creator_user_id: se.creator_user_id || null,
-      target_user_id: se.target_user_id || null,
-      session_id: se.session_id || seData.session_id || null,
-      status: seData.status || 'pending',
-      summary: se.summary || seData.summary || '',
-      transcript: se.transcript || seData.transcript || '',
-      data: {
-        file: seData.file || null,
-        file_name: seData.file_name || null,
-        file_type: seData.file_type || null,
-        entry_type: seData.entry_type || 'session_note',
-        created_at: seData.created_at || new Date().toISOString()
-      }
-    };
-  });
+  let prevRowSets = null;
+  if (prevCache) {
+    try {
+      prevRowSets = buildSupabaseRowSets(prevCache, { quiet: true });
+    } catch (prevErr) {
+      console.warn('⚠️ [saveSupabaseDb] No se pudo construir el diff del estado previo, se hará upsert completo:', prevErr?.message || prevErr);
+      prevRowSets = null;
+    }
+  }
 
-  // Care relationships: extraer campos según el nuevo schema (psychologist_user_id, patient_user_id, default_session_price, default_psych_percent)
-  const relationshipsRows = (data.careRelationships || [])
-    .filter(rel => {
-      // Solo incluir relaciones que tienen los campos requeridos
-      const hasPrice = rel.default_session_price !== undefined && rel.default_session_price !== null;
-      const hasPercent = rel.default_psych_percent !== undefined && rel.default_psych_percent !== null;
-      if (!hasPrice || !hasPercent) {
-        console.warn(`⚠️ [saveSupabaseDb] Saltando care_relationship ${rel.id} sin default_session_price o default_psych_percent`);
-        return false;
-      }
-      return true;
-    })
-    .map(rel => ({
-      id: rel.id,
-      data: cleanDataForStorage(rel.data || rel, CARE_REL_TABLE_COLUMNS),
-      psychologist_user_id: rel.psychologist_user_id || null,
-      patient_user_id: rel.patient_user_id || null,
-      default_session_price: rel.default_session_price,
-      default_psych_percent: Math.min(rel.default_psych_percent, 100)
-      // NOTA: historical_documents NO se incluye aquí intencionalmente.
-      // Esa columna se gestiona exclusivamente via escrituras directas en los endpoints
-      // de /historical-documents para evitar que un upsert masivo con caché stale
-      // (instancia serverless diferente) la sobreescriba con null.
-    }));
-  
-  // Psychologist profiles: extraer campo user_id
-  const profiles = data.psychologistProfiles || {};
-  const profilesRows = Object.keys(profiles)
-    .map(k => ({
-      id: k,
-      data: cleanDataForStorage(profiles[k], PSYCH_PROFILE_TABLE_COLUMNS),
-      user_id: profiles[k]?.user_id || profiles[k]?.userId || null
-    }))
-    .filter(p => p.user_id !== null); // Filtrar perfiles sin user_id válido
+  const changedRows = (nextRows, prevRows) => {
+    if (!prevRows) return nextRows; // sin estado previo → comportamiento anterior
+    const prevMap = new Map(prevRows.map(r => [r.id, JSON.stringify(r)]));
+    return nextRows.filter(r => prevMap.get(r.id) !== JSON.stringify(r));
+  };
 
-  await upsertTable('users', usersRows);
-  await upsertTable('entries', entriesRows);
-  await upsertTable('goals', goalsRows);
-  await upsertTable('invitations', invitationsRows);
-  await upsertTable('settings', settingsRows);
+  await upsertTable('users', changedRows(usersRows, prevRowSets?.usersRows));
+  await upsertTable('entries', changedRows(entriesRows, prevRowSets?.entriesRows));
+  await upsertTable('goals', changedRows(goalsRows, prevRowSets?.goalsRows));
+  await upsertTable('invitations', changedRows(invitationsRows, prevRowSets?.invitationsRows));
+  await upsertTable('settings', changedRows(settingsRows, prevRowSets?.settingsRows));
   // Sessions and session_entry are managed exclusively via direct Supabase calls
   // (POST/PATCH/PUT/DELETE all go directly to Supabase). Upserting from the in-memory
   // cache here is dangerous in serverless environments where multiple instances each
   // hold a stale supabaseDbCache — a stale instance would re-insert deleted sessions.
-  // await upsertTable('sessions', sessionsRows);
-  // await upsertTable('session_entry', sessionEntriesRows);
-  await upsertTable('care_relationships', relationshipsRows);
-  
-  if (invoicesRows.length === 0) {
-    console.log('⏭️ [saveSupabaseDb] No hay invoices válidas para guardar');
+  await upsertTable('care_relationships', changedRows(relationshipsRows, prevRowSets?.relationshipsRows));
+
+  const invoicesToUpsert = changedRows(invoicesRows, prevRowSets?.invoicesRows);
+  if (invoicesToUpsert.length === 0) {
+    console.log('⏭️ [saveSupabaseDb] No hay invoices con cambios para guardar');
   } else {
-    await upsertTable('invoices', invoicesRows);
-  }
-  
-  // Solo hacer upsert de profiles si hay alguno válido
-  if (profilesRows.length > 0) {
-    await upsertTable('psychologist_profiles', profilesRows);
-  } else {
-    console.log('⏭️ [saveSupabaseDb] No hay psychologist_profiles válidos para guardar');
+    await upsertTable('invoices', invoicesToUpsert);
   }
 
-  // Subscriptions: use psychologist_user_id as the row id
-  const subscriptionsRows = (data.subscriptions || []).map(s => ({
-    id: s.psychologist_user_id,
-    data: cleanDataForStorage(s, SUBSCRIPTION_TABLE_COLUMNS)
-  }));
-  if (subscriptionsRows.length > 0) {
-    await upsertTable('subscriptions', subscriptionsRows);
+  const profilesToUpsert = changedRows(profilesRows, prevRowSets?.profilesRows);
+  if (profilesToUpsert.length > 0) {
+    await upsertTable('psychologist_profiles', profilesToUpsert);
+  }
+
+  const subscriptionsToUpsert = changedRows(subscriptionsRows, prevRowSets?.subscriptionsRows);
+  if (subscriptionsToUpsert.length > 0) {
+    await upsertTable('subscriptions', subscriptionsToUpsert);
   }
 
   if (prevCache) {
@@ -2847,6 +2827,15 @@ const getDb = () => {
     const profilesArr = read('psychologist_profiles');
     const psychologistProfiles = Object.fromEntries(profilesArr.map((p) => [p.id, p]));
     return ensureDbShape({ users, entries, goals, invitations, settings, sessions, sessionEntries, invoices, careRelationships: read('care_relationships'), psychologistProfiles });
+  }
+
+  // En serverless (Vercel) NUNCA tocar db.json: el filesystem del bundle es de solo
+  // lectura (writeFileSync lanzaría y tumbaría cada request) y el db.json commiteado
+  // contiene datos antiguos — servirlo silenciosamente resucitaría usuarios/datos
+  // borrados si el init de Supabase fallara. Mejor un estado vacío y honesto.
+  if (IS_SERVERLESS) {
+    console.warn('⚠️ [getDb] Sin persistencia remota disponible en serverless — devolviendo estado vacío (no se toca db.json)');
+    return ensureDbShape(createInitialDb());
   }
 
   // 1. Si no existe, crearla
@@ -12325,10 +12314,18 @@ app.get('/api/invoices/zip', authenticateRequest, async (req, res) => {
   }
 
   try {
-    // 1. Fetch all invoices for this psychologist and filter by date range
-    const invoiceRows = await readTable('invoices');
-    const invoices = invoiceRows.map(normalizeSupabaseRow).filter(inv => {
-      if (inv.psychologist_user_id !== String(psychologistId)) return false;
+    // 1. Fetch this psychologist's invoices (filtered in Postgres — a full-table
+    // readTable('invoices') here pulled EVERY psychologist's invoices from Supabase
+    // on each ZIP download and saturated the database under load)
+    const { data: invoiceRows, error: invoicesError } = await supabaseAdmin
+      .from('invoices')
+      .select('*')
+      .eq('psychologist_user_id', String(psychologistId));
+    if (invoicesError) {
+      console.error('❌ [ZIP] Error cargando facturas:', invoicesError);
+      return res.status(500).json({ error: 'Error cargando facturas' });
+    }
+    const invoices = (invoiceRows || []).map(normalizeSupabaseRow).filter(inv => {
       if (inv.status === 'draft') return false;
       const invDate = (inv.invoice_date || inv.date || '').split('T')[0];
       if (!invDate) return false;
@@ -13758,6 +13755,27 @@ app.patch('/api/relationships/:psychologistId/patients/:patientId/reactivate', a
 });
 
 // --- HISTORICAL DOCUMENTS ---
+// Asegura el bucket 'historical-documents' una sola vez por instancia (evita
+// un storage.listBuckets() extra en cada subida/migración de documentos).
+let historicalDocsBucketEnsured = false;
+async function ensureHistoricalDocsBucket() {
+  if (!supabaseAdmin || historicalDocsBucketEnsured) return;
+  const { data: buckets } = await supabaseAdmin.storage.listBuckets();
+  const bucketExists = buckets?.some(b => b.name === 'historical-documents');
+  if (!bucketExists) {
+    console.log('📦 Creando bucket historical-documents...');
+    const { error: createError } = await supabaseAdmin.storage.createBucket('historical-documents', {
+      public: false,
+      fileSizeLimit: 50 * 1024 * 1024 // 50MB limit
+    });
+    if (createError && !createError.message.includes('already exists')) {
+      console.error('Error creando bucket:', createError);
+      throw createError;
+    }
+  }
+  historicalDocsBucketEnsured = true;
+}
+
 // GET /api/relationships/:id/historical-documents - Obtener documentos históricos
 app.get('/api/relationships/:id/historical-documents', authenticateRequest, async (req, res) => {
   try {
@@ -13800,6 +13818,56 @@ app.get('/api/relationships/:id/historical-documents', authenticateRequest, asyn
       }
 
       historicalDocs = relationship.historical_documents || relationship.data?.historicalDocuments || { documents: [], lastUpdated: 0 };
+    }
+
+    // LAZY MIGRATION: documentos legacy con base64 inline → Supabase Storage.
+    // Cada doc inline puede pesar MB dentro del JSONB: mientras existan, TODA
+    // lectura/escritura de esa relación mueve los blobs por Postgres (y cada
+    // update reescribe la fila entera generando WAL enorme). Migrarlos una vez
+    // deja la fila ligera para siempre y las descargas pasan a signed URLs.
+    if (supabaseAdmin && Array.isArray(historicalDocs.documents)) {
+      const legacyDocs = historicalDocs.documents.filter(d => !d.storagePath && d.content);
+      if (legacyDocs.length > 0) {
+        let migratedCount = 0;
+        try {
+          await ensureHistoricalDocsBucket();
+          for (const doc of legacyDocs) {
+            try {
+              const base64Data = doc.content.includes(',') ? doc.content.split(',')[1] : doc.content;
+              const buffer = Buffer.from(base64Data, 'base64');
+              const safeFileName = (doc.fileName || 'documento').replace(/[^a-zA-Z0-9.-]/g, '_');
+              const storagePath = `${id}/${doc.id}_${safeFileName}`;
+              const { error: upErr } = await supabaseAdmin.storage
+                .from('historical-documents')
+                .upload(storagePath, buffer, {
+                  contentType: doc.fileType || 'application/octet-stream',
+                  upsert: true, // idempotente si una migración anterior quedó a medias
+                  cacheControl: '3600'
+                });
+              if (upErr) throw upErr;
+              doc.storagePath = storagePath;
+              delete doc.content;
+              migratedCount++;
+            } catch (docErr) {
+              console.error(`⚠️ [historical-docs migration] No se pudo migrar doc ${doc.id} (se mantiene inline):`, docErr?.message || docErr);
+            }
+          }
+          if (migratedCount > 0) {
+            const { error: persistErr } = await supabaseAdmin
+              .from('care_relationships')
+              .update({ historical_documents: historicalDocs })
+              .eq('id', id);
+            if (persistErr) throw persistErr;
+            console.log(`✅ [historical-docs migration] ${migratedCount} documento(s) migrados a Storage para relación ${id}`);
+            if (supabaseDbCache?.careRelationships) {
+              const cacheIdx = supabaseDbCache.careRelationships.findIndex(rel => rel.id === id);
+              if (cacheIdx >= 0) supabaseDbCache.careRelationships[cacheIdx].historical_documents = historicalDocs;
+            }
+          }
+        } catch (migErr) {
+          console.error('⚠️ [historical-docs migration] Migración parcial/fallida (no bloquea la respuesta):', migErr?.message || migErr);
+        }
+      }
     }
 
     // Generar signed URLs para documentos en Storage y limpiar base64 del response
@@ -13901,21 +13969,7 @@ app.post('/api/relationships/:id/historical-documents', authenticateRequest, exp
     // Subir archivo a Supabase Storage si está disponible
     if (supabaseAdmin) {
       try {
-        // Crear bucket si no existe
-        const { data: buckets } = await supabaseAdmin.storage.listBuckets();
-        const bucketExists = buckets?.some(b => b.name === 'historical-documents');
-        
-        if (!bucketExists) {
-          console.log('📦 Creando bucket historical-documents...');
-          const { error: createError } = await supabaseAdmin.storage.createBucket('historical-documents', {
-            public: false,
-            fileSizeLimit: 50 * 1024 * 1024 // 50MB limit
-          });
-          if (createError && !createError.message.includes('already exists')) {
-            console.error('Error creando bucket:', createError);
-            throw createError;
-          }
-        }
+        await ensureHistoricalDocsBucket();
 
         // Extraer datos base64
         const base64Data = content.includes(',') ? content.split(',')[1] : content;
@@ -13940,8 +13994,16 @@ app.post('/api/relationships/:id/historical-documents', authenticateRequest, exp
         newDocument.storagePath = storagePath;
         console.log(`[POST /api/relationships/${id}/historical-documents] ✅ File uploaded to Storage: ${storagePath}`);
       } catch (storageErr) {
-        console.error(`[POST /api/relationships/${id}/historical-documents] ⚠️ Storage upload failed, saving base64 inline:`, storageErr);
-        // Fallback: guardar base64 inline si Storage falla
+        // Fallback inline SOLO para archivos pequeños. Guardar base64 grande en el
+        // JSONB de care_relationships es lo que infló las filas a decenas de MB y
+        // saturaba Postgres en cada lectura/escritura — no volver a permitirlo.
+        const approxBytes = Math.floor((String(content).length * 3) / 4);
+        const INLINE_FALLBACK_MAX_BYTES = 2 * 1024 * 1024; // 2MB
+        if (approxBytes > INLINE_FALLBACK_MAX_BYTES) {
+          console.error(`[POST /api/relationships/${id}/historical-documents] ❌ Storage no disponible y archivo demasiado grande para fallback inline (${approxBytes} bytes):`, storageErr?.message || storageErr);
+          return res.status(503).json({ error: 'Almacenamiento de archivos no disponible en este momento. Inténtalo de nuevo en unos minutos.' });
+        }
+        console.error(`[POST /api/relationships/${id}/historical-documents] ⚠️ Storage upload failed, saving small base64 inline (${approxBytes} bytes):`, storageErr?.message || storageErr);
         newDocument.content = content;
       }
     } else {
@@ -17352,7 +17414,10 @@ app.post('/api/ai/transcribe-from-storage', authenticateRequest, aiProxyLimiter,
     const nodePath = await import('path');
     const ext = nodePath.extname(path) || '.bin';
     tmpFilePath = nodePath.join(os.tmpdir(), `transcribe_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`);
-    await fs.writeFile(tmpFilePath, buffer);
+    // fs (import clásico) sin callback lanza ERR_INVALID_ARG_TYPE — usar la API de promesas.
+    // Este bug rompía TODA transcripción larga: se descargaba el audio completo de Storage
+    // y luego petaba aquí, provocando reintentos del usuario y descargas repetidas.
+    await fs.promises.writeFile(tmpFilePath, buffer);
 
     // 3) Upload to Gemini Files API (handles files up to 2GB, much larger than inline limit)
     console.log('☁️ Subiendo archivo a Gemini Files API...');
