@@ -1615,6 +1615,12 @@ const GOAL_TABLE_COLUMNS             = ['id', 'data', 'patient_user_id'];
 const INVITATION_TABLE_COLUMNS       = ['id', 'data', 'psychologist_user_id', 'patient_user_id', 'psychologist_email', 'invited_patient_email'];
 const SETTINGS_TABLE_COLUMNS         = ['id', 'data', 'user_id'];
 const CARE_REL_TABLE_COLUMNS         = ['id', 'data', 'created_at', 'psychologist_user_id', 'patient_user_id', 'default_session_price', 'default_psych_percent', 'center_id', 'active', 'historical_info', 'historical_documents', 'patientnumber', 'status'];
+// Lista de columnas "ligeras" para leer care_relationships SIN historical_documents.
+// Esa columna JSONB guarda documentos completos en base64 (PDFs/audios) y puede pesar
+// decenas de MB por fila: un select('*') en listados o en el caché de arranque descarga
+// TODOS los documentos de TODOS los pacientes y satura la BD (522s bajo carga).
+// Los documentos se leen SOLO bajo demanda en los endpoints /historical-documents.
+const CARE_REL_LIGHT_COLUMNS         = 'id, data, created_at, psychologist_user_id, patient_user_id, default_session_price, default_psych_percent, center_id, active, historical_info, patientnumber, status';
 const INVOICE_TABLE_COLUMNS          = ['id', 'data', 'created_at', 'psychologist_user_id', 'patient_user_id', 'amount', 'tax', 'total', 'status', 'psych_invoice_id', 'invoice_date', 'invoiceNumber', 'irpf_percent'];
 const PSYCH_PROFILE_TABLE_COLUMNS    = ['id', 'data', 'created_at', 'updated_at', 'user_id', 'locations'];
 const SUBSCRIPTION_TABLE_COLUMNS     = ['id', 'data', 'created_at'];
@@ -2133,55 +2139,55 @@ async function readTable(table) {
 async function loadSupabaseCache() {
   if (!supabaseAdmin) return null;
 
-  const readTableLocal = async (table) => {
+  const readTableLocal = async (table, selectColumns = '*') => {
     try {
-      const timeoutPromise = new Promise((_, reject) => 
+      const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error(`Timeout reading table ${table}`)), 10000)
       );
-      
+
       // Para tablas grandes como entries, usar paginación
       const isLargeTable = ['entries', 'sessions'].includes(table);
-      
+
       if (isLargeTable) {
         console.log(`📄 Loading ${table} with pagination...`);
         let allData = [];
         let page = 0;
         const pageSize = 1000;
         let hasMore = true;
-        
+
         while (hasMore) {
           const { data, error } = await Promise.race([
-            supabaseAdmin.from(table).select('*').range(page * pageSize, (page + 1) * pageSize - 1),
+            supabaseAdmin.from(table).select(selectColumns).range(page * pageSize, (page + 1) * pageSize - 1),
             timeoutPromise
           ]);
-          
+
           if (error) {
             console.warn(`⚠️ Could not load table '${table}' page ${page}:`, error.message);
             break;
           }
-          
+
           if (data && data.length > 0) {
             allData = allData.concat(data);
             console.log(`   Loaded ${data.length} rows from ${table} (page ${page + 1})`);
           }
-          
+
           hasMore = data && data.length === pageSize;
           page++;
-          
+
           // Límite de seguridad: máximo 10 páginas (10,000 registros)
           if (page >= 10) {
             console.warn(`⚠️ Reached pagination limit for ${table}`);
             break;
           }
         }
-        
+
         return allData;
       }
-      
-      const readPromise = supabaseAdmin.from(table).select('*');
-      
+
+      const readPromise = supabaseAdmin.from(table).select(selectColumns);
+
       const { data, error } = await Promise.race([readPromise, timeoutPromise]);
-      
+
       if (error) {
         console.warn(`⚠️ Could not load table '${table}':`, error.message);
         return [];
@@ -2195,8 +2201,11 @@ async function loadSupabaseCache() {
 
   // --- PERFORMANCE: En serverless, cargar solo tablas esenciales para auth/access control ---
   // session_entry NUNCA se carga en init — se consulta filtrada bajo demanda (era 44% del tiempo de DB)
+  // care_relationships se carga SIN historical_documents (ver CARE_REL_LIGHT_COLUMNS):
+  // un select('*') en cada cold start descargaba TODOS los documentos base64 de TODOS
+  // los pacientes desde Postgres, saturando la instancia bajo carga (522s).
   const usersRows = await readTableLocal('users');
-  const relationshipsRows = await readTableLocal('care_relationships');
+  const relationshipsRows = await readTableLocal('care_relationships', CARE_REL_LIGHT_COLUMNS);
   const subscriptionsRows = await readTableLocal('subscriptions');
 
   // Tablas secundarias: cargar solo fuera de serverless o si el init no es crítico
@@ -8228,7 +8237,7 @@ app.post('/api/entries', authenticateRequest, async (req, res) => {
         try {
           const { data, error } = await supabaseAdmin
             .from('care_relationships')
-            .select('*')
+            .select(CARE_REL_LIGHT_COLUMNS)
             .eq('psychologist_user_id', String(creatorId))
             .eq('patient_user_id', String(targetId))
             .maybeSingle();
@@ -12804,7 +12813,7 @@ app.get('/api/patient/:userId/psychologists', authenticateRequest, async (req, r
     if (supabaseAdmin) {
       const { data: relData, error: relError } = await supabaseAdmin
         .from('care_relationships')
-        .select('*')
+        .select(CARE_REL_LIGHT_COLUMNS)
         .eq('patient_user_id', userId)
         .eq('active', true);
       
@@ -12881,7 +12890,7 @@ app.get('/api/relationships', authenticateRequest, async (req, res) => {
       try {
         console.log('[GET /api/relationships] Consultando Supabase directamente - psychId:', psychId, 'patId:', patId, 'includeEnded:', includeEnded, 'includeInactive:', includeInactive);
         
-        let query = supabaseAdmin.from('care_relationships').select('*');
+        let query = supabaseAdmin.from('care_relationships').select(CARE_REL_LIGHT_COLUMNS);
         
         // Aplicar filtros
         if (psychId) {
@@ -13025,7 +13034,7 @@ app.post('/api/relationships', authenticateRequest, async (req, res) => {
         // Verificar si ya existe
         const { data: existing } = await supabaseAdmin
           .from('care_relationships')
-          .select('*')
+          .select(CARE_REL_LIGHT_COLUMNS)
           .eq('psychologist_user_id', psychId)
           .eq('patient_user_id', patId)
           .maybeSingle();
@@ -13274,7 +13283,7 @@ app.put('/api/relationships/:id', authenticateRequest, async (req, res) => {
       // Buscar la relación para saber el psicólogo y si estaba inactiva
       let existingRel = null;
       if (supabaseAdmin) {
-        const { data: rows } = await supabaseAdmin.from('care_relationships').select('*').eq('id', id).limit(1);
+        const { data: rows } = await supabaseAdmin.from('care_relationships').select(CARE_REL_LIGHT_COLUMNS).eq('id', id).limit(1);
         if (rows && rows[0]) existingRel = normalizeSupabaseRow(rows[0]);
       }
       if (!existingRel) {
@@ -13302,7 +13311,7 @@ app.put('/api/relationships/:id', authenticateRequest, async (req, res) => {
       try {
         const { data: existingRows, error: selectErr } = await supabaseAdmin
           .from('care_relationships')
-          .select('*')
+          .select(CARE_REL_LIGHT_COLUMNS)
           .eq('id', id)
           .limit(1);
 
@@ -13394,7 +13403,7 @@ app.put('/api/relationships/:id', authenticateRequest, async (req, res) => {
         // Obtener la relación actualizada
         const { data: updatedRows, error: fetchErr } = await supabaseAdmin
           .from('care_relationships')
-          .select('*')
+          .select(CARE_REL_LIGHT_COLUMNS)
           .eq('id', id)
           .limit(1);
 
@@ -15231,7 +15240,7 @@ app.get('/api/sessions', authenticateRequest, async (req, res) => {
       );
       
       // Cargar relaciones para obtener tags
-      const { data: relationshipsData } = await supabaseAdmin.from('care_relationships').select('*');
+      const { data: relationshipsData } = await supabaseAdmin.from('care_relationships').select(CARE_REL_LIGHT_COLUMNS);
       const relationshipIndex = new Map();
       (relationshipsData || []).forEach(rel => {
         const key = `${rel.psychologist_user_id}-${rel.patient_user_id}`;
@@ -18332,7 +18341,7 @@ app.get('/api/psychologist/:psychologistId/patients', authenticateRequest, async
         // Obtener relaciones del psicólogo
         let query = supabaseAdmin
           .from('care_relationships')
-          .select('*')
+          .select(CARE_REL_LIGHT_COLUMNS)
           .eq('psychologist_user_id', psychologistId);
         
         // Filtrar por estado activo si no se pide mostrar inactivos
