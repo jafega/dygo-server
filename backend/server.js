@@ -12325,10 +12325,18 @@ app.get('/api/invoices/zip', authenticateRequest, async (req, res) => {
   }
 
   try {
-    // 1. Fetch all invoices for this psychologist and filter by date range
-    const invoiceRows = await readTable('invoices');
-    const invoices = invoiceRows.map(normalizeSupabaseRow).filter(inv => {
-      if (inv.psychologist_user_id !== String(psychologistId)) return false;
+    // 1. Fetch this psychologist's invoices (filtered in Postgres — a full-table
+    // readTable('invoices') here pulled EVERY psychologist's invoices from Supabase
+    // on each ZIP download and saturated the database under load)
+    const { data: invoiceRows, error: invoicesError } = await supabaseAdmin
+      .from('invoices')
+      .select('*')
+      .eq('psychologist_user_id', String(psychologistId));
+    if (invoicesError) {
+      console.error('❌ [ZIP] Error cargando facturas:', invoicesError);
+      return res.status(500).json({ error: 'Error cargando facturas' });
+    }
+    const invoices = (invoiceRows || []).map(normalizeSupabaseRow).filter(inv => {
       if (inv.status === 'draft') return false;
       const invDate = (inv.invoice_date || inv.date || '').split('T')[0];
       if (!invDate) return false;
@@ -13758,6 +13766,27 @@ app.patch('/api/relationships/:psychologistId/patients/:patientId/reactivate', a
 });
 
 // --- HISTORICAL DOCUMENTS ---
+// Asegura el bucket 'historical-documents' una sola vez por instancia (evita
+// un storage.listBuckets() extra en cada subida/migración de documentos).
+let historicalDocsBucketEnsured = false;
+async function ensureHistoricalDocsBucket() {
+  if (!supabaseAdmin || historicalDocsBucketEnsured) return;
+  const { data: buckets } = await supabaseAdmin.storage.listBuckets();
+  const bucketExists = buckets?.some(b => b.name === 'historical-documents');
+  if (!bucketExists) {
+    console.log('📦 Creando bucket historical-documents...');
+    const { error: createError } = await supabaseAdmin.storage.createBucket('historical-documents', {
+      public: false,
+      fileSizeLimit: 50 * 1024 * 1024 // 50MB limit
+    });
+    if (createError && !createError.message.includes('already exists')) {
+      console.error('Error creando bucket:', createError);
+      throw createError;
+    }
+  }
+  historicalDocsBucketEnsured = true;
+}
+
 // GET /api/relationships/:id/historical-documents - Obtener documentos históricos
 app.get('/api/relationships/:id/historical-documents', authenticateRequest, async (req, res) => {
   try {
@@ -13800,6 +13829,56 @@ app.get('/api/relationships/:id/historical-documents', authenticateRequest, asyn
       }
 
       historicalDocs = relationship.historical_documents || relationship.data?.historicalDocuments || { documents: [], lastUpdated: 0 };
+    }
+
+    // LAZY MIGRATION: documentos legacy con base64 inline → Supabase Storage.
+    // Cada doc inline puede pesar MB dentro del JSONB: mientras existan, TODA
+    // lectura/escritura de esa relación mueve los blobs por Postgres (y cada
+    // update reescribe la fila entera generando WAL enorme). Migrarlos una vez
+    // deja la fila ligera para siempre y las descargas pasan a signed URLs.
+    if (supabaseAdmin && Array.isArray(historicalDocs.documents)) {
+      const legacyDocs = historicalDocs.documents.filter(d => !d.storagePath && d.content);
+      if (legacyDocs.length > 0) {
+        let migratedCount = 0;
+        try {
+          await ensureHistoricalDocsBucket();
+          for (const doc of legacyDocs) {
+            try {
+              const base64Data = doc.content.includes(',') ? doc.content.split(',')[1] : doc.content;
+              const buffer = Buffer.from(base64Data, 'base64');
+              const safeFileName = (doc.fileName || 'documento').replace(/[^a-zA-Z0-9.-]/g, '_');
+              const storagePath = `${id}/${doc.id}_${safeFileName}`;
+              const { error: upErr } = await supabaseAdmin.storage
+                .from('historical-documents')
+                .upload(storagePath, buffer, {
+                  contentType: doc.fileType || 'application/octet-stream',
+                  upsert: true, // idempotente si una migración anterior quedó a medias
+                  cacheControl: '3600'
+                });
+              if (upErr) throw upErr;
+              doc.storagePath = storagePath;
+              delete doc.content;
+              migratedCount++;
+            } catch (docErr) {
+              console.error(`⚠️ [historical-docs migration] No se pudo migrar doc ${doc.id} (se mantiene inline):`, docErr?.message || docErr);
+            }
+          }
+          if (migratedCount > 0) {
+            const { error: persistErr } = await supabaseAdmin
+              .from('care_relationships')
+              .update({ historical_documents: historicalDocs })
+              .eq('id', id);
+            if (persistErr) throw persistErr;
+            console.log(`✅ [historical-docs migration] ${migratedCount} documento(s) migrados a Storage para relación ${id}`);
+            if (supabaseDbCache?.careRelationships) {
+              const cacheIdx = supabaseDbCache.careRelationships.findIndex(rel => rel.id === id);
+              if (cacheIdx >= 0) supabaseDbCache.careRelationships[cacheIdx].historical_documents = historicalDocs;
+            }
+          }
+        } catch (migErr) {
+          console.error('⚠️ [historical-docs migration] Migración parcial/fallida (no bloquea la respuesta):', migErr?.message || migErr);
+        }
+      }
     }
 
     // Generar signed URLs para documentos en Storage y limpiar base64 del response
@@ -13901,21 +13980,7 @@ app.post('/api/relationships/:id/historical-documents', authenticateRequest, exp
     // Subir archivo a Supabase Storage si está disponible
     if (supabaseAdmin) {
       try {
-        // Crear bucket si no existe
-        const { data: buckets } = await supabaseAdmin.storage.listBuckets();
-        const bucketExists = buckets?.some(b => b.name === 'historical-documents');
-        
-        if (!bucketExists) {
-          console.log('📦 Creando bucket historical-documents...');
-          const { error: createError } = await supabaseAdmin.storage.createBucket('historical-documents', {
-            public: false,
-            fileSizeLimit: 50 * 1024 * 1024 // 50MB limit
-          });
-          if (createError && !createError.message.includes('already exists')) {
-            console.error('Error creando bucket:', createError);
-            throw createError;
-          }
-        }
+        await ensureHistoricalDocsBucket();
 
         // Extraer datos base64
         const base64Data = content.includes(',') ? content.split(',')[1] : content;
@@ -13940,8 +14005,16 @@ app.post('/api/relationships/:id/historical-documents', authenticateRequest, exp
         newDocument.storagePath = storagePath;
         console.log(`[POST /api/relationships/${id}/historical-documents] ✅ File uploaded to Storage: ${storagePath}`);
       } catch (storageErr) {
-        console.error(`[POST /api/relationships/${id}/historical-documents] ⚠️ Storage upload failed, saving base64 inline:`, storageErr);
-        // Fallback: guardar base64 inline si Storage falla
+        // Fallback inline SOLO para archivos pequeños. Guardar base64 grande en el
+        // JSONB de care_relationships es lo que infló las filas a decenas de MB y
+        // saturaba Postgres en cada lectura/escritura — no volver a permitirlo.
+        const approxBytes = Math.floor((String(content).length * 3) / 4);
+        const INLINE_FALLBACK_MAX_BYTES = 2 * 1024 * 1024; // 2MB
+        if (approxBytes > INLINE_FALLBACK_MAX_BYTES) {
+          console.error(`[POST /api/relationships/${id}/historical-documents] ❌ Storage no disponible y archivo demasiado grande para fallback inline (${approxBytes} bytes):`, storageErr?.message || storageErr);
+          return res.status(503).json({ error: 'Almacenamiento de archivos no disponible en este momento. Inténtalo de nuevo en unos minutos.' });
+        }
+        console.error(`[POST /api/relationships/${id}/historical-documents] ⚠️ Storage upload failed, saving small base64 inline (${approxBytes} bytes):`, storageErr?.message || storageErr);
         newDocument.content = content;
       }
     } else {
