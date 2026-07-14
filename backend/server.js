@@ -1630,6 +1630,14 @@ const CARE_REL_LIGHT_COLUMNS         = 'id, data, created_at, psychologist_user_
 const INVOICE_TABLE_COLUMNS          = ['id', 'data', 'created_at', 'psychologist_user_id', 'patient_user_id', 'amount', 'tax', 'total', 'status', 'psych_invoice_id', 'invoice_date', 'invoiceNumber', 'irpf_percent'];
 const PSYCH_PROFILE_TABLE_COLUMNS    = ['id', 'data', 'created_at', 'updated_at', 'user_id', 'locations'];
 const SUBSCRIPTION_TABLE_COLUMNS     = ['id', 'data', 'created_at'];
+// Columnas "ligeras" para LISTADOS de session_entry: todo MENOS la columna `data`.
+// `data` (JSONB) guarda el audio de sesión en base64 — ~211 MB en total, hasta 4,3 MB
+// por fila. Un select('*') en un listado por creator/target arrastra TODOS los audios
+// del psicólogo/paciente y satura el pool de PostgREST (causa directa de los 522).
+// transcript (~0,8 KB/fila) y summary sí se incluyen porque son ligeros y el listado
+// los muestra. El contenido completo (`data`, con el audio) se lee solo al pedir UNA
+// entrada por id.
+const SESSION_ENTRY_LIGHT_COLUMNS    = 'id, session_id, creator_user_id, target_user_id, status, summary, transcript, created_at:data->>created_at';
 
 // Aplana recursivamente el anidamiento data.data.data... extrayendo los campos reales del nivel más profundo
 function flattenNestedData(obj) {
@@ -17553,7 +17561,7 @@ app.post('/api/session-entries', authenticateRequest, async (req, res) => {
       try {
         const { data: rows, error: colError } = await supabaseAdmin
           .from('session_entry')
-          .select('*')
+          .select(SESSION_ENTRY_LIGHT_COLUMNS)
           .eq('session_id', session_id)
           .limit(1);
         if (!colError) {
@@ -17562,7 +17570,7 @@ app.post('/api/session-entries', authenticateRequest, async (req, res) => {
           // Column may not exist yet, try JSONB fallback
           const { data: rows2 } = await supabaseAdmin
             .from('session_entry')
-            .select('*')
+            .select(SESSION_ENTRY_LIGHT_COLUMNS)
             .eq('data->>session_id', session_id)
             .limit(1);
           existingRows = rows2;
@@ -17761,11 +17769,14 @@ app.get('/api/session-entries', authenticateRequest, async (req, res) => {
       }
     }
 
-    // Always query Supabase when filtering by target_user_id or creator_user_id to ensure completeness
+    // Always query Supabase when filtering by target_user_id or creator_user_id to ensure completeness.
+    // LISTADO: columnas ligeras (sin `data`, que contiene el audio base64). Este barrido por
+    // creator/target era el que arrastraba cientos de MB de audios y saturaba PostgREST (522).
+    // El contenido completo se obtiene con GET /api/session-entries/:id (una fila).
     if (supabaseAdmin && !ids && (session_id || target_user_id || creator_user_id)) {
       console.log(`🔍 [GET /api/session-entries] Querying Supabase to ensure cache completeness...`);
       try {
-        let query = supabaseAdmin.from('session_entry').select('*');
+        let query = supabaseAdmin.from('session_entry').select(SESSION_ENTRY_LIGHT_COLUMNS);
         
         if (ids) {
           const idList = String(ids).split(',').map(s => s.trim()).filter(Boolean);
