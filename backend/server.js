@@ -1540,26 +1540,32 @@ async function initializeSupabase() {
         });
       }
       
-      // Ensure entries.created_at column exists
-      try {
-        await Promise.race([
-          ensureEntriesCreatedAtColumn(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('ensureEntriesCreatedAtColumn timeout')), 8000))
-        ]);
-      } catch (migErr) {
-        console.error('⚠️ entries.created_at column migration skipped:', migErr?.message || migErr);
+      // Migraciones de columnas: SOLO opt-in. Antes corrían en CADA cold start
+      // (con await, bloqueando hasta 8s cada una) lanzando ALTER vía exec_sql —
+      // que además ya no existe, devolvía 404 y retenía la instancia y su hueco
+      // de pool en cada arranque. Las columnas ya existen en producción, así que
+      // por defecto NO se ejecutan. Actívalas puntualmente con
+      // RUN_SCHEMA_CHECK_ON_START=true solo si hace falta re-migrar.
+      if (String(process.env.RUN_SCHEMA_CHECK_ON_START || '').toLowerCase() === 'true') {
+        try {
+          await Promise.race([
+            ensureEntriesCreatedAtColumn(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('ensureEntriesCreatedAtColumn timeout')), 8000))
+          ]);
+        } catch (migErr) {
+          console.error('⚠️ entries.created_at column migration skipped:', migErr?.message || migErr);
+        }
+
+        try {
+          await Promise.race([
+            ensureHistoricalDocumentsColumn(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('ensureHistoricalDocumentsColumn timeout')), 8000))
+          ]);
+        } catch (migErr) {
+          console.error('⚠️ historical_documents column migration skipped:', migErr?.message || migErr);
+        }
       }
 
-      // Ensure historical_documents column exists BEFORE loading cache so migration data is available
-      try {
-        await Promise.race([
-          ensureHistoricalDocumentsColumn(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('ensureHistoricalDocumentsColumn timeout')), 8000))
-        ]);
-      } catch (migErr) {
-        console.error('⚠️ historical_documents column migration skipped:', migErr?.message || migErr);
-      }
-      
       try {
         console.log('🔄 Loading Supabase cache...');
         const cacheData = await Promise.race([
