@@ -1650,10 +1650,23 @@ const SESSION_ENTRY_LIGHT_COLUMNS    = [
   'data_status:data->>status'
 ].join(', ');
 
-// Normaliza UNA fila de session_entry leida con SESSION_ENTRY_LIGHT_COLUMNS (o con '*').
+// Igual que SESSION_ENTRY_LIGHT_COLUMNS pero para non_session_entry, que no tiene
+// columna session_id. Esta tabla guarda tambien el audio base64 en data.file, asi que
+// arrastra el mismo riesgo: hoy pesa poco, pero crece por el mismo camino.
+const NON_SESSION_ENTRY_LIGHT_COLUMNS = [
+  'id', 'creator_user_id', 'target_user_id', 'status', 'summary', 'transcript',
+  'created_at:data->>created_at',
+  'data_file_name:data->>file_name',
+  'data_file_type:data->>file_type',
+  'data_entry_type:data->>entry_type',
+  'data_status:data->>status'
+].join(', ');
+
+// Normaliza UNA fila de session_entry / non_session_entry leida con columnas ligeras
+// (o con '*'). non_session_entry no tiene session_id: el spread simplemente lo omite.
 // Reconstruye un objeto `data` MINIMO (sin el audio) porque el frontend lee
 // entry.data?.file_name / entry.data?.status en el historial clinico y en los informes.
-function normalizeLightSessionEntryRow(row) {
+function normalizeLightEntryRow(row) {
   const normalized = normalizeSupabaseRow(row);
 
   // Columnas reales de la tabla mandan sobre lo que hubiera en el JSONB.
@@ -1694,7 +1707,7 @@ function normalizeLightSessionEntryRow(row) {
 // La cache en memoria puede contener entradas cargadas por GET /:id (con data.file
 // completo); devolverlas tal cual en un listado reintroducia respuestas de cientos
 // de MB por la puerta de atras. El audio solo viaja en el detalle por id.
-function stripSessionEntryAudio(entry) {
+function stripEntryAudio(entry) {
   if (!entry || typeof entry !== 'object') return entry;
   const hasNested = entry.data && typeof entry.data === 'object' && entry.data.file !== undefined;
   const hasFlat = entry.file !== undefined;
@@ -17649,7 +17662,7 @@ app.post('/api/session-entries', authenticateRequest, async (req, res) => {
       }
       if (existingRows && existingRows.length > 0) {
         const row = existingRows[0];
-        const existing = normalizeLightSessionEntryRow(row);
+        const existing = normalizeLightEntryRow(row);
         console.log('⚠️ [POST session-entries] Duplicate blocked (Supabase) — returning existing:', existing.id);
         if (!db.sessionEntries) db.sessionEntries = [];
         const inCache = db.sessionEntries.find(e => e.id === existing.id);
@@ -17813,7 +17826,7 @@ app.get('/api/session-entries', authenticateRequest, async (req, res) => {
             .select(SESSION_ENTRY_LIGHT_COLUMNS)
             .in('id', missingIds);
           if (!error && supabaseEntries?.length > 0) {
-            const extra = supabaseEntries.map(normalizeLightSessionEntryRow);
+            const extra = supabaseEntries.map(normalizeLightEntryRow);
             // Actualizar cache
             extra.forEach(entry => {
               const idx = db.sessionEntries.findIndex(e => e.id === entry.id);
@@ -17867,7 +17880,7 @@ app.get('/api/session-entries', authenticateRequest, async (req, res) => {
         const { data: supabaseEntries, error } = await query;
         
         if (!error && supabaseEntries) {
-          const supabaseNormalized = supabaseEntries.map(normalizeLightSessionEntryRow);
+          const supabaseNormalized = supabaseEntries.map(normalizeLightEntryRow);
           
           // Merge: Supabase is source of truth, add any entries not already in results
           const existingIds = new Set(entries.map(e => e.id));
@@ -17908,7 +17921,7 @@ app.get('/api/session-entries', authenticateRequest, async (req, res) => {
     }
 
     // LISTADO: nunca devolver el audio, venga de Supabase o de la cache en memoria.
-    return res.json(entries.map(stripSessionEntryAudio));
+    return res.json(entries.map(stripEntryAudio));
   } catch (err) {
     console.error('❌ Error fetching session entries', err);
     return res.status(500).json({ error: err?.message || 'No se pudieron obtener las entradas' });
@@ -18275,7 +18288,8 @@ app.get('/api/non-session-entries', authenticateRequest, async (req, res) => {
 
     if (supabaseAdmin && (target_user_id || creator_user_id || ids)) {
       try {
-        let query = supabaseAdmin.from('non_session_entry').select('*');
+        // LISTADO: columnas ligeras, sin `data` (que contiene el audio base64).
+        let query = supabaseAdmin.from('non_session_entry').select(NON_SESSION_ENTRY_LIGHT_COLUMNS);
         if (ids) {
           const idList = String(ids).split(',').map(s => s.trim()).filter(Boolean);
           query = query.in('id', idList);
@@ -18285,14 +18299,7 @@ app.get('/api/non-session-entries', authenticateRequest, async (req, res) => {
 
         const { data: rows, error } = await query;
         if (!error && rows) {
-          const normalized = rows.map(row => {
-            const n = normalizeSupabaseRow(row);
-            if (row.status) { n.status = row.status; if (n.data) n.data.status = row.status; }
-            if (row.transcript !== undefined) n.transcript = row.transcript;
-            if (row.summary !== undefined) n.summary = row.summary;
-            n.created_at = row.created_at || row.data?.created_at || null;
-            return n;
-          });
+          const normalized = rows.map(normalizeLightEntryRow);
           const existingIds = new Set(entries.map(e => e.id));
           for (const n of normalized) {
             if (!existingIds.has(n.id)) entries.push(n);
@@ -18308,7 +18315,8 @@ app.get('/api/non-session-entries', authenticateRequest, async (req, res) => {
       }
     }
 
-    return res.json(entries);
+    // LISTADO: nunca devolver el audio, venga de Supabase o de la cache en memoria.
+    return res.json(entries.map(stripEntryAudio));
   } catch (err) {
     console.error('❌ Error fetching non-session entries', err);
     return res.status(500).json({ error: err?.message || 'No se pudieron obtener las entradas' });
