@@ -3,6 +3,8 @@ import {
   FileText, CheckCircle, Clock, X, Pen, RotateCcw, Check, Loader2, AlertCircle, PenLine, User
 } from 'lucide-react';
 import { API_URL } from '../services/config';
+import { useSignedUrl } from './SignedImage';
+import { openSignedFile } from '../services/signedFileUrl';
 import { apiFetch } from '../services/authService';
 
 // ─── Simple Markdown → HTML ───────────────────────────────────────────────────
@@ -265,6 +267,10 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ doc, onClose, onSigned,
   const firmaCount = useMemo(() => countFirmaMarkers(doc.content), [doc.content]);
   const hasVariables = varNames.length > 0 || firmaCount > 0;
 
+  // Los documentos externos viven en un bucket PRIVADO: hay que firmar la URL antes de
+  // poder pintarlos en un <img>/<iframe>, que no envían las cabeceras de autenticación.
+  const { url: signedExternalUrl, failed: signedExternalFailed } = useSignedUrl(doc.external_document_url);
+
   // Pre-fill from patient profile
   useEffect(() => {
     if (varNames.length === 0) return;
@@ -401,29 +407,33 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ doc, onClose, onSigned,
         {/* Content */}
         {doc.external_document_url ? (
           <div className="flex-1 overflow-hidden flex flex-col">
-            {doc.external_document_url.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
+            {/* El bucket es privado: se pinta con la URL firmada, no con la guardada. */}
+            {!signedExternalUrl ? (
+              <div className="flex-1 flex items-center justify-center text-sm text-slate-400">
+                {signedExternalFailed ? 'No se pudo cargar el documento.' : 'Cargando documento…'}
+              </div>
+            ) : doc.external_document_url.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
               <img
-                src={doc.external_document_url}
+                src={signedExternalUrl}
                 alt={title}
                 className="flex-1 object-contain p-4 max-h-full"
               />
             ) : (
               <iframe
-                src={doc.external_document_url}
+                src={signedExternalUrl}
                 title={title}
                 className="flex-1 w-full border-0"
                 style={{ minHeight: '400px' }}
               />
             )}
             <div className="px-5 py-3 border-t border-slate-100 flex-shrink-0">
-              <a
-                href={doc.external_document_url}
-                target="_blank"
-                rel="noopener noreferrer"
+              <button
+                type="button"
+                onClick={() => openSignedFile(doc.external_document_url)}
                 className="flex items-center justify-center gap-2 w-full py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 hover:bg-slate-50 transition-colors font-medium"
               >
                 <FileText size={15} /> Abrir / Descargar documento
-              </a>
+              </button>
             </div>
           </div>
         ) : (

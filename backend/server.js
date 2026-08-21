@@ -15,6 +15,7 @@ import Busboy from 'busboy';
 // import { google } from 'googleapis';                        // lazy — see getGoogleApis()
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
+import { auditMiddleware, auditDbRead, getAuditSnapshot, runSelfTest, resetAudit } from './utils/audit.js';
 // import archiver from 'archiver';                            // lazy — only /api/invoices/zip
 // import PDFDocument from 'pdfkit';                           // lazy — only /api/signatures/:id/send-email
 // import { Resend } from 'resend';                            // lazy — only email routes
@@ -426,6 +427,13 @@ const generalLimiter = rateLimit({
 });
 
 app.use('/api/', generalLimiter);
+
+// --- AUDITORÍA LIGERA (ver backend/utils/audit.js) ---
+// Mide estado, duración y BYTES DE RESPUESTA por ruta. El peso de la respuesta es la
+// señal que habría cazado la caída de agosto-2026 (un listado devolvía 194 MB y el
+// sidebar lo pedía cada 60 s). Cuesta 0 en base de datos: las anomalías salen como una
+// línea AUDIT_ANOMALY en los logs de Vercel.
+app.use(auditMiddleware);
 
 // --- PASSWORD HASHING HELPERS (LOPD/GDPR Art. 32 - Seguridad del tratamiento) ---
 const BCRYPT_ROUNDS = 12;
@@ -2282,12 +2290,15 @@ async function loadSupabaseCache() {
 
       const readPromise = supabaseAdmin.from(table).select(selectColumns);
 
+      const t0 = Date.now();
       const { data, error } = await Promise.race([readPromise, timeoutPromise]);
 
       if (error) {
         console.warn(`⚠️ Could not load table '${table}':`, error.message);
         return [];
       }
+      // Auditoría: atribuye a la tabla los bytes que trae cada lectura de arranque.
+      auditDbRead(table, data, Date.now() - t0);
       return data || [];
     } catch (err) {
       console.warn(`⚠️ Error reading table '${table}':`, err.message);
@@ -8017,6 +8028,101 @@ app.post('/api/upload-session-file', authenticateRequest, async (req, res) => {
   }
 });
 
+// ─── DOCUMENTOS CLÍNICOS: URLs firmadas en vez de buckets públicos ────────────
+// Los buckets de adjuntos se crearon `public: true`, así que cualquiera con la URL
+// podía descargar el PDF de un paciente SIN autenticarse: la única protección era que
+// la URL fuese difícil de adivinar. Son datos de salud (categoría especial del RGPD).
+//
+// Este endpoint sustituye esa "seguridad por oscuridad" por autorización real: firma la
+// URL solo si quien la pide es el propio usuario, su psicólogo (existe care_relationship)
+// o un superadmin. Como la auth de la app va por cabeceras y un <img>/<a> no las manda,
+// el frontend pide aquí una URL firmada de corta vida y usa esa.
+//
+// Acepta tanto una ruta `bucket/objeto` como una URL pública ya guardada en la BD, para
+// que los adjuntos antiguos sigan funcionando sin migrar datos.
+const SIGNABLE_BUCKETS = new Set([
+  'patient-attachments', 'external-documents', 'psychologist-materials',
+  'historical-documents', 'session-files', 'session-audio-archive'
+]);
+const SIGNED_URL_TTL_SECONDS = 60 * 60; // 1 hora: suficiente para ver/descargar
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Extrae {bucket, objectPath} de una ruta o de una URL pública/firmada de Supabase. */
+function parseStorageRef(ref) {
+  let value = String(ref || '').trim();
+  if (!value) return null;
+
+  const marker = '/storage/v1/object/';
+  const at = value.indexOf(marker);
+  if (at !== -1) {
+    // .../storage/v1/object/{public|sign|authenticated}/{bucket}/{path}
+    let rest = value.slice(at + marker.length).split('?')[0];
+    rest = rest.replace(/^(public|sign|authenticated)\//, '');
+    value = rest;
+  }
+  value = value.replace(/^\/+/, '');
+
+  const slash = value.indexOf('/');
+  if (slash <= 0) return null;
+  const bucket = value.slice(0, slash);
+  const objectPath = decodeURIComponent(value.slice(slash + 1));
+
+  // Nunca dejar que un `..` se escape del prefijo del propietario.
+  if (!objectPath || objectPath.includes('..')) return null;
+  return { bucket, objectPath };
+}
+
+app.post('/api/storage/signed-url', authenticateRequest, express.json({ limit: '8kb' }), async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no está configurado' });
+
+    const requesterId = req.authenticatedUserId;
+    const ref = parseStorageRef(req.body?.path || req.body?.url);
+    if (!ref) return res.status(400).json({ error: 'Ruta de fichero inválida' });
+    if (!SIGNABLE_BUCKETS.has(ref.bucket)) {
+      return res.status(400).json({ error: `Bucket no permitido: ${ref.bucket}` });
+    }
+
+    // Los adjuntos se guardan bajo el id del usuario dueño: {ownerId}/... y, en
+    // external-documents, {psychId}/{patientId}/... Basta con que el solicitante esté
+    // autorizado sobre CUALQUIERA de los ids de la ruta.
+    const db = getDb();
+    const segments = ref.objectPath.split('/').filter(Boolean);
+    const owners = segments.filter(seg => UUID_RE.test(seg));
+
+    if (owners.length) {
+      let allowed = false;
+      for (const ownerId of owners) {
+        if (await isAuthorizedForUser(requesterId, ownerId, db)) { allowed = true; break; }
+      }
+      if (!allowed) {
+        console.warn(`[signed-url] DENEGADO requester=${requesterId} ruta=${ref.bucket}/${ref.objectPath}`);
+        return res.status(403).json({ error: 'No autorizado para este fichero' });
+      }
+    }
+    // Si la ruta no lleva ningún UUID no se puede atribuir dueño: se deniega en vez de
+    // abrir la mano (evita que una ruta rara se convierta en un bypass).
+    else return res.status(403).json({ error: 'No autorizado para este fichero' });
+
+    const { data, error } = await supabaseAdmin.storage
+      .from(ref.bucket)
+      .createSignedUrl(ref.objectPath, SIGNED_URL_TTL_SECONDS);
+
+    if (error || !data?.signedUrl) {
+      return res.status(404).json({ error: 'No se pudo firmar el fichero: ' + (error?.message || 'no encontrado') });
+    }
+
+    return res.json({
+      signedUrl: data.signedUrl,
+      path: `${ref.bucket}/${ref.objectPath}`,
+      expiresIn: SIGNED_URL_TTL_SECONDS
+    });
+  } catch (err) {
+    console.error('Error in POST /api/storage/signed-url', err);
+    return res.status(500).json({ error: err?.message || 'Error firmando el fichero' });
+  }
+});
+
 // Upload endpoint for entry attachments (base64)
 app.post('/api/upload', authenticateRequest, async (req, res) => {
   try {
@@ -8052,8 +8158,10 @@ app.post('/api/upload', authenticateRequest, async (req, res) => {
     
     if (!bucketExists) {
       console.log(`📦 Creando bucket ${folder}...`);
+      // `public: false` a propósito: estos buckets guardan adjuntos de pacientes.
+      // Antes se creaban públicos y el fichero quedaba descargable sin autenticación.
       const { error: createError } = await supabaseAdmin.storage.createBucket(folder, {
-        public: true,
+        public: false,
         fileSizeLimit: 50 * 1024 * 1024 // 50MB limit
       });
       
@@ -8082,13 +8190,24 @@ app.post('/api/upload', authenticateRequest, async (req, res) => {
       return res.status(500).json({ error: 'Error subiendo archivo' });
     }
 
-    // Obtener URL pública
-    const { data: { publicUrl } } = supabaseAdmin.storage
+    // Se devuelve una URL FIRMADA de corta vida, no la pública: un adjunto clínico no
+    // debe quedar accesible sin autenticación. Se devuelve además `storagePath`
+    // (bucket incluido) para que el cliente pueda pedir una URL nueva cuando caduque,
+    // vía POST /api/storage/signed-url.
+    const storagePath = `${folder}/${filePath}`;
+    let url = null;
+    const { data: signed, error: signErr } = await supabaseAdmin.storage
       .from(folder)
-      .getPublicUrl(filePath);
+      .createSignedUrl(filePath, SIGNED_URL_TTL_SECONDS);
 
-    console.log('✅ Archivo adjunto subido:', filePath);
-    return res.json({ url: publicUrl, path: filePath });
+    if (signErr || !signed?.signedUrl) {
+      console.warn('⚠️ No se pudo firmar el adjunto recién subido:', signErr?.message);
+    } else {
+      url = signed.signedUrl;
+    }
+
+    console.log('✅ Archivo adjunto subido:', storagePath);
+    return res.json({ url, path: filePath, storagePath });
   } catch (err) {
     console.error('Error in POST /api/upload', err);
     return res.status(500).json({ error: err?.message || 'Error procesando el archivo' });
@@ -17877,9 +17996,11 @@ app.get('/api/session-entries', authenticateRequest, async (req, res) => {
           query = query.eq('creator_user_id', creator_user_id);
         }
         
+        const tDb = Date.now();
         const { data: supabaseEntries, error } = await query;
         
         if (!error && supabaseEntries) {
+          auditDbRead('session_entry', supabaseEntries, Date.now() - tDb);
           const supabaseNormalized = supabaseEntries.map(normalizeLightEntryRow);
           
           // Merge: Supabase is source of truth, add any entries not already in results
@@ -18297,8 +18418,10 @@ app.get('/api/non-session-entries', authenticateRequest, async (req, res) => {
         if (target_user_id) query = query.eq('target_user_id', target_user_id);
         if (creator_user_id) query = query.eq('creator_user_id', creator_user_id);
 
+        const tDb = Date.now();
         const { data: rows, error } = await query;
         if (!error && rows) {
+          auditDbRead('non_session_entry', rows, Date.now() - tDb);
           const normalized = rows.map(normalizeLightEntryRow);
           const existingIds = new Set(entries.map(e => e.id));
           for (const n of normalized) {
@@ -19461,10 +19584,12 @@ app.post('/api/signatures/external', authenticateRequest, async (req, res) => {
       return res.status(500).json({ error: 'Error subiendo el archivo: ' + uploadError.message });
     }
 
-    // Get public URL
-    const { data: { publicUrl } } = supabaseAdmin.storage
-      .from('external-documents')
-      .getPublicUrl(safeFileName);
+    // El bucket es privado: se guarda la referencia estable `bucket/objeto`, no una URL
+    // pública. El frontend pide una URL firmada con POST /api/storage/signed-url, que
+    // además comprueba que quien la pide es el paciente, su psicólogo o un superadmin.
+    // parseStorageRef() acepta también las URLs públicas ya guardadas, así que los
+    // documentos antiguos siguen funcionando sin migrar datos.
+    const publicUrl = `external-documents/${safeFileName}`;
 
     // Insert into signatures (template_id = null for external docs)
     const { data, error } = await supabaseAdmin
@@ -20170,6 +20295,35 @@ const requireSuperAdmin = async (req, res, next) => {
   req.superAdminEmail = user.email || user.user_email;
   next();
 };
+
+// ─── AUDITORÍA: endpoints de diagnóstico (solo superadmin) ────────────────────
+// Para usar cuando algo se cae. Ver backend/utils/audit.js.
+//
+//   GET  /api/_audit           → peores rutas por PESO y por latencia, + anomalías
+//   GET  /api/_audit/selftest  → ¿falla REST, Auth o Storage? ¿en cuánto?
+//   POST /api/_audit/reset     → pone a cero los contadores de esta instancia
+//
+// /api/_audit no toca la base de datos. El selftest hace 3 peticiones de 1 fila para
+// localizar la capa que falla. El registro duradero son las líneas `AUDIT_ANOMALY` de
+// los logs de Vercel: en serverless cada instancia recuerda solo sus peticiones.
+// Se registran aquí, y no junto a /api/health, porque requireSuperAdmin se declara
+// con `const` en esta línea y antes estaría en zona muerta temporal.
+app.get('/api/_audit', authenticateRequest, requireSuperAdmin, (req, res) => {
+  return res.json(getAuditSnapshot());
+});
+
+app.get('/api/_audit/selftest', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    return res.json(await runSelfTest());
+  } catch (err) {
+    return res.status(500).json({ error: err?.message || 'selftest falló' });
+  }
+});
+
+app.post('/api/_audit/reset', authenticateRequest, requireSuperAdmin, (req, res) => {
+  resetAudit();
+  return res.json({ ok: true, reset: true });
+});
 
 // --- GET /api/admin/leads — List leads with pagination and server-side search ---
 app.get('/api/admin/leads', authenticateRequest, requireSuperAdmin, async (req, res) => {

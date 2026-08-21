@@ -1,13 +1,18 @@
 ﻿import React, { useState, useEffect, useRef } from 'react';
 import { Plus, MessageSquare, Mic, MicOff, ThumbsUp, Clock, User, X, Paperclip, Download, Eye, FileText, Image as ImageIcon, File, Music, Trash2 } from 'lucide-react';
 import { API_URL } from '../services/config';
+import { openSignedFile } from '../services/signedFileUrl';
+import SignedImage from './SignedImage';
 import { getCurrentUser, apiFetch } from '../services/authService';
 
 interface Attachment {
   id: string;
   name: string;
   type: string;
+  /** URL firmada (caduca) o, en adjuntos antiguos, la URL pública guardada. */
   url: string;
+  /** Referencia estable `bucket/objeto`. Es la que se manda a firmar. */
+  storagePath?: string;
   size: number;
 }
 
@@ -258,7 +263,10 @@ const PatientTimeline: React.FC<PatientTimelineProps> = ({ patientId, psychologi
             id: crypto.randomUUID(),
             name: file.name,
             type: file.type,
-            url: data.url,
+            // `url` viene FIRMADA y caduca en 1 h; `storagePath` es la referencia
+            // estable con la que se pide una URL nueva cuando hace falta.
+            url: data.storagePath || data.url,
+            storagePath: data.storagePath,
             size: file.size
           });
         } else {
@@ -510,24 +518,23 @@ const PatientTimeline: React.FC<PatientTimelineProps> = ({ patientId, psychologi
                             </div>
                             <div className="flex items-center gap-1 sm:gap-2">
                               {attachment.type.startsWith('image/') && (
-                                <a
-                                  href={attachment.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
+                                <button
+                                  type="button"
+                                  onClick={() => openSignedFile(attachment.storagePath || attachment.url)}
                                   className="p-1.5 sm:p-2 hover:bg-slate-100 rounded-lg transition-colors"
                                   title="Ver imagen"
                                 >
                                   <Eye size={14} className="sm:w-4 sm:h-4 text-slate-600" />
-                                </a>
+                                </button>
                               )}
-                              <a
-                                href={attachment.url}
-                                download={attachment.name}
+                              <button
+                                type="button"
+                                onClick={() => openSignedFile(attachment.storagePath || attachment.url, attachment.name)}
                                 className="p-1.5 sm:p-2 hover:bg-slate-100 rounded-lg transition-colors"
                                 title="Descargar"
                               >
                                 <Download size={14} className="sm:w-4 sm:h-4 text-slate-600" />
-                              </a>
+                              </button>
                             </div>
                           </div>
                         ))}
@@ -539,22 +546,21 @@ const PatientTimeline: React.FC<PatientTimelineProps> = ({ patientId, psychologi
                           {entry.attachments
                             .filter(a => a.type.startsWith('image/'))
                             .map((attachment) => (
-                              <a
+                              <button
                                 key={attachment.id}
-                                href={attachment.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
+                                type="button"
+                                onClick={() => openSignedFile(attachment.storagePath || attachment.url)}
                                 className="relative group rounded-lg overflow-hidden border-2 border-slate-200 hover:border-indigo-400 transition-all aspect-square"
                               >
-                                <img
-                                  src={attachment.url}
+                                <SignedImage
+                                  refPath={attachment.storagePath || attachment.url}
                                   alt={attachment.name}
                                   className="w-full h-32 object-cover"
                                 />
                                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
                                   <Eye size={24} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
                                 </div>
-                              </a>
+                              </button>
                             ))}
                         </div>
                       )}

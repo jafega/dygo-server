@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { includesNormalized, isTempEmail } from '../services/textUtils';
 import { API_URL } from '../services/config';
+import { openSignedFile } from '../services/signedFileUrl';
 import { apiFetch } from '../services/authService';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -156,7 +157,10 @@ const PsychologistMaterialsPanel: React.FC<PsychologistMaterialsPanelProps> = ({
       if (!uploadRes.ok) {
         throw new Error('Error subiendo archivo');
       }
-      const { url: file_url } = await uploadRes.json();
+      // `storagePath` es la referencia estable (bucket/objeto). Se guarda ESA y no la
+      // URL firmada, que caduca en 1 h; al abrirla se pide una firma nueva.
+      const uploaded = await uploadRes.json();
+      const file_url = uploaded.storagePath || uploaded.url;
 
       // Save material record
       const saveRes = await apiFetch(`${API_URL}/materials`, {
@@ -334,15 +338,14 @@ const PsychologistMaterialsPanel: React.FC<PsychologistMaterialsPanelProps> = ({
                 </div>
               </div>
               <div className="flex gap-2 pt-1 border-t border-slate-100">
-                <a
-                  href={material.file_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <button
+                  type="button"
+                  onClick={() => openSignedFile(material.file_url)}
                   className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
                 >
                   <File size={13} />
                   Ver
-                </a>
+                </button>
                 <button
                   onClick={() => openSendModal(material)}
                   className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium text-indigo-700 border border-indigo-200 rounded-lg hover:bg-indigo-50 transition-colors"

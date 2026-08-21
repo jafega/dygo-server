@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { includesNormalized } from '../services/textUtils';
 import { X, User, Calendar, Phone, Mail, FileText, DollarSign, Settings, Tag, Trash2, Save, Edit2, CreditCard, MapPin, Cake, Clock as ClockIcon, BookOpen, Sparkles, CheckCircle, AlertCircle, Download, Loader2, Ticket, Building2, TrendingUp, BarChart3, Upload, File, XCircle, Send, Scroll, Eye, Award, Shield, Lock, ClipboardList, Link, ExternalLink, Plus } from 'lucide-react';
 import { API_URL } from '../services/config';
+import { openSignedFile } from '../services/signedFileUrl';
 import { getCurrentUser, apiFetch } from '../services/authService';
 import { formatMoney, currencySymbol } from '../services/currency';
 import InsightsPanel from './InsightsPanel';
@@ -2606,15 +2607,14 @@ tr:nth-child(even) td{background:#f8fafc}
                           </div>
                         </div>
                         {isExternal ? (
-                          <a
-                            href={sig.external_document_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <button
+                            type="button"
+                            onClick={() => openSignedFile(sig.external_document_url)}
                             className="p-2 text-teal-500 hover:text-teal-700 hover:bg-teal-50 rounded-lg transition-colors"
                             title="Abrir documento"
                           >
                             <ExternalLink size={16} />
-                          </a>
+                          </button>
                         ) : (
                           <div className="flex items-center gap-1">
                             {sig.signed && (
