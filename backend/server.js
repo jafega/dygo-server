@@ -17800,8 +17800,15 @@ app.post('/api/session-entries', authenticateRequest, async (req, res) => {
 
     const sessionEntryId = crypto.randomUUID();
     // Separar campos que van en columnas vs data
+    // NO se persiste `file` (el audio/adjunto en base64) en Postgres. Nunca se leía:
+    // el frontend no lo pide en ningún sitio y la transcripción va por el bucket
+    // `session-files`. Eran 211 MB, el 86% de la base de datos, y cualquier listado con
+    // select('*') los arrastraba y saturaba PostgREST (los 522 de agosto-2026).
+    // Se conservan file_name/file_type porque el historial clínico y los informes
+    // impresos muestran "Archivo adjunto" con ellos.
+    // El audio histórico quedó archivado en el bucket privado `session-audio-archive`
+    // (ver backend/scripts/archive-and-purge-session-audio.js).
     const sessionEntryData = {
-      file,
       file_name,
       file_type,
       entry_type: entry_type || 'session_note',
@@ -18176,9 +18183,11 @@ app.patch('/api/session-entries/:id', authenticateRequest, async (req, res) => {
       console.log('✅ Actualizando transcript en columna, longitud:', transcript?.length || 0);
     }
 
-    if (file !== undefined) {
-      dataUpdates.file = file;
-    }
+    // `file` se acepta en el body por compatibilidad, pero NO se guarda nunca: ver la
+    // nota en la creación de la entrada. Guardarlo es lo que tumbó el servicio.
+    // Se borra SIEMPRE (no solo si viene en el body) porque dataUpdates se construye
+    // con {...entry.data} y una entrada antigua de la caché podría reintroducir el blob.
+    delete dataUpdates.file;
 
     if (file_name !== undefined) {
       dataUpdates.file_name = file_name;
@@ -18334,8 +18343,15 @@ app.post('/api/non-session-entries', authenticateRequest, async (req, res) => {
 
     const entryId = crypto.randomUUID();
     const nowIso = new Date().toISOString();
+    // NO se persiste `file` (el audio/adjunto en base64) en Postgres. Nunca se leía:
+    // el frontend no lo pide en ningún sitio y la transcripción va por el bucket
+    // `session-files`. Eran 211 MB, el 86% de la base de datos, y cualquier listado con
+    // select('*') los arrastraba y saturaba PostgREST (los 522 de agosto-2026).
+    // Se conservan file_name/file_type porque el historial clínico y los informes
+    // impresos muestran "Archivo adjunto" con ellos.
+    // El audio histórico quedó archivado en el bucket privado `session-audio-archive`
+    // (ver backend/scripts/archive-and-purge-session-audio.js).
     const entryData = {
-      file,
       file_name,
       file_type,
       entry_type: entry_type || 'non_session_note',
@@ -18526,7 +18542,9 @@ app.patch('/api/non-session-entries/:id', authenticateRequest, async (req, res) 
     if (summary !== undefined) updates.summary = summary;
     if (transcript !== undefined) updates.transcript = transcript;
     if (status !== undefined) { updates.status = status; dataUpdates.status = status; }
-    if (file !== undefined) dataUpdates.file = file;
+    // `file` no se persiste nunca (ver nota en la creación). Se borra SIEMPRE porque
+    // dataUpdates parte de {...entry.data} y podría arrastrar el blob de una fila vieja.
+    delete dataUpdates.file;
     if (file_name !== undefined) dataUpdates.file_name = file_name;
     if (file_type !== undefined) dataUpdates.file_type = file_type;
 
