@@ -1637,7 +1637,76 @@ const SUBSCRIPTION_TABLE_COLUMNS     = ['id', 'data', 'created_at'];
 // transcript (~0,8 KB/fila) y summary sí se incluyen porque son ligeros y el listado
 // los muestra. El contenido completo (`data`, con el audio) se lee solo al pedir UNA
 // entrada por id.
-const SESSION_ENTRY_LIGHT_COLUMNS    = 'id, session_id, creator_user_id, target_user_id, status, summary, transcript, created_at:data->>created_at';
+const SESSION_ENTRY_LIGHT_COLUMNS    = [
+  'id', 'session_id', 'creator_user_id', 'target_user_id', 'status', 'summary', 'transcript',
+  // Metadatos del adjunto proyectados DESDE data, sin traer `data.file` (el audio base64).
+  // El historial clinico y los informes impresos muestran "Archivo adjunto" con
+  // entry.data?.file_name, asi que hay que seguir sirviendo el nombre/tipo — nunca el blob.
+  'created_at:data->>created_at',
+  'data_file_name:data->>file_name',
+  'data_file_type:data->>file_type',
+  'data_entry_type:data->>entry_type',
+  // Fallback para filas antiguas que guardaban estos campos solo dentro del JSONB.
+  'data_status:data->>status'
+].join(', ');
+
+// Normaliza UNA fila de session_entry leida con SESSION_ENTRY_LIGHT_COLUMNS (o con '*').
+// Reconstruye un objeto `data` MINIMO (sin el audio) porque el frontend lee
+// entry.data?.file_name / entry.data?.status en el historial clinico y en los informes.
+function normalizeLightSessionEntryRow(row) {
+  const normalized = normalizeSupabaseRow(row);
+
+  // Columnas reales de la tabla mandan sobre lo que hubiera en el JSONB.
+  const status = row.status || row.data_status || row.data?.status || null;
+  if (status) normalized.status = status;
+  if (row.transcript !== undefined) normalized.transcript = row.transcript;
+  if (row.summary !== undefined) normalized.summary = row.summary;
+  normalized.created_at = row.created_at || row.data?.created_at || null;
+
+  const fileName = row.data_file_name ?? row.data?.file_name ?? null;
+  const fileType = row.data_file_type ?? row.data?.file_type ?? null;
+  const entryType = row.data_entry_type ?? row.data?.entry_type ?? null;
+
+  // `data` ligero: metadatos si, audio (`file`) NUNCA en un listado.
+  normalized.data = {
+    ...(status ? { status } : {}),
+    ...(fileName ? { file_name: fileName } : {}),
+    ...(fileType ? { file_type: fileType } : {}),
+    ...(entryType ? { entry_type: entryType } : {}),
+    ...(normalized.created_at ? { created_at: normalized.created_at } : {}),
+    ...(row.session_id ? { session_id: row.session_id } : {})
+  };
+
+  // Los alias de proyeccion son detalle interno: no se exponen al cliente.
+  delete normalized.data_file_name;
+  delete normalized.data_file_type;
+  delete normalized.data_entry_type;
+  delete normalized.data_status;
+
+  // normalizeSupabaseRow APLANA data al nivel superior, asi que un `data.file` acaba
+  // como `file` de primer nivel. En un listado el audio no viaja por ninguna via.
+  delete normalized.file;
+
+  return normalized;
+}
+
+// Quita el audio base64 de una entrada antes de mandarla en un LISTADO.
+// La cache en memoria puede contener entradas cargadas por GET /:id (con data.file
+// completo); devolverlas tal cual en un listado reintroducia respuestas de cientos
+// de MB por la puerta de atras. El audio solo viaja en el detalle por id.
+function stripSessionEntryAudio(entry) {
+  if (!entry || typeof entry !== 'object') return entry;
+  const hasNested = entry.data && typeof entry.data === 'object' && entry.data.file !== undefined;
+  const hasFlat = entry.file !== undefined;
+  if (!hasNested && !hasFlat) return entry;
+
+  // `file` puede venir dentro de data (fila cruda) o aplanado al nivel superior
+  // (normalizeSupabaseRow aplana data, y GET /:id mete asi la entrada en la cache).
+  const { file: _flatFile, ...rest } = entry;
+  if (!hasNested) return rest;
+  const { file: _nestedFile, ...lightData } = entry.data;
+  return { ...rest, data: lightData };
+}
 
 // Aplana recursivamente el anidamiento data.data.data... extrayendo los campos reales del nivel más profundo
 function flattenNestedData(obj) {
@@ -17580,11 +17649,7 @@ app.post('/api/session-entries', authenticateRequest, async (req, res) => {
       }
       if (existingRows && existingRows.length > 0) {
         const row = existingRows[0];
-        const existing = normalizeSupabaseRow(row);
-        if (row.status) { existing.status = row.status; }
-        if (row.transcript !== undefined) existing.transcript = row.transcript;
-        if (row.summary !== undefined) existing.summary = row.summary;
-        existing.created_at = row.data?.created_at || null;
+        const existing = normalizeLightSessionEntryRow(row);
         console.log('⚠️ [POST session-entries] Duplicate blocked (Supabase) — returning existing:', existing.id);
         if (!db.sessionEntries) db.sessionEntries = [];
         const inCache = db.sessionEntries.find(e => e.id === existing.id);
@@ -17740,19 +17805,15 @@ app.get('/api/session-entries', authenticateRequest, async (req, res) => {
       if (missingIds.length > 0) {
         console.log(`🔍 [GET /api/session-entries] ${missingIds.length} IDs missing from cache, querying Supabase...`);
         try {
+          // LISTADO por ids: columnas ligeras (sin `data`, que contiene el audio base64).
+          // SessionsList pide un lote de ids en cada cambio de rango de fechas y solo usa
+          // id + status, asi que un select('*') aqui arrastraba los audios de todo el lote.
           const { data: supabaseEntries, error } = await supabaseAdmin
             .from('session_entry')
-            .select('*')
+            .select(SESSION_ENTRY_LIGHT_COLUMNS)
             .in('id', missingIds);
           if (!error && supabaseEntries?.length > 0) {
-            const extra = supabaseEntries.map(row => {
-              const normalized = normalizeSupabaseRow(row);
-              if (row.status) { normalized.status = row.status; if (normalized.data) normalized.data.status = row.status; }
-              if (row.transcript !== undefined) normalized.transcript = row.transcript;
-              if (row.summary !== undefined) normalized.summary = row.summary;
-              normalized.created_at = row.data?.created_at || null;
-              return normalized;
-            });
+            const extra = supabaseEntries.map(normalizeLightSessionEntryRow);
             // Actualizar cache
             extra.forEach(entry => {
               const idx = db.sessionEntries.findIndex(e => e.id === entry.id);
@@ -17806,18 +17867,7 @@ app.get('/api/session-entries', authenticateRequest, async (req, res) => {
         const { data: supabaseEntries, error } = await query;
         
         if (!error && supabaseEntries) {
-          const supabaseNormalized = supabaseEntries.map(row => {
-            const normalized = normalizeSupabaseRow(row);
-            // Columns stored separately in Supabase (not inside data JSONB)
-            if (row.status) {
-              normalized.status = row.status;
-              if (normalized.data) normalized.data.status = row.status;
-            }
-            if (row.transcript !== undefined) normalized.transcript = row.transcript;
-            if (row.summary !== undefined) normalized.summary = row.summary;
-            normalized.created_at = row.data?.created_at || null;
-            return normalized;
-          });
+          const supabaseNormalized = supabaseEntries.map(normalizeLightSessionEntryRow);
           
           // Merge: Supabase is source of truth, add any entries not already in results
           const existingIds = new Set(entries.map(e => e.id));
@@ -17857,7 +17907,8 @@ app.get('/api/session-entries', authenticateRequest, async (req, res) => {
       });
     }
 
-    return res.json(entries);
+    // LISTADO: nunca devolver el audio, venga de Supabase o de la cache en memoria.
+    return res.json(entries.map(stripSessionEntryAudio));
   } catch (err) {
     console.error('❌ Error fetching session entries', err);
     return res.status(500).json({ error: err?.message || 'No se pudieron obtener las entradas' });
@@ -17892,7 +17943,7 @@ app.get('/api/session-entries/:id', authenticateRequest, async (req, res) => {
           }
           if (row.transcript !== undefined) entry.transcript = row.transcript;
           if (row.summary !== undefined) entry.summary = row.summary;
-          entry.created_at = row.data?.created_at || null;
+          entry.created_at = row.created_at || row.data?.created_at || null;
           console.log(`✅ [GET /api/session-entries/${id}] Entry found in Supabase`);
           
           // Agregar al caché
@@ -18018,11 +18069,14 @@ app.patch('/api/session-entries/:id', authenticateRequest, async (req, res) => {
     if (supabaseAdmin) {
       try {
         console.log('📝 [PATCH session-entry] Actualizando en Supabase:', { id, updates });
+        // .select() a secas devolvia la fila COMPLETA, incluido data.file (el audio
+        // base64, hasta 4,3 MB): megas de vuelta desde Postgres en cada guardado de
+        // transcripcion, solo para el console.log de abajo. Proyeccion explicita.
         const { data: updatedData, error: updateError } = await supabaseAdmin
           .from('session_entry')
           .update(updates)
           .eq('id', id)
-          .select();
+          .select('id, status, summary, transcript');
 
         if (updateError) {
           console.error('❌ [PATCH session-entry] Error actualizando en Supabase:', updateError);
@@ -18033,8 +18087,7 @@ app.patch('/api/session-entries/:id', authenticateRequest, async (req, res) => {
           id: updatedData?.[0]?.id,
           status: updatedData?.[0]?.status,
           summaryLength: updatedData?.[0]?.summary?.length || 0,
-          transcriptLength: updatedData?.[0]?.transcript?.length || 0,
-          dataKeys: updatedData?.[0]?.data ? Object.keys(updatedData[0].data) : []
+          transcriptLength: updatedData?.[0]?.transcript?.length || 0
         });
       } catch (supabaseErr) {
         console.error('❌ [PATCH session-entry] Error en operación de Supabase:', supabaseErr);
