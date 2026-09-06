@@ -88,7 +88,32 @@ interface UserDetail {
   lastActivity: string | null;
 }
 
-type Tab = 'dashboard' | 'users' | 'sales' | 'templates' | 'email';
+type Tab = 'dashboard' | 'funnel' | 'users' | 'sales' | 'templates' | 'email';
+
+// ─────────────────── Embudo de activacion ───────────────────
+// Los datos salen de product_events via GET /api/admin/funnel.
+interface FunnelStep {
+  event: string;
+  label: string;
+  total: number;
+  fromPrevious: number | null;  // % respecto al paso anterior
+  fromSignup: number | null;    // % respecto al registro
+}
+interface FunnelAtRisk {
+  userId: string;
+  email: string;
+  signupAt: string;
+  daysLeft: number;
+  stuck: string;
+}
+interface FunnelData {
+  days: number;
+  funnel: FunnelStep[];
+  series: Record<string, number | string>[];
+  activeTrials: number;
+  atRisk: FunnelAtRisk[];
+  generatedAt: string;
+}
 
 // ─────────────────── Helpers ───────────────────
 const PLAN_COLORS: Record<string, string> = {
@@ -151,11 +176,30 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
   const [userDetail, setUserDetail] = useState<UserDetail | null>(null);
   const [userDetailLoading, setUserDetailLoading] = useState(false);
   const [userTypeFilter, setUserTypeFilter] = useState<'all' | 'psychologist' | 'patient'>('all');
+  const [funnel, setFunnel] = useState<FunnelData | null>(null);
+  const [funnelLoading, setFunnelLoading] = useState(false);
+  const [funnelDays, setFunnelDays] = useState(30);
 
   useEffect(() => {
     loadStats();
     loadUsers();
   }, []);
+
+  useEffect(() => {
+    if (tab === 'funnel' && !funnel && !funnelLoading) loadFunnel();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
+  const loadFunnel = async (days = funnelDays) => {
+    setFunnelLoading(true);
+    try {
+      const res = await apiFetch(`${API_URL}/admin/funnel?days=${days}`);
+      if (res.ok) setFunnel(await res.json());
+    } catch (e) {
+      console.error('Error loading funnel:', e);
+    }
+    setFunnelLoading(false);
+  };
 
   const loadStats = async () => {
     setStatsLoading(true);
@@ -246,6 +290,156 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
           Refrescar
         </button>
       </div>
+      )}
+
+      {/* ── EMBUDO TAB ────────────────────────────── */}
+      {tab === 'funnel' && (
+        <div className="space-y-6">
+          {funnelLoading && !funnel ? (
+            <div className="py-16 text-center">
+              <RefreshCcw className="animate-spin mx-auto text-indigo-400 mb-3" size={32} />
+              <p className="text-slate-400">Cargando embudo…</p>
+            </div>
+          ) : funnel ? (
+            <>
+              {/* Cabecera con selector de ventana */}
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <h2 className="text-base font-semibold text-slate-800">Embudo de activación</h2>
+                  <p className="text-xs text-slate-400">
+                    Dónde se cae la gente entre registrarse y pagar · {funnel.activeTrials} en prueba ahora
+                  </p>
+                </div>
+                <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
+                  {[7, 30, 90].map(d => (
+                    <button
+                      key={d}
+                      onClick={() => { setFunnelDays(d); loadFunnel(d); }}
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                        funnelDays === d ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                      }`}
+                    >{d}d</button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Embudo acumulado: una barra por paso, ancho proporcional */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6">
+                <h3 className="text-sm font-semibold text-slate-700 mb-1 uppercase tracking-wide">Acumulado histórico</h3>
+                <p className="text-xs text-slate-400 mb-5">Psicólogos distintos que han alcanzado cada hito</p>
+                <div className="space-y-3">
+                  {funnel.funnel.map(step => {
+                    const width = funnel.funnel[0].total ? (step.total / funnel.funnel[0].total) * 100 : 0;
+                    // Un paso a cero no es una fuga: puede ser un evento que se
+                    // empezo a medir despues del backfill (checkout_started no
+                    // tiene historico). Sin datos se muestra neutro, no en rojo.
+                    const noData = step.total === 0;
+                    // Por debajo del 40% respecto al paso anterior si es una fuga.
+                    const leaking = !noData && step.fromPrevious !== null && step.fromPrevious < 40;
+                    return (
+                      <div key={step.event}>
+                        <div className="flex items-baseline justify-between gap-3 mb-1">
+                          <span className={`text-sm truncate ${noData ? 'text-slate-400' : 'text-slate-700'}`}>{step.label}</span>
+                          <span className="text-xs text-slate-400 flex-shrink-0">
+                            <span className={`font-semibold text-sm ${noData ? 'text-slate-400' : 'text-slate-700'}`}>{step.total}</span>
+                            {noData ? (
+                              <span className="ml-2 font-medium text-slate-400">sin datos aún</span>
+                            ) : step.fromPrevious !== null && (
+                              <span className={`ml-2 font-medium ${leaking ? 'text-red-600' : 'text-slate-400'}`}>
+                                {step.fromPrevious}% del anterior
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                        <div className="h-7 bg-slate-100 rounded-lg overflow-hidden">
+                          {!noData && (
+                            <div
+                              className={`h-full rounded-lg transition-all ${leaking ? 'bg-red-400' : 'bg-indigo-500'}`}
+                              style={{ width: `${Math.max(width, 1.5)}%` }}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-4">
+                  Los hitos históricos se reconstruyeron desde el alta de cada psicólogo.
+                  «Abre checkout» solo cuenta desde que se instrumentó, así que aún no tiene serie completa.
+                </p>
+              </div>
+
+              {/* Serie diaria */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6 overflow-hidden">
+                <h3 className="text-sm font-semibold text-slate-700 mb-1 uppercase tracking-wide">
+                  Últimos {funnel.days} días
+                </h3>
+                <p className="text-xs text-slate-400 mb-4">Registros, primeras grabaciones y pagos por día</p>
+                <ResponsiveContainer width="100%" height={220}>
+                  <AreaChart data={funnel.series} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="gSignup" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#6366f1" stopOpacity={0.35} />
+                        <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                    <XAxis
+                      dataKey="date"
+                      tick={{ fontSize: 10, fill: '#94a3b8' }}
+                      tickFormatter={(d: string) => d.slice(5)}
+                      minTickGap={24}
+                    />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                    <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }} />
+                    <Area type="monotone" dataKey="signup" name="Registros" stroke="#6366f1" fill="url(#gSignup)" strokeWidth={2} />
+                    <Area type="monotone" dataKey="first_session_recorded" name="1ª grabación" stroke="#0ea5e9" fill="transparent" strokeWidth={2} />
+                    <Area type="monotone" dataKey="paid" name="Pagos" stroke="#10b981" fill="transparent" strokeWidth={2} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* En riesgo */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6">
+                <h3 className="text-sm font-semibold text-slate-700 mb-1 uppercase tracking-wide">
+                  En riesgo ({funnel.atRisk.length})
+                </h3>
+                <p className="text-xs text-slate-400 mb-4">En prueba, atascados antes de pagar. Ordenados por días restantes</p>
+                {funnel.atRisk.length === 0 ? (
+                  <p className="text-sm text-slate-400 py-6 text-center">Nadie atascado ahora mismo.</p>
+                ) : (
+                  <div className="overflow-x-auto -mx-4 sm:mx-0">
+                    <table className="w-full text-sm min-w-[420px]">
+                      <thead>
+                        <tr className="text-left text-[10px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+                          <th className="py-2 px-4 sm:px-2 font-semibold">Psicólogo</th>
+                          <th className="py-2 px-2 font-semibold">Atascado en</th>
+                          <th className="py-2 px-4 sm:px-2 font-semibold text-right">Prueba</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {funnel.atRisk.map(r => (
+                          <tr key={r.userId} className="border-b border-slate-50 last:border-0">
+                            <td className="py-2.5 px-4 sm:px-2 text-slate-700 truncate max-w-[220px]">{r.email || r.userId}</td>
+                            <td className="py-2.5 px-2 text-slate-500">{r.stuck}</td>
+                            <td className={`py-2.5 px-4 sm:px-2 text-right font-medium ${r.daysLeft <= 3 ? 'text-red-600' : 'text-slate-500'}`}>
+                              {r.daysLeft > 0 ? `${r.daysLeft}d` : 'Expirada'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="py-16 text-center text-slate-400">
+              <AlertCircle className="mx-auto mb-3" size={32} />
+              <p className="text-sm">No se pudo cargar el embudo.</p>
+            </div>
+          )}
+        </div>
       )}
 
       {/* ── DASHBOARD TAB ─────────────────────────── */}
