@@ -88,7 +88,48 @@ interface UserDetail {
   lastActivity: string | null;
 }
 
-type Tab = 'dashboard' | 'funnel' | 'users' | 'sales' | 'templates' | 'email';
+type Tab = 'dashboard' | 'funnel' | 'users' | 'sales' | 'agents' | 'templates' | 'email';
+
+// ─────────────────── Equipo de ventas automatizado ───────────────────
+interface AgentConfig {
+  enabled: boolean;
+  autonomia: 'borrador' | 'autonomo';
+  cupo_diario: number;
+}
+interface AgentDraft {
+  id: string;
+  to_email: string;
+  to_name: string | null;
+  subject: string;
+  body_html: string;
+  lead_id: string | null;
+  lead_name: string | null;
+  created_at: string;
+  metadata: { agent?: string; variant?: string; motivo_borrador?: string };
+}
+interface AgentAction {
+  id: number;
+  agent: string;
+  action: string;
+  email: string | null;
+  variant: string | null;
+  created_at: string;
+}
+interface AgentOptout {
+  email: string;
+  reason: string | null;
+  source: string | null;
+  created_at: string;
+}
+interface AgentsData {
+  config: AgentConfig;
+  enviados_hoy: number;
+  token_configurado: boolean;
+  webhook_firmado: boolean;
+  borradores: AgentDraft[];
+  acciones: AgentAction[];
+  bajas_recientes: AgentOptout[];
+}
 
 // ─────────────────── Embudo de activacion ───────────────────
 // Los datos salen de product_events via GET /api/admin/funnel.
@@ -179,6 +220,10 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
   const [funnel, setFunnel] = useState<FunnelData | null>(null);
   const [funnelLoading, setFunnelLoading] = useState(false);
   const [funnelDays, setFunnelDays] = useState(30);
+  const [agents, setAgents] = useState<AgentsData | null>(null);
+  const [agentsLoading, setAgentsLoading] = useState(false);
+  const [agentBusy, setAgentBusy] = useState<string | null>(null);
+  const [draftOpen, setDraftOpen] = useState<string | null>(null);
 
   useEffect(() => {
     loadStats();
@@ -187,8 +232,61 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
 
   useEffect(() => {
     if (tab === 'funnel' && !funnel && !funnelLoading) loadFunnel();
+    if (tab === 'agents' && !agents && !agentsLoading) loadAgents();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
+
+  const loadAgents = async () => {
+    setAgentsLoading(true);
+    try {
+      const res = await apiFetch(`${API_URL}/admin/agents`);
+      if (res.ok) setAgents(await res.json());
+    } catch (e) {
+      console.error('Error loading agents:', e);
+    }
+    setAgentsLoading(false);
+  };
+
+  const patchAgentConfig = async (cambios: Partial<AgentConfig>) => {
+    setAgentBusy('config');
+    try {
+      const res = await apiFetch(`${API_URL}/admin/agents/config`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cambios),
+      });
+      if (res.ok) {
+        const { config } = await res.json();
+        setAgents(a => (a ? { ...a, config } : a));
+      }
+    } catch (e) {
+      console.error('Error updating agent config:', e);
+    }
+    setAgentBusy(null);
+  };
+
+  const resolveDraft = async (id: string, accion: 'approve' | 'discard') => {
+    setAgentBusy(id);
+    try {
+      const res = await apiFetch(`${API_URL}/admin/agents/drafts/${id}/${accion}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      if (res.ok) {
+        setDraftOpen(null);
+        await loadAgents();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.motivo === 'dado_de_baja'
+          ? 'No se envía: este contacto se dio de baja después de redactarse el borrador.'
+          : `No se pudo completar: ${err.motivo || err.error || 'error desconocido'}`);
+      }
+    } catch (e) {
+      console.error('Error resolving draft:', e);
+    }
+    setAgentBusy(null);
+  };
 
   const loadFunnel = async (days = funnelDays) => {
     setFunnelLoading(true);
@@ -290,6 +388,226 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
           Refrescar
         </button>
       </div>
+      )}
+
+      {/* ── AGENTES TAB ───────────────────────────── */}
+      {tab === 'agents' && (
+        <div className="space-y-6">
+          {agentsLoading && !agents ? (
+            <div className="py-16 text-center">
+              <RefreshCcw className="animate-spin mx-auto text-indigo-400 mb-3" size={32} />
+              <p className="text-slate-400">Cargando equipo…</p>
+            </div>
+          ) : agents ? (
+            <>
+              {/* Avisos de configuración incompleta */}
+              {(!agents.token_configurado || !agents.webhook_firmado) && (
+                <div className="space-y-2">
+                  {!agents.token_configurado && (
+                    <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 border border-amber-200">
+                      <AlertCircle size={16} className="text-amber-600 mt-0.5 flex-shrink-0" />
+                      <p className="text-xs text-amber-800">
+                        <strong>AGENT_API_TOKEN no configurado.</strong> Los agentes de n8n no pueden
+                        conectarse hasta que la variable exista en el entorno de Producción de Vercel.
+                      </p>
+                    </div>
+                  )}
+                  {!agents.webhook_firmado && (
+                    <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 border border-amber-200">
+                      <AlertCircle size={16} className="text-amber-600 mt-0.5 flex-shrink-0" />
+                      <p className="text-xs text-amber-800">
+                        <strong>RESEND_WEBHOOK_SECRET no configurado.</strong> El correo entrante se
+                        procesa sin verificar la firma: cualquiera que conozca la URL puede inyectar
+                        emails falsos en este buzón.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Control principal */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6">
+                <div className="flex items-start justify-between gap-4 flex-wrap">
+                  <div>
+                    <h2 className="text-base font-semibold text-slate-800">Equipo de ventas automatizado</h2>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {agents.enviados_hoy} de {agents.config.cupo_diario} envíos usados hoy
+                    </p>
+                  </div>
+                  {/* Interruptor general: lo más grande y lo más a mano. */}
+                  <button
+                    onClick={() => patchAgentConfig({ enabled: !agents.config.enabled })}
+                    disabled={agentBusy === 'config'}
+                    className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
+                      agents.config.enabled
+                        ? 'bg-red-50 text-red-700 border border-red-200 hover:bg-red-100'
+                        : 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
+                    }`}
+                  >
+                    {agents.config.enabled ? 'Parar todo' : 'Reactivar equipo'}
+                  </button>
+                </div>
+
+                {!agents.config.enabled && (
+                  <div className="mt-4 flex items-center gap-2 p-3 rounded-xl bg-red-50 border border-red-200">
+                    <Ban size={16} className="text-red-600 flex-shrink-0" />
+                    <p className="text-xs text-red-800">Equipo parado. No se envía ni se redacta nada.</p>
+                  </div>
+                )}
+
+                <div className="grid sm:grid-cols-2 gap-4 mt-5">
+                  {/* Modo */}
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-2">Modo</p>
+                    <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
+                      {([
+                        { id: 'borrador' as const, label: 'Borrador' },
+                        { id: 'autonomo' as const, label: 'Autónomo' },
+                      ]).map(m => (
+                        <button
+                          key={m.id}
+                          onClick={() => patchAgentConfig({ autonomia: m.id })}
+                          disabled={agentBusy === 'config'}
+                          className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                            agents.config.autonomia === m.id
+                              ? 'bg-white text-indigo-600 shadow-sm'
+                              : 'text-slate-500 hover:text-slate-700'
+                          }`}
+                        >{m.label}</button>
+                      ))}
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-2 leading-relaxed">
+                      {agents.config.autonomia === 'borrador'
+                        ? 'Los agentes redactan y tú apruebas. No sale nada sin tu clic.'
+                        : 'Los agentes envían solos dentro del cupo. Las bajas se siguen respetando.'}
+                    </p>
+                  </div>
+
+                  {/* Cupo */}
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-2">
+                      Cupo diario · {agents.config.cupo_diario}
+                    </p>
+                    <input
+                      type="range" min={0} max={200} step={5}
+                      value={agents.config.cupo_diario}
+                      onChange={e => setAgents(a => (a ? { ...a, config: { ...a.config, cupo_diario: Number(e.target.value) } } : a))}
+                      onMouseUp={e => patchAgentConfig({ cupo_diario: Number((e.target as HTMLInputElement).value) })}
+                      onTouchEnd={e => patchAgentConfig({ cupo_diario: Number((e.target as HTMLInputElement).value) })}
+                      className="w-full accent-indigo-600"
+                    />
+                    <p className="text-[11px] text-slate-400 mt-2 leading-relaxed">
+                      Techo de emails que los agentes pueden mandar al día. Al llegar, dejan de enviar
+                      aunque estén en modo autónomo.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Borradores pendientes */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6">
+                <h3 className="text-sm font-semibold text-slate-700 mb-1 uppercase tracking-wide">
+                  Pendientes de aprobar ({agents.borradores.length})
+                </h3>
+                <p className="text-xs text-slate-400 mb-4">Redactados por los agentes. Nada sale sin que lo apruebes</p>
+                {agents.borradores.length === 0 ? (
+                  <p className="text-sm text-slate-400 py-6 text-center">No hay borradores esperando.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {agents.borradores.map(b => (
+                      <div key={b.id} className="border border-slate-200 rounded-xl overflow-hidden">
+                        <div className="p-3 flex items-start justify-between gap-3 flex-wrap">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium text-slate-800 truncate">{b.subject}</p>
+                            <p className="text-xs text-slate-400 truncate">
+                              Para {b.to_name || b.to_email}
+                              {b.metadata?.agent && <> · agente <span className="font-medium">{b.metadata.agent}</span></>}
+                              {b.metadata?.variant && <> · variante {b.metadata.variant}</>}
+                            </p>
+                          </div>
+                          <div className="flex gap-2 flex-shrink-0">
+                            <button
+                              onClick={() => setDraftOpen(draftOpen === b.id ? null : b.id)}
+                              className="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:bg-slate-100"
+                            >{draftOpen === b.id ? 'Ocultar' : 'Ver'}</button>
+                            <button
+                              onClick={() => resolveDraft(b.id, 'discard')}
+                              disabled={agentBusy === b.id}
+                              className="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:bg-slate-100"
+                            >Descartar</button>
+                            <button
+                              onClick={() => resolveDraft(b.id, 'approve')}
+                              disabled={agentBusy === b.id}
+                              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                            >{agentBusy === b.id ? 'Enviando…' : 'Aprobar y enviar'}</button>
+                          </div>
+                        </div>
+                        {draftOpen === b.id && (
+                          <div
+                            className="border-t border-slate-100 p-3 bg-slate-50 max-h-96 overflow-y-auto text-sm"
+                            dangerouslySetInnerHTML={{ __html: b.body_html }}
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="grid lg:grid-cols-2 gap-6">
+                {/* Actividad */}
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6">
+                  <h3 className="text-sm font-semibold text-slate-700 mb-1 uppercase tracking-wide">Actividad reciente</h3>
+                  <p className="text-xs text-slate-400 mb-4">Todo lo que han hecho los agentes</p>
+                  {agents.acciones.length === 0 ? (
+                    <p className="text-sm text-slate-400 py-6 text-center">Sin actividad todavía.</p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-80 overflow-y-auto">
+                      {agents.acciones.map(a => (
+                        <div key={a.id} className="flex items-center gap-2 text-xs py-1.5 border-b border-slate-50 last:border-0">
+                          <span className={`px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${
+                            a.action === 'enviado' ? 'bg-emerald-50 text-emerald-700'
+                              : a.action === 'descartado' ? 'bg-red-50 text-red-600'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}>{a.action}</span>
+                          <span className="text-slate-600 truncate flex-1">{a.email || '—'}</span>
+                          <span className="text-slate-400 flex-shrink-0">{a.agent}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Bajas */}
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6">
+                  <h3 className="text-sm font-semibold text-slate-700 mb-1 uppercase tracking-wide">
+                    Bajas · últimos 30 días ({agents.bajas_recientes.length})
+                  </h3>
+                  <p className="text-xs text-slate-400 mb-4">A estos no se les vuelve a escribir</p>
+                  {agents.bajas_recientes.length === 0 ? (
+                    <p className="text-sm text-slate-400 py-6 text-center">Ninguna baja.</p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-80 overflow-y-auto">
+                      {agents.bajas_recientes.map(b => (
+                        <div key={b.email} className="flex items-center gap-2 text-xs py-1.5 border-b border-slate-50 last:border-0">
+                          <span className="text-slate-600 truncate flex-1">{b.email}</span>
+                          <span className={`px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${
+                            b.reason === 'queja_spam' ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-600'
+                          }`}>{b.reason}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="py-16 text-center text-slate-400">
+              <AlertCircle className="mx-auto mb-3" size={32} />
+              <p className="text-sm">No se pudo cargar el equipo.</p>
+            </div>
+          )}
+        </div>
       )}
 
       {/* ── EMBUDO TAB ────────────────────────────── */}

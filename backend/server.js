@@ -24,7 +24,7 @@ import {
 import { verificarFirmaResend, motivoDeSupresion, pideBaja } from './utils/resend-webhook.js';
 import {
   requireAgentToken, leerConfig, enviadosHoy, registrarAccion,
-  enviarComoAgente
+  enviarComoAgente, aprobarBorrador, descartarBorrador
 } from './utils/agent-api.js';
 // import archiver from 'archiver';                            // lazy — only /api/invoices/zip
 // import PDFDocument from 'pdfkit';                           // lazy — only /api/signatures/:id/send-email
@@ -20393,6 +20393,130 @@ app.get('/api/_audit/selftest', authenticateRequest, requireSuperAdmin, async (r
 app.post('/api/_audit/reset', authenticateRequest, requireSuperAdmin, (req, res) => {
   resetAudit();
   return res.json({ ok: true, reset: true });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PANEL DE CONTROL DEL EQUIPO DE VENTAS (superadmin)
+// ═══════════════════════════════════════════════════════════════════════════
+// Autenticado como superadmin, no con el token de agente: son las dos caras
+// de lo mismo. Los agentes trabajan a traves de /api/agent/*; una persona los
+// gobierna desde aqui.
+
+// --- GET /api/admin/agents — Estado completo del equipo ---
+app.get('/api/admin/agents', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const desdeHoy = new Date(); desdeHoy.setHours(0, 0, 0, 0);
+    const hace30 = new Date(Date.now() - 30 * 86400000).toISOString();
+
+    const [config, hoy, borradoresRes, accionesRes, bajasRes] = await Promise.all([
+      leerConfig(supabaseAdmin),
+      enviadosHoy(supabaseAdmin),
+      // Borradores pendientes de aprobacion.
+      supabaseAdmin.from('admin_emails')
+        .select('id, to_email, to_name, subject, body_html, lead_id, lead_name, created_at, metadata')
+        .eq('mailbox', 'sales')
+        .eq('resend_status', 'draft')
+        .order('created_at', { ascending: false })
+        .limit(50),
+      supabaseAdmin.from('agent_actions')
+        .select('id, agent, action, email, variant, created_at, result')
+        .order('created_at', { ascending: false })
+        .limit(40),
+      supabaseAdmin.from('email_optouts')
+        .select('email, reason, source, created_at')
+        .gte('created_at', hace30)
+        .order('created_at', { ascending: false })
+        .limit(30)
+    ]);
+
+    const borradores = (borradoresRes.data || [])
+      .filter(b => (b.metadata || {}).estado === 'borrador');
+
+    return res.json({
+      config,
+      enviados_hoy: hoy,
+      // Sirve para avisar en la interfaz: sin token, n8n no puede llamar.
+      token_configurado: !!process.env.AGENT_API_TOKEN,
+      webhook_firmado: !!process.env.RESEND_WEBHOOK_SECRET,
+      borradores,
+      acciones: accionesRes.data || [],
+      bajas_recientes: bajasRes.data || []
+    });
+  } catch (err) {
+    console.error('[admin/agents]', err?.message || err);
+    return res.status(500).json({ error: err?.message || 'Error interno' });
+  }
+});
+
+// --- PATCH /api/admin/agents/config — Interruptor, modo y cupo ---
+app.patch('/api/admin/agents/config', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { enabled, autonomia, cupo_diario } = req.body || {};
+    const cambios = { updated_at: new Date().toISOString() };
+
+    if (typeof enabled === 'boolean') cambios.enabled = enabled;
+    if (autonomia !== undefined) {
+      if (!['borrador', 'autonomo'].includes(autonomia)) {
+        return res.status(400).json({ error: 'autonomia debe ser borrador o autonomo' });
+      }
+      cambios.autonomia = autonomia;
+    }
+    if (cupo_diario !== undefined) {
+      const n = parseInt(cupo_diario);
+      // El tope duro existe para que un cero de mas en el formulario no se
+      // convierta en 2.000 emails: el limite lo pone el codigo, no la interfaz.
+      if (!Number.isFinite(n) || n < 0 || n > 200) {
+        return res.status(400).json({ error: 'cupo_diario debe estar entre 0 y 200' });
+      }
+      cambios.cupo_diario = n;
+    }
+
+    const { error } = await supabaseAdmin.from('agent_config').update(cambios).eq('id', 'default');
+    if (error) throw error;
+
+    auditLog('AGENTES_CONFIG', { por: req.superAdminEmail, cambios });
+    return res.json({ ok: true, config: await leerConfig(supabaseAdmin) });
+  } catch (err) {
+    console.error('[admin/agents/config]', err?.message || err);
+    return res.status(500).json({ error: err?.message || 'Error interno' });
+  }
+});
+
+// --- POST /api/admin/agents/drafts/:id/approve — Aprobar y enviar ---
+app.post('/api/admin/agents/drafts/:id/approve', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const out = await aprobarBorrador(supabaseAdmin, {
+      borradorId: req.params.id,
+      aprobadoPor: req.superAdminEmail
+    });
+    if (!out.ok) return res.status(400).json(out);
+    auditLog('AGENTES_BORRADOR_APROBADO', { por: req.superAdminEmail, borrador: req.params.id });
+    return res.json(out);
+  } catch (err) {
+    console.error('[admin/agents/approve]', err?.message || err);
+    return res.status(500).json({ error: err?.message || 'Error interno' });
+  }
+});
+
+// --- POST /api/admin/agents/drafts/:id/discard — Descartar ---
+app.post('/api/admin/agents/drafts/:id/discard', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const out = await descartarBorrador(supabaseAdmin, {
+      borradorId: req.params.id,
+      descartadoPor: req.superAdminEmail,
+      motivo: req.body?.motivo
+    });
+    if (!out.ok) return res.status(400).json(out);
+    auditLog('AGENTES_BORRADOR_DESCARTADO', { por: req.superAdminEmail, borrador: req.params.id });
+    return res.json(out);
+  } catch (err) {
+    console.error('[admin/agents/discard]', err?.message || err);
+    return res.status(500).json({ error: err?.message || 'Error interno' });
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

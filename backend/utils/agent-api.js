@@ -172,3 +172,124 @@ export async function enviarComoAgente(supabase, {
     cupo: decision.config?.cupo_diario ?? null
   };
 }
+
+/**
+ * Aprueba un borrador dejado por un agente y lo envía de verdad.
+ *
+ * La supresión se vuelve a comprobar en el momento de aprobar, no solo cuando
+ * se redactó: entre que el agente escribió el borrador y tú le das al botón
+ * pueden haber pasado horas, y en ese rato la persona puede haberse dado de
+ * baja o haber marcado un correo anterior como spam.
+ */
+export async function aprobarBorrador(supabase, { borradorId, aprobadoPor }) {
+  const { data: borrador } = await supabase
+    .from('admin_emails')
+    .select('id, to_email, to_name, subject, body_html, lead_id, lead_name, thread_id, metadata')
+    .eq('id', borradorId)
+    .maybeSingle();
+
+  if (!borrador) return { ok: false, motivo: 'no_encontrado' };
+  if ((borrador.metadata || {}).estado !== 'borrador') {
+    return { ok: false, motivo: 'no_es_un_borrador' };
+  }
+
+  const email = normalizarEmail(borrador.to_email);
+  if (await estaDadoDeBaja(supabase, email)) {
+    return { ok: false, motivo: 'dado_de_baja' };
+  }
+  if (!process.env.RESEND_API_KEY) return { ok: false, motivo: 'resend_no_configurado' };
+
+  const html = conPieBaja(borrador.body_html || '', email);
+  const { Resend } = await import('resend');
+  const resend = new Resend(process.env.RESEND_API_KEY);
+  const envio = await resend.emails.send({
+    from: FROM,
+    to: email,
+    reply_to: REPLY_TO,
+    subject: borrador.subject,
+    html,
+    headers: cabecerasBaja(email)
+  });
+  const resendId = envio?.data?.id || envio?.id || null;
+
+  // Se actualiza la fila existente en vez de crear otra: en el buzón tiene que
+  // verse UN email que pasó de borrador a enviado, no dos entradas.
+  await supabase.from('admin_emails').update({
+    body_html: html,
+    resend_id: resendId,
+    resend_status: 'sent',
+    updated_at: new Date().toISOString(),
+    metadata: {
+      ...(borrador.metadata || {}),
+      estado: 'enviado',
+      motivo_borrador: null,
+      aprobado_por: aprobadoPor,
+      aprobado_en: new Date().toISOString()
+    }
+  }).eq('id', borrador.id);
+
+  if (borrador.lead_id) {
+    await supabase.from('leads')
+      .update({ last_contacted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', borrador.lead_id);
+    await supabase.from('lead_activities').insert([{
+      lead_id: borrador.lead_id,
+      type: 'email_sent',
+      title: borrador.subject,
+      body: html,
+      metadata: {
+        source: 'agent',
+        agent: (borrador.metadata || {}).agent || null,
+        variant: (borrador.metadata || {}).variant || null,
+        resend_id: resendId,
+        aprobado_por: aprobadoPor
+      },
+      created_by: aprobadoPor
+    }]);
+  }
+
+  await registrarAccion(supabase, {
+    agent: (borrador.metadata || {}).agent || 'desconocido',
+    action: 'enviado',
+    lead_id: borrador.lead_id || null,
+    email,
+    variant: (borrador.metadata || {}).variant || null,
+    payload: { asunto: borrador.subject, aprobado_por: aprobadoPor },
+    result: { resend_id: resendId, via: 'aprobacion_manual' }
+  });
+
+  return { ok: true, resend_id: resendId };
+}
+
+/** Descarta un borrador. Se marca, no se borra: el descarte es informacion. */
+export async function descartarBorrador(supabase, { borradorId, descartadoPor, motivo }) {
+  const { data: borrador } = await supabase
+    .from('admin_emails').select('id, metadata, lead_id, to_email').eq('id', borradorId).maybeSingle();
+  if (!borrador) return { ok: false, motivo: 'no_encontrado' };
+  if ((borrador.metadata || {}).estado !== 'borrador') return { ok: false, motivo: 'no_es_un_borrador' };
+
+  await supabase.from('admin_emails').update({
+    is_archived: true,
+    resend_status: 'discarded',
+    updated_at: new Date().toISOString(),
+    metadata: {
+      ...(borrador.metadata || {}),
+      estado: 'descartado',
+      descartado_por: descartadoPor,
+      motivo_descarte: motivo || null,
+      descartado_en: new Date().toISOString()
+    }
+  }).eq('id', borrador.id);
+
+  await registrarAccion(supabase, {
+    agent: (borrador.metadata || {}).agent || 'desconocido',
+    action: 'descartado',
+    lead_id: borrador.lead_id || null,
+    email: borrador.to_email,
+    variant: (borrador.metadata || {}).variant || null,
+    payload: { motivo: motivo || null },
+    result: { descartado_por: descartadoPor }
+  });
+
+  return { ok: true };
+}
