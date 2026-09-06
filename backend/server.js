@@ -20375,6 +20375,198 @@ app.post('/api/_audit/reset', authenticateRequest, requireSuperAdmin, (req, res)
   return res.json({ ok: true, reset: true });
 });
 
+// --- GET /api/automation/optout — Baja de las campanas de activacion ---
+// Publico a proposito: es el enlace del pie de los emails automaticos y tiene
+// que funcionar sin sesion. La firma HMAC evita que nadie de de baja a otro
+// cambiando el id en la URL. No afecta a los emails de la cuenta (facturas,
+// recordatorios de sesion): solo al ciclo de vida.
+app.get('/api/automation/optout', async (req, res) => {
+  const userId = String(req.query.u || '');
+  const firma = String(req.query.s || '');
+
+  const pagina = (titulo, mensaje) => `<!DOCTYPE html><html lang="es"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${titulo} · mainds</title></head>
+<body style="margin:0;padding:48px 16px;background:#f1f5f9;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif">
+  <div style="max-width:480px;margin:0 auto;background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:32px;text-align:center">
+    <h1 style="margin:0 0 12px;font-size:20px;color:#0f172a">${titulo}</h1>
+    <p style="margin:0;font-size:15px;color:#475569;line-height:1.6">${mensaje}</p>
+    <p style="margin:24px 0 0;font-size:13px;color:#94a3b8">mainds · Software para psicologos</p>
+  </div>
+</body></html>`;
+
+  const esperada = crypto.createHmac('sha256', process.env.SESSION_SECRET || 'mainds-baja')
+    .update(userId).digest('hex').slice(0, 16);
+
+  if (!userId || firma !== esperada) {
+    return res.status(400).type('html').send(
+      pagina('Enlace no valido', 'Este enlace de baja no es correcto o ha caducado. Escribenos a info@mainds.app y te damos de baja a mano.')
+    );
+  }
+
+  try {
+    if (supabaseAdmin) {
+      let email = null;
+      try {
+        const row = await readSupabaseRowById('users', userId);
+        email = row?.user_email || (row?.data || {}).email || null;
+      } catch (_) { /* el email es informativo */ }
+
+      const { error } = await supabaseAdmin.from('automation_optouts').upsert(
+        [{ user_id: userId, email, reason: 'enlace_email' }],
+        { onConflict: 'user_id' }
+      );
+      if (error) throw error;
+    }
+    auditLog('AUTOMATION_OPTOUT', { userId });
+    return res.type('html').send(
+      pagina('Listo, no te escribimos mas', 'Has dejado de recibir los avisos de activacion. Seguiras recibiendo lo relacionado con tu cuenta, como facturas y recordatorios de sesion.')
+    );
+  } catch (err) {
+    console.error('[automation/optout] error:', err?.message || err);
+    return res.status(500).type('html').send(
+      pagina('No hemos podido completarlo', 'Ha fallado algo por nuestra parte. Escribenos a info@mainds.app y te damos de baja a mano.')
+    );
+  }
+});
+
+// --- GET /api/admin/funnel — Embudo de activacion (solo superadmin) ---
+// Sale entero de product_events (ver backend/utils/events.js). No toca tablas
+// clinicas ni arrastra JSONB pesado: solo user_id, event y created_at.
+app.get('/api/admin/funnel', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+
+    const FUNNEL_STEPS = [
+      { event: 'signup',                 label: 'Registro' },
+      { event: 'first_patient_added',    label: 'Anade 1er paciente' },
+      { event: 'first_session_recorded', label: 'Graba 1a sesion' },
+      { event: 'first_invoice',          label: 'Emite 1a factura' },
+      { event: 'checkout_started',       label: 'Abre checkout' },
+      { event: 'paid',                   label: 'Paga' }
+    ];
+    const TRIAL_DAYS = 14;
+    const DAY_MS = 86400000;
+    const now = Date.now();
+    const days = Math.min(90, Math.max(7, parseInt(req.query.days) || 30));
+
+    // Una sola lectura de la ventana pedida; el acumulado va por count(head).
+    const windowStart = new Date(now - days * DAY_MS).toISOString();
+    const [windowRes, ...totals] = await Promise.all([
+      supabaseAdmin
+        .from('product_events')
+        .select('user_id, event, created_at')
+        .gte('created_at', windowStart)
+        .limit(20000),
+      ...FUNNEL_STEPS.map(step =>
+        supabaseAdmin
+          .from('product_events')
+          .select('id', { count: 'exact', head: true })
+          .eq('event', step.event)
+      )
+    ]);
+
+    if (windowRes.error) throw windowRes.error;
+    const windowEvents = windowRes.data || [];
+
+    // Embudo acumulado: usuarios distintos que alcanzaron cada hito.
+    const lifetime = {};
+    FUNNEL_STEPS.forEach((step, i) => { lifetime[step.event] = totals[i]?.count || 0; });
+
+    const funnel = FUNNEL_STEPS.map((step, i) => {
+      const prev = i > 0 ? lifetime[FUNNEL_STEPS[i - 1].event] : null;
+      return {
+        event: step.event,
+        label: step.label,
+        total: lifetime[step.event],
+        fromPrevious: prev ? Math.round((lifetime[step.event] / prev) * 1000) / 10 : null,
+        fromSignup: lifetime.signup ? Math.round((lifetime[step.event] / lifetime.signup) * 1000) / 10 : null
+      };
+    });
+
+    // Serie diaria de la ventana.
+    const seriesByDay = {};
+    for (let d = days - 1; d >= 0; d--) {
+      const key = new Date(now - d * DAY_MS).toISOString().slice(0, 10);
+      seriesByDay[key] = { date: key };
+      for (const step of FUNNEL_STEPS) seriesByDay[key][step.event] = 0;
+    }
+    for (const e of windowEvents) {
+      const key = String(e.created_at).slice(0, 10);
+      if (seriesByDay[key] && seriesByDay[key][e.event] !== undefined) seriesByDay[key][e.event]++;
+    }
+
+    // Quien esta en prueba ahora y donde se ha quedado atascado. Es el punto
+    // accionable: el salto de "anadir paciente" a "grabar sesion" es donde se
+    // pierde la gente que si acabaria pagando.
+    const trialStart = now - TRIAL_DAYS * DAY_MS;
+    const signupsInTrial = windowEvents
+      .filter(e => e.event === 'signup' && new Date(e.created_at).getTime() >= trialStart)
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    const trialIds = [...new Set(signupsInTrial.map(e => e.user_id).filter(Boolean))];
+    const reached = {};
+    let emailById = {};
+
+    if (trialIds.length) {
+      const [milestonesRes, usersRes] = await Promise.all([
+        supabaseAdmin
+          .from('product_events')
+          .select('user_id, event')
+          .in('user_id', trialIds)
+          .in('event', ['first_patient_added', 'first_session_recorded', 'paid']),
+        supabaseAdmin
+          .from('users')
+          .select('id, user_email, data')
+          .in('id', trialIds)
+      ]);
+      for (const m of milestonesRes.data || []) {
+        (reached[m.user_id] = reached[m.user_id] || new Set()).add(m.event);
+      }
+      for (const u of usersRes.data || []) {
+        emailById[u.id] = u.user_email || (u.data || {}).email || '';
+      }
+    }
+
+    const atRisk = [];
+    let activeTrials = 0;
+    for (const e of signupsInTrial) {
+      const got = reached[e.user_id] || new Set();
+      if (got.has('paid')) continue;
+      activeTrials++;
+      const daysElapsed = Math.floor((now - new Date(e.created_at).getTime()) / DAY_MS);
+      const daysLeft = TRIAL_DAYS - daysElapsed;
+      let stuck = null;
+      if (got.has('first_patient_added') && !got.has('first_session_recorded')) {
+        stuck = 'Tiene paciente, no ha grabado';
+      } else if (!got.has('first_patient_added') && daysElapsed >= 2) {
+        stuck = 'No ha anadido ningun paciente';
+      }
+      if (!stuck) continue;
+      atRisk.push({
+        userId: e.user_id,
+        email: emailById[e.user_id] || '',
+        signupAt: e.created_at,
+        daysLeft,
+        stuck
+      });
+    }
+    atRisk.sort((a, b) => a.daysLeft - b.daysLeft);
+
+    return res.json({
+      days,
+      funnel,
+      series: Object.values(seriesByDay),
+      activeTrials,
+      atRisk,
+      generatedAt: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error('[admin/funnel] error:', err?.message || err);
+    return res.status(500).json({ error: err?.message || 'Error interno' });
+  }
+});
+
 // --- GET /api/admin/leads — List leads with pagination and server-side search ---
 app.get('/api/admin/leads', authenticateRequest, requireSuperAdmin, async (req, res) => {
   try {
