@@ -23,7 +23,7 @@ export default async function handler(req, res) {
     /* ── 1. Fetch all active leads (not won/lost/cancelled) ── */
     const { data: leads, error: leadsErr } = await supabase
       .from('leads')
-      .select('id, email, name, stage, app_user_id, app_registered_at, app_plan, app_is_subscribed, assigned_to, tags, notes_count, last_contacted_at, created_at, phone, company, details, source')
+      .select('id, email, name, stage, app_user_id, app_registered_at, app_plan, app_is_subscribed, assigned_to, tags, notes_count, last_contacted_at, created_at, phone, company, details, source, lead_score')
       .not('stage', 'in', '(won,lost,cancelled)');
 
     if (leadsErr) throw leadsErr;
@@ -65,70 +65,67 @@ export default async function handler(req, res) {
       for (let i = 0; i < appUserIds.length; i += BATCH) {
         const batch = appUserIds.slice(i, i + BATCH);
 
-        // Count sessions per psychologist
+        // Count sessions per psychologist.
+        // La columna es psychologist_user_id (no psychologist_id): con el nombre
+        // antiguo la query no devolvía nada y el uso puntuaba siempre 0.
         const { data: sessions } = await supabase
           .from('sessions')
-          .select('psychologist_id')
-          .in('psychologist_id', batch);
+          .select('psychologist_user_id')
+          .in('psychologist_user_id', batch);
         if (sessions) {
           for (const s of sessions) {
-            sessionsByUser[s.psychologist_id] = (sessionsByUser[s.psychologist_id] || 0) + 1;
+            sessionsByUser[s.psychologist_user_id] = (sessionsByUser[s.psychologist_user_id] || 0) + 1;
           }
         }
 
         // Count care relationships (patients added)
+        // Mismo caso, y además el filtro correcto de "activa" es la columna
+        // booleana `active` (status='active' no lo cumple ninguna fila).
         const { data: rels } = await supabase
           .from('care_relationships')
-          .select('psychologist_id')
-          .in('psychologist_id', batch)
-          .eq('status', 'active');
+          .select('psychologist_user_id')
+          .in('psychologist_user_id', batch)
+          .or('active.is.null,active.eq.true');
         if (rels) {
           for (const r of rels) {
-            entriesByUser[r.psychologist_id] = (entriesByUser[r.psychologist_id] || 0) + 1;
+            entriesByUser[r.psychologist_user_id] = (entriesByUser[r.psychologist_user_id] || 0) + 1;
           }
         }
       }
     }
 
-    /* ── 4. Fetch inbound emails from admin_emails ── */
-    const leadEmails = leads.map(l => l.email.toLowerCase());
-    let emailsByLead = {};
-    // Check admin_emails for inbound responses from these leads
-    for (let i = 0; i < leadEmails.length; i += BATCH) {
-      const batch = leadEmails.slice(i, i + BATCH);
-      const { data: emails } = await supabase
-        .from('admin_emails')
-        .select('from_email, direction, created_at')
-        .in('from_email', batch)
-        .eq('direction', 'inbound')
-        .gte('created_at', ninetyDaysAgo);
-      if (emails) {
-        for (const e of emails) {
-          const key = e.from_email.toLowerCase();
-          if (!emailsByLead[key]) emailsByLead[key] = [];
-          emailsByLead[key].push(e);
-        }
-      }
+    /* ── 4. Emails de admin_emails (una sola lectura) ── */
+    // La version anterior recorria los leads en lotes de 50 y, para los salientes,
+    // pedia TODOS los outbound en cada iteracion sin filtrar por destinatario:
+    // con 1.127 leads eran 23 escaneos completos de admin_emails por ejecucion.
+    // El volumen de los ultimos 90 dias es pequeno, asi que se lee una vez y se
+    // indexa en memoria.
+    const leadEmails = leads.map(l => (l.email || '').toLowerCase());
+    const leadEmailSet = new Set(leadEmails.filter(Boolean));
+    const emailsByLead = {};
+    const outboundByLead = {};
+
+    const { data: recentEmails, error: emailsErr } = await supabase
+      .from('admin_emails')
+      .select('from_email, to_email, direction, created_at')
+      .gte('created_at', ninetyDaysAgo)
+      .limit(5000);
+
+    if (emailsErr) {
+      console.warn('[lead-scoring] admin_emails no disponible:', emailsErr.message || emailsErr);
     }
 
-    // Also count outbound emails sent TO leads
-    let outboundByLead = {};
-    for (let i = 0; i < leadEmails.length; i += BATCH) {
-      const batch = leadEmails.slice(i, i + BATCH);
-      const { data: emails } = await supabase
-        .from('admin_emails')
-        .select('to_email, direction, created_at')
-        .eq('direction', 'outbound')
-        .gte('created_at', ninetyDaysAgo);
-      if (emails) {
-        for (const e of emails) {
-          const to = (e.to_email || '').toLowerCase();
-          for (const addr of batch) {
-            if (to.includes(addr)) {
-              if (!outboundByLead[addr]) outboundByLead[addr] = [];
-              outboundByLead[addr].push(e);
-            }
-          }
+    for (const e of recentEmails || []) {
+      if (e.direction === 'inbound') {
+        const key = (e.from_email || '').toLowerCase();
+        if (!leadEmailSet.has(key)) continue;
+        (emailsByLead[key] = emailsByLead[key] || []).push(e);
+      } else if (e.direction === 'outbound') {
+        // to_email puede llevar varios destinatarios separados por comas.
+        const recipients = (e.to_email || '').toLowerCase().split(/[,;\s]+/).filter(Boolean);
+        for (const addr of recipients) {
+          if (!leadEmailSet.has(addr)) continue;
+          (outboundByLead[addr] = outboundByLead[addr] || []).push(e);
         }
       }
     }
@@ -204,31 +201,57 @@ export default async function handler(req, res) {
       // Clamp to 1-10 and round
       const finalScore = Math.max(1, Math.min(10, Math.round(score)));
 
-      updates.push({ id: lead.id, lead_score: finalScore, lead_score_updated_at: new Date().toISOString() });
+      updates.push({
+        id: lead.id,
+        lead_score: finalScore,
+        previous_score: lead.lead_score ?? null,
+        lead_score_updated_at: new Date().toISOString()
+      });
     }
 
-    /* ── 6. Batch update scores ── */
+    /* ── 6. Persistir solo los scores que han cambiado ── */
+    // Antes se lanzaba un UPDATE por lead (1.127 peticiones por ejecucion) y los
+    // errores se descartaban con `if (!updateErr)`, asi que el cron parecia
+    // funcionar aunque no escribiera nada. Ahora se escriben solo los cambios y
+    // los fallos se cuentan y se devuelven.
+    const changed = updates.filter(u => u.previous_score !== u.lead_score);
     let updated = 0;
-    for (const u of updates) {
-      const { error: updateErr } = await supabase
-        .from('leads')
-        .update({ lead_score: u.lead_score, lead_score_updated_at: u.lead_score_updated_at })
-        .eq('id', u.id);
-      if (!updateErr) updated++;
+    const writeErrors = [];
+    const WRITE_CONCURRENCY = 8;
+
+    for (let i = 0; i < changed.length; i += WRITE_CONCURRENCY) {
+      const slice = changed.slice(i, i + WRITE_CONCURRENCY);
+      const results = await Promise.all(slice.map(u =>
+        supabase
+          .from('leads')
+          .update({ lead_score: u.lead_score, lead_score_updated_at: u.lead_score_updated_at })
+          .eq('id', u.id)
+          .then(({ error }) => ({ id: u.id, error }))
+      ));
+      for (const r of results) {
+        if (r.error) writeErrors.push({ id: r.id, error: r.error.message || String(r.error) });
+        else updated++;
+      }
     }
 
-    const summary = updates.map(u => {
+    if (writeErrors.length) {
+      console.error(`[lead-scoring] ${writeErrors.length} escrituras fallaron:`, writeErrors.slice(0, 5));
+    }
+
+    const summary = changed.slice(0, 25).map(u => {
       const lead = leads.find(l => l.id === u.id);
-      return `${tier(u.lead_score)} ${(lead?.name || lead?.email || u.id).substring(0, 30)}: ${u.lead_score}/10`;
+      return `${tier(u.lead_score)} ${(lead?.name || lead?.email || u.id).substring(0, 30)}: ${u.previous_score ?? '-'} -> ${u.lead_score}/10`;
     }).join('\n');
 
-    console.log(`[lead-scoring] ✅ Scored ${updated}/${leads.length} leads:\n${summary}`);
+    console.log(`[lead-scoring] ✅ ${updated}/${changed.length} scores actualizados (${leads.length} leads evaluados):\n${summary}`);
 
     return res.status(200).json({
-      message: `Scored ${updated} leads`,
+      message: `Actualizados ${updated} de ${changed.length} scores con cambios`,
       scored: updated,
+      changed: changed.length,
       total: leads.length,
-      scores: updates.map(u => ({ id: u.id, score: u.lead_score })),
+      write_errors: writeErrors.length,
+      scores: changed.map(u => ({ id: u.id, score: u.lead_score, previous: u.previous_score })),
     });
   } catch (err) {
     console.error('[lead-scoring] ❌ Error:', err);
