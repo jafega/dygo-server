@@ -16,6 +16,7 @@ import Busboy from 'busboy';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import { auditMiddleware, auditDbRead, getAuditSnapshot, runSelfTest, resetAudit } from './utils/audit.js';
+import { track, EVENTS } from './utils/events.js';
 // import archiver from 'archiver';                            // lazy — only /api/invoices/zip
 // import PDFDocument from 'pdfkit';                           // lazy — only /api/signatures/:id/send-email
 // import { Resend } from 'resend';                            // lazy — only email routes
@@ -3174,6 +3175,7 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
     saveDb(db);
 
     auditLog('USER_REGISTERED', { userId: newUser.id, email: normalizedEmail, role: normalizedRole });
+    track(EVENTS.SIGNUP, { userId: newUser.id, props: { role: normalizedRole, method: 'password' } });
     console.log('✅ Usuario creado:', newUser.id);
 
     // Send welcome email to new psychologists (fire-and-forget)
@@ -3408,6 +3410,10 @@ const handleSupabaseAuth = async (req, res) => {
         }
         
         user = newUser;
+        track(EVENTS.SIGNUP, {
+          userId: newUser.id,
+          props: { role: newUser.is_psychologist ? 'PSYCHOLOGIST' : 'PATIENT', method: 'oauth' }
+        });
 
         // CRM: Auto-create/update lead for OAuth registrations
         if (supabaseAdmin && normalizedEmail) {
@@ -5810,6 +5816,12 @@ const handleCreateCheckoutSession = async (req, res) => {
       }
     });
 
+    track(EVENTS.CHECKOUT_STARTED, {
+      userId: requesterId,
+      once: false,
+      props: { plan_id: requestedPlanId, checkout_session_id: session.id }
+    });
+
     return res.json({ url: session.url });
   } catch (err) {
     console.error('Error creating checkout session', err?.message || err);
@@ -6708,6 +6720,11 @@ app.post(
           sub.access_blocked = false;
           saveDb(db);
           await upsertPsychSubToSupabase(psychId, sub);
+          track(EVENTS.PAID, {
+            userId: psychId,
+            once: false,
+            props: { plan_id: planId, stripe_subscription_id: stripeSubId, source: 'checkout.session.completed' }
+          });
           console.log(`[Webhook] checkout.session.completed: psychologist ${psychId} subscribed (plan: ${planId})`);
         }
         break;
@@ -6771,6 +6788,13 @@ app.post(
           }
           saveDb(db);
           await upsertPsychSubToSupabase(sub.psychologist_user_id, sub);
+          if (['canceled', 'unpaid', 'incomplete_expired'].includes(subscription.status) && sub.psychologist_user_id) {
+            track(EVENTS.CHURNED, {
+              userId: sub.psychologist_user_id,
+              once: false,
+              props: { plan_id: sub.plan_id, stripe_status: subscription.status, source: 'subscription.updated' }
+            });
+          }
           console.log(`[Webhook] subscription.updated: ${subscription.id} → status=${subscription.status}, plan=${sub.plan_id}`);
 
           // CRM: Auto-move lead to 'won' on active subscription, 'cancelled' on cancel
@@ -9978,6 +10002,8 @@ app.post('/api/invoices', authenticateRequest, async (req, res) => {
           console.log('✅ Verificación exitosa - Factura existe en Supabase:', verifyData?.id);
         }
         
+        track(EVENTS.FIRST_INVOICE, { userId: invoice.psychologist_user_id || psychologistUserId });
+
         // Devolver el invoice con los campos normalizados de Supabase
         return res.json({
           ...invoice,
@@ -13293,6 +13319,7 @@ app.post('/api/relationships', authenticateRequest, async (req, res) => {
         }
         
         console.log('[POST /api/relationships] ✓ Relación creada en Supabase:', data.id);
+        track(EVENTS.FIRST_PATIENT_ADDED, { userId: psychId });
         return res.json(normalizeSupabaseRow(data));
       } catch (supaErr) {
         console.error('[POST /api/relationships] ❌ Error guardando en Supabase:', supaErr);
@@ -13335,6 +13362,7 @@ app.post('/api/relationships', authenticateRequest, async (req, res) => {
     
     await saveDb(dbLocal, { awaitPersistence: true });
     console.log('[POST /api/relationships] ✓ Relación guardada en DB local');
+    track(EVENTS.FIRST_PATIENT_ADDED, { userId: psychId });
     return res.json(relationship);
   } catch (err) {
     console.error('❌ Error creating relationship', err);
@@ -17855,6 +17883,10 @@ app.post('/api/session-entries', authenticateRequest, async (req, res) => {
         }
 
         console.log('✅ Session_entry creada en Supabase:', sessionEntryId);
+        track(EVENTS.FIRST_SESSION_RECORDED, {
+          userId: creator_user_id || userId,
+          props: { has_transcript: !!transcript, has_summary: !!summary }
+        });
 
         // Actualizar la sesión con el session_entry_id
         const { error: updateError } = await supabaseAdmin
