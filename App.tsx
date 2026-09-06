@@ -60,7 +60,7 @@ const App: React.FC = () => {
   const [phonePromptSaving, setPhonePromptSaving] = useState(false);
   
   const [psychViewMode, setPsychViewMode] = useState<'DASHBOARD' | 'PERSONAL' | 'ADMIN'>('DASHBOARD');
-  const [adminTab, setAdminTab] = useState<'dashboard' | 'funnel' | 'users' | 'sales' | 'templates' | 'email'>('dashboard');
+  const [adminTab, setAdminTab] = useState<'dashboard' | 'funnel' | 'users' | 'sales' | 'agents' | 'templates' | 'email'>('dashboard');
   const [adminSidebarOpen, setAdminSidebarOpen] = useState(false);
   const [psychPanelView, setPsychPanelView] = useState<'home' | 'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule' | 'centros' | 'templates' | 'import' | 'ai-assistant' | 'materials'>('home');
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -1140,9 +1140,10 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
       { id: 'funnel'    as const, label: 'Embudo',    icon: <Filter size={18} /> },
       { id: 'users'     as const, label: 'Usuarios',  icon: <Users size={18} /> },
       { id: 'sales'     as const, label: 'Ventas',     icon: <TrendingUp size={18} /> },
+      { id: 'agents'    as const, label: 'Agentes',    icon: <Bot size={18} /> },
       { id: 'templates' as const, label: 'Plantillas', icon: <FileText size={18} /> },
       { id: 'email'     as const, label: 'Buzón',      icon: <Mail size={18} /> },
-    ] as { id: 'dashboard' | 'funnel' | 'users' | 'sales' | 'templates' | 'email'; label: string; icon: React.ReactNode }[];
+    ] as { id: 'dashboard' | 'funnel' | 'users' | 'sales' | 'agents' | 'templates' | 'email'; label: string; icon: React.ReactNode }[];
     return (
       <div className="h-screen bg-slate-50 text-slate-900 flex flex-col overflow-hidden">
         {/* ── Mobile top bar ─────────────────────────── */}
