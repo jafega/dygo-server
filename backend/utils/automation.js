@@ -21,9 +21,9 @@
 // Todo lo enviado queda en el buzón de superadmin (admin_emails) y en la ficha
 // del lead (lead_activities).
 
-import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import { renderEmail } from './email-shell.js';
+import { urlBaja, cabecerasBaja, suprimidos, normalizarEmail } from './email-optout.js';
 
 const DAY_MS = 86400000;
 const HOUR_MS = 3600000;
@@ -39,17 +39,8 @@ const esEmailTemporal = (email) =>
   || email.includes('@noemail.mainds.local')
   || email.includes('@noemail.dygo.local');
 
-// El enlace de baja va firmado con HMAC para que nadie pueda dar de baja a
-// otro simplemente cambiando el id en la URL. Apunta al endpoint de la API,
-// no a una ruta del SPA: el rewrite de Vercel manda /api/* a la funcion.
-export const firmaBaja = (userId) =>
-  crypto.createHmac('sha256', process.env.SESSION_SECRET || 'mainds-baja')
-    .update(String(userId))
-    .digest('hex')
-    .slice(0, 16);
-
-const bajaUrl = (userId) =>
-  `${APP_URL}/api/automation/optout?u=${encodeURIComponent(userId)}&s=${firmaBaja(userId)}`;
+// La baja vive en email-optout.js: es por direccion de correo, no por usuario,
+// para que valga igual en campanas, CRM y envios masivos.
 
 // ─────────────────────────── Campañas ───────────────────────────
 // El orden es la prioridad: gana la primera cuyo `cuando` devuelva true.
@@ -290,14 +281,13 @@ export async function runAutomations({ dryRun = false, soloUsuario = null } = {}
   // prueba. Fuera de ahí no hay ninguna campaña que pueda disparar.
   const ventana = new Date(ahora - (TRIAL_DAYS + 22) * DAY_MS).toISOString();
 
-  const [signupsRes, subsRes, optoutsRes] = await Promise.all([
+  const [signupsRes, subsRes] = await Promise.all([
     supabase.from('product_events')
       .select('user_id, created_at')
       .eq('event', 'signup')
       .gte('created_at', ventana)
       .limit(5000),
-    supabase.from('subscriptions').select('id, data'),
-    supabase.from('automation_optouts').select('user_id')
+    supabase.from('subscriptions').select('id, data')
   ]);
   if (signupsRes.error) throw signupsRes.error;
 
@@ -311,15 +301,13 @@ export async function runAutomations({ dryRun = false, soloUsuario = null } = {}
     }
   }
 
-  const dadosDeBaja = new Set((optoutsRes.data || []).map(o => o.user_id));
   const pagan = new Set(
     (subsRes.data || [])
       .filter(r => ['active', 'trialing'].includes((r.data || {}).stripe_status))
       .map(r => r.id)
   );
 
-  let candidatos = [...altaPorUsuario.keys()]
-    .filter(id => !pagan.has(id) && !dadosDeBaja.has(id));
+  let candidatos = [...altaPorUsuario.keys()].filter(id => !pagan.has(id));
   if (soloUsuario) candidatos = candidatos.filter(id => id === soloUsuario);
 
   if (candidatos.length === 0) {
@@ -335,6 +323,12 @@ export async function runAutomations({ dryRun = false, soloUsuario = null } = {}
 
   const usuarioPorId = new Map();
   for (const u of usuariosRes.data || []) usuarioPorId.set(u.id, u);
+
+  // Bajas: una sola consulta con todas las direcciones implicadas.
+  const dadosDeBaja = await suprimidos(
+    supabase,
+    (usuariosRes.data || []).map(u => u.user_email || (u.data || {}).email)
+  );
 
   const eventosPorUsuario = new Map();
   for (const e of eventosRes.data || []) {
@@ -369,6 +363,7 @@ export async function runAutomations({ dryRun = false, soloUsuario = null } = {}
     if (!usuario) { decisiones.push({ userId, omitido: 'usuario_no_encontrado' }); continue; }
     if (usuario.master === true) { decisiones.push({ userId, omitido: 'master' }); continue; }
     if (esEmailTemporal(email)) { decisiones.push({ userId, omitido: 'email_temporal' }); continue; }
+    if (dadosDeBaja.has(normalizarEmail(email))) { decisiones.push({ userId, email, omitido: 'dado_de_baja' }); continue; }
 
     const ultimo = ultimoEnvioPorUsuario.get(userId);
     if (ultimo && ahora - ultimo < SILENCIO_ENTRE_EMAILS_MS) {
@@ -410,7 +405,7 @@ export async function runAutomations({ dryRun = false, soloUsuario = null } = {}
         ctaTexto: contenido.ctaTexto,
         ctaUrl: contenido.ctaUrl,
         tono: contenido.tono,
-        bajaUrl: bajaUrl(userId)
+        bajaUrl: urlBaja(email)
       });
 
       const { Resend } = await import('resend');
@@ -420,7 +415,9 @@ export async function runAutomations({ dryRun = false, soloUsuario = null } = {}
         to: email,
         reply_to: REPLY_TO,
         subject: contenido.asunto,
-        html
+        html,
+        // Sin estas cabeceras no hay boton nativo de baja en Gmail/Outlook.
+        headers: cabecerasBaja(email)
       });
       const resendId = envio?.data?.id || envio?.id || null;
 

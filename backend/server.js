@@ -17,6 +17,10 @@ import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import { auditMiddleware, auditDbRead, getAuditSnapshot, runSelfTest, resetAudit } from './utils/audit.js';
 import { track, EVENTS } from './utils/events.js';
+import {
+  urlBaja, cabecerasBaja, pieBaja, conPieBaja,
+  suprimidos, estaDadoDeBaja, normalizarEmail, firmaBaja
+} from './utils/email-optout.js';
 // import archiver from 'archiver';                            // lazy — only /api/invoices/zip
 // import PDFDocument from 'pdfkit';                           // lazy — only /api/signatures/:id/send-email
 // import { Resend } from 'resend';                            // lazy — only email routes
@@ -235,13 +239,20 @@ async function sendPsychWelcomeEmail(toEmail, firstName) {
     const { Resend } = await import('resend');
     const resend = new Resend(process.env.RESEND_API_KEY);
     const appUrl = process.env.FRONTEND_URL || 'https://mi.mainds.app';
+    // Aunque llegue justo despues de registrarse, este es un email de ciclo de
+    // vida y no una gestion de la cuenta: lleva baja, visible y en cabecera.
+    if (await estaDadoDeBaja(supabaseAdmin, toEmail)) {
+      console.log(`[sendPsychWelcomeEmail] ${toEmail} esta dado de baja — no se envia`);
+      return;
+    }
     await resend.emails.send({
       from: 'mainds <no-reply@mainds.app>',
       to: toEmail,
       bcc: 'info@mainds.app',
       reply_to: 'info@mainds.app',
       subject: `¡Bienvenido/a a mainds${firstName ? `, ${firstName}` : ''}! Tu prueba gratuita ha comenzado`,
-      html: buildPsychWelcomeEmail({ firstName, appUrl })
+      html: conPieBaja(buildPsychWelcomeEmail({ firstName, appUrl }), toEmail),
+      headers: cabecerasBaja(toEmail)
     });
     console.log(`📧 [sendPsychWelcomeEmail] Welcome email sent to ${toEmail}`);
   } catch (err) {
@@ -20375,14 +20386,21 @@ app.post('/api/_audit/reset', authenticateRequest, requireSuperAdmin, (req, res)
   return res.json({ ok: true, reset: true });
 });
 
-// --- GET /api/automation/optout — Baja de las campanas de activacion ---
-// Publico a proposito: es el enlace del pie de los emails automaticos y tiene
-// que funcionar sin sesion. La firma HMAC evita que nadie de de baja a otro
-// cambiando el id en la URL. No afecta a los emails de la cuenta (facturas,
-// recordatorios de sesion): solo al ciclo de vida.
-app.get('/api/automation/optout', async (req, res) => {
-  const userId = String(req.query.u || '');
-  const firma = String(req.query.s || '');
+// --- GET/POST /api/automation/optout — Baja de los emails de mainds ---
+// Publico a proposito: es el destino del enlace del pie y de la cabecera
+// List-Unsubscribe, y tiene que funcionar sin sesion. La firma HMAC sobre el
+// email evita que nadie de de baja a otro cambiando la URL.
+//
+// Acepta POST ademas de GET porque List-Unsubscribe-Post (RFC 8058) hace que
+// Gmail y Outlook envien un POST al pulsar su boton nativo, sin abrir el
+// navegador. Ese caso responde 200 sin cuerpo.
+//
+// No afecta a facturas, recordatorios de sesion ni restablecimientos de
+// contrasena: son gestiones de la cuenta, no comunicaciones comerciales.
+const handleOptout = async (req, res) => {
+  const email = String(req.query.e || req.body?.e || '').trim().toLowerCase();
+  const firma = String(req.query.s || req.body?.s || '');
+  const esUnClick = req.method === 'POST';
 
   const pagina = (titulo, mensaje) => `<!DOCTYPE html><html lang="es"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -20395,10 +20413,8 @@ app.get('/api/automation/optout', async (req, res) => {
   </div>
 </body></html>`;
 
-  const esperada = crypto.createHmac('sha256', process.env.SESSION_SECRET || 'mainds-baja')
-    .update(userId).digest('hex').slice(0, 16);
-
-  if (!userId || firma !== esperada) {
+  if (!email || firma !== firmaBaja(email)) {
+    if (esUnClick) return res.status(400).end();
     return res.status(400).type('html').send(
       pagina('Enlace no valido', 'Este enlace de baja no es correcto o ha caducado. Escribenos a info@mainds.app y te damos de baja a mano.')
     );
@@ -20406,29 +20422,61 @@ app.get('/api/automation/optout', async (req, res) => {
 
   try {
     if (supabaseAdmin) {
-      let email = null;
+      // El user_id es informativo: la baja manda por email, exista cuenta o no.
+      let userId = null;
       try {
-        const row = await readSupabaseRowById('users', userId);
-        email = row?.user_email || (row?.data || {}).email || null;
-      } catch (_) { /* el email es informativo */ }
+        const { data } = await supabaseAdmin.from('users').select('id').eq('user_email', email).limit(1);
+        userId = data?.[0]?.id || null;
+      } catch (_) { /* opcional */ }
 
-      const { error } = await supabaseAdmin.from('automation_optouts').upsert(
-        [{ user_id: userId, email, reason: 'enlace_email' }],
-        { onConflict: 'user_id' }
+      const { error } = await supabaseAdmin.from('email_optouts').upsert(
+        [{ email, user_id: userId, reason: 'enlace_email', source: esUnClick ? 'boton_nativo' : 'enlace_pie' }],
+        { onConflict: 'email' }
       );
       if (error) throw error;
+
+      // Que se vea en el CRM: si hay lead, queda la actividad en su ficha y
+      // una etiqueta, para que nadie vuelva a incluirlo en un envio a mano.
+      try {
+        const { data: leads } = await supabaseAdmin.from('leads').select('id, tags').eq('email', email).limit(1);
+        const lead = leads?.[0];
+        if (lead) {
+          const tags = Array.isArray(lead.tags) ? lead.tags : [];
+          if (!tags.includes('baja')) {
+            await supabaseAdmin.from('leads')
+              .update({ tags: [...tags, 'baja'], updated_at: new Date().toISOString() })
+              .eq('id', lead.id);
+          }
+          await supabaseAdmin.from('lead_activities').insert([{
+            lead_id: lead.id,
+            type: 'note',
+            title: 'Se dio de baja de los emails',
+            body: esUnClick ? 'Desde el boton de su cliente de correo.' : 'Desde el enlace del pie del email.',
+            metadata: { source: 'optout', email },
+            created_by: 'automation'
+          }]);
+        }
+      } catch (e) {
+        console.warn('[automation/optout] no se pudo reflejar en el CRM:', e?.message || e);
+      }
     }
-    auditLog('AUTOMATION_OPTOUT', { userId });
+
+    auditLog('EMAIL_OPTOUT', { email, oneClick: esUnClick });
+    if (esUnClick) return res.status(200).end();
     return res.type('html').send(
-      pagina('Listo, no te escribimos mas', 'Has dejado de recibir los avisos de activacion. Seguiras recibiendo lo relacionado con tu cuenta, como facturas y recordatorios de sesion.')
+      pagina('Listo, no te escribimos mas', 'Has dejado de recibir emails de seguimiento y novedades. Seguiras recibiendo lo relacionado con tu cuenta: facturas, recordatorios de sesion y avisos de seguridad.')
     );
   } catch (err) {
     console.error('[automation/optout] error:', err?.message || err);
+    if (esUnClick) return res.status(500).end();
     return res.status(500).type('html').send(
       pagina('No hemos podido completarlo', 'Ha fallado algo por nuestra parte. Escribenos a info@mainds.app y te damos de baja a mano.')
     );
   }
-});
+};
+
+app.get('/api/automation/optout', handleOptout);
+app.post('/api/automation/optout', express.urlencoded({ extended: false }), handleOptout);
 
 // --- GET /api/admin/funnel — Embudo de activacion (solo superadmin) ---
 // Sale entero de product_events (ver backend/utils/events.js). No toca tablas
@@ -21252,6 +21300,14 @@ app.post('/api/admin/leads/:id/email', authenticateRequest, requireSuperAdmin, a
       .replace(/\{\{name\}\}/gi, lead.name || '')
       .replace(/\{\{email\}\}/gi, lead.email);
 
+    if (await estaDadoDeBaja(supabaseAdmin, lead.email)) {
+      return res.status(409).json({ error: 'optout', message: 'Este contacto se dio de baja y no se le puede escribir.' });
+    }
+
+    // El pie de baja se anade aqui y no en la plantilla: quien redacta desde el
+    // CRM no se va a acordar, y no puede depender de eso.
+    const htmlConBaja = conPieBaja(personalizedHtml, lead.email);
+
     if (process.env.RESEND_API_KEY) {
       const { Resend } = await import('resend');
       const resend = new Resend(process.env.RESEND_API_KEY);
@@ -21260,7 +21316,8 @@ app.post('/api/admin/leads/:id/email', authenticateRequest, requireSuperAdmin, a
         to: lead.email,
         reply_to: 'info@mainds.app',
         subject: personalizedSubject,
-        html: personalizedHtml,
+        html: htmlConBaja,
+        headers: cabecerasBaja(lead.email),
       });
       console.log(`📧 [CRM] Email sent to ${lead.email}: ${personalizedSubject}`, emailResult);
     } else {
@@ -21277,6 +21334,7 @@ app.post('/api/admin/leads/:id/email', authenticateRequest, requireSuperAdmin, a
       metadata: { resend_id: emailResult?.id || emailResult?.data?.id, from: fromAddr, to: lead.email, sender_name: fromName },
       created_by: req.superAdminEmail,
     }]).select().single();
+    // Nota: body guarda el html tal cual se envio, con el pie de baja incluido.
 
     // Register in admin_emails (sales inbox)
     const { error: adminEmailErr } = await supabaseAdmin.from('admin_emails').insert({
@@ -21287,7 +21345,7 @@ app.post('/api/admin/leads/:id/email', authenticateRequest, requireSuperAdmin, a
       to_email: lead.email,
       to_name: lead.name || null,
       subject: personalizedSubject,
-      body_html: personalizedHtml,
+      body_html: htmlConBaja,
       is_read: true,
       resend_id: emailResult?.data?.id || emailResult?.id || null,
       resend_status: 'sent',
@@ -21319,8 +21377,16 @@ app.post('/api/admin/leads/email-bulk', authenticateRequest, requireSuperAdmin, 
     if (!subject || !body_html) return res.status(400).json({ error: 'Subject y body son obligatorios' });
     if (lead_ids.length > 200) return res.status(400).json({ error: 'Máximo 200 emails por envío' });
 
-    const { data: leads } = await supabaseAdmin.from('leads').select('id, email, name, stage, assigned_to').in('id', lead_ids);
-    if (!leads || leads.length === 0) return res.status(404).json({ error: 'No leads found' });
+    const { data: leadsTodos } = await supabaseAdmin.from('leads').select('id, email, name, stage, assigned_to').in('id', lead_ids);
+    if (!leadsTodos || leadsTodos.length === 0) return res.status(404).json({ error: 'No leads found' });
+
+    // Las bajas se resuelven de una vez para todo el lote, antes de enviar nada.
+    const bajas = await suprimidos(supabaseAdmin, leadsTodos.map(l => l.email));
+    const leads = leadsTodos.filter(l => !bajas.has(normalizarEmail(l.email)));
+    const omitidosPorBaja = leadsTodos.length - leads.length;
+    if (leads.length === 0) {
+      return res.status(409).json({ error: 'optout', message: 'Todos los contactos seleccionados se dieron de baja.', omitidos_por_baja: omitidosPorBaja });
+    }
 
     const fromName = sender_name || 'mainds';
     const fromAddr = `${fromName} <info@mainds.app>`;
@@ -21345,6 +21411,8 @@ app.post('/api/admin/leads/email-bulk', authenticateRequest, requireSuperAdmin, 
           .replace(/\{\{name\}\}/gi, lead.name || '')
           .replace(/\{\{email\}\}/gi, lead.email);
 
+        const htmlConBaja = conPieBaja(personalizedHtml, lead.email);
+
         let resendId = null;
         if (resendClient) {
           const result = await resendClient.emails.send({
@@ -21352,7 +21420,8 @@ app.post('/api/admin/leads/email-bulk', authenticateRequest, requireSuperAdmin, 
             to: lead.email,
             reply_to: 'info@mainds.app',
             subject: personalizedSubject,
-            html: personalizedHtml,
+            html: htmlConBaja,
+            headers: cabecerasBaja(lead.email),
           });
           resendId = result?.data?.id || result?.id;
         }
@@ -21362,7 +21431,7 @@ app.post('/api/admin/leads/email-bulk', authenticateRequest, requireSuperAdmin, 
           lead_id: lead.id,
           type: 'email_bulk',
           title: personalizedSubject,
-          body: personalizedHtml,
+          body: htmlConBaja,
           metadata: { resend_id: resendId, from: fromAddr, to: lead.email, sender_name: fromName, bulk: true },
           created_by: req.superAdminEmail,
         });
@@ -21376,7 +21445,7 @@ app.post('/api/admin/leads/email-bulk', authenticateRequest, requireSuperAdmin, 
           to_email: lead.email,
           to_name: lead.name || null,
           subject: personalizedSubject,
-          body_html: personalizedHtml,
+          body_html: htmlConBaja,
           is_read: true,
           resend_id: resendId,
           resend_status: 'sent',
