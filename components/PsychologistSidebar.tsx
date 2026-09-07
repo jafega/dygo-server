@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Home, Users, FileText, User as UserIcon, Calendar, Menu, X, ArrowLeftRight, ShieldCheck, Shield, Link2, BarChart3, AlertCircle, ClipboardList, Building2, Scroll, Upload, Bot, Zap, RefreshCw, FolderOpen } from 'lucide-react';
 import { createCheckoutSession, createBillingPortalSession, apiFetch } from '../services/authService';
-import { API_URL } from '../services/config';
+import { API_URL, isSuperAdminEmail } from '../services/config';
 
 const MaindsLogo: React.FC<{ className?: string }> = ({ className = "w-12 h-12" }) => (
   <svg viewBox="0 0 1242 641" xmlns="http://www.w3.org/2000/svg" className={className}>
@@ -444,11 +444,7 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
             <ArrowLeftRight size={16} />
             <span>Mi Diario Personal</span>
           </button>
-          {onSwitchToAdmin && [
-            'garryjavi@gmail.com',
-            'daniel.m.mendezv@gmail.com',
-            'info@mainds.app'
-          ].includes(userEmail?.toLowerCase() || '') && (
+          {onSwitchToAdmin && isSuperAdminEmail(userEmail) && (
             <button
               onClick={onSwitchToAdmin}
               className="w-full px-3 py-2 text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors text-left flex items-center gap-2 border border-red-100"

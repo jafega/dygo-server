@@ -188,6 +188,13 @@ export const login = async (email: string, password: string): Promise<User> => {
           });
           if (!res.ok) {
                if (res.status === 401) throw new Error("Credenciales inválidas");
+               // 403: la contraseña era correcta pero no se le deja entrar
+               // (cuenta bloqueada por un superadmin). El servidor manda el
+               // texto que hay que enseñar, así que se usa el suyo.
+               if (res.status === 403) {
+                 const cuerpo = await res.json().catch(() => ({} as any));
+                 throw new Error(cuerpo.error || "Tu cuenta está bloqueada.");
+               }
                throw new Error(`Error del servidor (${res.status})`);
           }
           const user = await res.json();
