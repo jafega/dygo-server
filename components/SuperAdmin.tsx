@@ -10,9 +10,9 @@ import {
   LayoutDashboard, X, Phone, Mail, Calendar, TrendingUp,
   BadgeEuro, Activity, CreditCard, ChevronRight, UserX,
   AlertCircle, FileText, CheckCircle2, Clock, Ban,
-  Euro, BarChart2, BookOpen, Mic, Zap,
+  Euro, BarChart2, BookOpen, Mic, Zap, Lock, Unlock,
 } from 'lucide-react';
-import { API_URL } from '../services/config';
+import { API_URL, isSuperAdminEmail } from '../services/config';
 import { includesNormalized, isTempEmail } from '../services/textUtils';
 import { apiFetch } from '../services/authService';
 
@@ -241,6 +241,12 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
   const [agentsLoading, setAgentsLoading] = useState(false);
   const [agentBusy, setAgentBusy] = useState<string | null>(null);
   const [draftOpen, setDraftOpen] = useState<string | null>(null);
+  // Bloqueo de cuentas: la confirmación va en un diálogo aparte porque deja a
+  // alguien fuera de la aplicación y conviene poder anotar por qué.
+  const [blockTarget, setBlockTarget] = useState<{ user: User; unblock: boolean } | null>(null);
+  const [blockReason, setBlockReason] = useState('');
+  const [blockBusy, setBlockBusy] = useState(false);
+  const [blockError, setBlockError] = useState('');
 
   useEffect(() => {
     loadStats();
@@ -339,6 +345,104 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
   };
 
   const handleRefresh = () => { loadStats(); loadUsers(); };
+
+  // ── Bloqueo de cuentas ──────────────────────────────────────────────────
+  // Bloquear deja a esa persona fuera (no entra ni con la sesión que tuviera
+  // abierta) y le corta todo el correo, comercial y transaccional. Se puede
+  // deshacer desde aquí mismo.
+  const esBloqueada = (u: User) => !!u.blocked_at;
+
+  // A un superadmin no se le puede bloquear — el backend lo rechaza igual, esto
+  // es solo para no ofrecer un botón que va a dar error.
+  const sePuedeBloquear = (u: User) => !isSuperAdminEmail(u.email || u.user_email);
+
+  const abrirDialogoBloqueo = (u: User, unblock: boolean) => {
+    setBlockTarget({ user: u, unblock });
+    setBlockReason('');
+    setBlockError('');
+  };
+
+  const confirmarBloqueo = async () => {
+    if (!blockTarget) return;
+    const { user: u, unblock } = blockTarget;
+    setBlockBusy(true);
+    setBlockError('');
+    try {
+      const res = await apiFetch(`${API_URL}/admin/users/${u.id}/${unblock ? 'unblock' : 'block'}`, {
+        method: 'POST',
+        body: JSON.stringify(unblock ? {} : { motivo: blockReason.trim() || undefined }),
+      });
+      const cuerpo = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setBlockError(cuerpo.error || `No se pudo completar (${res.status})`);
+        setBlockBusy(false);
+        return;
+      }
+      // Se refleja en la tabla sin volver a pedir la lista entera.
+      setUsers(prev => prev.map(x => x.id === u.id ? {
+        ...x,
+        blocked_at: unblock ? null : cuerpo.blocked_at,
+        blocked_by: unblock ? null : cuerpo.blocked_by,
+        blocked_reason: unblock ? null : cuerpo.blocked_reason,
+      } : x));
+      setBlockTarget(null);
+    } catch (e) {
+      console.error('Error al bloquear/desbloquear:', e);
+      setBlockError('Error de red. Inténtalo de nuevo.');
+    }
+    setBlockBusy(false);
+  };
+
+  // Se declaran como funciones y no como componentes a proposito: un componente
+  // definido dentro del render cambia de identidad en cada pasada y React
+  // desmonta y vuelve a montar su DOM. En una tabla de cientos de usuarios eso
+  // se paga en cada tecla del buscador.
+  const botonBloqueo = (u: User, compact?: boolean) => {
+    if (!sePuedeBloquear(u)) {
+      return compact ? null : <span className="text-xs text-slate-300">—</span>;
+    }
+    const bloqueada = esBloqueada(u);
+    return (
+      <button
+        onClick={e => { e.stopPropagation(); abrirDialogoBloqueo(u, bloqueada); }}
+        title={bloqueada ? 'Desbloquear: vuelve a poder entrar y recibir emails' : 'Bloquear: no podrá entrar ni recibirá ningún email'}
+        className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-colors ${
+          bloqueada
+            ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+            : 'bg-slate-100 text-slate-500 hover:bg-red-50 hover:text-red-700'
+        }`}
+      >
+        {bloqueada ? <Unlock size={12} /> : <Lock size={12} />}
+        {bloqueada ? 'Desbloquear' : 'Bloquear'}
+      </button>
+    );
+  };
+
+  // En la tabla el nombre ya va justo de ancho, así que la marca de bloqueo va
+  // en corto (solo el icono, con el motivo en el title) y la fila entera se
+  // tiñe: así se ve de un vistazo sin comerse el nombre.
+  const tituloBloqueo = (u: User) => [
+    'Cuenta bloqueada',
+    u.blocked_reason || null,
+    u.blocked_by ? `por ${u.blocked_by}` : null,
+  ].filter(Boolean).join(' · ');
+
+  // El title va en el span y no en el icono: lucide pasa las props sueltas al
+  // <svg>, y ahi `title` es un atributo cualquiera, no el globo de ayuda.
+  const marcaBloqueada = (u: User) => esBloqueada(u) ? (
+    <span className="inline-flex flex-shrink-0" title={tituloBloqueo(u)} aria-label="Cuenta bloqueada">
+      <Ban size={13} className="text-red-600" />
+    </span>
+  ) : null;
+
+  const badgeBloqueada = (u: User) => esBloqueada(u) ? (
+    <span
+      className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-100 text-red-700 text-xs font-semibold rounded-full flex-shrink-0"
+      title={tituloBloqueo(u)}
+    >
+      <Ban size={10} /> Bloqueada
+    </span>
+  ) : null;
 
   const isLoading = statsLoading || loading;
 
@@ -1129,7 +1233,7 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
             ) : (
               <>
                 {/* Header row */}
-                <div className="hidden lg:grid grid-cols-[2fr_2fr_1fr_1fr_1.5fr_1.5fr_1fr_1fr_28px] gap-3 px-5 py-2.5 bg-slate-50 border-b border-slate-100 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                <div className="hidden lg:grid grid-cols-[2fr_2fr_1fr_1fr_1.5fr_1.5fr_1fr_1fr_116px_28px] gap-3 px-5 py-2.5 bg-slate-50 border-b border-slate-100 text-xs font-semibold uppercase tracking-wide text-slate-400">
                   <span>Nombre</span>
                   <span>Email</span>
                   <span>Teléfono</span>
@@ -1138,6 +1242,7 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                   <span>Estado</span>
                   <span>Relaciones</span>
                   <span>Registro</span>
+                  <span>Acceso</span>
                   <span />
                 </div>
                 <div className="divide-y divide-slate-100">
@@ -1147,7 +1252,7 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                     return (
                       <div
                         key={u.id}
-                        className={`${isPsych && pStat ? 'cursor-pointer' : ''} hover:bg-slate-50 transition-colors`}
+                        className={`${isPsych && pStat ? 'cursor-pointer' : ''} ${esBloqueada(u) ? 'bg-red-50/60 hover:bg-red-50' : 'hover:bg-slate-50'} transition-colors`}
                         onClick={() => isPsych && pStat && openPsychDrawer(pStat)}
                       >
                         {/* ── Mobile card layout ─────────────────── */}
@@ -1161,6 +1266,10 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                               <p className="text-xs text-slate-400 truncate">
                                 {!isTempEmail(u.email) ? u.email : <span className="italic text-slate-300">Sin email</span>}
                               </p>
+                              <div className="mt-1 flex items-center gap-2">
+                                {badgeBloqueada(u)}
+                                {botonBloqueo(u, true)}
+                              </div>
                             </div>
                             <div className="flex items-center gap-2 flex-shrink-0">
                               {isPsych ? (
@@ -1194,12 +1303,13 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                         </div>
 
                         {/* ── Desktop table row ─────────────────── */}
-                        <div className="hidden lg:grid grid-cols-[2fr_2fr_1fr_1fr_1.5fr_1.5fr_1fr_1fr_28px] gap-3 items-center px-5 py-3">
+                        <div className="hidden lg:grid grid-cols-[2fr_2fr_1fr_1fr_1.5fr_1.5fr_1fr_1fr_116px_28px] gap-3 items-center px-5 py-3">
                           {/* Name */}
-                          <div className="flex items-center gap-3 min-w-0">
+                          <div className="flex items-center gap-2 min-w-0">
                             <div className="flex-shrink-0 w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-white text-xs font-bold">
                               {u.name?.charAt(0)?.toUpperCase() || '?'}
                             </div>
+                            {marcaBloqueada(u)}
                             <span className="text-sm font-medium text-slate-800 truncate">{u.name || 'Sin nombre'}</span>
                           </div>
 
@@ -1268,6 +1378,11 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                             ) : (
                               <span className="text-xs text-slate-300">—</span>
                             )}
+                          </div>
+
+                          {/* Bloquear / desbloquear */}
+                          <div>
+                            {botonBloqueo(u)}
                           </div>
 
                           {/* Arrow */}
@@ -1344,6 +1459,33 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                   ) : null}
                 </div>
               </div>
+
+              {/* Acceso a la aplicación */}
+              {(() => {
+                const cuenta = users.find(x => x.id === selectedPsych.id);
+                if (!cuenta || !sePuedeBloquear(cuenta)) return null;
+                const bloqueada = esBloqueada(cuenta);
+                return (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Acceso</p>
+                    <div className={`rounded-xl px-4 py-3 space-y-2 ${bloqueada ? 'bg-red-50 border border-red-100' : 'bg-slate-50'}`}>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-slate-600">
+                          {bloqueada ? 'Cuenta bloqueada' : 'Cuenta activa'}
+                        </span>
+                        {botonBloqueo(cuenta)}
+                      </div>
+                      {bloqueada && (
+                        <p className="text-xs text-red-700">
+                          {cuenta.blocked_reason ? `${cuenta.blocked_reason} · ` : ''}
+                          Bloqueada{cuenta.blocked_by ? ` por ${cuenta.blocked_by}` : ''}
+                          {cuenta.blocked_at ? ` el ${new Date(cuenta.blocked_at).toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}` : ''}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Subscription */}
               <div className="space-y-2">
@@ -1500,6 +1642,100 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
         <React.Suspense fallback={<div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-2 border-indigo-200 border-t-indigo-600 rounded-full" /></div>}>
           <EmailInbox />
         </React.Suspense>
+      )}
+
+      {/* ── CONFIRMAR BLOQUEO / DESBLOQUEO ───────── */}
+      {blockTarget && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4"
+          onClick={() => !blockBusy && setBlockTarget(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3 px-5 py-4 border-b border-slate-100">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                blockTarget.unblock ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
+              }`}>
+                {blockTarget.unblock ? <Unlock size={18} /> : <Lock size={18} />}
+              </div>
+              <div className="min-w-0">
+                <h3 className="font-bold text-slate-900">
+                  {blockTarget.unblock ? 'Desbloquear cuenta' : 'Bloquear cuenta'}
+                </h3>
+                <p className="text-sm text-slate-500 truncate">
+                  {blockTarget.user.name || 'Sin nombre'} · {blockTarget.user.email}
+                </p>
+              </div>
+            </div>
+
+            <div className="px-5 py-4 space-y-3">
+              {blockTarget.unblock ? (
+                <>
+                  <p className="text-sm text-slate-600">
+                    Volverá a poder iniciar sesión y a recibir emails con normalidad.
+                  </p>
+                  {blockTarget.user.blocked_reason && (
+                    <p className="text-xs text-slate-500 bg-slate-50 rounded-xl px-3 py-2">
+                      <span className="font-semibold">Se bloqueó por:</span> {blockTarget.user.blocked_reason}
+                    </p>
+                  )}
+                  <p className="text-xs text-slate-400">
+                    Si esta persona se había dado de baja de los emails por su cuenta, seguirá de baja.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <ul className="text-sm text-slate-600 space-y-1.5">
+                    <li className="flex gap-2"><Ban size={15} className="text-red-500 flex-shrink-0 mt-0.5" /> No podrá iniciar sesión, y se le cierra la sesión que tenga abierta.</li>
+                    <li className="flex gap-2"><Mail size={15} className="text-red-500 flex-shrink-0 mt-0.5" /> No recibirá ningún email: ni avisos, ni recordatorios, ni facturas.</li>
+                    <li className="flex gap-2"><CheckCircle2 size={15} className="text-slate-400 flex-shrink-0 mt-0.5" /> No se borra nada. Puedes desbloquearla cuando quieras.</li>
+                  </ul>
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">
+                      Motivo (opcional)
+                    </label>
+                    <input
+                      value={blockReason}
+                      onChange={e => setBlockReason(e.target.value)}
+                      maxLength={500}
+                      placeholder="Para acordarte dentro de seis meses…"
+                      className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 transition-all"
+                    />
+                  </div>
+                </>
+              )}
+
+              {blockError && (
+                <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 border border-amber-200">
+                  <AlertCircle size={15} className="text-amber-600 mt-0.5 flex-shrink-0" />
+                  <p className="text-xs text-amber-800">{blockError}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 px-5 py-4 bg-slate-50 border-t border-slate-100">
+              <button
+                onClick={() => setBlockTarget(null)}
+                disabled={blockBusy}
+                className="px-4 py-2 rounded-xl text-sm font-medium text-slate-500 hover:bg-slate-200 transition-colors disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmarBloqueo}
+                disabled={blockBusy}
+                className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-colors disabled:opacity-60 ${
+                  blockTarget.unblock ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'
+                }`}
+              >
+                {blockBusy && <RefreshCcw size={14} className="animate-spin" />}
+                {blockTarget.unblock ? 'Desbloquear' : 'Bloquear'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

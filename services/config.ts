@@ -34,8 +34,26 @@ export const API_BASE_URL = (() => {
 // Simple check to see if we should try using backend.
 // In production this should be true. For development you can allow a local fallback
 // by setting VITE_ALLOW_LOCAL_FALLBACK=true in .env.local (not recommended for prod).
-export const USE_BACKEND = true; 
+export const USE_BACKEND = true;
 export const ALLOW_LOCAL_FALLBACK = false;
+
+// Emails con acceso al panel de superadmin.
+//
+// Esto solo decide lo que se PINTA (la pestaña de admin, el botón de bloquear).
+// Quien manda es SUPERADMIN_EMAILS del backend, que es quien contesta 403 a
+// cualquiera que no esté en la lista: cambiar esto en el navegador no da acceso
+// a nada.
+//
+// Se lee de VITE_SUPERADMIN_EMAILS, con el propietario como valor por defecto
+// para que un despliegue sin la variable no se quede sin panel.
+export const SUPERADMIN_EMAILS: string[] =
+  String((import.meta as any).env?.VITE_SUPERADMIN_EMAILS || 'garryjavi@gmail.com')
+    .split(',')
+    .map(e => e.trim().toLowerCase())
+    .filter(Boolean);
+
+export const isSuperAdminEmail = (email?: string | null): boolean =>
+  SUPERADMIN_EMAILS.includes(String(email || '').trim().toLowerCase());
 
 import { createClient } from '@supabase/supabase-js';
 

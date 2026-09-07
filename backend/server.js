@@ -22,7 +22,7 @@ import {
   suprimidos, estaDadoDeBaja, normalizarEmail, firmaBaja
 } from './utils/email-optout.js';
 import {
-  idsBloqueados, bloqueadoPorId, emailBloqueado, invalidarCacheBloqueos
+  bloqueadoPorId, emailBloqueado, emailsBloqueados, invalidarCacheBloqueos
 } from './utils/user-block.js';
 import {
   verificarFirmaResend, motivoDeSupresion, pideBaja,
@@ -689,7 +689,7 @@ const authenticateRequest = async (req, res, next) => {
       // Va como 401 a propósito: el cliente ya sabe cerrar sesión ante un 401
       // (ver apiFetch en services/authService.ts) y así no hace falta que cada
       // pantalla trate este caso.
-      if (await bloqueadoPorId(supabaseAdmin, userId)) {
+      if (await cuentaBloqueadaPorId(userId)) {
         revokeSessionToken(token);
         auditLog('ACCESO_CUENTA_BLOQUEADA', { userId, ruta: req.originalUrl });
         return res.status(401).json({
@@ -719,16 +719,26 @@ const isSuperAdmin = (email) => {
 // --- CUENTAS BLOQUEADAS ---
 // Un superadmin puede bloquear una cuenta desde el panel: ver
 // backend/utils/user-block.js y los endpoints /api/admin/users/:id/block.
-//
-// Se comprueba sobre la fila que ya tenemos en la mano cuando la hay (el login
-// acaba de leerla, así que el dato es del momento y no de la caché de 60s), y
-// solo si no la hay se cae a la caché por id. Así el bloqueo cierra la puerta
-// en el mismo instante en los dos sitios donde más importa: iniciar sesión y
-// registrarse.
+
+/** Por id. Con Supabase va contra la caché de bloqueados (60s). */
+const cuentaBloqueadaPorId = async (userId) => {
+  if (!userId) return false;
+  if (supabaseAdmin) return bloqueadoPorId(supabaseAdmin, userId);
+  // Sin Supabase (desarrollo con db.json) el dato está en la fila local.
+  const fila = (getDb().users || []).find(u => String(u.id) === String(userId));
+  return !!fila?.blocked_at;
+};
+
+/**
+ * Sobre una fila que ya tenemos en la mano. Se prefiere a la anterior donde se
+ * pueda: el login acaba de leer esa fila, así que el dato es del momento y no
+ * de la caché. Así el bloqueo cierra la puerta en el mismo instante en los dos
+ * sitios donde más importa, iniciar sesión y registrarse.
+ */
 const cuentaBloqueada = async (user) => {
   if (!user) return false;
   if (user.blocked_at) return true;
-  return bloqueadoPorId(supabaseAdmin, user.id || user.data?.id);
+  return cuentaBloqueadaPorId(user.id || user.data?.id);
 };
 
 // Respuesta única para quien intenta entrar con la cuenta bloqueada. 403 y no
@@ -4393,6 +4403,14 @@ app.post('/api/users/:patientId/invite-to-mainds', authenticateRequest, async (r
     const frontendUrl = process.env.FRONTEND_URL || 'https://mi.mainds.app';
     const inviteUrl = `${frontendUrl}/?invite_token=${token}`;
 
+    // Cuenta bloqueada: no se le escribe ni para invitarla. La invitación no
+    // lleva pie de baja porque es gestión de su tratamiento, así que el
+    // bloqueo se comprueba aquí a mano.
+    if (await emailBloqueado(supabaseAdmin, patientEmail)) {
+      auditLog('INVITE_NO_ENVIADO_BLOQUEADO', { psychologistId, patientId, patientEmail });
+      return res.status(403).json({ error: 'Esa cuenta está bloqueada y no puede recibir correo.' });
+    }
+
     const { Resend } = await import('resend');
     const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -7060,6 +7078,7 @@ app.get('/api/users', authenticateRequest, async (req, res) => {
     const id = req.query.id || req.query.userId;
     const ids = req.query.ids; // comma-separated batch
     const email = req.query.email;
+    let esSuperadmin = false;
 
     // --- Authorization (BOLA/IDOR prevention) ---
     const authedId = req.authenticatedUserId;
@@ -7095,6 +7114,10 @@ app.get('/api/users', authenticateRequest, async (req, res) => {
       if (!requesterIsPsych && !isSuperAdmin(requesterEmail)) {
         return res.status(403).json({ error: 'Acceso denegado' });
       }
+      // El listado completo lo puede pedir cualquier psicólogo, así que quién
+      // bloqueó a quién y por qué solo se manda si lo pide un superadmin: es
+      // una nota interna sobre una persona, no un dato de la aplicación.
+      esSuperadmin = isSuperAdmin(requesterEmail);
     }
 
     if (supabaseAdmin) {
@@ -7180,7 +7203,12 @@ app.get('/api/users', authenticateRequest, async (req, res) => {
         if (!key) continue;
         if (seen.has(key)) continue;
         seen.add(key);
-        unique.push(stripSensitiveFields(u));
+        const seguro = stripSensitiveFields(u);
+        if (!esSuperadmin) {
+          delete seguro.blocked_by;
+          delete seguro.blocked_reason;
+        }
+        unique.push(seguro);
       }
       return res.json(unique);
     }
@@ -7297,7 +7325,16 @@ app.get('/api/users', authenticateRequest, async (req, res) => {
     });
     if (changed) saveDb(db);
 
-    res.json(db.users.map(stripSensitiveFields));
+    res.json(db.users.map(u => {
+      const seguro = stripSensitiveFields(u);
+      // Igual que en la rama de Supabase: el motivo del bloqueo y quién lo puso
+      // son nota interna y solo salen para un superadmin.
+      if (!esSuperadmin) {
+        delete seguro.blocked_by;
+        delete seguro.blocked_reason;
+      }
+      return seguro;
+    }));
   } catch (err) {
     console.error('Error in /api/users', err);
     res.status(500).json({ error: 'Error interno del servidor' });
@@ -10849,11 +10886,21 @@ app.post('/api/invoices/:id/send-email', authenticateRequest, async (req, res) =
     const psychEmail = psychUser?.user_email || psychUser?.email || '';
 
     // Construir lista de destinatarios (psicólogo + gestores), sin duplicados ni placeholders
-    const allRecipients = [...new Set([psychEmail, ...gestorEmails])]
+    const candidatos = [...new Set([psychEmail, ...gestorEmails])]
       .filter(e => e && !isTempEmail(e));
 
+    // Una cuenta bloqueada no recibe correo, ni siquiera sus propias facturas.
+    // Se filtra por destinatario y no de golpe: el gestor puede estar bien
+    // aunque el psicólogo no, y al revés.
+    const bloqueados = await emailsBloqueados(supabaseAdmin, candidatos);
+    const allRecipients = candidatos.filter(e => !bloqueados.has(String(e).trim().toLowerCase()));
+
     if (allRecipients.length === 0) {
-      return res.status(400).json({ error: 'No hay destinatarios configurados' });
+      return res.status(400).json({
+        error: bloqueados.size > 0
+          ? 'Los destinatarios configurados están bloqueados y no pueden recibir correo.'
+          : 'No hay destinatarios configurados'
+      });
     }
 
     // Generar HTML de la factura
@@ -16146,6 +16193,12 @@ app.post('/api/sessions/:sessionId/send-reminder', authenticateRequest, async (r
       psychPhone
     });
 
+    // Cuenta bloqueada: no se le manda nada, ni recordatorios.
+    if (await emailBloqueado(supabaseAdmin, patientEmail)) {
+      auditLog('RECORDATORIO_NO_ENVIADO_BLOQUEADO', { sessionId: req.params.sessionId, patientEmail });
+      return res.status(403).json({ error: 'Esa cuenta está bloqueada y no puede recibir correo.' });
+    }
+
     const emailPayload = {
       from: 'mainds <no-reply@mainds.app>',
       to: [patientEmail],
@@ -20068,6 +20121,12 @@ app.post('/api/signatures/:id/send-email', authenticateRequest, async (req, res)
 </body>
 </html>`;
 
+    // Cuenta bloqueada: no se le manda nada, ni documentos para firmar.
+    if (await emailBloqueado(supabaseAdmin, patientEmail)) {
+      auditLog('FIRMA_NO_ENVIADA_BLOQUEADO', { signatureId: req.params.id, patientEmail });
+      return res.status(403).json({ error: 'Esa cuenta está bloqueada y no puede recibir correo.' });
+    }
+
     const emailPayload = {
       from: 'mainds <no-reply@mainds.app>',
       to: [patientEmail],
@@ -20453,6 +20512,186 @@ app.get('/api/_audit/selftest', authenticateRequest, requireSuperAdmin, async (r
 app.post('/api/_audit/reset', authenticateRequest, requireSuperAdmin, (req, res) => {
   resetAudit();
   return res.json({ ok: true, reset: true });
+});
+
+// ─── BLOQUEO DE CUENTAS (solo superadmin) ─────────────────────────────────────
+//
+//   POST /api/admin/users/:id/block    { motivo? }  → deja fuera a esa cuenta
+//   POST /api/admin/users/:id/unblock                → la devuelve a la normalidad
+//
+// Bloquear hace tres cosas a la vez, y hacen falta las tres:
+//
+//   1. Marca la fila (blocked_at/by/reason). Es lo que impide iniciar sesión y
+//      lo que corta la sesión que ya tuviera abierta, en authenticateRequest.
+//   2. La mete en email_optouts con source 'bloqueo_admin', para que ni un
+//      envío masivo del CRM ni una automatización le escriban.
+//   3. Le revoca los tokens que esta instancia tenga en memoria y vacía la
+//      caché de bloqueados, para que el corte sea inmediato aquí y no dentro
+//      de 60s.
+//
+// Desbloquear deshace las tres, con un matiz en la baja de correo: solo se
+// retira si la puso el bloqueo. Si esa persona se había dado de baja ella
+// misma antes, sigue de baja — desbloquear no es re-suscribir a nadie.
+//
+// A un superadmin no se le puede bloquear. Es lo que evita que un descuido
+// deje el panel sin nadie dentro.
+
+const revocarSesionesDeUsuario = (userId) => {
+  let revocadas = 0;
+  for (const [token, sesion] of activeSessions.entries()) {
+    if (String(sesion.userId) === String(userId)) {
+      activeSessions.delete(token);
+      revocadas++;
+    }
+  }
+  return revocadas;
+};
+
+// Lee la cuenta a bloquear/desbloquear de donde toque y comprueba que se puede
+// tocar. Devuelve { error, status } si no, o { user } si sí.
+const cargarCuentaParaBloqueo = async (req) => {
+  const id = String(req.params.id || '');
+  if (!id) return { status: 400, error: 'Falta el id de la cuenta' };
+
+  let user = null;
+  if (supabaseAdmin) {
+    user = await readSupabaseRowById('users', id);
+  }
+  if (!user) {
+    const db = getDb();
+    user = (db.users || []).find(u => String(u.id) === id) || null;
+  }
+  if (!user) return { status: 404, error: 'Cuenta no encontrada' };
+
+  const email = user.user_email || user.email || '';
+  if (isSuperAdmin(email)) {
+    return { status: 403, error: 'No se puede bloquear a un superadmin' };
+  }
+  if (String(user.id) === String(req.authenticatedUserId)) {
+    return { status: 403, error: 'No puedes bloquear tu propia cuenta' };
+  }
+  return { user, email };
+};
+
+app.post('/api/admin/users/:id/block', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    const cargada = await cargarCuentaParaBloqueo(req);
+    if (cargada.error) return res.status(cargada.status).json({ error: cargada.error });
+    const { user, email } = cargada;
+
+    // Texto libre, lo escribe un superadmin y solo lo lee el panel (React ya
+    // escapa al pintar): se guarda tal cual, sin escapar, para que el motivo se
+    // lea como se escribió.
+    const motivo = String(req.body?.motivo || req.body?.reason || '').trim().slice(0, 500) || null;
+    const ahora = new Date().toISOString();
+
+    if (supabaseAdmin) {
+      const { error } = await supabaseAdmin.from('users').update({
+        blocked_at: ahora,
+        blocked_by: req.superAdminEmail,
+        blocked_reason: motivo
+      }).eq('id', user.id);
+      if (error) throw error;
+
+      // Que no le llegue tampoco el correo comercial que sale del CRM.
+      if (!isTempEmail(email)) {
+        const { error: errBaja } = await supabaseAdmin.from('email_optouts').upsert(
+          [{
+            email: normalizarEmail(email),
+            user_id: String(user.id),
+            reason: 'cuenta_bloqueada',
+            source: 'bloqueo_admin'
+          }],
+          { onConflict: 'email' }
+        );
+        if (errBaja) console.error('[bloqueo] no se pudo dar de baja el email:', errBaja.message || errBaja);
+      }
+    } else {
+      const db = getDb();
+      const fila = (db.users || []).find(u => String(u.id) === String(user.id));
+      if (fila) {
+        fila.blocked_at = ahora;
+        fila.blocked_by = req.superAdminEmail;
+        fila.blocked_reason = motivo;
+        await saveDb(db, { awaitPersistence: true });
+      }
+    }
+
+    // Caché al día e instancia limpia antes de contestar.
+    invalidarCacheBloqueos();
+    const sesiones = revocarSesionesDeUsuario(user.id);
+    if (supabaseDbCache?.users?.length) {
+      const enCache = supabaseDbCache.users.find(u => String(u.id) === String(user.id));
+      if (enCache) enCache.blocked_at = ahora;
+    }
+
+    auditLog('CUENTA_BLOQUEADA', {
+      por: req.superAdminEmail, userId: user.id, email, motivo, sesionesRevocadas: sesiones
+    });
+    console.log(`🚫 ${req.superAdminEmail} bloqueó la cuenta ${email} (${user.id})`);
+
+    return res.json({
+      ok: true,
+      id: user.id,
+      blocked_at: ahora,
+      blocked_by: req.superAdminEmail,
+      blocked_reason: motivo,
+      sesiones_revocadas: sesiones
+    });
+  } catch (err) {
+    console.error('[bloqueo] Error bloqueando cuenta:', err);
+    return res.status(500).json({ error: 'No se pudo bloquear la cuenta' });
+  }
+});
+
+app.post('/api/admin/users/:id/unblock', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    const cargada = await cargarCuentaParaBloqueo(req);
+    if (cargada.error) return res.status(cargada.status).json({ error: cargada.error });
+    const { user, email } = cargada;
+
+    if (supabaseAdmin) {
+      const { error } = await supabaseAdmin.from('users').update({
+        blocked_at: null,
+        blocked_by: null,
+        blocked_reason: null
+      }).eq('id', user.id);
+      if (error) throw error;
+
+      // Solo se retira la baja que puso el bloqueo: si se dio de baja por su
+      // cuenta, sigue de baja.
+      if (!isTempEmail(email)) {
+        const { error: errBaja } = await supabaseAdmin.from('email_optouts')
+          .delete()
+          .eq('email', normalizarEmail(email))
+          .eq('source', 'bloqueo_admin');
+        if (errBaja) console.error('[bloqueo] no se pudo retirar la baja del email:', errBaja.message || errBaja);
+      }
+    } else {
+      const db = getDb();
+      const fila = (db.users || []).find(u => String(u.id) === String(user.id));
+      if (fila) {
+        fila.blocked_at = null;
+        fila.blocked_by = null;
+        fila.blocked_reason = null;
+        await saveDb(db, { awaitPersistence: true });
+      }
+    }
+
+    invalidarCacheBloqueos();
+    if (supabaseDbCache?.users?.length) {
+      const enCache = supabaseDbCache.users.find(u => String(u.id) === String(user.id));
+      if (enCache) enCache.blocked_at = null;
+    }
+
+    auditLog('CUENTA_DESBLOQUEADA', { por: req.superAdminEmail, userId: user.id, email });
+    console.log(`✅ ${req.superAdminEmail} desbloqueó la cuenta ${email} (${user.id})`);
+
+    return res.json({ ok: true, id: user.id, blocked_at: null });
+  } catch (err) {
+    console.error('[bloqueo] Error desbloqueando cuenta:', err);
+    return res.status(500).json({ error: 'No se pudo desbloquear la cuenta' });
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { Resend } from 'resend';
 import twilio from 'twilio';
+import { idsBloqueados } from '../../backend/utils/user-block.js';
 
 const isTempEmail = (email) => !email || email.includes('@noemail.mainds.local') || email.includes('@noemail.dygo.local');
 
@@ -57,6 +58,14 @@ export default async function handler(req, res) {
   let sent = 0;
   const errors = [];
 
+  // Cuentas bloqueadas por un superadmin: una sola consulta para toda la
+  // pasada. Se salta la sesión completa (email y WhatsApp) cuando el bloqueado
+  // es el paciente — no recibe nada — y también cuando es el psicólogo: el
+  // recordatorio sale en su nombre y con su email de respuesta, y una cuenta
+  // bloqueada no sigue escribiendo a nadie.
+  const bloqueados = await idsBloqueados(supabase, { force: true });
+  let omitidosPorBloqueo = 0;
+
   // Cache psychologist profile lookups to avoid N+1 queries
   const profileCache = new Map();
   const getProfile = async (psychologistId) => {
@@ -76,6 +85,11 @@ export default async function handler(req, res) {
 
     // Skip session if neither channel is enabled
     if (!emailReminderEnabled && !whatsappReminderEnabled) continue;
+
+    if (bloqueados.has(String(session.patient_user_id)) || bloqueados.has(String(session.psychologist_user_id))) {
+      omitidosPorBloqueo++;
+      continue;
+    }
 
     const sessionTime    = new Date(session.starts_on).getTime();
     const isTodaySession    = sessionTime <= todayEnd.getTime();
@@ -185,7 +199,10 @@ export default async function handler(req, res) {
     }
   }
 
-  return res.status(200).json({ sent, errors });
+  if (omitidosPorBloqueo > 0) {
+    console.log(`[send-reminders] 🚫 ${omitidosPorBloqueo} sesión(es) omitida(s) por cuenta bloqueada`);
+  }
+  return res.status(200).json({ sent, errors, omitidos_por_bloqueo: omitidosPorBloqueo });
 }
 
 function buildReminderEmail({ patientFirstName, sessionDateStr, sessionTimeStr, label, isTodaySession, meetLink, sessionType, psychName, psychEmail, psychPhone }) {

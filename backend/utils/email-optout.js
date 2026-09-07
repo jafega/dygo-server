@@ -21,6 +21,7 @@
 // darles botón de baja confundiría a quien lo pulse esperando lo otro.
 
 import crypto from 'crypto';
+import { emailsBloqueados } from './user-block.js';
 
 // La cabecera List-Unsubscribe-Post exige una URL https: un one-click sobre
 // http lo rechazan los clientes de correo. FRONTEND_URL vale http en local y
@@ -83,8 +84,17 @@ export const conPieBaja = (html, email) => {
 };
 
 /**
- * Devuelve el conjunto de direcciones dadas de baja, de entre las que se pasan.
- * Una sola consulta: se llama antes de cualquier envío, incluidos los masivos.
+ * Devuelve el conjunto de direcciones a las que NO se puede escribir, de entre
+ * las que se pasan. Son dos cosas distintas que aquí se suman:
+ *
+ *   - Las que se dieron de baja ellas mismas (email_optouts).
+ *   - Las de cuentas que un superadmin ha bloqueado (users.blocked_at). El
+ *     bloqueo va más allá de la baja: corta también el correo transaccional,
+ *     así que los envíos de factura, recordatorio e invitación comprueban
+ *     `emailBloqueado` aparte — ver backend/utils/user-block.js.
+ *
+ * Una sola consulta por cada cosa: se llama antes de cualquier envío, incluidos
+ * los masivos.
  *
  * Ante un fallo de lectura devuelve un conjunto vacío y lo registra: preferimos
  * no bloquear un envío legítimo por un error transitorio, pero el fallo tiene
@@ -93,8 +103,8 @@ export const conPieBaja = (html, email) => {
 export async function suprimidos(supabase, emails) {
   const lista = [...new Set((emails || []).map(normalizarEmail).filter(Boolean))];
   if (!supabase || lista.length === 0) return new Set();
+  const encontrados = new Set();
   try {
-    const encontrados = new Set();
     const LOTE = 200;
     for (let i = 0; i < lista.length; i += LOTE) {
       const { data, error } = await supabase
@@ -104,11 +114,11 @@ export async function suprimidos(supabase, emails) {
       if (error) throw error;
       for (const r of data || []) encontrados.add(normalizarEmail(r.email));
     }
-    return encontrados;
   } catch (err) {
     console.error('[email-optout] no se pudo leer email_optouts:', err?.message || err);
-    return new Set();
   }
+  for (const e of await emailsBloqueados(supabase, lista)) encontrados.add(e);
+  return encontrados;
 }
 
 /** Atajo para un único destinatario. */

@@ -20,6 +20,12 @@ export interface User {
   // Master user flag — bypasses all subscription/trial restrictions
   master?: boolean;
 
+  // Bloqueo desde el panel de superadmin: sin fecha, la cuenta es normal; con
+  // fecha, no puede entrar ni recibir correo. Columnas de la tabla users.
+  blocked_at?: string | null;
+  blocked_by?: string | null;
+  blocked_reason?: string | null;
+
   // Premium subscription fields
   isPremium?: boolean;
   premiumUntil?: number; // timestamp in ms

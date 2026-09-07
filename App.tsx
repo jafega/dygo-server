@@ -2,7 +2,7 @@
 import { ViewState, JournalEntry, Goal, UserSettings, WeeklyReport, User } from './types';
 import * as StorageService from './services/storageService';
 import * as AuthService from './services/authService';
-import { USE_BACKEND, API_URL } from './services/config';
+import { USE_BACKEND, API_URL, isSuperAdminEmail } from './services/config';
 import { detectDefaultPrefix } from './services/phoneUtils';
 import { setActiveCurrency } from './services/currency';
 import { isTempEmail } from './services/textUtils';
@@ -1129,9 +1129,11 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
     </button>
   );
 
-  // Superadmin View - Solo para garryjavi@gmail.com y daniel.m.mendezv@gmail.com
-  const SUPERADMIN_EMAILS_FRONTEND = ['garryjavi@gmail.com', 'daniel.m.mendezv@gmail.com', 'info@mainds.app'];
-  const isSuperAdminUser = SUPERADMIN_EMAILS_FRONTEND.includes(currentUser?.email?.toLowerCase() || '');
+  // Superadmin View — la lista sale de VITE_SUPERADMIN_EMAILS (ver
+  // services/config.ts) para que no haya dos listas que mantener a mano. Esto
+  // solo enseña u oculta la pestaña: el backend valida cada petición contra su
+  // propia SUPERADMIN_EMAILS.
+  const isSuperAdminUser = isSuperAdminEmail(currentUser?.email);
 
   if (psychViewMode === 'ADMIN' && isSuperAdminUser) {
     const goBackFromAdmin = () => setPsychViewMode(currentUser?.is_psychologist === true ? 'DASHBOARD' : 'PERSONAL');
@@ -1801,7 +1803,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
 
           <div className={`${sidebarOpen ? 'block' : 'hidden'} md:block p-3 border-t border-slate-200 space-y-2`}>
             {/* Admin tab - solo para superadmins */}
-            {SUPERADMIN_EMAILS_FRONTEND.includes(currentUser?.email?.toLowerCase() || '') && (
+            {isSuperAdminUser && (
               <button
                 onClick={() => { setPsychViewMode('ADMIN'); if (window.innerWidth < 768) setSidebarOpen(false); }}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium mb-2 ${
