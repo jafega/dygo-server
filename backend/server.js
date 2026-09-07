@@ -21054,8 +21054,65 @@ app.get('/api/admin/funnel', authenticateRequest, requireSuperAdmin, async (req,
     }
     atRisk.sort((a, b) => a.daysLeft - b.daysLeft);
 
+    /* ── Embudo comercial: lo que pasa ANTES de que exista una cuenta ── */
+    // El embudo de producto arranca en `signup`, asi que se dejaba fuera a los
+    // mas de mil leads que aun no se han registrado — justo los que hay que
+    // trabajar con venta activa. Estas etapas salen de la tabla `leads`, no de
+    // product_events, porque un lead sin cuenta no genera eventos de producto.
+    const cuenta = async (aplicarFiltros) => {
+      let q = supabaseAdmin.from('leads').select('id', { count: 'exact', head: true });
+      q = aplicarFiltros(q);
+      const { count, error } = await q;
+      if (error) throw error;
+      return count || 0;
+    };
+
+    const desdeVentana = new Date(now - days * DAY_MS).toISOString();
+
+    const [
+      leadsTotales, leadsVivos, leadsNuevosVentana,
+      leadsContactados, leadsRegistrados, leadsDePago, leadsPerdidos, leadsDeBaja
+    ] = await Promise.all([
+      cuenta(q => q),
+      cuenta(q => q.not('stage', 'in', '(won,lost,cancelled)')),
+      cuenta(q => q.gte('created_at', desdeVentana)),
+      // "Contactado" es haber recibido algo de verdad, no la etiqueta de etapa:
+      // la etapa se puede mover a mano sin haber escrito nunca.
+      cuenta(q => q.not('last_contacted_at', 'is', null)),
+      cuenta(q => q.not('app_user_id', 'is', null)),
+      cuenta(q => q.eq('app_is_subscribed', true)),
+      cuenta(q => q.in('stage', ['lost', 'cancelled'])),
+      cuenta(q => q.contains('tags', ['baja']))
+    ]);
+
+    const comercial = [
+      { key: 'leads', label: 'Leads en cartera', total: leadsTotales, fromPrevious: null },
+      { key: 'contactados', label: 'Contactados', total: leadsContactados },
+      { key: 'registrados', label: 'Se registran', total: leadsRegistrados },
+      { key: 'de_pago', label: 'Pagan', total: leadsDePago }
+    ].map((paso, i, arr) => ({
+      ...paso,
+      fromPrevious: i === 0 || !arr[i - 1].total
+        ? null
+        : Math.round((paso.total / arr[i - 1].total) * 1000) / 10,
+      fromLeads: leadsTotales ? Math.round((paso.total / leadsTotales) * 1000) / 10 : null
+    }));
+
+    // Cuantos quedan por tocar: es la cifra que dice si hay trabajo para el
+    // equipo de ventas o si hace falta captar mas.
+    const sinContactar = Math.max(0, leadsVivos - leadsContactados);
+
     return res.json({
       days,
+      comercial,
+      cartera: {
+        total: leadsTotales,
+        vivos: leadsVivos,
+        nuevos_en_ventana: leadsNuevosVentana,
+        sin_contactar: sinContactar,
+        perdidos: leadsPerdidos,
+        de_baja: leadsDeBaja
+      },
       funnel,
       series: Object.values(seriesByDay),
       activeTrials,
