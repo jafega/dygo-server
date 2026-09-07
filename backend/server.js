@@ -20879,6 +20879,20 @@ app.get('/api/agent/leads/next', requireAgentToken, async (req, res) => {
     // Y ademas se excluye a quien consta como PACIENTE en la app: hay leads
     // importados cuyo email pertenece a un paciente, y a esos no se les
     // escribe de ventas jamas.
+    // Un borrador sin aprobar significa que a ese lead YA se le ha escrito, y
+    // solo falta que una persona le de el visto bueno. Sin esto el agente lo
+    // volveria a elegir en cada pasada: `last_contacted_at` no se toca hasta
+    // que el email sale de verdad (ver enviarComoAgente), asi que en modo
+    // borrador el lead sigue pareciendo virgen y se le acumularian borradores
+    // duplicados un dia tras otro.
+    const { data: conBorrador } = await supabaseAdmin
+      .from('admin_emails')
+      .select('lead_id')
+      .eq('direction', 'outbound')
+      .eq('resend_status', 'draft')
+      .in('lead_id', candidatos.map(l => l.id));
+    const esperandoVistoBueno = new Set((conBorrador || []).map(b => b.lead_id));
+
     const [bajas, sonPacientes] = await Promise.all([
       suprimidos(supabaseAdmin, candidatos.map(l => l.email)),
       pacientes(supabaseAdmin, candidatos.map(l => l.email))
@@ -20886,7 +20900,7 @@ app.get('/api/agent/leads/next', requireAgentToken, async (req, res) => {
     const cola = candidatos
       .filter(l => {
         const e = normalizarEmail(l.email);
-        return !bajas.has(e) && !sonPacientes.has(e);
+        return !bajas.has(e) && !sonPacientes.has(e) && !esperandoVistoBueno.has(l.id);
       })
       .slice(0, limite);
 
@@ -20908,6 +20922,7 @@ app.get('/api/agent/leads/next', requireAgentToken, async (req, res) => {
 
     return res.json({
       total: cola.length,
+      con_borrador_pendiente: esperandoVistoBueno.size,
       config: await leerConfig(supabaseAdmin),
       enviados_hoy: await enviadosHoy(supabaseAdmin),
       leads: cola.map(l => ({ ...l, acciones_recientes: ultimas[l.id] || [] }))
@@ -21052,8 +21067,17 @@ app.post('/api/agent/email', requireAgentToken, async (req, res) => {
       forzarBorrador: draft === true
     });
 
-    // Al responder, el entrante deja de estar pendiente.
-    if (reply_to_email_id && salida.estado === 'enviado') {
+    // Al responder, el entrante deja de estar pendiente. Y OJO: tambien cuando
+    // la respuesta se queda en borrador. Un borrador ya es una respuesta
+    // escrita esperando visto bueno, asi que el entrante esta atendido.
+    //
+    // Sin esta segunda parte, en modo borrador el email seguia sin leer y el
+    // bot lo volvia a coger en la pasada siguiente: con el cron cada 15
+    // minutos, casi cien borradores al dia para el mismo correo.
+    //
+    // Si el borrador se descarta, el entrante se queda leido. Es lo correcto:
+    // descartar es la decision explicita de no contestar.
+    if (reply_to_email_id && (salida.estado === 'enviado' || salida.estado === 'borrador')) {
       await supabaseAdmin.from('admin_emails')
         .update({ is_read: true, updated_at: new Date().toISOString() })
         .eq('id', reply_to_email_id);
