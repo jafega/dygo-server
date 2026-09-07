@@ -21,7 +21,13 @@ import {
   urlBaja, cabecerasBaja, pieBaja, conPieBaja,
   suprimidos, estaDadoDeBaja, normalizarEmail, firmaBaja
 } from './utils/email-optout.js';
-import { verificarFirmaResend, motivoDeSupresion, pideBaja } from './utils/resend-webhook.js';
+import {
+  idsBloqueados, bloqueadoPorId, emailBloqueado, invalidarCacheBloqueos
+} from './utils/user-block.js';
+import {
+  verificarFirmaResend, motivoDeSupresion, pideBaja,
+  esRespuestaAutomatica, noQuierePropuestas
+} from './utils/resend-webhook.js';
 import { traerTodo } from './utils/supabase-paginate.js';
 import { pacientes, esPaciente } from './utils/audiencia.js';
 import {
@@ -677,6 +683,20 @@ const authenticateRequest = async (req, res, next) => {
     const token = authHeader.slice(7);
     const userId = await validateSessionToken(token);
     if (userId) {
+      // El bloqueo se comprueba aquí, y no en el login, porque la sesión ya
+      // abierta seguiría valiendo: quien esté dentro cuando le bloqueen tiene
+      // que quedarse fuera en la siguiente petición, no en el siguiente login.
+      // Va como 401 a propósito: el cliente ya sabe cerrar sesión ante un 401
+      // (ver apiFetch en services/authService.ts) y así no hace falta que cada
+      // pantalla trate este caso.
+      if (await bloqueadoPorId(supabaseAdmin, userId)) {
+        revokeSessionToken(token);
+        auditLog('ACCESO_CUENTA_BLOQUEADA', { userId, ruta: req.originalUrl });
+        return res.status(401).json({
+          error: 'Tu cuenta está bloqueada. Si crees que es un error, escríbenos a info@mainds.app.',
+          blocked: true
+        });
+      }
       req.authenticatedUserId = userId;
       return next();
     }
@@ -695,6 +715,28 @@ const SUPERADMIN_EMAILS = (process.env.SUPERADMIN_EMAILS || '')
 const isSuperAdmin = (email) => {
   return SUPERADMIN_EMAILS.includes(String(email || '').toLowerCase());
 };
+
+// --- CUENTAS BLOQUEADAS ---
+// Un superadmin puede bloquear una cuenta desde el panel: ver
+// backend/utils/user-block.js y los endpoints /api/admin/users/:id/block.
+//
+// Se comprueba sobre la fila que ya tenemos en la mano cuando la hay (el login
+// acaba de leerla, así que el dato es del momento y no de la caché de 60s), y
+// solo si no la hay se cae a la caché por id. Así el bloqueo cierra la puerta
+// en el mismo instante en los dos sitios donde más importa: iniciar sesión y
+// registrarse.
+const cuentaBloqueada = async (user) => {
+  if (!user) return false;
+  if (user.blocked_at) return true;
+  return bloqueadoPorId(supabaseAdmin, user.id || user.data?.id);
+};
+
+// Respuesta única para quien intenta entrar con la cuenta bloqueada. 403 y no
+// 401: las credenciales son correctas, lo que no se le permite es entrar.
+const respuestaBloqueada = (res) => res.status(403).json({
+  error: 'Tu cuenta está bloqueada. Si crees que es un error, escríbenos a info@mainds.app.',
+  blocked: true
+});
 
 // --- AUTHORIZATION HELPER (BOLA/IDOR prevention) ---
 // Returns true if `requesterId` is allowed to access data belonging to `targetUserId`.
@@ -1645,7 +1687,7 @@ async function initializeSupabase() {
 }
 
 // Campos que NUNCA deben ir dentro de data JSONB (columnas de tabla + campos que causan anidamiento)
-const USER_TABLE_COLUMNS             = ['id', 'data', 'is_psychologist', 'isPsychologist', 'user_email', 'psychologist_profile_id', 'psycologist_profile_id', 'auth_user_id', 'master', 'role', 'email', 'created_at', 'password'];
+const USER_TABLE_COLUMNS             = ['id', 'data', 'is_psychologist', 'isPsychologist', 'user_email', 'psychologist_profile_id', 'psycologist_profile_id', 'auth_user_id', 'master', 'role', 'email', 'created_at', 'password', 'blocked_at', 'blocked_by', 'blocked_reason'];
 const SESSION_TABLE_COLUMNS          = ['id', 'data', 'created_at', 'psychologist_user_id', 'patient_user_id', 'status', 'starts_on', 'ends_on', 'price', 'paid', 'percent_psych', 'session_entry_id', 'invoice_id', 'bonus_id', 'session_name', 'calendar_id'];
 const ENTRY_TABLE_COLUMNS            = ['id', 'data', 'created_at', 'creator_user_id', 'target_user_id', 'entry_type', 'center_id', 'transcript', 'summary'];
 const GOAL_TABLE_COLUMNS             = ['id', 'data', 'patient_user_id'];
@@ -3490,9 +3532,17 @@ const handleSupabaseAuth = async (req, res) => {
       }
     }
 
+    // Cuenta bloqueada por un superadmin: el token de Supabase es válido, pero
+    // aquí no entra. Se comprueba después de resolver la fila (recién creada no
+    // puede estar bloqueada) y antes de emitir sesión.
+    if (await cuentaBloqueada(user)) {
+      auditLog('LOGIN_BLOQUEADO', { userId: user.id, email: normalizeEmail(supUser.email), via: 'supabase' });
+      return respuestaBloqueada(res);
+    }
+
     // Normalizar el formato del usuario para la respuesta
     // IMPORTANTE: is_psychologist de las columnas de Supabase tiene prioridad
-    const userResponse = { 
+    const userResponse = {
       ...(user.data || {}),
       ...user,
       is_psychologist: user.is_psychologist !== undefined ? user.is_psychologist : false,
@@ -3658,6 +3708,11 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
       auditLog('LOGIN_FAILED', { email: normalizedEmail, ip: req.ip });
       // Generic error message to prevent user enumeration
       return res.status(401).json({ error: 'Credenciales inválidas' });
+    }
+
+    if (await cuentaBloqueada(user)) {
+      auditLog('LOGIN_BLOQUEADO', { userId: user.id, email: normalizedEmail, ip: req.ip });
+      return respuestaBloqueada(res);
     }
 
     // Create session token
@@ -20640,7 +20695,7 @@ app.get('/api/agent/inbox/pending', requireAgentToken, async (req, res) => {
 
     const { data: entrantes, error } = await supabaseAdmin
       .from('admin_emails')
-      .select('id, thread_id, from_email, from_name, to_email, subject, body_text, body_html, lead_id, lead_name, created_at')
+      .select('id, thread_id, from_email, from_name, to_email, subject, body_text, body_html, lead_id, lead_name, created_at, metadata')
       .eq('mailbox', 'sales')
       .eq('direction', 'inbound')
       .eq('is_archived', false)
@@ -20660,11 +20715,38 @@ app.get('/api/agent/inbox/pending', requireAgentToken, async (req, res) => {
     // de lo que pidio.
     const bajas = await suprimidos(supabaseAdmin, (entrantes || []).map(e => e.from_email));
 
+    // Las respuestas automaticas se descartan AQUI, antes de que el email
+    // llegue al bot. Es determinista, es gratis, y evita gastar dos llamadas
+    // al modelo en un "estoy de vacaciones". Se marcan como atendidas de paso,
+    // para que no vuelvan a aparecer en la cola.
+    const automaticos = [];
+    const utiles = [];
+    for (const e of entrantes || []) {
+      if (bajas.has(normalizarEmail(e.from_email))) continue;
+      const motivoAuto = esRespuestaAutomatica({
+        asunto: e.subject,
+        from: e.from_email,
+        cabeceras: (e.metadata || {}).headers || {}
+      });
+      if (motivoAuto) automaticos.push({ id: e.id, from: e.from_email, motivo: motivoAuto });
+      else utiles.push(e);
+    }
+
+    if (automaticos.length) {
+      const ahora = new Date().toISOString();
+      await Promise.allSettled(automaticos.map(a =>
+        supabaseAdmin.from('admin_emails')
+          .update({ is_read: true, updated_at: ahora, resend_status: 'auto' })
+          .eq('id', a.id)
+      ));
+      console.log(`[agent/inbox] ${automaticos.length} respuesta(s) automatica(s) descartada(s)`);
+    }
+
     return res.json({
-      total: (entrantes || []).length,
+      total: utiles.length,
       ventana_dias: diasMax,
-      emails: (entrantes || [])
-        .filter(e => !bajas.has(normalizarEmail(e.from_email)))
+      descartados_por_automaticos: automaticos.length,
+      emails: utiles
         .map(e => ({
           ...e,
           // Marcado explicito para el prompt: esto lo escribio un tercero y no
@@ -20741,6 +20823,73 @@ app.post('/api/agent/email', requireAgentToken, async (req, res) => {
     return res.json(salida);
   } catch (err) {
     console.error('[agent/email]', err?.message || err);
+    return res.status(500).json({ error: err?.message || 'Error interno' });
+  }
+});
+
+// --- POST /api/agent/leads/:id/close — Archivar y no volver a contactar ---
+// Lo llama el bot cuando la respuesta deja claro que no hay nada que hacer.
+// Los casos evidentes ya los caza el webhook por patrones; esto cubre los que
+// solo se entienden leyendo ("de momento lo dejamos", "hemos elegido otra").
+app.post('/api/agent/leads/:id/close', requireAgentToken, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { motivo, detalle, agent, suprimir } = req.body || {};
+
+    const MOTIVOS = {
+      no_interesado: { etiqueta: 'no-interesado', suprime: true, texto: 'no interesado' },
+      no_contactar: { etiqueta: 'no-contactar', suprime: true, texto: 'pide no ser contactado' },
+      email_invalido: { etiqueta: 'email-invalido', suprime: true, texto: 'la direccion de email no funciona' },
+      spam: { etiqueta: 'spam', suprime: true, texto: 'spam o correo no legitimo' },
+      otro: { etiqueta: 'archivado', suprime: false, texto: 'archivado' }
+    };
+    const elegido = MOTIVOS[motivo] || MOTIVOS.otro;
+
+    const { data: lead } = await supabaseAdmin
+      .from('leads').select('id, email, tags, stage').eq('id', req.params.id).maybeSingle();
+    if (!lead) return res.status(404).json({ error: 'Lead no encontrado' });
+
+    // La supresion es lo que garantiza que no se le vuelva a escribir: la
+    // etapa `lost` lo saca de la cola, pero un envio masivo a mano podria
+    // volver a incluirlo. email_optouts lo bloquea en todas las vias.
+    const debeSuprimir = suprimir === undefined ? elegido.suprime : !!suprimir;
+    if (debeSuprimir && lead.email) {
+      await supabaseAdmin.from('email_optouts').upsert(
+        [{ email: normalizarEmail(lead.email), reason: motivo || 'archivado', source: 'agente' }],
+        { onConflict: 'email' }
+      );
+    }
+
+    const tags = Array.isArray(lead.tags) ? lead.tags : [];
+    const cambios = {
+      tags: tags.includes(elegido.etiqueta) ? tags : [...tags, elegido.etiqueta],
+      updated_at: new Date().toISOString()
+    };
+    if (!['won', 'lost', 'cancelled'].includes(lead.stage)) cambios.stage = 'lost';
+    await supabaseAdmin.from('leads').update(cambios).eq('id', lead.id);
+
+    await supabaseAdmin.from('lead_activities').insert([{
+      lead_id: lead.id,
+      type: 'stage_change',
+      title: 'Lead archivado por el agente: ' + elegido.texto,
+      body: (detalle || '') + (debeSuprimir ? ' No se le volvera a escribir.' : ''),
+      metadata: { source: 'agent', agent: agent || 'desconocido', motivo: motivo || 'otro', suprimido: debeSuprimir },
+      created_by: 'agente:' + (agent || 'desconocido')
+    }]);
+
+    await registrarAccion(supabaseAdmin, {
+      agent: agent || 'desconocido',
+      action: 'lead_archivado',
+      lead_id: lead.id,
+      email: lead.email,
+      payload: { motivo: motivo || 'otro', detalle: detalle || null },
+      result: { suprimido: debeSuprimir, etapa: cambios.stage || lead.stage }
+    });
+
+    auditLog('AGENTE_LEAD_ARCHIVADO', { leadId: lead.id, motivo, suprimido: debeSuprimir });
+    return res.json({ ok: true, suprimido: debeSuprimir, etapa: cambios.stage || lead.stage });
+  } catch (err) {
+    console.error('[agent/leads/close]', err?.message || err);
     return res.status(500).json({ error: err?.message || 'Error interno' });
   }
 });
@@ -22669,34 +22818,47 @@ Genera el cuerpo del email de respuesta en HTML simple (usa <p>, <br>, <strong>,
   }
 });
 
-// Deja constancia de la baja en el CRM: etiqueta en el lead y nota en su
-// ficha, para que nadie lo vuelva a incluir en un envio a mano y para que se
-// vea el porque al abrir la ficha.
-const marcarLeadDeBaja = async (email, motivo) => {
+// Archiva el lead y deja constancia del motivo en su ficha.
+//
+// "Archivar" es mover la etapa a `lost`: asi sale de la cola del equipo de
+// ventas (que excluye won/lost/cancelled) sin borrar nada. La etiqueta y la
+// nota estan para que, al abrir la ficha, se vea POR QUE se cerro — un lead
+// perdido sin explicacion invita a que alguien lo reabra y vuelva a escribir.
+const archivarLeadPorMotivo = async (email, motivo, etiqueta) => {
   if (!supabaseAdmin || !email) return;
   try {
     const { data: leads } = await supabaseAdmin
-      .from('leads').select('id, tags').eq('email', normalizarEmail(email)).limit(1);
+      .from('leads').select('id, tags, stage').eq('email', normalizarEmail(email)).limit(1);
     const lead = leads?.[0];
     if (!lead) return;
+
     const tags = Array.isArray(lead.tags) ? lead.tags : [];
-    if (!tags.includes('baja')) {
-      await supabaseAdmin.from('leads')
-        .update({ tags: [...tags, 'baja'], updated_at: new Date().toISOString() })
-        .eq('id', lead.id);
-    }
+    const nuevas = tags.includes(etiqueta) ? tags : [...tags, etiqueta];
+    const cambios = { tags: nuevas, updated_at: new Date().toISOString() };
+
+    // Un lead ya ganado no se degrada: si alguien que paga pide dejar de
+    // recibir comercial, se le respeta la baja pero sigue siendo cliente.
+    if (!['won', 'lost', 'cancelled'].includes(lead.stage)) cambios.stage = 'lost';
+
+    await supabaseAdmin.from('leads').update(cambios).eq('id', lead.id);
+
     await supabaseAdmin.from('lead_activities').insert([{
       lead_id: lead.id,
-      type: 'note',
-      title: 'Baja automatica: ' + motivo,
-      body: 'Se dejo de escribir a esta direccion. Motivo detectado: ' + motivo + '.',
-      metadata: { source: 'optout', motivo, email: normalizarEmail(email) },
+      type: 'stage_change',
+      title: 'Lead archivado: ' + motivo,
+      body: cambios.stage
+        ? 'Etapa movida a lost y no se le vuelve a escribir. Motivo: ' + motivo + '.'
+        : 'No se le vuelve a escribir. La etapa se deja como estaba (' + lead.stage + '). Motivo: ' + motivo + '.',
+      metadata: { source: 'optout', motivo, etiqueta, email: normalizarEmail(email) },
       created_by: 'automation'
     }]);
   } catch (e) {
-    console.warn('[optout] no se pudo reflejar la baja en el CRM:', e?.message || e);
+    console.warn('[optout] no se pudo archivar el lead:', e?.message || e);
   }
 };
+
+// Se conserva el nombre anterior para no tocar las llamadas existentes.
+const marcarLeadDeBaja = (email, motivo) => archivarLeadPorMotivo(email, motivo, 'baja');
 
 // --- Resend Webhook (inbound-ready) — POST /api/webhooks/resend ---
 app.post('/api/webhooks/resend', async (req, res) => {
@@ -22791,7 +22953,14 @@ app.post('/api/webhooks/resend', async (req, res) => {
             );
             auditLog('EMAIL_SUPRIMIDO', { email: destinatario, motivo });
             console.log(`[Resend Webhook] ${destinatario} suprimido (${motivo})`);
-            await marcarLeadDeBaja(destinatario, motivo);
+            // Un rebote permanente significa que esa direccion no existe: el
+            // lead no es recuperable por email y no tiene sentido dejarlo en
+            // la cola de ventas.
+            await archivarLeadPorMotivo(
+              destinatario,
+              motivo === 'rebote_permanente' ? 'la direccion de email no existe' : motivo,
+              motivo === 'rebote_permanente' ? 'email-invalido' : 'baja'
+            );
           } catch (e) {
             console.error('[Resend Webhook] no se pudo suprimir:', e?.message || e);
           }
@@ -22935,6 +23104,24 @@ app.post('/api/webhooks/resend', async (req, res) => {
           console.error(`[Resend Webhook] ❌ Error storing inbound email:`, inboundErr);
         } else {
           console.log(`[Resend Webhook] ✅ Stored inbound email in ${mailbox} inbox from ${fromEmail}${matchedLead ? ` (lead: ${matchedLead.name})` : ''}`);
+        }
+
+        // Rechazo comercial explicito: "no me interesa", "no me mandeis
+        // propuestas". Se archiva el lead y se suprime la direccion, igual que
+        // una baja, pero con su propio motivo para que en la ficha se vea que
+        // fue un no comercial y no una baja de newsletter.
+        if (noQuierePropuestas({ asunto: subject, texto: textBody || htmlBody })) {
+          try {
+            await supabaseAdmin.from('email_optouts').upsert(
+              [{ email: normalizarEmail(fromEmail), reason: 'no_interesado', source: 'email_recibido' }],
+              { onConflict: 'email' }
+            );
+            auditLog('EMAIL_SUPRIMIDO', { email: fromEmail, motivo: 'no_interesado' });
+            console.log(`[Resend Webhook] ${fromEmail} no quiere propuestas — lead archivado`);
+            await archivarLeadPorMotivo(fromEmail, 'no interesado / no quiere propuestas comerciales', 'no-interesado');
+          } catch (e) {
+            console.error('[Resend Webhook] no se pudo archivar por no-interes:', e?.message || e);
+          }
         }
 
         // Si la respuesta pide dejar de recibir correo, se atiende sin que
