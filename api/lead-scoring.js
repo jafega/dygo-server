@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { traerTodo } from '../backend/utils/supabase-paginate.js';
 
 export const config = { api: { bodyParser: true } };
 
@@ -21,12 +22,14 @@ export default async function handler(req, res) {
 
   try {
     /* ── 1. Fetch all active leads (not won/lost/cancelled) ── */
-    const { data: leads, error: leadsErr } = await supabase
+    // Paginado: PostgREST corta en 1000 filas sin avisar. Con 1.116 leads
+    // activos, la version anterior dejaba 116 sin puntuar en cada ejecucion
+    // — siempre los mismos, y sin ninguna senal de que faltaran.
+    const leads = await traerTodo(() => supabase
       .from('leads')
       .select('id, email, name, stage, app_user_id, app_registered_at, app_plan, app_is_subscribed, assigned_to, tags, notes_count, last_contacted_at, created_at, phone, company, details, source, lead_score')
-      .not('stage', 'in', '(won,lost,cancelled)');
-
-    if (leadsErr) throw leadsErr;
+      .not('stage', 'in', '(won,lost,cancelled)')
+      .order('created_at', { ascending: true }));
     if (!leads || leads.length === 0) {
       return res.status(200).json({ message: 'No active leads to score', scored: 0 });
     }
@@ -105,13 +108,14 @@ export default async function handler(req, res) {
     const emailsByLead = {};
     const outboundByLead = {};
 
-    const { data: recentEmails, error: emailsErr } = await supabase
-      .from('admin_emails')
-      .select('from_email, to_email, direction, created_at')
-      .gte('created_at', ninetyDaysAgo)
-      .limit(5000);
-
-    if (emailsErr) {
+    let recentEmails = [];
+    try {
+      recentEmails = await traerTodo(() => supabase
+        .from('admin_emails')
+        .select('from_email, to_email, direction, created_at')
+        .gte('created_at', ninetyDaysAgo)
+        .order('created_at', { ascending: true }));
+    } catch (emailsErr) {
       console.warn('[lead-scoring] admin_emails no disponible:', emailsErr.message || emailsErr);
     }
 

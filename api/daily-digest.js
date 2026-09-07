@@ -8,6 +8,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
+import { traerTodo } from '../backend/utils/supabase-paginate.js';
 
 export const config = { api: { bodyParser: true } };
 
@@ -44,12 +45,13 @@ export default async function handler(req, res) {
   try {
     /* ── 1. Embudo: ayer, últimos 7 días y los 7 anteriores ── */
     const since = new Date(now - 15 * DAY_MS).toISOString();
-    const { data: recentEvents, error: evErr } = await supabase
+    // Paginado: el .limit(10000) era ilusorio, PostgREST devuelve 1000 como
+    // maximo y no avisa de las que faltan.
+    const recentEvents = await traerTodo(() => supabase
       .from('product_events')
       .select('user_id, event, created_at')
       .gte('created_at', since)
-      .limit(10000);
-    if (evErr) throw evErr;
+      .order('created_at', { ascending: true }));
 
     const startOfDay = d => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x.getTime(); };
     const todayStart = startOfDay(now);
@@ -58,7 +60,7 @@ export default async function handler(req, res) {
     const week2Start = now - 14 * DAY_MS;
 
     const counts = { yesterday: {}, week1: {}, week2: {} };
-    for (const e of recentEvents || []) {
+    for (const e of recentEvents) {
       const t = new Date(e.created_at).getTime();
       if (t >= yesterdayStart && t < todayStart) counts.yesterday[e.event] = (counts.yesterday[e.event] || 0) + 1;
       if (t >= week1Start) counts.week1[e.event] = (counts.week1[e.event] || 0) + 1;

@@ -24,6 +24,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { renderEmail } from './email-shell.js';
 import { urlBaja, cabecerasBaja, suprimidos, normalizarEmail } from './email-optout.js';
+import { traerTodo } from './supabase-paginate.js';
 
 const DAY_MS = 86400000;
 const HOUR_MS = 3600000;
@@ -281,19 +282,20 @@ export async function runAutomations({ dryRun = false, soloUsuario = null } = {}
   // prueba. Fuera de ahí no hay ninguna campaña que pueda disparar.
   const ventana = new Date(ahora - (TRIAL_DAYS + 22) * DAY_MS).toISOString();
 
-  const [signupsRes, subsRes] = await Promise.all([
-    supabase.from('product_events')
+  const [signups, subsRes] = await Promise.all([
+    // Paginado: product_events crece con cada evento de cada usuario y el
+    // tope de 1000 filas de PostgREST llegaria sin avisar.
+    traerTodo(() => supabase.from('product_events')
       .select('user_id, created_at')
       .eq('event', 'signup')
       .gte('created_at', ventana)
-      .limit(5000),
+      .order('created_at', { ascending: true })),
     supabase.from('subscriptions').select('id, data')
   ]);
-  if (signupsRes.error) throw signupsRes.error;
 
   // Un alta por usuario, la más antigua.
   const altaPorUsuario = new Map();
-  for (const s of signupsRes.data || []) {
+  for (const s of signups) {
     if (!s.user_id) continue;
     const t = new Date(s.created_at).getTime();
     if (!altaPorUsuario.has(s.user_id) || t < altaPorUsuario.get(s.user_id)) {
