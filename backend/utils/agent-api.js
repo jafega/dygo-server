@@ -15,6 +15,7 @@
 
 import { conPieBaja, cabecerasBaja, estaDadoDeBaja, normalizarEmail } from './email-optout.js';
 import { esPaciente } from './audiencia.js';
+import { esperandoRespuesta, diasDeCadencia } from './cadencia.js';
 
 const FROM = 'mainds <info@mainds.app>';
 const REPLY_TO = 'info@mainds.app';
@@ -66,6 +67,13 @@ export async function puedeEnviar(supabase, { email, forzarBorrador }) {
     return { permitido: false, motivo: 'modo_borrador', config };
   }
   if (await estaDadoDeBaja(supabase, email)) return { permitido: false, motivo: 'dado_de_baja' };
+
+  // No se insiste a quien no ha contestado todavia. Si contesta, la regla se
+  // levanta sola: responder a quien te escribe no es insistir.
+  const espera = await esperandoRespuesta(supabase, email, diasDeCadencia(config));
+  if (espera.bloqueado) {
+    return { permitido: false, motivo: 'espera_respuesta', espera, config };
+  }
   // Ultimo cerrojo, en el punto por el que pasan TODOS los envios de agente:
   // da igual que endpoint o que workflow lo pida, a un paciente no le sale un
   // email de ventas.
@@ -205,6 +213,26 @@ export async function aprobarBorrador(supabase, { borradorId, aprobadoPor }) {
   if (await esPaciente(supabase, email)) {
     return { ok: false, motivo: 'es_paciente' };
   }
+
+  // AQUI esta el cerrojo que faltaba. Aprobar no puede saltarse la cadencia:
+  // quien aprueba no tiene por que acordarse de si a esa persona ya le salio un
+  // email hace tres minutos, y de hecho fue exactamente asi como dos leads
+  // recibieron dos correos seguidos. Lo comprueba el servidor, no la memoria.
+  const config = await leerConfig(supabase);
+  const espera = await esperandoRespuesta(supabase, email, diasDeCadencia(config));
+  if (espera.bloqueado) {
+    const aviso = `Ya le salio un email hace ${espera.diasDesde} dia(s) y no ha contestado.`
+      + ` No se le puede volver a escribir hasta que responda o pasen ${diasDeCadencia(config)} dias.`;
+    return {
+      ok: false,
+      motivo: 'espera_respuesta',
+      error: aviso,
+      detalle: `Ya le salio un email hace ${espera.diasDesde} dia(s) y no ha contestado.`
+        + ` No se le puede volver a escribir hasta que responda o pasen ${diasDeCadencia(config)} dias.`,
+      espera
+    };
+  }
+
   if (!process.env.RESEND_API_KEY) return { ok: false, motivo: 'resend_no_configurado' };
 
   const html = conPieBaja(borrador.body_html || '', email);

@@ -24,6 +24,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { renderEmail } from './email-shell.js';
 import { urlBaja, cabecerasBaja, suprimidos, normalizarEmail } from './email-optout.js';
+import { esperandoRespuesta } from './cadencia.js';
 import { traerTodo } from './supabase-paginate.js';
 import { soloPsicologos } from './audiencia.js';
 
@@ -405,6 +406,17 @@ export async function runAutomations({ dryRun = false, soloUsuario = null } = {}
       diasDePrueba: perfil.diasDePrueba,
       pacientes: perfil.pacientes
     };
+
+    // Cadencia compartida con los agentes. Este canal envia solo, sin que nadie
+    // apruebe, asi que es el que mas necesita la regla: si a esa persona le
+    // acaba de salir un email comercial y no ha contestado, la campana espera.
+    // El indice unico de (user_id, campaign) evita repetir LA MISMA campana,
+    // pero no que dos campanas distintas le lleguen una detras de otra.
+    const espera = await esperandoRespuesta(supabase, email);
+    if (espera.bloqueado) {
+      decisiones.push({ ...decision, enviado: false, omitido: 'espera_respuesta', diasDesde: espera.diasDesde });
+      continue;
+    }
 
     if (dryRun) { decisiones.push({ ...decision, enviado: false }); continue; }
 
