@@ -21403,6 +21403,191 @@ const handleOptout = async (req, res) => {
 app.get('/api/automation/optout', handleOptout);
 app.post('/api/automation/optout', express.urlencoded({ extended: false }), handleOptout);
 
+// --- GET /api/admin/sales/pipeline — El embudo comercial real ---
+//
+// Por que existe, y por que NO se fia de `leads.stage`:
+//
+// El 7 sep 2026 habia 6 leads en etapa `won` y CINCO mentian: cuatro habian
+// cancelado y una que si pagaba constaba como no suscrita. La etapa es un
+// campo que se pone a mano o desde un webhook, y cuando el webhook no llega
+// se queda congelada para siempre.
+//
+// Asi que aqui la etapa se DERIVA de hechos con fecha: eventos de producto y
+// el estado real de la suscripcion en Stripe. Del campo manual se respetan
+// solo las dos cosas que ningun evento puede saber: que hay una demo y que
+// alguien dijo que no.
+//
+// Gana el paso mas avanzado. Y `cancelled` no se mezcla con `lost`: uno fue
+// cliente y se fue, el otro nunca compro. Juntarlos borra la fuga, que es el
+// numero que mas duele en un SaaS.
+const PIPELINE_PASOS = [
+  { id: 'nuevo',        label: 'Nuevo',           ayuda: 'En cartera, nadie le ha escrito' },
+  { id: 'contactado',   label: 'Contactado',      ayuda: 'Le hemos escrito, aun sin cuenta' },
+  { id: 'prueba',       label: 'En prueba',       ayuda: 'Se registro, todavia sin pacientes' },
+  { id: 'con_paciente', label: 'Anadio paciente', ayuda: 'Ya tiene un paciente en ficha' },
+  { id: 'grabando',     label: 'Grabo sesion',    ayuda: 'El hito que predice la compra' },
+  { id: 'demo',         label: 'Demo',            ayuda: 'Demo agendada o hecha' },
+  { id: 'ganado',       label: 'Ganado',          ayuda: 'Paga ahora mismo' },
+  { id: 'fuga',         label: 'Se dio de baja',  ayuda: 'Fue cliente y se fue' },
+  { id: 'perdido',      label: 'Perdido',         ayuda: 'Nunca compro o dijo que no' }
+];
+
+app.get('/api/admin/sales/pipeline', authenticateRequest, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const dias = Math.min(90, Math.max(1, parseInt(req.query.dias) || 7));
+    const desde = new Date(Date.now() - dias * 86400000).toISOString();
+
+    const [leads, eventos, subs, movimientos] = await Promise.all([
+      traerTodo(() => supabaseAdmin
+        .from('leads')
+        .select('id, name, email, stage, source, app_user_id, app_is_subscribed, app_plan, last_contacted_at, created_at, updated_at')),
+      traerTodo(() => supabaseAdmin
+        .from('product_events')
+        .select('user_id, event, created_at')
+        .in('event', ['signup', 'first_patient_added', 'first_session_recorded', 'first_invoice', 'paid'])),
+      traerTodo(() => supabaseAdmin.from('subscriptions').select('id, data')),
+      traerTodo(() => supabaseAdmin
+        .from('lead_activities')
+        .select('lead_id, type, title, body, metadata, created_at')
+        .eq('type', 'stage_change')
+        .gte('created_at', desde)
+        .order('created_at', { ascending: false }))
+    ]);
+
+    // Hitos por usuario, guardando la fecha del PRIMERO de cada tipo.
+    const hitos = {};
+    for (const e of eventos) {
+      if (!e.user_id) continue;
+      hitos[e.user_id] = hitos[e.user_id] || {};
+      const previo = hitos[e.user_id][e.event];
+      if (!previo || e.created_at < previo) hitos[e.user_id][e.event] = e.created_at;
+    }
+
+    // Stripe es la verdad sobre quien paga. `app_is_subscribed` es un reflejo
+    // y ya se demostro que se desincroniza, asi que se mira tambien aqui.
+    const ACTIVOS = ['active', 'trialing'];
+    const pagaAhora = {};
+    for (const sub of subs) {
+      const uid = sub.data?.psychologist_user_id || sub.id;
+      if (uid) pagaAhora[uid] = ACTIVOS.includes(sub.data?.stripe_status);
+    }
+
+    const pasoDe = (l) => {
+      if (l.stage === 'lost') return 'perdido';
+      if (l.stage === 'cancelled') return 'fuga';
+      const uid = l.app_user_id;
+      const paga = uid && pagaAhora[uid] !== undefined ? pagaAhora[uid] : !!l.app_is_subscribed;
+      if (paga) return 'ganado';
+      if (l.stage === 'demo') return 'demo';
+      const h = uid ? (hitos[uid] || {}) : {};
+      if (h.first_session_recorded) return 'grabando';
+      if (h.first_patient_added) return 'con_paciente';
+      if (uid || h.signup) return 'prueba';
+      if (l.last_contacted_at) return 'contactado';
+      return 'nuevo';
+    };
+
+    // Desde cuando lleva en ese paso. Es la columna que de verdad se mira en un
+    // pipeline: no cuantos hay, sino quien se ha quedado atascado y desde cuando.
+    const desdeCuando = (l, paso) => {
+      const h = l.app_user_id ? (hitos[l.app_user_id] || {}) : {};
+      if (paso === 'grabando') return h.first_session_recorded;
+      if (paso === 'con_paciente') return h.first_patient_added;
+      if (paso === 'prueba') return h.signup || l.created_at;
+      if (paso === 'contactado') return l.last_contacted_at;
+      if (paso === 'nuevo') return l.created_at;
+      return l.updated_at || l.created_at;
+    };
+
+    const porPaso = {};
+    for (const paso of PIPELINE_PASOS) porPaso[paso.id] = [];
+    for (const l of leads) {
+      const paso = pasoDe(l);
+      const ref = desdeCuando(l, paso);
+      porPaso[paso].push({
+        id: l.id,
+        name: l.name || l.email,
+        email: l.email,
+        source: l.source,
+        plan: l.app_plan || null,
+        tiene_cuenta: !!l.app_user_id,
+        desde: ref,
+        dias_en_paso: ref ? Math.floor((Date.now() - new Date(ref).getTime()) / 86400000) : null
+      });
+    }
+    for (const id of Object.keys(porPaso)) {
+      porPaso[id].sort((a, b) => (b.dias_en_paso || 0) - (a.dias_en_paso || 0));
+    }
+
+    const nombreLead = {};
+    for (const l of leads) nombreLead[l.id] = l.name || l.email;
+
+    // Movimientos de etapa de la ventana. Salen de las notas con fecha: un
+    // cambio que no deja nota no se puede contar despues, y por eso todo lo
+    // que mueve una etapa escribe una.
+    const movs = movimientos.map(m => ({
+      fecha: m.created_at,
+      lead_id: m.lead_id,
+      lead: nombreLead[m.lead_id] || '(lead borrado)',
+      de: (m.metadata && m.metadata.de) || null,
+      a: (m.metadata && m.metadata.a) || null,
+      titulo: m.title,
+      via: (m.metadata && m.metadata.source) || 'manual'
+    }));
+
+    // Avances DENTRO de la prueba. No mueven la etapa, asi que no dejan nota,
+    // pero son exactamente los pasos que interesa ver a diario.
+    const ETIQUETA_HITO = {
+      signup: 'Se registro',
+      first_patient_added: 'Anadio su primer paciente',
+      first_session_recorded: 'Grabo su primera sesion',
+      first_invoice: 'Emitio su primera factura',
+      paid: 'Empezo a pagar'
+    };
+    const leadPorUsuario = {};
+    for (const l of leads) if (l.app_user_id) leadPorUsuario[l.app_user_id] = l;
+    const avances = [];
+    for (const e of eventos) {
+      if (e.created_at < desde) continue;
+      const l = leadPorUsuario[e.user_id];
+      avances.push({
+        fecha: e.created_at,
+        lead_id: l ? l.id : null,
+        lead: l ? (l.name || l.email) : '(sin lead asociado)',
+        hito: e.event,
+        titulo: ETIQUETA_HITO[e.event] || e.event
+      });
+    }
+    avances.sort((a, b) => (a.fecha < b.fecha ? 1 : -1));
+
+    return res.json({
+      dias,
+      pasos: PIPELINE_PASOS.map(paso => ({
+        id: paso.id,
+        label: paso.label,
+        ayuda: paso.ayuda,
+        total: porPaso[paso.id].length,
+        leads: porPaso[paso.id]
+      })),
+      resumen: {
+        en_juego: PIPELINE_PASOS
+          .filter(paso => ['ganado', 'fuga', 'perdido'].indexOf(paso.id) === -1)
+          .reduce((n, paso) => n + porPaso[paso.id].length, 0),
+        ganado: porPaso.ganado.length,
+        fuga: porPaso.fuga.length,
+        perdido: porPaso.perdido.length,
+        total: leads.length
+      },
+      movimientos: movs,
+      avances
+    });
+  } catch (err) {
+    console.error('[admin/sales/pipeline]', err?.message || err);
+    return res.status(500).json({ error: err?.message || 'Error interno' });
+  }
+});
+
 // --- GET /api/admin/funnel — Embudo de activacion (solo superadmin) ---
 // Sale entero de product_events (ver backend/utils/events.js). No toca tablas
 // clinicas ni arrastra JSONB pesado: solo user_id, event y created_at.

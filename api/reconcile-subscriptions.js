@@ -20,6 +20,7 @@
 import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
 import { trackEvent, EVENTS } from '../backend/utils/events.js';
+import { sincronizarLeadConSuscripcion } from '../backend/utils/lead-suscripcion.js';
 
 export const config = { api: { bodyParser: true } };
 
@@ -163,6 +164,23 @@ export default async function handler(req, res) {
       if (error) {
         errors.push({ user_id: userId, error: error.message || String(error) });
         continue;
+      }
+
+      // La ficha del CRM tiene que decir lo mismo que Stripe. Sin esto, la
+      // etapa del lead solo la movia el webhook, y cuando el webhook no
+      // llegaba la ficha se congelaba: 5 de 6 leads en `won` mentian.
+      try {
+        const sinc = await sincronizarLeadConSuscripcion(supabase, {
+          userId,
+          activaAhora: isActive,
+          plan: next.plan_id,
+          estado: next.stripe_status,
+          origen: 'reconcile-subscriptions'
+        });
+        if (sinc.cambiado) change.lead = { de: sinc.de, a: sinc.a };
+      } catch (e) {
+        // Que no se caiga la conciliacion de cobros por no poder tocar el CRM.
+        console.warn('[reconcile] no se pudo sincronizar el lead:', e?.message || e);
       }
 
       // El evento sólo se emite si el webhook no lo registró ya: `paid` y

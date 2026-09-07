@@ -5,11 +5,12 @@ import { LeadKanban } from './LeadKanban';
 import { LeadDetailDrawer } from './LeadDetailDrawer';
 import { LeadImportModal } from './LeadImportModal';
 import { LeadEmailComposer } from './LeadEmailComposer';
+import { PipelineReal } from './PipelineReal';
 import { API_URL } from '../../services/config';
 import { apiFetch } from '../../services/authService';
 import {
   LayoutGrid, Table2, Upload, RefreshCcw, Plus, Search, Filter,
-  Mail, Zap, X, Users, TrendingUp, Target, Ban, Loader2,
+  Mail, Zap, X, Loader2,
   ArrowRightLeft, UserCheck, ChevronDown,
 } from 'lucide-react';
 
@@ -380,29 +381,11 @@ const SalesPipeline: React.FC = () => {
         </div>
       </div>
 
-      {/* KPI cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <div className="bg-white border border-slate-200 rounded-xl p-4">
-          <div className="flex items-center gap-2 text-slate-500 text-xs font-semibold uppercase mb-1"><Users size={13} /> Total</div>
-          <p className="text-2xl font-bold text-slate-900">{kpis.total}</p>
-        </div>
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-          <div className="flex items-center gap-2 text-blue-600 text-xs font-semibold uppercase mb-1"><Target size={13} /> Pipeline</div>
-          <p className="text-2xl font-bold text-blue-700">{kpis.pipeline}</p>
-        </div>
-        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
-          <div className="flex items-center gap-2 text-emerald-600 text-xs font-semibold uppercase mb-1"><TrendingUp size={13} /> Ganados</div>
-          <p className="text-2xl font-bold text-emerald-700">{kpis.won}</p>
-        </div>
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-          <div className="flex items-center gap-2 text-red-600 text-xs font-semibold uppercase mb-1"><Ban size={13} /> Perdidos</div>
-          <p className="text-2xl font-bold text-red-700">{kpis.lost}</p>
-        </div>
-        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
-          <div className="flex items-center gap-2 text-slate-500 text-xs font-semibold uppercase mb-1"><Zap size={13} /> En App</div>
-          <p className="text-2xl font-bold text-slate-700">{kpis.inApp}</p>
-        </div>
-      </div>
+      {/* El embudo real. Sustituye a las tarjetas de KPI que leian
+          `leads.stage` directamente: ese campo se queda viejo cuando el
+          webhook de Stripe no llega, y tener dos cifras de "Ganados" que
+          pueden no coincidir en la misma pantalla es peor que tener una. */}
+      <PipelineReal />
 
       {/* Toolbar */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 bg-white border border-slate-200 rounded-xl p-3">

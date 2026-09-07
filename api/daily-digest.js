@@ -204,6 +204,77 @@ export default async function handler(req, res) {
       return `<span style="color:${color}">${pct > 0 ? '+' : ''}${pct}%</span>`;
     };
 
+    /* ── Quien ha avanzado en las ultimas 24 h ── */
+    //
+    // Son DOS cosas distintas y en el parte van juntas porque para vender dan
+    // igual: lo que interesa es "quien se movio ayer".
+    //
+    //   - Hitos de producto: anadir el primer paciente, grabar la primera
+    //     sesion. No mueven la etapa del lead, asi que no dejan nota, pero son
+    //     los pasos que de verdad predicen la compra.
+    //   - Cambios de etapa: los que si dejan nota (a demo, a ganado, a baja,
+    //     a perdido), vengan de una persona, de un agente o de la
+    //     conciliacion diaria con Stripe.
+    const ETIQUETA_HITO = {
+      signup: 'Se registro',
+      first_patient_added: 'Anadio su primer paciente',
+      first_session_recorded: 'Grabo su primera sesion',
+      first_invoice: 'Emitio su primera factura',
+      paid: 'Empezo a pagar'
+    };
+    const desde24h = new Date(now - DAY_MS).toISOString();
+    let movimientos = [];
+    try {
+      const [avances, cambios] = await Promise.all([
+        supabase.from('product_events')
+          .select('user_id, event, created_at')
+          .in('event', Object.keys(ETIQUETA_HITO))
+          .gte('created_at', desde24h),
+        supabase.from('lead_activities')
+          .select('lead_id, title, metadata, created_at')
+          .eq('type', 'stage_change')
+          .gte('created_at', desde24h)
+      ]);
+
+      const idsUsuario = [...new Set((avances.data || []).map(a => a.user_id).filter(Boolean))];
+      const idsLead = [...new Set((cambios.data || []).map(c => c.lead_id).filter(Boolean))];
+
+      const [porUsuario, porLead] = await Promise.all([
+        idsUsuario.length
+          ? supabase.from('leads').select('id, name, email, app_user_id').in('app_user_id', idsUsuario)
+          : Promise.resolve({ data: [] }),
+        idsLead.length
+          ? supabase.from('leads').select('id, name, email').in('id', idsLead)
+          : Promise.resolve({ data: [] })
+      ]);
+
+      const nombreDeUsuario = {};
+      for (const l of porUsuario.data || []) nombreDeUsuario[l.app_user_id] = l.name || l.email;
+      const nombreDeLead = {};
+      for (const l of porLead.data || []) nombreDeLead[l.id] = l.name || l.email;
+
+      for (const a of avances.data || []) {
+        movimientos.push({
+          quien: nombreDeUsuario[a.user_id] || emailById[a.user_id] || 'Alguien sin ficha',
+          que: ETIQUETA_HITO[a.event] || a.event,
+          cuando: a.created_at,
+          bueno: true
+        });
+      }
+      for (const c of cambios.data || []) {
+        const a = (c.metadata && c.metadata.a) || null;
+        movimientos.push({
+          quien: nombreDeLead[c.lead_id] || 'Lead sin nombre',
+          que: c.title || 'Cambio de etapa',
+          cuando: c.created_at,
+          bueno: !['cancelled', 'lost'].includes(a)
+        });
+      }
+      movimientos.sort((x, y) => (x.cuando < y.cuando ? 1 : -1));
+    } catch (e) {
+      console.warn('[daily-digest] no se pudieron leer los movimientos:', e?.message || e);
+    }
+
     const html = `<!doctype html><html><body style="margin:0;padding:24px;background:#f6f7f9;font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#111827">
   <div style="max-width:640px;margin:0 auto;background:#fff;border-radius:12px;padding:28px">
     <p style="margin:0 0 4px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#6b7280">mainds · ${esc(report.date)}</p>
@@ -246,6 +317,15 @@ export default async function handler(req, res) {
         <td style="padding:8px 4px;color:${r.rate !== null && r.rate < 40 ? '#dc2626' : '#6b7280'}">${r.rate === null ? '—' : r.rate + '%'}</td>
       </tr>`).join('')}
     </table>
+
+    <h2 style="font-size:15px;margin:28px 0 10px">Se movieron ayer (${movimientos.length})</h2>
+    ${movimientos.length ? `<table style="width:100%;border-collapse:collapse;font-size:13px">
+      ${movimientos.map(m => `<tr style="border-top:1px solid #f3f4f6">
+        <td style="padding:8px 4px">${esc(m.quien)}</td>
+        <td style="padding:8px 4px;color:${m.bueno ? '#166534' : '#dc2626'}">${esc(m.que)}</td>
+        <td style="padding:8px 4px;text-align:right;color:#6b7280">${new Date(m.cuando).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Madrid' })}</td>
+      </tr>`).join('')}
+    </table>` : `<p style="margin:0;font-size:13px;color:#6b7280">Nadie avanzo un paso ayer.</p>`}
 
     ${atRisk.length ? `<h2 style="font-size:15px;margin:28px 0 10px">En riesgo (${atRisk.length})</h2>
     <table style="width:100%;border-collapse:collapse;font-size:13px">
