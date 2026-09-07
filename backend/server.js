@@ -20639,6 +20639,11 @@ app.get('/api/agent/inbox/pending', requireAgentToken, async (req, res) => {
       .eq('direction', 'inbound')
       .eq('is_archived', false)
       .eq('is_read', false)
+      // El correo que mainds se manda a si mismo no es una consulta de ventas.
+      // El parte diario va a info@mainds.app, el webhook de Resend lo captura
+      // como entrante y el bot se lo encontraba cada 15 minutos: dos llamadas
+      // al modelo, para siempre, por un informe interno.
+      .not('from_email', 'ilike', '%@mainds.app')
       .order('created_at', { ascending: false })
       .limit(limite);
     if (error) throw error;
@@ -20728,6 +20733,52 @@ app.post('/api/agent/email', requireAgentToken, async (req, res) => {
     return res.json(salida);
   } catch (err) {
     console.error('[agent/email]', err?.message || err);
+    return res.status(500).json({ error: err?.message || 'Error interno' });
+  }
+});
+
+// --- POST /api/agent/inbox/:id/handled — Atendido, no hace falta responder ---
+// Sin esto, todo lo que el bot decide NO contestar se queda sin leer y vuelve
+// a aparecer en la cola en la pasada siguiente. Con un cron cada 15 minutos
+// eso son casi 200 llamadas al modelo al dia por el mismo email.
+app.post('/api/agent/inbox/:id/handled', requireAgentToken, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
+    const { motivo, agent } = req.body || {};
+
+    const { data: email } = await supabaseAdmin
+      .from('admin_emails')
+      .select('id, from_email, subject, lead_id, metadata')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (!email) return res.status(404).json({ error: 'Email no encontrado' });
+
+    const { error } = await supabaseAdmin.from('admin_emails').update({
+      is_read: true,
+      updated_at: new Date().toISOString(),
+      // Queda por que se marco: si mananas te preguntas por que nadie
+      // contesto a algo, esta aqui y no en un log de n8n.
+      metadata: {
+        ...(email.metadata || {}),
+        atendido_por: 'agente:' + (agent || 'desconocido'),
+        motivo_no_respuesta: motivo || null,
+        atendido_en: new Date().toISOString()
+      }
+    }).eq('id', email.id);
+    if (error) throw error;
+
+    await registrarAccion(supabaseAdmin, {
+      agent: agent || 'desconocido',
+      action: 'atendido_sin_responder',
+      lead_id: email.lead_id || null,
+      email: email.from_email,
+      payload: { asunto: email.subject, motivo: motivo || null },
+      result: {}
+    });
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[agent/inbox/handled]', err?.message || err);
     return res.status(500).json({ error: err?.message || 'Error interno' });
   }
 });
