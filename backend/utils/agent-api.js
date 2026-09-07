@@ -14,6 +14,7 @@
 // lo fija este código a partir del hilo. El agente solo aporta el texto.
 
 import { conPieBaja, cabecerasBaja, estaDadoDeBaja, normalizarEmail } from './email-optout.js';
+import { esPaciente } from './audiencia.js';
 
 const FROM = 'mainds <info@mainds.app>';
 const REPLY_TO = 'info@mainds.app';
@@ -65,6 +66,10 @@ export async function puedeEnviar(supabase, { email, forzarBorrador }) {
     return { permitido: false, motivo: 'modo_borrador', config };
   }
   if (await estaDadoDeBaja(supabase, email)) return { permitido: false, motivo: 'dado_de_baja' };
+  // Ultimo cerrojo, en el punto por el que pasan TODOS los envios de agente:
+  // da igual que endpoint o que workflow lo pida, a un paciente no le sale un
+  // email de ventas.
+  if (await esPaciente(supabase, email)) return { permitido: false, motivo: 'es_paciente' };
 
   const hoy = await enviadosHoy(supabase);
   if (hoy >= config.cupo_diario) {
@@ -196,6 +201,9 @@ export async function aprobarBorrador(supabase, { borradorId, aprobadoPor }) {
   const email = normalizarEmail(borrador.to_email);
   if (await estaDadoDeBaja(supabase, email)) {
     return { ok: false, motivo: 'dado_de_baja' };
+  }
+  if (await esPaciente(supabase, email)) {
+    return { ok: false, motivo: 'es_paciente' };
   }
   if (!process.env.RESEND_API_KEY) return { ok: false, motivo: 'resend_no_configurado' };
 

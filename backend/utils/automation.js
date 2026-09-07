@@ -25,6 +25,7 @@ import { createClient } from '@supabase/supabase-js';
 import { renderEmail } from './email-shell.js';
 import { urlBaja, cabecerasBaja, suprimidos, normalizarEmail } from './email-optout.js';
 import { traerTodo } from './supabase-paginate.js';
+import { soloPsicologos } from './audiencia.js';
 
 const DAY_MS = 86400000;
 const HOUR_MS = 3600000;
@@ -317,19 +318,24 @@ export async function runAutomations({ dryRun = false, soloUsuario = null } = {}
   }
 
   const [usuariosRes, eventosRes, enviosRes, relacionesRes] = await Promise.all([
-    supabase.from('users').select('id, user_email, data, master').in('id', candidatos),
+    // is_psychologist entra en el SELECT y se filtra abajo: las campanas de
+    // activacion van SOLO a psicologos. Aunque `signup` ya excluye a los
+    // pacientes por diseno, este es el cerrojo que no depende de que el
+    // evento se haya emitido bien.
+    supabase.from('users').select('id, user_email, data, master, is_psychologist').in('id', candidatos),
     supabase.from('product_events').select('user_id, event, created_at').in('user_id', candidatos),
     supabase.from('automation_sends').select('user_id, campaign, sent_at').in('user_id', candidatos),
     supabase.from('care_relationships').select('psychologist_user_id').in('psychologist_user_id', candidatos)
   ]);
 
+  const usuariosPsicologos = soloPsicologos(usuariosRes.data);
   const usuarioPorId = new Map();
-  for (const u of usuariosRes.data || []) usuarioPorId.set(u.id, u);
+  for (const u of usuariosPsicologos) usuarioPorId.set(u.id, u);
 
   // Bajas: una sola consulta con todas las direcciones implicadas.
   const dadosDeBaja = await suprimidos(
     supabase,
-    (usuariosRes.data || []).map(u => u.user_email || (u.data || {}).email)
+    usuariosPsicologos.map(u => u.user_email || (u.data || {}).email)
   );
 
   const eventosPorUsuario = new Map();
@@ -362,7 +368,9 @@ export async function runAutomations({ dryRun = false, soloUsuario = null } = {}
     const usuario = usuarioPorId.get(userId);
     const email = usuario?.user_email || (usuario?.data || {}).email || '';
 
-    if (!usuario) { decisiones.push({ userId, omitido: 'usuario_no_encontrado' }); continue; }
+    // Un candidato sin fila aqui es, o un usuario borrado, o un PACIENTE que
+    // el filtro de rol ha dejado fuera. En ambos casos no se le escribe.
+    if (!usuario) { decisiones.push({ userId, omitido: 'no_es_psicologo_o_no_existe' }); continue; }
     if (usuario.master === true) { decisiones.push({ userId, omitido: 'master' }); continue; }
     if (esEmailTemporal(email)) { decisiones.push({ userId, omitido: 'email_temporal' }); continue; }
     if (dadosDeBaja.has(normalizarEmail(email))) { decisiones.push({ userId, email, omitido: 'dado_de_baja' }); continue; }

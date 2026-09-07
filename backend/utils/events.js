@@ -19,7 +19,12 @@ import { createClient } from '@supabase/supabase-js';
 
 // Hitos del recorrido del psicólogo, en orden de embudo.
 export const EVENTS = {
+  // `signup` es SOLO de psicologos, a proposito. Las altas de paciente van a
+  // `signup_patient` para que ninguna consulta que busque `signup` (el embudo,
+  // el parte diario, el motor de campanas) los recoja por accidente y acaben
+  // recibiendo correo comercial. Ver backend/utils/audiencia.js.
   SIGNUP: 'signup',
+  SIGNUP_PATIENT: 'signup_patient',
   FIRST_PATIENT_ADDED: 'first_patient_added',
   FIRST_SESSION_RECORDED: 'first_session_recorded',
   FIRST_INVOICE: 'first_invoice',
@@ -31,6 +36,7 @@ export const EVENTS = {
 // Eventos de "primera vez": se registran una única vez por usuario.
 const ONCE_BY_DEFAULT = new Set([
   EVENTS.SIGNUP,
+  EVENTS.SIGNUP_PATIENT,
   EVENTS.FIRST_PATIENT_ADDED,
   EVENTS.FIRST_SESSION_RECORDED,
   EVENTS.FIRST_INVOICE
