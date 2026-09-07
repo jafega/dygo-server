@@ -23,6 +23,7 @@ import {
 } from './utils/email-optout.js';
 import { verificarFirmaResend, motivoDeSupresion, pideBaja } from './utils/resend-webhook.js';
 import { traerTodo } from './utils/supabase-paginate.js';
+import { pacientes, esPaciente } from './utils/audiencia.js';
 import {
   requireAgentToken, leerConfig, enviadosHoy, registrarAccion,
   enviarComoAgente, aprobarBorrador, descartarBorrador
@@ -3196,7 +3197,10 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
     saveDb(db);
 
     auditLog('USER_REGISTERED', { userId: newUser.id, email: normalizedEmail, role: normalizedRole });
-    track(EVENTS.SIGNUP, { userId: newUser.id, props: { role: normalizedRole, method: 'password' } });
+    track(isPsych ? EVENTS.SIGNUP : EVENTS.SIGNUP_PATIENT, {
+      userId: newUser.id,
+      props: { role: normalizedRole, method: 'password' }
+    });
     console.log('✅ Usuario creado:', newUser.id);
 
     // Send welcome email to new psychologists (fire-and-forget)
@@ -3431,7 +3435,7 @@ const handleSupabaseAuth = async (req, res) => {
         }
         
         user = newUser;
-        track(EVENTS.SIGNUP, {
+        track(newUser.is_psychologist ? EVENTS.SIGNUP : EVENTS.SIGNUP_PATIENT, {
           userId: newUser.id,
           props: { role: newUser.is_psychologist ? 'PSYCHOLOGIST' : 'PATIENT', method: 'oauth' }
         });
@@ -20578,9 +20582,18 @@ app.get('/api/agent/leads/next', requireAgentToken, async (req, res) => {
 
     // La supresion se comprueba contra la tabla, no solo contra la etiqueta:
     // la etiqueta es un reflejo y puede fallar; email_optouts es la verdad.
-    const bajas = await suprimidos(supabaseAdmin, candidatos.map(l => l.email));
+    // Y ademas se excluye a quien consta como PACIENTE en la app: hay leads
+    // importados cuyo email pertenece a un paciente, y a esos no se les
+    // escribe de ventas jamas.
+    const [bajas, sonPacientes] = await Promise.all([
+      suprimidos(supabaseAdmin, candidatos.map(l => l.email)),
+      pacientes(supabaseAdmin, candidatos.map(l => l.email))
+    ]);
     const cola = candidatos
-      .filter(l => !bajas.has(normalizarEmail(l.email)))
+      .filter(l => {
+        const e = normalizarEmail(l.email);
+        return !bajas.has(e) && !sonPacientes.has(e);
+      })
       .slice(0, limite);
 
     // Ultimas acciones de agente sobre esos leads, para que el orquestador no
@@ -21743,6 +21756,14 @@ app.post('/api/admin/leads/:id/email', authenticateRequest, requireSuperAdmin, a
     if (await estaDadoDeBaja(supabaseAdmin, lead.email)) {
       return res.status(409).json({ error: 'optout', message: 'Este contacto se dio de baja y no se le puede escribir.' });
     }
+    // Cerrojo de audiencia: si esa direccion es de un paciente de la app, no
+    // sale ni aunque se pida a mano desde el CRM.
+    if (await esPaciente(supabaseAdmin, lead.email)) {
+      return res.status(409).json({
+        error: 'es_paciente',
+        message: 'Esa direccion pertenece a un paciente de la app. Los emails de ventas solo van a psicologos.'
+      });
+    }
 
     // El pie de baja se anade aqui y no en la plantilla: quien redacta desde el
     // CRM no se va a acordar, y no puede depender de eso.
@@ -21820,12 +21841,25 @@ app.post('/api/admin/leads/email-bulk', authenticateRequest, requireSuperAdmin, 
     const { data: leadsTodos } = await supabaseAdmin.from('leads').select('id, email, name, stage, assigned_to').in('id', lead_ids);
     if (!leadsTodos || leadsTodos.length === 0) return res.status(404).json({ error: 'No leads found' });
 
-    // Las bajas se resuelven de una vez para todo el lote, antes de enviar nada.
-    const bajas = await suprimidos(supabaseAdmin, leadsTodos.map(l => l.email));
-    const leads = leadsTodos.filter(l => !bajas.has(normalizarEmail(l.email)));
-    const omitidosPorBaja = leadsTodos.length - leads.length;
+    // Bajas y pacientes se resuelven de una vez para todo el lote, antes de
+    // enviar nada.
+    const [bajas, sonPacientes] = await Promise.all([
+      suprimidos(supabaseAdmin, leadsTodos.map(l => l.email)),
+      pacientes(supabaseAdmin, leadsTodos.map(l => l.email))
+    ]);
+    const leads = leadsTodos.filter(l => {
+      const e = normalizarEmail(l.email);
+      return !bajas.has(e) && !sonPacientes.has(e);
+    });
+    const omitidosPorBaja = leadsTodos.filter(l => bajas.has(normalizarEmail(l.email))).length;
+    const omitidosPorSerPacientes = leadsTodos.filter(l => sonPacientes.has(normalizarEmail(l.email))).length;
     if (leads.length === 0) {
-      return res.status(409).json({ error: 'optout', message: 'Todos los contactos seleccionados se dieron de baja.', omitidos_por_baja: omitidosPorBaja });
+      return res.status(409).json({
+        error: 'sin_destinatarios',
+        message: 'Ninguno de los contactos seleccionados puede recibir el envio.',
+        omitidos_por_baja: omitidosPorBaja,
+        omitidos_por_ser_pacientes: omitidosPorSerPacientes
+      });
     }
 
     const fromName = sender_name || 'mainds';
