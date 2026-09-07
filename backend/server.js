@@ -22,6 +22,7 @@ import {
   suprimidos, estaDadoDeBaja, normalizarEmail, firmaBaja
 } from './utils/email-optout.js';
 import { verificarFirmaResend, motivoDeSupresion, pideBaja } from './utils/resend-webhook.js';
+import { traerTodo } from './utils/supabase-paginate.js';
 import {
   requireAgentToken, leerConfig, enviadosHoy, registrarAccion,
   enviarComoAgente, aprobarBorrador, descartarBorrador
@@ -20556,6 +20557,9 @@ app.get('/api/agent/leads/next', requireAgentToken, async (req, res) => {
     const diasSilencio = Math.max(1, parseInt(req.query.dias_silencio) || 7);
     const corte = new Date(Date.now() - diasSilencio * 86400000).toISOString();
 
+    // Se piden mas de los que se van a usar porque despues se filtran bajas y
+    // etiquetas; el tope de PostgREST no molesta aqui porque `limite` nunca
+    // pasa de 50, pero se deja explicito para que no sorprenda al subirlo.
     const { data: leads, error } = await supabaseAdmin
       .from('leads')
       .select('id, email, name, phone, company, details, source, stage, lead_score, tags, last_contacted_at, app_user_id, app_is_subscribed, created_at')
@@ -20563,7 +20567,7 @@ app.get('/api/agent/leads/next', requireAgentToken, async (req, res) => {
       .eq('app_is_subscribed', false)
       .or(`last_contacted_at.is.null,last_contacted_at.lt.${corte}`)
       .order('lead_score', { ascending: false, nullsFirst: false })
-      .limit(limite * 4);
+      .limit(Math.min(1000, limite * 4));
     if (error) throw error;
 
     const candidatos = (leads || []).filter(l => {
@@ -20762,31 +20766,33 @@ app.get('/api/agent/learn', requireAgentToken, async (req, res) => {
     const dias = Math.min(180, Math.max(7, parseInt(req.query.dias) || 30));
     const desde = new Date(Date.now() - dias * 86400000).toISOString();
 
-    const { data: acciones } = await supabaseAdmin
+    const acciones = await traerTodo(() => supabaseAdmin
       .from('agent_actions')
       .select('variant, action, email, created_at')
       .eq('action', 'enviado')
       .gte('created_at', desde)
-      .limit(5000);
+      .order('created_at', { ascending: true }));
 
     const porVariante = {};
     const emailsPorVariante = {};
-    for (const a of acciones || []) {
+    for (const a of acciones) {
       const v = a.variant || '(sin variante)';
       porVariante[v] = porVariante[v] || { variante: v, enviados: 0, respuestas: 0, registros: 0, bajas: 0 };
       porVariante[v].enviados++;
       (emailsPorVariante[v] = emailsPorVariante[v] || new Set()).add(normalizarEmail(a.email));
     }
 
-    const todos = [...new Set((acciones || []).map(a => normalizarEmail(a.email)).filter(Boolean))];
+    const todos = [...new Set(acciones.map(a => normalizarEmail(a.email)).filter(Boolean))];
     if (todos.length) {
       const [respuestas, registros, bajas] = await Promise.all([
-        supabaseAdmin.from('admin_emails').select('from_email')
-          .eq('direction', 'inbound').gte('created_at', desde).limit(2000),
-        supabaseAdmin.from('users').select('user_email').eq('is_psychologist', true).limit(2000),
-        supabaseAdmin.from('email_optouts').select('email').limit(2000)
+        traerTodo(() => supabaseAdmin.from('admin_emails').select('from_email')
+          .eq('direction', 'inbound').gte('created_at', desde).order('created_at', { ascending: true })),
+        traerTodo(() => supabaseAdmin.from('users').select('id, user_email')
+          .eq('is_psychologist', true).order('id', { ascending: true })),
+        traerTodo(() => supabaseAdmin.from('email_optouts').select('email')
+          .order('email', { ascending: true }))
       ]);
-      const conjunto = (r, campo) => new Set((r.data || []).map(x => normalizarEmail(x[campo])));
+      const conjunto = (filas, campo) => new Set(filas.map(x => normalizarEmail(x[campo])));
       const respondieron = conjunto(respuestas, 'from_email');
       const registrados = conjunto(registros, 'user_email');
       const seDieronDeBaja = conjunto(bajas, 'email');
@@ -20935,12 +20941,14 @@ app.get('/api/admin/funnel', authenticateRequest, requireSuperAdmin, async (req,
 
     // Una sola lectura de la ventana pedida; el acumulado va por count(head).
     const windowStart = new Date(now - days * DAY_MS).toISOString();
-    const [windowRes, ...totals] = await Promise.all([
-      supabaseAdmin
+    const [windowEvents, ...totals] = await Promise.all([
+      // Paginado: product_events crece con el uso y el tope de 1000 filas de
+      // PostgREST recortaria la serie sin dar ningun aviso.
+      traerTodo(() => supabaseAdmin
         .from('product_events')
         .select('user_id, event, created_at')
         .gte('created_at', windowStart)
-        .limit(20000),
+        .order('created_at', { ascending: true })),
       ...FUNNEL_STEPS.map(step =>
         supabaseAdmin
           .from('product_events')
@@ -20948,9 +20956,6 @@ app.get('/api/admin/funnel', authenticateRequest, requireSuperAdmin, async (req,
           .eq('event', step.event)
       )
     ]);
-
-    if (windowRes.error) throw windowRes.error;
-    const windowEvents = windowRes.data || [];
 
     // Embudo acumulado: usuarios distintos que alcanzaron cada hito.
     const lifetime = {};
