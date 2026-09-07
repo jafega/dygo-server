@@ -20631,6 +20631,12 @@ app.get('/api/agent/inbox/pending', requireAgentToken, async (req, res) => {
   try {
     if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase no disponible' });
     const limite = Math.min(50, Math.max(1, parseInt(req.query.limit) || 10));
+    // Ventana de recencia. El buzon acumula correo sin leer de meses atras: 29
+    // de los 30 pendientes al montar esto eran de abril a julio. Un bot no
+    // puede contestar eso como si acabara de llegar — quedaria fatal y el hilo
+    // ya no tiene sentido. El atraso es trabajo para una persona, si acaso.
+    const diasMax = Math.min(30, Math.max(1, parseInt(req.query.dias) || 7));
+    const desde = new Date(Date.now() - diasMax * 86400000).toISOString();
 
     const { data: entrantes, error } = await supabaseAdmin
       .from('admin_emails')
@@ -20639,6 +20645,7 @@ app.get('/api/agent/inbox/pending', requireAgentToken, async (req, res) => {
       .eq('direction', 'inbound')
       .eq('is_archived', false)
       .eq('is_read', false)
+      .gte('created_at', desde)
       // El correo que mainds se manda a si mismo no es una consulta de ventas.
       // El parte diario va a info@mainds.app, el webhook de Resend lo captura
       // como entrante y el bot se lo encontraba cada 15 minutos: dos llamadas
@@ -20655,6 +20662,7 @@ app.get('/api/agent/inbox/pending', requireAgentToken, async (req, res) => {
 
     return res.json({
       total: (entrantes || []).length,
+      ventana_dias: diasMax,
       emails: (entrantes || [])
         .filter(e => !bajas.has(normalizarEmail(e.from_email)))
         .map(e => ({
