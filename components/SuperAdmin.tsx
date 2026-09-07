@@ -147,8 +147,25 @@ interface FunnelAtRisk {
   daysLeft: number;
   stuck: string;
 }
+interface ComercialStep {
+  key: string;
+  label: string;
+  total: number;
+  fromPrevious: number | null;
+  fromLeads: number | null;
+}
+interface Cartera {
+  total: number;
+  vivos: number;
+  nuevos_en_ventana: number;
+  sin_contactar: number;
+  perdidos: number;
+  de_baja: number;
+}
 interface FunnelData {
   days: number;
+  comercial: ComercialStep[];
+  cartera: Cartera;
   funnel: FunnelStep[];
   series: Record<string, number | string>[];
   activeTrials: number;
@@ -641,9 +658,76 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
                 </div>
               </div>
 
+              {/* Cartera de leads: el trabajo que hay por delante */}
+              {funnel.cartera && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+                  <div className="bg-white rounded-xl border border-slate-200 p-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">En cartera</p>
+                    <p className="text-xl font-bold text-slate-800 mt-0.5">{funnel.cartera.total}</p>
+                    <p className="text-[11px] text-slate-400">{funnel.cartera.vivos} vivos</p>
+                  </div>
+                  {/* La cifra que dice si hay trabajo para el equipo de ventas */}
+                  <div className={`rounded-xl border p-3 ${funnel.cartera.sin_contactar > 0 ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200'}`}>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-600">Sin contactar</p>
+                    <p className="text-xl font-bold text-amber-900 mt-0.5">{funnel.cartera.sin_contactar}</p>
+                    <p className="text-[11px] text-amber-600">pendientes de tocar</p>
+                  </div>
+                  <div className="bg-white rounded-xl border border-slate-200 p-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Nuevos · {funnel.days}d</p>
+                    <p className="text-xl font-bold text-slate-800 mt-0.5">{funnel.cartera.nuevos_en_ventana}</p>
+                    <p className="text-[11px] text-slate-400">entradas a la cartera</p>
+                  </div>
+                  <div className="bg-white rounded-xl border border-slate-200 p-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Descartados</p>
+                    <p className="text-xl font-bold text-slate-800 mt-0.5">{funnel.cartera.perdidos + funnel.cartera.de_baja}</p>
+                    <p className="text-[11px] text-slate-400">{funnel.cartera.perdidos} perdidos · {funnel.cartera.de_baja} bajas</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Embudo comercial: lo que pasa ANTES de que exista una cuenta */}
+              {funnel.comercial && funnel.comercial.length > 0 && (
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6">
+                  <h3 className="text-sm font-semibold text-slate-700 mb-1 uppercase tracking-wide">Embudo comercial</h3>
+                  <p className="text-xs text-slate-400 mb-5">De lead en cartera a cliente. Incluye a los que aún no tienen cuenta</p>
+                  <div className="space-y-3">
+                    {funnel.comercial.map(paso => {
+                      const base = funnel.comercial[0].total || 1;
+                      const width = (paso.total / base) * 100;
+                      const fuga = paso.fromPrevious !== null && paso.fromPrevious < 20;
+                      return (
+                        <div key={paso.key}>
+                          <div className="flex items-baseline justify-between gap-3 mb-1">
+                            <span className="text-sm text-slate-700 truncate">{paso.label}</span>
+                            <span className="text-xs text-slate-400 flex-shrink-0">
+                              <span className="font-semibold text-slate-700 text-sm">{paso.total}</span>
+                              {paso.fromPrevious !== null && (
+                                <span className={`ml-2 font-medium ${fuga ? 'text-red-600' : 'text-slate-400'}`}>
+                                  {paso.fromPrevious}% del anterior
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                          <div className="h-7 bg-slate-100 rounded-lg overflow-hidden">
+                            <div
+                              className={`h-full rounded-lg transition-all ${fuga ? 'bg-red-400' : 'bg-cyan-500'}`}
+                              style={{ width: `${Math.max(width, 1.5)}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-4">
+                    «Contactados» cuenta haber recibido algo de verdad, no la etiqueta de etapa: la etapa
+                    se puede mover a mano sin haber escrito nunca.
+                  </p>
+                </div>
+              )}
+
               {/* Embudo acumulado: una barra por paso, ancho proporcional */}
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6">
-                <h3 className="text-sm font-semibold text-slate-700 mb-1 uppercase tracking-wide">Acumulado histórico</h3>
+                <h3 className="text-sm font-semibold text-slate-700 mb-1 uppercase tracking-wide">Activación del producto</h3>
                 <p className="text-xs text-slate-400 mb-5">Psicólogos distintos que han alcanzado cada hito</p>
                 <div className="space-y-3">
                   {funnel.funnel.map(step => {
