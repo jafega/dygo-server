@@ -188,11 +188,38 @@ export default async function handler(req, res) {
     if (preview) return res.status(200).json(report);
 
     /* ── 6. Enviar ── */
-    const recipients = (process.env.SUPERADMIN_EMAILS || '')
-      .split(',').map(s => s.trim()).filter(Boolean);
+    //
+    // Quien lo recibe sale de SUPERADMIN_EMAILS, MENOS quien este en
+    // DIGEST_EXCLUDE_EMAILS.
+    //
+    // Son dos variables y no una a proposito: SUPERADMIN_EMAILS es lo que da
+    // acceso al panel (ver isSuperAdmin en backend/server.js). Si a alguien
+    // que no quiere el parte diario lo sacaramos de ahi, le quitariamos
+    // tambien el acceso, que es un efecto que nadie pidio. Recibir el correo
+    // y poder entrar son dos permisos distintos y aqui se tratan como tales.
+    const lista = (v) => (v || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
+    const excluidos = new Set(lista(process.env.DIGEST_EXCLUDE_EMAILS));
+    const todos = lista(process.env.SUPERADMIN_EMAILS);
+    const recipients = todos.filter(e => !excluidos.has(e));
+    const fuera = todos.filter(e => excluidos.has(e));
+
+    if (fuera.length) {
+      console.log(`[daily-digest] ${fuera.length} excluido(s) por DIGEST_EXCLUDE_EMAILS: ${fuera.join(', ')}`);
+    }
+    // Una direccion en la lista de exclusion que no esta en la de superadmin
+    // suele ser una errata: se avisa para que no pase inadvertida.
+    const sobran = [...excluidos].filter(e => !todos.includes(e));
+    if (sobran.length) {
+      console.warn(`[daily-digest] en DIGEST_EXCLUDE_EMAILS hay direcciones que no reciben el parte: ${sobran.join(', ')}`);
+    }
+
     if (!process.env.RESEND_API_KEY || recipients.length === 0) {
-      console.warn('[daily-digest] Sin RESEND_API_KEY o SUPERADMIN_EMAILS — no se envía');
-      return res.status(200).json({ ...report, sent: false, reason: 'destinatarios_o_resend_no_configurados' });
+      console.warn('[daily-digest] Sin RESEND_API_KEY o sin destinatarios tras excluir — no se envía');
+      return res.status(200).json({
+        ...report, sent: false,
+        reason: 'destinatarios_o_resend_no_configurados',
+        excluidos: fuera
+      });
     }
 
     const { Resend } = await import('resend');
@@ -348,7 +375,7 @@ export default async function handler(req, res) {
     });
 
     console.log(`[daily-digest] enviado a ${recipients.length} destinatario(s)`);
-    return res.status(200).json({ ...report, sent: true, recipients: recipients.length });
+    return res.status(200).json({ ...report, sent: true, recipients: recipients.length, excluidos: fuera });
   } catch (err) {
     console.error('[daily-digest] error:', err?.message || err);
     return res.status(500).json({ error: err?.message || 'digest falló' });
