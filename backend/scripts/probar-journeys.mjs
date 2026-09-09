@@ -7,7 +7,9 @@
 import dotenv from 'dotenv';
 import { randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
-dotenv.config({ path: './.env.local' });
+// Rutas relativas a ESTE fichero, no al directorio desde el que se lanza:
+// asi la suite se ejecuta igual desde la raiz o desde backend/scripts.
+dotenv.config({ path: new URL('../../.env.local', import.meta.url) });
 
 const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 const rt = async (f, n = 4) => {
@@ -16,11 +18,11 @@ const rt = async (f, n = 4) => {
   }
 };
 
-const { puedeEnviar, leerConfig, enviadosHoy } = await import('./backend/utils/agent-api.js');
-const { clienteQuePaga } = await import('./backend/utils/clientes.js');
-const { esperandoRespuesta, diasDeCadencia } = await import('./backend/utils/cadencia.js');
-const { esPaciente } = await import('./backend/utils/audiencia.js');
-const { estaDadoDeBaja } = await import('./backend/utils/email-optout.js');
+const { puedeEnviar, leerConfig, enviadosHoy } = await import('../utils/agent-api.js');
+const { clienteQuePaga } = await import('../utils/clientes.js');
+const { esperandoRespuesta, diasDeCadencia } = await import('../utils/cadencia.js');
+const { esPaciente } = await import('../utils/audiencia.js');
+const { estaDadoDeBaja } = await import('../utils/email-optout.js');
 
 let fallos = 0, total = 0;
 const ok = (caso, esperado, obtenido, nota = '') => {
