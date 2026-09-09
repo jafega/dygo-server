@@ -305,10 +305,15 @@ export async function runAutomations({ dryRun = false, soloUsuario = null } = {}
     }
   }
 
+  // Se lee `psychologist_user_id` ANTES del id de la fila. Hoy los 48 registros
+  // tienen los dos valores iguales, pero el id de fila es un detalle de como se
+  // guarda y el campo del payload es el que significa algo. Si algun dia
+  // dejaran de coincidir, la consecuencia seria mandar correo comercial a un
+  // cliente que paga, que es justo lo que esto evita.
   const pagan = new Set(
     (subsRes.data || [])
       .filter(r => ['active', 'trialing'].includes((r.data || {}).stripe_status))
-      .map(r => r.id)
+      .map(r => (r.data || {}).psychologist_user_id || r.id)
   );
 
   let candidatos = [...altaPorUsuario.keys()].filter(id => !pagan.has(id));
