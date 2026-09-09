@@ -16,6 +16,7 @@
 import { conPieBaja, cabecerasBaja, estaDadoDeBaja, normalizarEmail } from './email-optout.js';
 import { esPaciente } from './audiencia.js';
 import { esperandoRespuesta, diasDeCadencia } from './cadencia.js';
+import { clienteQuePaga } from './clientes.js';
 
 const FROM = 'mainds <info@mainds.app>';
 const REPLY_TO = 'info@mainds.app';
@@ -78,6 +79,15 @@ export async function puedeEnviar(supabase, { email, forzarBorrador }) {
   // da igual que endpoint o que workflow lo pida, a un paciente no le sale un
   // email de ventas.
   if (await esPaciente(supabase, email)) return { permitido: false, motivo: 'es_paciente' };
+
+  // A un cliente que paga no se le vende. Un "te quedan 3 dias de prueba" a
+  // quien lleva meses pagando dice que no sabemos quien es, y eso invita a
+  // cancelar. Se comprueba contra Stripe, no contra leads.app_is_subscribed,
+  // que es un reflejo y se queda viejo.
+  const cliente = await clienteQuePaga(supabase, email);
+  if (cliente.esCliente) {
+    return { permitido: false, motivo: 'ya_es_cliente', cliente };
+  }
 
   const hoy = await enviadosHoy(supabase);
   if (hoy >= config.cupo_diario) {
@@ -218,6 +228,16 @@ export async function aprobarBorrador(supabase, { borradorId, aprobadoPor }) {
   // quien aprueba no tiene por que acordarse de si a esa persona ya le salio un
   // email hace tres minutos, y de hecho fue exactamente asi como dos leads
   // recibieron dos correos seguidos. Lo comprueba el servidor, no la memoria.
+  // Un borrador escrito el lunes puede aprobarse el viernes, cuando esa
+  // persona ya ha pagado. Se comprueba en el momento de enviar, no cuando se
+  // escribio.
+  const cliente = await clienteQuePaga(supabase, email);
+  if (cliente.esCliente) {
+    const avisoCliente = `Esta persona ya es cliente (plan ${cliente.plan || '?'}, ${cliente.estado}).`
+      + ' No se le manda correo comercial: escribirle ahora invita a que se de de baja.';
+    return { ok: false, motivo: 'ya_es_cliente', error: avisoCliente, detalle: avisoCliente, cliente };
+  }
+
   const config = await leerConfig(supabase);
   const espera = await esperandoRespuesta(supabase, email, diasDeCadencia(config));
   if (espera.bloqueado) {
