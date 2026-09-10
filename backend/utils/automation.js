@@ -25,6 +25,7 @@ import { createClient } from '@supabase/supabase-js';
 import { renderEmail } from './email-shell.js';
 import { urlBaja, cabecerasBaja, suprimidos, normalizarEmail } from './email-optout.js';
 import { esperandoRespuesta } from './cadencia.js';
+import { usuariosQueHanPagado } from './clientes.js';
 import { traerTodo } from './supabase-paginate.js';
 import { soloPsicologos } from './audiencia.js';
 
@@ -284,16 +285,15 @@ export async function runAutomations({ dryRun = false, soloUsuario = null } = {}
   // prueba. Fuera de ahí no hay ninguna campaña que pueda disparar.
   const ventana = new Date(ahora - (TRIAL_DAYS + 22) * DAY_MS).toISOString();
 
-  const [signups, subsRes] = await Promise.all([
+  // Ya no se leen aqui las suscripciones: quien ha pagado alguna vez lo
+  // resuelve usuariosQueHanPagado(), que cruza dos senales en vez de una.
+  const signups = await traerTodo(() => supabase.from('product_events')
     // Paginado: product_events crece con cada evento de cada usuario y el
     // tope de 1000 filas de PostgREST llegaria sin avisar.
-    traerTodo(() => supabase.from('product_events')
-      .select('user_id, created_at')
-      .eq('event', 'signup')
-      .gte('created_at', ventana)
-      .order('created_at', { ascending: true })),
-    supabase.from('subscriptions').select('id, data')
-  ]);
+    .select('user_id, created_at')
+    .eq('event', 'signup')
+    .gte('created_at', ventana)
+    .order('created_at', { ascending: true }));
 
   // Un alta por usuario, la más antigua.
   const altaPorUsuario = new Map();
@@ -310,13 +310,12 @@ export async function runAutomations({ dryRun = false, soloUsuario = null } = {}
   // guarda y el campo del payload es el que significa algo. Si algun dia
   // dejaran de coincidir, la consecuencia seria mandar correo comercial a un
   // cliente que paga, que es justo lo que esto evita.
-  const pagan = new Set(
-    (subsRes.data || [])
-      .filter(r => ['active', 'trialing'].includes((r.data || {}).stripe_status))
-      .map(r => (r.data || {}).psychologist_user_id || r.id)
-  );
+  // Fuera todo el que haya tenido suscripcion alguna vez, pague hoy o no. Una
+  // campana de activacion ("anade tu primer paciente") a alguien que fue
+  // cliente durante meses es peor que no escribir nada.
+  const hanPagado = await usuariosQueHanPagado(supabase);
 
-  let candidatos = [...altaPorUsuario.keys()].filter(id => !pagan.has(id));
+  let candidatos = [...altaPorUsuario.keys()].filter(id => !hanPagado.has(String(id)));
   if (soloUsuario) candidatos = candidatos.filter(id => id === soloUsuario);
 
   if (candidatos.length === 0) {

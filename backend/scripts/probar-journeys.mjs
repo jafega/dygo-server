@@ -18,7 +18,7 @@ const rt = async (f, n = 4) => {
   }
 };
 
-const { puedeEnviar, leerConfig, enviadosHoy } = await import('../utils/agent-api.js');
+const { puedeEnviar, guardasDelDestinatario, leerConfig } = await import('../utils/agent-api.js');
 const { clienteQuePaga } = await import('../utils/clientes.js');
 const { esperandoRespuesta, diasDeCadencia } = await import('../utils/cadencia.js');
 const { esPaciente } = await import('../utils/audiencia.js');
@@ -33,10 +33,11 @@ const ok = (caso, esperado, obtenido, nota = '') => {
   console.log(`         espera "${esperado}", obtiene "${obtenido}"${nota ? '  ' + nota : ''}`);
 };
 
-const basura = { emails: [], optouts: [], users: [], subs: [] };
+const basura = { emails: [], optouts: [], users: [], subs: [], eventos: [] };
 const limpiar = async () => {
   if (basura.emails.length) await rt(() => sb.from('admin_emails').delete().in('id', basura.emails));
   if (basura.optouts.length) await rt(() => sb.from('email_optouts').delete().in('email', basura.optouts));
+  if (basura.eventos.length) await rt(() => sb.from('product_events').delete().in('user_id', basura.eventos));
   if (basura.subs.length) await rt(() => sb.from('subscriptions').delete().in('id', basura.subs));
   if (basura.users.length) await rt(() => sb.from('users').delete().in('id', basura.users));
 };
@@ -50,10 +51,13 @@ const crearUsuario = async (email) => {
   basura.users.push(data.id);
   return data;
 };
-const darSuscripcion = async (userId, estado, plan = 'starter') => {
+const darSuscripcion = async (userId, estado, plan = 'starter', subId = 'sub_journey', cusId = 'cus_journey') => {
   const { error } = await rt(() => sb.from('subscriptions').insert([{
     id: userId,
-    data: { psychologist_user_id: userId, stripe_status: estado, plan_id: plan, access_blocked: false }
+    data: {
+      psychologist_user_id: userId, stripe_status: estado, plan_id: plan, access_blocked: false,
+      stripe_subscription_id: subId, stripe_customer_id: cusId
+    }
   }]));
   if (error) throw new Error(`suscripcion ${estado}: ${error.message}`);
   basura.subs.push(userId);
@@ -78,19 +82,16 @@ const ahora = Date.now();
 const haceHoras = h => new Date(ahora - h * 3600e3).toISOString();
 const haceDias = d => new Date(ahora - d * 86400e3).toISOString();
 
-// Replica del orden de puedeEnviar, saltando solo la puerta del modo borrador.
+// Se llama a la MISMA funcion que corre en produccion, saltando solo la
+// puerta del modo borrador. La primera version de esta suite replicaba la
+// cadena de guardas a mano y se desincronizo en cuanto se anadio la de ex
+// clientes: daba por buenos envios que el codigo real ya bloqueaba. Probar
+// una copia de la logica de seguridad es no probarla.
 const config = await rt(() => leerConfig(sb));
+const comoSiFueraAutonomo = { ...config, autonomia: 'autonomo' };
 const siFueraAutonomo = async (email) => {
-  if (!config.enabled) return 'agentes_desactivados';
-  if (await estaDadoDeBaja(sb, email)) return 'dado_de_baja';
-  const espera = await esperandoRespuesta(sb, email, diasDeCadencia(config));
-  if (espera.bloqueado) return 'espera_respuesta';
-  if (await esPaciente(sb, email)) return 'es_paciente';
-  const cli = await clienteQuePaga(sb, email);
-  if (cli.esCliente) return 'ya_es_cliente';
-  const hoy = await enviadosHoy(sb);
-  if (hoy >= config.cupo_diario) return 'cupo_diario_agotado';
-  return 'enviar';
+  const r = await guardasDelDestinatario(sb, email, comoSiFueraAutonomo);
+  return r.permitido ? 'enviar' : r.motivo;
 };
 
 try {
@@ -112,12 +113,23 @@ try {
   ok('TRIALING de Stripe (ya dejo tarjeta)', 'ya_es_cliente', await siFueraAutonomo('j3.trial@ejemplo.test'));
 
   const u4 = await crearUsuario('j4.cancelo@ejemplo.test');
-  await darSuscripcion(u4.id, 'canceled');
-  ok('CANCELED: se puede intentar recuperar', 'enviar', await siFueraAutonomo('j4.cancelo@ejemplo.test'));
+  await darSuscripcion(u4.id, 'canceled', 'starter', 'sub_j4');
+  ok('CANCELED: pago y se fue, NO se le escribe', 'fue_cliente', await siFueraAutonomo('j4.cancelo@ejemplo.test'));
 
   const u5 = await crearUsuario('j5.impago@ejemplo.test');
-  await darSuscripcion(u5.id, 'past_due');
-  ok('PAST_DUE: no es cliente vivo', 'enviar', await siFueraAutonomo('j5.impago@ejemplo.test'));
+  await darSuscripcion(u5.id, 'past_due', 'starter', 'sub_j5');
+  ok('PAST_DUE: tuvo suscripcion, tampoco', 'fue_cliente', await siFueraAutonomo('j5.impago@ejemplo.test'));
+
+  const u5b = await crearUsuario('j5b.checkout@ejemplo.test');
+  await darSuscripcion(u5b.id, null, 'starter', null, 'cus_j5b');
+  ok('Llego al checkout y NO pago: lead caliente', 'enviar', await siFueraAutonomo('j5b.checkout@ejemplo.test'),
+     '(tiene cliente de Stripe pero nunca suscripcion)');
+
+  const u5c = await crearUsuario('j5c.solo.evento@ejemplo.test');
+  await rt(() => sb.from('product_events').insert([{ user_id: u5c.id, event: 'paid', props: { source: 'journey' } }]));
+  basura.eventos.push(u5c.id);
+  ok('Sin fila de suscripcion pero CON evento paid', 'fue_cliente', await siFueraAutonomo('j5c.solo.evento@ejemplo.test'),
+     '(la segunda senal lo caza igual)');
 
   console.log('\n=== 3. DIJO QUE NO ===');
   await darBaja('j6.baja@ejemplo.test');
@@ -172,14 +184,24 @@ try {
     ok(`${l.name} (${l.app_plan})`, 'ya_es_cliente', await siFueraAutonomo(l.email));
   }
 
-  console.log('\n=== 8. EX CLIENTES: SI se pueden recuperar ===');
+  console.log('\n=== 8. EX CLIENTES REALES: tampoco se les escribe ===');
   const { data: fugados } = await rt(() => sb.from('leads')
-    .select('email, name').eq('stage', 'cancelled').not('email', 'is', null).limit(4));
+    .select('email, name').eq('stage', 'cancelled').not('email', 'is', null));
   for (const l of fugados || []) {
-    const v = await siFueraAutonomo(l.email);
-    ok(`${l.name} (se fue)`, 'enviar', v === 'espera_respuesta' ? 'enviar' : v,
-       v === 'espera_respuesta' ? '(en cadencia por el email de ayer; no es bloqueo de cliente)' : '');
+    ok(`${l.name} (pago y se fue)`, 'fue_cliente', await siFueraAutonomo(l.email));
   }
+
+  console.log('\n=== 9. DIJO QUE NO LE ESCRIBAMOS ===');
+  for (const motivo of ['no_interesado', 'no_contactar', 'queja_spam', 'peticion_por_respuesta']) {
+    const dir = `j.no.${motivo}@ejemplo.test`;
+    await rt(() => sb.from('email_optouts').upsert([{ email: dir, reason: motivo, source: 'journey' }], { onConflict: 'email' }));
+    basura.optouts.push(dir);
+    ok(`Suprimido por "${motivo}"`, 'dado_de_baja', await siFueraAutonomo(dir));
+  }
+  const may = 'J.No.MAYUSCULAS@Ejemplo.Test';
+  await rt(() => sb.from('email_optouts').upsert([{ email: may.toLowerCase(), reason: 'no_contactar', source: 'journey' }], { onConflict: 'email' }));
+  basura.optouts.push(may.toLowerCase());
+  ok('La supresion no depende de mayusculas', 'dado_de_baja', await siFueraAutonomo(may));
 } catch (e) {
   console.error('\nEL ARNES SE ROMPIO:', e.message);
   fallos++;

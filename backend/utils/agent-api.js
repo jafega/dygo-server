@@ -61,39 +61,58 @@ export async function registrarAccion(supabase, fila) {
  * Decide si un envío puede salir. Devuelve el motivo del bloqueo, si lo hay.
  * Se comprueba SIEMPRE antes de enviar, venga de donde venga la petición.
  */
+/**
+ * Las guardas sobre el DESTINATARIO, sin la puerta del modo borrador.
+ *
+ * Vive aparte de puedeEnviar por un motivo practico: en modo borrador
+ * puedeEnviar corta en la primera puerta y nunca llega aqui, asi que estas
+ * comprobaciones no se podrian probar sin poner produccion en autonomo. La
+ * suite (backend/scripts/probar-journeys.mjs) llama a ESTA funcion.
+ *
+ * No es un atajo para pruebas: es la misma funcion que corre en produccion.
+ * La primera version de la suite replicaba esta cadena a mano y se
+ * desincronizo en cuanto se anadio una guarda — daba por buenos envios a ex
+ * clientes que el codigo real ya bloqueaba. Duplicar la logica de seguridad
+ * para probarla es probar la copia.
+ */
+export async function guardasDelDestinatario(supabase, email, config) {
+  if (await estaDadoDeBaja(supabase, email)) return { permitido: false, motivo: 'dado_de_baja' };
+
+  // No se insiste a quien no ha contestado todavia. Si contesta, la regla se
+  // levanta sola: responder a quien te escribe no es insistir.
+  const espera = await esperandoRespuesta(supabase, email, diasDeCadencia(config));
+  if (espera.bloqueado) return { permitido: false, motivo: 'espera_respuesta', espera };
+
+  // Cerrojo en el punto por el que pasan TODOS los envios de agente: da igual
+  // que endpoint o que workflow lo pida, a un paciente no le sale un email de
+  // ventas.
+  if (await esPaciente(supabase, email)) return { permitido: false, motivo: 'es_paciente' };
+
+  // A un cliente que paga no se le vende: un "te quedan 3 dias de prueba" a
+  // quien lleva meses pagando dice que no sabemos quien es, y eso invita a
+  // cancelar. Y a quien pago y se fue tampoco: volver a venderle con el mismo
+  // correo automatico que a un desconocido no es recuperarlo, es no haberse
+  // enterado de que se fue. Se comprueba contra Stripe, no contra
+  // leads.app_is_subscribed, que es un reflejo y se queda viejo.
+  const cliente = await clienteQuePaga(supabase, email);
+  if (cliente.esCliente) return { permitido: false, motivo: 'ya_es_cliente', cliente };
+  if (cliente.fueCliente) return { permitido: false, motivo: 'fue_cliente', cliente };
+
+  const hoy = await enviadosHoy(supabase);
+  if (hoy >= config.cupo_diario) {
+    return { permitido: false, motivo: 'cupo_diario_agotado', enviadosHoy: hoy, cupo: config.cupo_diario };
+  }
+  return { permitido: true, enviadosHoy: hoy };
+}
+
 export async function puedeEnviar(supabase, { email, forzarBorrador }) {
   const config = await leerConfig(supabase);
   if (!config.enabled) return { permitido: false, motivo: 'agentes_desactivados' };
   if (forzarBorrador || config.autonomia !== 'autonomo') {
     return { permitido: false, motivo: 'modo_borrador', config };
   }
-  if (await estaDadoDeBaja(supabase, email)) return { permitido: false, motivo: 'dado_de_baja' };
-
-  // No se insiste a quien no ha contestado todavia. Si contesta, la regla se
-  // levanta sola: responder a quien te escribe no es insistir.
-  const espera = await esperandoRespuesta(supabase, email, diasDeCadencia(config));
-  if (espera.bloqueado) {
-    return { permitido: false, motivo: 'espera_respuesta', espera, config };
-  }
-  // Ultimo cerrojo, en el punto por el que pasan TODOS los envios de agente:
-  // da igual que endpoint o que workflow lo pida, a un paciente no le sale un
-  // email de ventas.
-  if (await esPaciente(supabase, email)) return { permitido: false, motivo: 'es_paciente' };
-
-  // A un cliente que paga no se le vende. Un "te quedan 3 dias de prueba" a
-  // quien lleva meses pagando dice que no sabemos quien es, y eso invita a
-  // cancelar. Se comprueba contra Stripe, no contra leads.app_is_subscribed,
-  // que es un reflejo y se queda viejo.
-  const cliente = await clienteQuePaga(supabase, email);
-  if (cliente.esCliente) {
-    return { permitido: false, motivo: 'ya_es_cliente', cliente };
-  }
-
-  const hoy = await enviadosHoy(supabase);
-  if (hoy >= config.cupo_diario) {
-    return { permitido: false, motivo: 'cupo_diario_agotado', enviadosHoy: hoy, cupo: config.cupo_diario };
-  }
-  return { permitido: true, config, enviadosHoy: hoy };
+  const veredicto = await guardasDelDestinatario(supabase, email, config);
+  return { ...veredicto, config };
 }
 
 /**
@@ -232,10 +251,17 @@ export async function aprobarBorrador(supabase, { borradorId, aprobadoPor }) {
   // persona ya ha pagado. Se comprueba en el momento de enviar, no cuando se
   // escribio.
   const cliente = await clienteQuePaga(supabase, email);
-  if (cliente.esCliente) {
-    const avisoCliente = `Esta persona ya es cliente (plan ${cliente.plan || '?'}, ${cliente.estado}).`
-      + ' No se le manda correo comercial: escribirle ahora invita a que se de de baja.';
-    return { ok: false, motivo: 'ya_es_cliente', error: avisoCliente, detalle: avisoCliente, cliente };
+  if (cliente.esCliente || cliente.fueCliente) {
+    const avisoCliente = cliente.esCliente
+      ? `Esta persona ya es cliente (plan ${cliente.plan || '?'}, ${cliente.estado}).`
+        + ' No se le manda correo comercial: escribirle ahora invita a que se de de baja.'
+      : `Esta persona fue cliente y se dio de baja (${cliente.estado || 'cancelada'}).`
+        + ' Recuperarla se escribe a mano, sabiendo por que se fue, no con el correo automatico.';
+    return {
+      ok: false,
+      motivo: cliente.esCliente ? 'ya_es_cliente' : 'fue_cliente',
+      error: avisoCliente, detalle: avisoCliente, cliente
+    };
   }
 
   const config = await leerConfig(supabase);
