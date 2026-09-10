@@ -20509,6 +20509,67 @@ app.get('/api/_audit/selftest', authenticateRequest, requireSuperAdmin, async (r
   }
 });
 
+// --- GET /api/_audit/baja — ¿funciona el enlace de darse de baja? ---
+//
+// Esto existe por una razon concreta y cara. De los 1.088 correos comerciales
+// enviados entre abril y agosto de 2026, NINGUNO llevaba un enlace de baja que
+// funcionara: el pie hablaba de darse de baja y no habia enlace detras. Tres
+// personas escribieron para decirlo con estas palabras — "el boton para darme
+// de baja no funciona" — y como no habia forma de salirse, el sistema
+// registro cero bajas y parecio que nadie queria irse.
+//
+// Un enlace de baja roto no es un detalle: es la diferencia entre que alguien
+// se de de baja y que te marque como spam, y en la LSSI y el RGPD es
+// obligatorio que exista y sea sencillo.
+//
+// La comprobacion es de ida y vuelta y NO toca datos de nadie: se firma una
+// direccion inventada, se valida esa firma con el mismo secreto del servidor,
+// y se comprueba que una firma manipulada se rechaza. No se suprime a nadie.
+//
+// Sirve para responder, antes de cada campana, a "¿de verdad se pueden dar de
+// baja?" sin tener que dar de baja a una persona real para averiguarlo.
+app.get('/api/_audit/baja', authenticateRequest, requireSuperAdmin, (req, res) => {
+  try {
+    const ficticia = 'comprobacion.baja@ejemplo.invalid';
+    const firma = firmaBaja(ficticia);
+    const enlace = urlBaja(ficticia);
+
+    const pruebas = {
+      genera_firma: !!firma && firma.length >= 16,
+      // La firma buena se valida y una manipulada no. Si esto fallara, el
+      // enlace del pie no daria de baja a nadie aunque lo pulsaran.
+      valida_la_buena: firmaBaja(ficticia) === firma,
+      rechaza_la_mala: firmaBaja(ficticia + 'x') !== firma,
+      // El enlace tiene que llevar direccion Y firma, y apuntar a este dominio.
+      enlace_completo: /[?&]e=/.test(enlace) && /[?&]s=/.test(enlace),
+      enlace_absoluto: /^https?:\/\//.test(enlace),
+      // Con el pie puesto, el HTML del correo tiene que contener el enlace.
+      pie_incluye_enlace: conPieBaja('<p>hola</p>', ficticia).includes('optout?e='),
+      // Y las cabeceras que hacen que Gmail ensene su propio boton de baja.
+      cabecera_list_unsubscribe: !!cabecerasBaja(ficticia)['List-Unsubscribe']
+    };
+
+    const fallos = Object.keys(pruebas).filter(k => !pruebas[k]);
+    const ok = fallos.length === 0;
+    if (!ok) console.warn('[_audit/baja] el enlace de baja NO esta sano:', fallos.join(', '));
+
+    return res.status(ok ? 200 : 500).json({
+      ok,
+      pruebas,
+      fallos,
+      // Se ensena el enlace de la direccion ficticia para poder pulsarlo sin
+      // consecuencias: da de baja a una direccion que no existe.
+      enlace_de_ejemplo: enlace,
+      nota: ok
+        ? 'El enlace de baja funciona. Se puede enviar campana.'
+        : 'NO enviar campana: quien quiera salirse no podra, y marcara como spam.'
+    });
+  } catch (err) {
+    console.error('[_audit/baja]', err?.message || err);
+    return res.status(500).json({ ok: false, error: err?.message || 'fallo la comprobacion' });
+  }
+});
+
 app.post('/api/_audit/reset', authenticateRequest, requireSuperAdmin, (req, res) => {
   resetAudit();
   return res.json({ ok: true, reset: true });
