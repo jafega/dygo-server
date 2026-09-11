@@ -20940,6 +20940,43 @@ app.get('/api/agent/leads/next', requireAgentToken, async (req, res) => {
     // Y ademas se excluye a quien consta como PACIENTE en la app: hay leads
     // importados cuyo email pertenece a un paciente, y a esos no se les
     // escribe de ventas jamas.
+    // A quien nos escribio y sigue esperando NO se le prospecta.
+    //
+    // El 11 sep 2026 el primer envio autonomo le pregunto a Elena "¿que te
+    // falto para seguir con mainds?". Elena habia escrito ocho veces entre
+    // mayo y junio con dudas concretas y nadie le contesto nunca: lo que le
+    // falto fue la respuesta. El correo estaba bien escrito y era el peor
+    // posible, porque el redactor no ve los correos que la persona nos manda.
+    //
+    // Si su ultimo mensaje es posterior a nuestro ultimo envio, esa persona no
+    // es un lead a prospectar: es una conversacion a medias. Se saca de esta
+    // cola y se devuelve aparte, para poder contestarle.
+    const [entrantes, salientes] = await Promise.all([
+      traerTodo(() => supabaseAdmin
+        .from('admin_emails')
+        .select('from_email, created_at')
+        .eq('mailbox', 'sales').eq('direction', 'inbound')
+        .not('from_email', 'ilike', '%@mainds.app')),
+      traerTodo(() => supabaseAdmin
+        .from('admin_emails')
+        .select('to_email, created_at')
+        .eq('mailbox', 'sales').eq('direction', 'outbound'))
+    ]);
+    const ultimoSuyo = {};
+    for (const e of entrantes) {
+      const d = normalizarEmail(e.from_email);
+      if (!ultimoSuyo[d] || e.created_at > ultimoSuyo[d]) ultimoSuyo[d] = e.created_at;
+    }
+    const ultimoNuestro = {};
+    for (const e of salientes) {
+      const d = normalizarEmail(e.to_email);
+      if (!ultimoNuestro[d] || e.created_at > ultimoNuestro[d]) ultimoNuestro[d] = e.created_at;
+    }
+    const esperanRespuesta = new Set();
+    for (const d of Object.keys(ultimoSuyo)) {
+      if (!ultimoNuestro[d] || ultimoNuestro[d] < ultimoSuyo[d]) esperanRespuesta.add(d);
+    }
+
     // Un borrador sin aprobar significa que a ese lead YA se le ha escrito, y
     // solo falta que una persona le de el visto bueno. Sin esto el agente lo
     // volveria a elegir en cada pasada: `last_contacted_at` no se toca hasta
@@ -20961,7 +20998,8 @@ app.get('/api/agent/leads/next', requireAgentToken, async (req, res) => {
     const cola = candidatos
       .filter(l => {
         const e = normalizarEmail(l.email);
-        return !bajas.has(e) && !sonPacientes.has(e) && !esperandoVistoBueno.has(l.id);
+        return !bajas.has(e) && !sonPacientes.has(e)
+          && !esperandoVistoBueno.has(l.id) && !esperanRespuesta.has(e);
       })
       .slice(0, limite);
 
@@ -20981,9 +21019,25 @@ app.get('/api/agent/leads/next', requireAgentToken, async (req, res) => {
       }
     }
 
+    // Los que esperan respuesta se devuelven aparte, no se esconden: son los
+    // mejores leads que hay en la base. Preguntaron para comprar.
+    const debemosRespuesta = candidatos
+      .filter(l => esperanRespuesta.has(normalizarEmail(l.email)))
+      .map(l => ({
+        id: l.id,
+        name: l.name || l.email,
+        email: l.email,
+        escribio: ultimoSuyo[normalizarEmail(l.email)],
+        dias_esperando: Math.floor(
+          (Date.now() - new Date(ultimoSuyo[normalizarEmail(l.email)]).getTime()) / 86400000
+        )
+      }))
+      .sort((a, b) => b.dias_esperando - a.dias_esperando);
+
     return res.json({
       total: cola.length,
       con_borrador_pendiente: esperandoVistoBueno.size,
+      esperan_respuesta: debemosRespuesta,
       config: await leerConfig(supabaseAdmin),
       enviados_hoy: await enviadosHoy(supabaseAdmin),
       leads: cola.map(l => ({ ...l, acciones_recientes: ultimas[l.id] || [] }))
