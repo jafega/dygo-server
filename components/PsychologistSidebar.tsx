@@ -351,11 +351,11 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
       {/* Sidebar */}
       <aside
         className={`
-          fixed lg:sticky top-0 left-0 h-screen
+          fixed lg:sticky top-0 left-0 h-dvh
           w-64 bg-white border-r border-slate-200 z-40
           transition-transform duration-300 ease-in-out
           ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-          flex flex-col
+          flex flex-col overflow-y-auto overscroll-contain
         `}
       >
         {/* Header */}
@@ -378,7 +378,7 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+        <nav className="flex-1 shrink-0 p-3 space-y-1">
           {menuItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeView === item.id;

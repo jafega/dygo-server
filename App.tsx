@@ -1700,10 +1700,10 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
 
         {/* Sidebar tipo Notion */}
         <aside className={`
-          fixed md:sticky top-0 left-0 h-screen bg-white border-r border-slate-200 z-40
+          fixed md:sticky top-0 left-0 h-dvh bg-white border-r border-slate-200 z-40
           transition-transform duration-300 ease-in-out
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
-          flex flex-col overflow-hidden
+          flex flex-col overflow-y-auto overscroll-contain
           w-64
         `}>
           <div className="p-4 border-b border-slate-200">
@@ -1724,7 +1724,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
             </div>
           </div>
 
-          <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+          <nav className="flex-1 shrink-0 p-3 space-y-1">
             <button
               onClick={() => { setActiveTab('calendar'); if (window.innerWidth < 768) setSidebarOpen(false); }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium ${
