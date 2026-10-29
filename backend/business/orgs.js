@@ -95,6 +95,8 @@ export function projectOrg(org) {
     plus: hasPlus(org),
     // Tarifas por servicio (Fase 6): las ve todo el equipo para dar citas.
     service_prices: org.settings?.service_prices || {},
+    // Cerrada por el titular (Fase 6): solo lectura; se reabre suscribiéndose de nuevo.
+    closed_at: org.status !== 'active' ? (org.settings?.closed_at || null) : null,
     created_at: org.created_at
   };
 }
@@ -164,7 +166,8 @@ export async function buildMe(ctx, user, userId) {
       orgId: org.id, name: org.name, slug: org.slug, logo_url: org.logo_url || null,
       role: m.role, status: m.status, memberId: m.id,
       permissions: effectivePermissions(m),
-      access: access.level, trial: access.trial, trial_days_left: access.trialDaysLeft
+      access: access.level, trial: access.trial, trial_days_left: access.trialDaysLeft,
+      closed: !!(org.status !== 'active' && org.settings?.closed_at)
     });
   }
 
@@ -538,6 +541,53 @@ export function registerScopedRoutes(router, ctx) {
   router.post('/members/:memberId/suspend', requireAction('team.manage'), changeStatus('suspend'));
   router.post('/members/:memberId/reactivate', requireAction('team.manage'), changeStatus('reactivate'));
   router.delete('/members/:memberId', requireAction('team.manage'), changeStatus('remove'));
+
+  // Cerrar la clínica (titular). El titular sigue con su consulta de mainds pro
+  // tal cual: la suscripción de Pro es otra y no se toca.
+  //   - Se cancela YA la suscripción de Stripe de la clínica (no se cobra más).
+  //   - La clínica queda en solo lectura: la historia clínica se conserva por
+  //     obligación legal (Ley 41/2002, 5 años) y el titular puede consultarla.
+  //   - El resto del equipo pierde el acceso; las invitaciones se anulan.
+  //   - Se reabre activando de nuevo la suscripción.
+  router.post('/close', requireAction('org.delete'), asyncRoute(async (req, res) => {
+    const ws = req.workspace;
+    const org = ws.org;
+    const confirm = String(req.body?.confirm_name || '').trim().toLowerCase();
+    if (confirm !== String(org.name).trim().toLowerCase()) {
+      throw badRequest('Escribe el nombre exacto de la clínica para confirmar el cierre.', 'CONFIRM_NAME');
+    }
+    if (org.settings?.closed_at && org.status !== 'active') throw httpError(409, 'ALREADY_CLOSED', 'La clínica ya está cerrada.');
+
+    if (org.stripe_subscription_id && org.status !== 'canceled') {
+      const client = typeof ctx.stripe === 'function' ? ctx.stripe() : ctx.stripe;
+      if (!client) throw httpError(503, 'STRIPE_NOT_CONFIGURED', 'No se puede cancelar el cobro de la clínica ahora mismo. Inténtalo más tarde.');
+      try {
+        const subs = client.subscriptions;
+        await (typeof subs.cancel === 'function' ? subs.cancel(org.stripe_subscription_id) : subs.del(org.stripe_subscription_id));
+      } catch (err) {
+        // Ya cancelada en Stripe: se sigue cerrando.
+        if (err?.code !== 'resource_missing') {
+          throw httpError(502, 'STRIPE_CANCEL_FAILED', 'No se pudo cancelar la suscripción de la clínica en Stripe. No se ha cerrado nada; inténtalo de nuevo.');
+        }
+      }
+    }
+
+    const now = nowIso();
+    const members = await store.list('org_members', { eq: { org_id: org.id }, limit: 500 });
+    for (const m of members) {
+      if (m.id === ws.member.id || !['active', 'invited', 'suspended'].includes(m.status)) continue;
+      await store.update('org_members', m.id, {
+        status: 'left', left_at: now, seat_billable: false, invitation_token_hash: null, updated_at: now
+      });
+    }
+    const updated = await store.update('organizations', org.id, {
+      status: 'canceled',
+      settings: { ...(org.settings || {}), closed_at: now, closed_by: String(req.authenticatedUserId) },
+      updated_at: now
+    });
+    await recordAccess({ org_id: org.id, actor_user_id: String(req.authenticatedUserId), action: 'org.closed', resource_type: 'organization', resource_id: org.id });
+    res.json({ organization: projectOrg(updated) });
+  }));
 
   router.post('/leave', asyncRoute(async (req, res) => {
     const me = req.workspace.member;

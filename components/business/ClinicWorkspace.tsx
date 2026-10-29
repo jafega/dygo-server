@@ -259,9 +259,11 @@ const ClinicWorkspace: React.FC<ClinicWorkspaceProps> = ({ orgId, currentUser, b
         {ctx.readOnly && (
           <div className="flex items-center gap-2 px-4 md:px-8 py-2 bg-amber-50 text-amber-900 text-sm border-b border-amber-200" role="alert">
             <AlertTriangle size={15} className="flex-shrink-0" />
-            <span className="flex-1">La suscripción de la clínica no está activa: puedes consultar los datos, pero no modificarlos.</span>
+            <span className="flex-1">{ctx.org.closed_at
+              ? 'La clínica está cerrada: puedes consultar los datos (se conservan por obligación legal), pero no modificarlos.'
+              : 'La suscripción de la clínica no está activa: puedes consultar los datos, pero no modificarlos.'}</span>
             {ctx.can('org.subscription')
-              ? <button onClick={() => go('subscription')} className="font-semibold underline">Reactivar</button>
+              ? <button onClick={() => go('subscription')} className="font-semibold underline">{ctx.org.closed_at ? 'Reabrir' : 'Reactivar'}</button>
               : <span className="text-xs">Avisa al titular.</span>}
           </div>
         )}

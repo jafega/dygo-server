@@ -23,6 +23,8 @@ export interface OrgMembershipSummary {
   access: 'full' | 'read_only';
   trial: boolean;
   trial_days_left: number;
+  /** Cerrada por el titular: solo lectura. */
+  closed?: boolean;
 }
 
 export interface PendingInvitation {
@@ -60,6 +62,8 @@ export interface Organization {
   plus: boolean;
   /** Tarifas por servicio (€). Rellenan el precio de las citas. */
   service_prices?: Record<string, number>;
+  /** Fecha de cierre si el titular la cerró (solo lectura hasta reactivarla). */
+  closed_at?: string | null;
 }
 
 export interface OrgMember {
@@ -191,6 +195,9 @@ export const suspendMember = (orgId: string, memberId: string) => call<{ member:
 export const reactivateMember = (orgId: string, memberId: string) => call<{ member: OrgMember }>('POST', `/${orgId}/members/${memberId}/reactivate`);
 export const removeMember = (orgId: string, memberId: string) => call<{ member: OrgMember }>('DELETE', `/${orgId}/members/${memberId}`);
 export const leaveOrganization = (orgId: string) => call<{ ok: boolean }>('POST', `/${orgId}/leave`);
+/** Cierra la clínica (titular): cancela su cobro y la deja en solo lectura. mainds pro no cambia. */
+export const closeOrganization = (orgId: string, confirmName: string) =>
+  call<{ organization: Organization }>('POST', `/${orgId}/close`, { confirm_name: confirmName });
 
 export const acceptInvitation = (token: string) =>
   call<{ organization: Organization; membership: OrgMember }>('POST', '/invitations/accept', { token });

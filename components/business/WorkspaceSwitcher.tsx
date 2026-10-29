@@ -44,7 +44,7 @@ const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({ me, current, pers
             : <Building2 size={15} className="flex-shrink-0" />}
           <span className="truncate flex-1">{m.name}</span>
           {m.access === 'read_only' && (
-            <span className={`text-[10px] px-1.5 py-0.5 rounded ${current === m.orgId ? 'bg-white/20' : 'bg-amber-100 text-amber-800'}`}>pausada</span>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded ${current === m.orgId ? 'bg-white/20' : m.closed ? 'bg-slate-200 text-slate-600' : 'bg-amber-100 text-amber-800'}`}>{m.closed ? 'cerrada' : 'pausada'}</span>
           )}
         </button>
       ))}

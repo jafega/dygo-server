@@ -88,6 +88,7 @@ export function assertPlus(req) {
 const READ_ONLY_EXEMPT = [
   /^\/billing(\/|$)/,
   /^\/leave$/,
+  /^\/close$/, // cerrar una clínica caducada también tiene que poder hacerse
   /^\/members\/[^/]+\/suspend$/,
   /^\/members\/[^/]+$/ // DELETE (baja)
 ];

@@ -19,6 +19,20 @@
 - Los tests *golden* comprueban que las respuestas de Pro son idénticas con Business apagado, encendido y con el psicólogo siendo titular de una clínica.
 - El bundle de Pro crece unos 2 KB gzip: todo lo de clínicas se carga solo si el usuario tiene alguna.
 
+## Pro y Business: cuentas y cobros
+
+- **Tener mainds pro y una clínica a la vez.**
+  - Son dos espacios y **dos suscripciones**: la de Pro (personal) sigue igual y se cobra por separado.
+  - La clínica paga su base y una licencia por profesional. Si el titular atiende pacientes, **ocupa una licencia** que paga la clínica.
+  - Business nunca escribe en la suscripción de Pro: lo comprueban el store y los golden.
+- **Cerrar el centro y seguir en Pro** (*Ajustes → Cerrar la clínica*, solo el titular, confirmando el nombre):
+  - se cancela al momento la suscripción de Stripe de la **clínica** y no se cobra nada más;
+  - el equipo pierde el acceso y las invitaciones se anulan;
+  - la clínica queda en solo lectura para el titular, porque la historia clínica se conserva 5 años (Ley 41/2002);
+  - el titular vuelve a su consulta Pro sin ningún cambio;
+  - para reabrirla basta con activar de nuevo la suscripción.
+  - El golden "el Pro abrió y cerró su clínica" comprueba que Pro queda idéntico.
+
 ## Cómo activarlo
 
 1. **Migraciones**, en el SQL Editor de Supabase y en este orden. Son idempotentes, así que se pueden repetir.
@@ -61,8 +75,8 @@
 ## Cómo se prueba
 
 ```bash
-cd backend && npm test                  # 197 tests: unitarios, integración con el servidor real y golden de Pro
-node e2e/business/f1.spec.mjs           # E2E con Playwright (f1…f6, f7-self-serve), arrancan backend y Vite solos
+cd backend && npm test                  # 209 tests: unitarios, integración con el servidor real y golden de Pro
+node e2e/business/f1.spec.mjs           # E2E con Playwright (f1…f6, f7-self-serve, f8-close-clinic), arrancan backend y Vite solos
 node e2e/business/explore-owner.mjs     # recorrido exploratorio de la titular (capturas, no es un test)
 ```
 
