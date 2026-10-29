@@ -122,6 +122,7 @@ ALTER TABLE public.org_invoices ENABLE ROW LEVEL SECURITY;
 CREATE OR REPLACE FUNCTION public.org_invoices_protect_issued()
 RETURNS trigger
 LANGUAGE plpgsql
+SET search_path = ''
 AS $$
 BEGIN
   IF TG_OP = 'DELETE' THEN
@@ -201,6 +202,7 @@ ALTER TABLE public.verifactu_records ENABLE ROW LEVEL SECURITY;
 CREATE OR REPLACE FUNCTION public.verifactu_records_block_changes()
 RETURNS trigger
 LANGUAGE plpgsql
+SET search_path = ''
 AS $$
 BEGIN
   RAISE EXCEPTION 'verifactu_records es de solo inserción (% bloqueado)', TG_OP USING ERRCODE = 'insufficient_privilege';

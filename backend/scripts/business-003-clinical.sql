@@ -119,6 +119,7 @@ ALTER TABLE public.org_clinical_notes ENABLE ROW LEVEL SECURITY;
 CREATE OR REPLACE FUNCTION public.org_clinical_notes_protect_record()
 RETURNS trigger
 LANGUAGE plpgsql
+SET search_path = ''
 AS $$
 BEGIN
   IF OLD.visibility = 'clinical_record' THEN

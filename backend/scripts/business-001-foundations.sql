@@ -47,6 +47,7 @@ ALTER TABLE public.access_audit ENABLE ROW LEVEL SECURITY;
 CREATE OR REPLACE FUNCTION public.access_audit_block_changes()
 RETURNS trigger
 LANGUAGE plpgsql
+SET search_path = ''
 AS $$
 BEGIN
   RAISE EXCEPTION 'access_audit es de solo inserción (% bloqueado)', TG_OP
