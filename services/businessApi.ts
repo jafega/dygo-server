@@ -261,3 +261,41 @@ export async function downloadOrgFile(orgId: string, path: string, filename: str
     return { ok: false, error: 'No hay conexión con el servidor' };
   }
 }
+
+// ── Fase 4: captación ──────────────────────────────────────────────────────
+export type LeadStatus = 'nuevo' | 'contactado' | 'primera_cita' | 'paciente' | 'descartado';
+export interface Lead {
+  id: string; name: string; email: string | null; phone: string | null; reason: string | null; modality: string | null;
+  preferences: string | null; source: string; utm: Record<string, string>; preferred_member_id: string | null; preferred_member_name: string | null;
+  status: LeadStatus; assigned_member_id: string | null; assigned_member_name: string | null; patient_id: string | null;
+  consent_at: string | null; events: { at: string; type: string; by: string | null; from?: string; to?: string | null; note?: string }[];
+  created_at: string; updated_at: string;
+}
+export interface PublicPageSettings {
+  enabled?: boolean; headline?: string | null; description?: string | null; specialties?: string[]; contact_phone?: string | null;
+  contact_email?: string | null; address?: string | null; city?: string | null; modalities?: string[]; assignment?: 'manual' | 'round_robin';
+}
+export interface PublicProfile { visible?: boolean; display_name?: string | null; bio?: string | null; specialties?: string[]; photo_url?: string | null }
+export interface LeadMetrics {
+  total: number; converted: number; rate: number; by_status: Record<LeadStatus, number>;
+  by_source: { source: string; leads: number; converted: number; rate: number }[];
+  by_member: { member_id: string; member_name: string | null; leads: number; converted: number; rate: number }[];
+}
+export const LEAD_STATUS_LABELS: Record<LeadStatus, string> = {
+  nuevo: 'Nuevo', contactado: 'Contactado', primera_cita: 'Primera cita', paciente: 'Paciente', descartado: 'Descartado'
+};
+export const LEAD_SOURCE_LABELS: Record<string, string> = {
+  web: 'Página web', widget: 'Widget', telefono: 'Teléfono', whatsapp: 'WhatsApp', otro: 'Otro'
+};
+
+export const getPublicPage = (orgId: string) => orgApi<{ public_page: PublicPageSettings; plus: boolean; slug: string }>('GET', orgId, '/public-page');
+export const savePublicPage = (orgId: string, body: PublicPageSettings) => orgApi<{ public_page: PublicPageSettings }>('PUT', orgId, '/public-page', body);
+export const saveMyPublicProfile = (orgId: string, body: PublicProfile & { accepts_leads: boolean }) =>
+  orgApi<{ public_profile: PublicProfile; accepts_leads: boolean }>('PUT', orgId, '/members/me/public-profile', body);
+export const listLeads = (orgId: string, status?: string) => orgApi<{ leads: Lead[] }>('GET', orgId, `/leads${status ? `?status=${status}` : ''}`);
+export const createLead = (orgId: string, body: { name: string; email?: string; phone?: string; reason?: string; source: string; consent?: boolean }) =>
+  orgApi<{ lead: Lead }>('POST', orgId, '/leads', body);
+export const updateLead = (orgId: string, id: string, body: { status?: LeadStatus; note?: string }) => orgApi<{ lead: Lead }>('PATCH', orgId, `/leads/${id}`, body);
+export const assignLead = (orgId: string, id: string, memberId: string | 'round_robin' | null) => orgApi<{ lead: Lead }>('POST', orgId, `/leads/${id}/assign`, { member_id: memberId });
+export const convertLead = (orgId: string, id: string) => orgApi<{ lead: Lead; patient_id: string }>('POST', orgId, `/leads/${id}/convert`);
+export const getLeadMetrics = (orgId: string) => orgApi<LeadMetrics>('GET', orgId, '/leads/metrics');

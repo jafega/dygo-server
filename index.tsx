@@ -1,7 +1,12 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import './index.css';
+
+// mainds business: página pública de una clínica (/c/:slug, también embebible
+// con ?embed=1). No arranca la app privada (ni sesión ni datos de usuario).
+const PublicClinicPage = lazy(() => import('./components/business/PublicClinicPage'));
+const publicClinicSlug = (window.location.pathname.match(/^\/c\/([a-z0-9-]{3,50})\/?$/) || [])[1] || null;
 
 // Polyfill para crypto.randomUUID() en iOS Safari antiguo
 if (typeof crypto !== 'undefined' && !crypto.randomUUID) {
@@ -95,7 +100,9 @@ console.log('🚀 mainds iniciando...');
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <ErrorBoundary>
-    <App />
+    {publicClinicSlug
+      ? <Suspense fallback={null}><PublicClinicPage slug={publicClinicSlug} /></Suspense>
+      : <App />}
   </ErrorBoundary>
 );
 

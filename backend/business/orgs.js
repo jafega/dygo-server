@@ -112,6 +112,7 @@ export function projectMember(m, { full = false } = {}) {
     seat_billable: !!m.seat_billable,
     permissions_override: m.permissions_override || {},
     permissions: effectivePermissions(m),
+    public_profile: m.public_profile || {},
     invitation_expires_at: m.status === 'invited' ? (m.invitation_expires_at || null) : null,
     joined_at: m.joined_at || null,
     left_at: m.left_at || null,

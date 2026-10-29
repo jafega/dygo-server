@@ -374,3 +374,8 @@ CREATE TABLE public.org_members (
 -- verifactu_records(id, org_id, invoice_id, record_type, issuer_tax_id, series_number, issue_date,
 --                   invoice_type, vat_total, total, previous_hash, chain_index, generated_at, hash, qr_url,
 --                   mode, status)   UNIQUE (issuer_tax_id, previous_hash), UNIQUE (invoice_id, record_type)
+-- business-005-leads.sql — Fase 4. RLS activado sin políticas.
+-- org_leads(id, org_id, name, email, phone, reason, modality, preferences, preferred_member_id, source,
+--           utm, consent_at, consent_version, status, assigned_member_id, assigned_at, patient_id,
+--           discarded_at, converted_at, events, ip_hash (sin IP en claro), created_by)
+-- Configuración de la página pública: organizations.settings.public_page; perfil público: org_members.public_profile.
