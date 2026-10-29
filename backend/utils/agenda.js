@@ -83,3 +83,79 @@ export function toBusyBlocks(appointments) {
 /** ¿Algún bloque ocupado se solapa con [start, end)? */
 export const anyOverlap = (blocks, start, end) =>
   (blocks || []).some(b => overlaps(b.starts_at, b.ends_at, start, end));
+
+// ── Fase 6: tarifas y citas periódicas ──────────────────────────────────────
+
+export const MAX_REPEAT_COUNT = 26;
+
+const toPrice = (v) => {
+  if (v === undefined || v === null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null;
+};
+
+/**
+ * Precio de una cita: el indicado; si no, el del paciente; si no, la tarifa
+ * del servicio en la clínica. `null` si no hay ninguno.
+ */
+export function resolvePrice({ explicit, patient, servicePrices, serviceType }) {
+  const given = toPrice(explicit);
+  if (given !== null) return given;
+  const own = toPrice(patient?.default_price);
+  if (own !== null) return own;
+  return toPrice(servicePrices?.[serviceType || 'session']);
+}
+
+/** Valida y normaliza las tarifas por servicio (`{ session: 60, … }`). */
+export function normalizeServicePrices(input, serviceTypes) {
+  if (input === null) return {};
+  if (typeof input !== 'object' || Array.isArray(input)) return { error: 'Tarifas no válidas.' };
+  const out = {};
+  for (const [k, v] of Object.entries(input)) {
+    if (!serviceTypes.includes(k)) return { error: `Servicio desconocido: ${k}.` };
+    if (v === null || v === '') continue;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0 || n > 100000) return { error: 'Importe de tarifa no válido.' };
+    out[k] = Math.round(n * 100) / 100;
+  }
+  return { prices: out };
+}
+
+/** Minutos de diferencia con UTC en Madrid (60 en invierno, 120 en verano). */
+export function madridOffsetMinutes(date) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Europe/Madrid', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+  }).formatToParts(date);
+  const get = (t) => Number(parts.find(p => p.type === t).value);
+  const asUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'));
+  return Math.round((asUtc - Math.floor(date.getTime() / 60000) * 60000) / 60000);
+}
+
+/**
+ * Suma días manteniendo la hora de reloj de España: una sesión de los lunes a
+ * las 10:00 sigue a las 10:00 después del cambio de hora.
+ */
+export function addDaysLocal(iso, days) {
+  const d = new Date(iso);
+  const naive = new Date(d.getTime() + days * DAY_MS);
+  return new Date(naive.getTime() + (madridOffsetMinutes(d) - madridOffsetMinutes(naive)) * 60000).toISOString();
+}
+
+/**
+ * Huecos de una serie periódica, incluida la primera cita.
+ * @param {{ every_weeks?: number, count?: number }} repeat
+ * @returns {{ slots: Array<{starts_at, ends_at}> } | { error: string }}
+ */
+export function repeatSlots(startsAt, endsAt, repeat) {
+  const every = Number(repeat?.every_weeks ?? 1);
+  const count = Number(repeat?.count);
+  if (![1, 2, 3, 4].includes(every)) return { error: 'La repetición debe ser cada 1, 2, 3 o 4 semanas.' };
+  if (!Number.isInteger(count) || count < 2 || count > MAX_REPEAT_COUNT) {
+    return { error: `Indica entre 2 y ${MAX_REPEAT_COUNT} citas en la serie.` };
+  }
+  const slots = [];
+  for (let i = 0; i < count; i++) {
+    slots.push({ starts_at: addDaysLocal(startsAt, i * every * 7), ends_at: addDaysLocal(endsAt, i * every * 7) });
+  }
+  return { slots };
+}

@@ -22,6 +22,8 @@ import {
 import { asyncRoute, httpError, badRequest, forbidden, notFound } from './errors.js';
 import { orgAccess, hasPlus, requireAction } from './workspace.js';
 import { canCreateOrganization } from './flags.js';
+import { SERVICE_TYPES } from './agenda.js';
+import { normalizeServicePrices } from '../utils/agenda.js';
 
 export const TRIAL_DAYS = 14;
 const INVITE_TTL_DAYS = 7;
@@ -85,6 +87,8 @@ export function projectOrg(org) {
     trial: access.trial,
     trial_days_left: access.trialDaysLeft,
     plus: hasPlus(org),
+    // Tarifas por servicio (Fase 6): las ve todo el equipo para dar citas.
+    service_prices: org.settings?.service_prices || {},
     created_at: org.created_at
   };
 }
@@ -357,6 +361,11 @@ export function registerScopedRoutes(router, ctx) {
       const err = validateSlug(slug);
       if (err) throw badRequest(err, 'INVALID_SLUG');
       patch.slug = slug;
+    }
+    if (body.service_prices !== undefined) {
+      const r = normalizeServicePrices(body.service_prices, SERVICE_TYPES);
+      if (r.error) throw badRequest(r.error, 'INVALID_PRICES');
+      patch.settings = { ...(req.workspace.org.settings || {}), service_prices: r.prices };
     }
     const org = await store.update('organizations', req.workspace.orgId, patch);
     res.json({ organization: projectOrg(org) });

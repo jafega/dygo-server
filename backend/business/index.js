@@ -30,6 +30,7 @@ import { registerClinicalRoutes } from './clinical.js';
 import { registerMoneyRoutes } from './money.js';
 import { registerLeadsRoutes, registerLeadsPublic } from './leads.js';
 import { registerKnowledgeRoutes } from './knowledge.js';
+import { registerHomeRoutes } from './home.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_STORE_FILE = path.resolve(__dirname, '..', '.business-store.local.json');
@@ -96,6 +97,7 @@ export function createBusinessRouter({ store, authenticateRequest, isSuperAdmin,
   registerMoneyRoutes(scoped, ctx);
   registerLeadsRoutes(scoped, ctx);
   registerKnowledgeRoutes(scoped, ctx);
+  registerHomeRoutes(scoped, ctx);
   for (const register of deps.registerScoped || []) register(scoped, ctx);
   orgRouter.use('/:orgId', authenticateRequest, scoped);
 

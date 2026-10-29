@@ -377,27 +377,34 @@ export function registerMoneyRoutes(router, ctx) {
       if (!a || a.org_id !== ws.orgId || a.patient_id !== patient.id) throw badRequest('Alguna cita no corresponde a este paciente.');
       if (a.status !== 'completed') throw badRequest('Solo se facturan citas realizadas.', 'APPOINTMENT_NOT_COMPLETED');
       if (a.invoice_id) throw httpError(409, 'APPOINTMENT_ALREADY_INVOICED', 'Alguna cita ya está facturada.');
-      if (a.price === null || a.price === undefined) throw badRequest('Alguna cita no tiene precio.');
+      if (a.price === null || a.price === undefined) throw badRequest('Alguna cita no tiene precio. Pónselo en la agenda o define las tarifas en Facturación.', 'MISSING_PRICE');
       if (issuerKind === 'member' && a.member_id !== ws.member.id) throw forbidden('Solo puedes facturar tus citas.');
       appts.push(a);
     }
-    let issuer;
     let entity = null;
     if (issuerKind === 'entity') {
       entity = body.billing_entity_id ? await loadIn('org_billing_entities', req, body.billing_entity_id, 'Emisor') : await defaultEntity(store, ws.orgId);
-      issuer = entityIssuer(entity);
-    } else {
-      issuer = memberIssuer(ws.member);
     }
+    const draft = await createPatientDraft(req, { patient, appts, issuerKind, entity, recipientTaxIdInput: body.recipient_tax_id, notes: body.notes });
+    res.status(201).json({ invoice: projectInvoice(draft) });
+  }));
+
+  /**
+   * Borrador de factura a un paciente con sus citas (individual y en lote usan
+   * lo mismo: IVA, NIF, F1/F2 y reserva de las citas).
+   */
+  async function createPatientDraft(req, { patient, appts, issuerKind, entity, recipientTaxIdInput, notes }) {
+    const ws = req.workspace;
+    const issuer = issuerKind === 'entity' ? entityIssuer(entity) : memberIssuer(ws.member);
     const vatExempt = entity ? entity.vat_exempt !== false : true;
-    const lines = appts
+    const lines = [...appts]
       .sort((x, y) => String(x.starts_at).localeCompare(String(y.starts_at)))
       .map(a => ({
         description: `${SERVICE_LABELS[a.service_type] || SERVICE_LABELS.other} — ${new Date(a.starts_at).toLocaleDateString('es-ES', { timeZone: 'Europe/Madrid' })}`,
         quantity: 1, unit_price: Number(a.price), vat_rate: vatExempt ? 0 : 21, appointment_id: a.id
       }));
     const totals = totalsFor(lines, 0);
-    const recipientTaxId = normalizeTaxId(body.recipient_tax_id ?? patient.tax_id) || null;
+    const recipientTaxId = normalizeTaxId(recipientTaxIdInput ?? patient.tax_id) || null;
     if (recipientTaxId && !isValidTaxId(recipientTaxId)) throw badRequest('El NIF del paciente no es válido.', 'INVALID_TAX_ID');
     if (!recipientTaxId && totals.total_cents > SIMPLIFIED_LIMIT_CENTS) {
       throw badRequest('Para facturas de más de 400 € hace falta el NIF del paciente.', 'RECIPIENT_TAX_ID_REQUIRED');
@@ -413,13 +420,80 @@ export function registerMoneyRoutes(router, ctx) {
       lines: totals.lines, vat_breakdown: totals.vat_breakdown, subtotal: totals.subtotal, vat_total: totals.vat_total,
       irpf_rate: 0, irpf_total: 0, total: totals.total,
       exemption_text: vatExempt ? (entity?.exemption_text || DEFAULT_EXEMPTION_TEXT) : null,
-      status: 'draft', appointment_ids: appts.map(a => a.id), notes: trimOrNull(body.notes, 1000),
+      status: 'draft', appointment_ids: appts.map(a => a.id), notes: trimOrNull(notes, 1000),
       created_by: String(req.authenticatedUserId), updated_at: nowIso()
     });
     // Las citas quedan reservadas por el borrador (nadie puede facturarlas dos veces).
     for (const a of appts) await store.update('org_appointments', a.id, { invoice_id: draft.id, updated_at: nowIso() });
     await audit(req, 'billing.invoice_drafted', { resource_type: 'invoice', resource_id: draft.id });
-    res.status(201).json({ invoice: projectInvoice(draft) });
+    return draft;
+  }
+
+  // ── Facturación en lote (Fase 6) ──
+  // Un borrador por paciente con todas sus citas realizadas sin facturar hasta
+  // `to` (incluido). Lo que no se puede facturar se devuelve con el motivo.
+  router.post('/invoices/bulk', requireAction('billing.manage'), asyncRoute(async (req, res) => {
+    const ws = req.workspace;
+    const to = trimOrNull(req.body?.to, 10) || todayMadrid();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(to)) throw badRequest('Fecha no válida (AAAA-MM-DD).');
+    const from = trimOrNull(req.body?.from, 10);
+    if (from && !/^\d{4}-\d{2}-\d{2}$/.test(from)) throw badRequest('Fecha no válida (AAAA-MM-DD).');
+    const entity = req.body?.billing_entity_id ? await loadIn('org_billing_entities', req, req.body.billing_entity_id, 'Emisor') : await defaultEntity(store, ws.orgId);
+    const onlyPatients = Array.isArray(req.body?.patient_ids) ? new Set(req.body.patient_ids.map(String)) : null;
+    // Como mucho 500 citas por pasada (límite del store); lo que quede sale en la siguiente.
+    const rows = (await store.list('org_appointments', { eq: { org_id: ws.orgId, status: 'completed', invoice_id: null }, order: 'starts_at', limit: 500 }))
+      .filter(a => a.patient_id && madridTimestamp(new Date(a.starts_at)).slice(0, 10) <= to)
+      .filter(a => !from || madridTimestamp(new Date(a.starts_at)).slice(0, 10) >= from)
+      .filter(a => !onlyPatients || onlyPatients.has(a.patient_id));
+    const byPatient = new Map();
+    for (const a of rows) {
+      if (!byPatient.has(a.patient_id)) byPatient.set(a.patient_id, []);
+      byPatient.get(a.patient_id).push(a);
+    }
+    const created = [];
+    const skipped = [];
+    for (const [patientId, appts] of byPatient) {
+      const patient = await store.get('org_patients', patientId);
+      if (!patient || patient.org_id !== ws.orgId) continue;
+      const name = patientDisplayName(patient);
+      const withPrice = appts.filter(a => a.price !== null && a.price !== undefined);
+      const noPrice = appts.length - withPrice.length;
+      if (noPrice) skipped.push({ patient_id: patientId, patient_name: name, appointments: noPrice, code: 'MISSING_PRICE', reason: `${noPrice === 1 ? 'Una cita' : `${noPrice} citas`} sin precio` });
+      // Una factura tiene como mucho 100 líneas; el resto queda para la siguiente pasada.
+      const batch = withPrice.slice(0, 100);
+      if (!batch.length) continue;
+      try {
+        const draft = await createPatientDraft(req, { patient, appts: batch, issuerKind: 'entity', entity });
+        created.push({ id: draft.id, patient_id: patientId, patient_name: name, appointments: batch.length, total: draft.total });
+      } catch (err) {
+        if (!err.status || err.status >= 500) throw err;
+        skipped.push({ patient_id: patientId, patient_name: name, appointments: batch.length, code: err.code, reason: err.message });
+      }
+    }
+    res.status(created.length ? 201 : 200).json({ created, skipped });
+  }));
+
+  // Emitir varios borradores de una vez. Cada uno se emite (número + Verifactu)
+  // por separado: si uno falla, los demás siguen.
+  router.post('/invoices/issue-batch', asyncRoute(async (req, res) => {
+    const ws = req.workspace;
+    const ids = Array.isArray(req.body?.ids) ? [...new Set(req.body.ids.map(String))] : [];
+    if (!ids.length || ids.length > 200) throw badRequest('Indica entre 1 y 200 borradores.');
+    const issued = [];
+    const failed = [];
+    for (const id of ids) {
+      const inv = await store.get('org_invoices', id);
+      if (!inv || inv.org_id !== ws.orgId || !canTouchInvoice(ws, inv)) { failed.push({ id, reason: 'No encontrada' }); continue; }
+      try {
+        const done = await issueDraft(store, inv);
+        await audit(req, 'billing.invoice_issued', { resource_type: 'invoice', resource_id: inv.id });
+        issued.push({ id: done.id, full_number: done.full_number });
+      } catch (err) {
+        if (!err.status || err.status >= 500) throw err;
+        failed.push({ id, reason: err.message });
+      }
+    }
+    res.json({ issued, failed });
   }));
 
   router.get('/invoices/export.csv', requireAction('billing.read_export'), asyncRoute(async (req, res) => {

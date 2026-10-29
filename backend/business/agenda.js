@@ -7,15 +7,24 @@
 //   GET  /api/org/:orgId/appointments?from&to&memberId&roomId&locationId
 //   POST /api/org/:orgId/appointments
 //   PATCH /api/org/:orgId/appointments/:id
+//   POST /api/org/:orgId/appointments/bulk-status        cerrar en bloque (Fase 6)
+//   POST /api/org/:orgId/appointments/:id/cancel-following  serie: esta y las siguientes
+//   GET  /api/org/:orgId/patients/:patientId/appointments  citas de un paciente
+//
+// El precio de una cita se resuelve en el servidor (Fase 6): el indicado, si no
+// el del paciente, si no la tarifa del servicio (organizations.settings.service_prices).
+// Una cita con `repeat` crea una serie semanal o quincenal; los huecos con
+// conflicto se saltan y se informan, nunca se fuerzan.
 //
 // Quien solo tiene agenda.view_busy ve las citas de otros como bloques
 // "ocupado" sin datos del paciente.
 
+import crypto from 'node:crypto';
 import { asyncRoute, httpError, badRequest, forbidden, notFound } from './errors.js';
 import { requireAction } from './workspace.js';
 import { canSeePatient, patientDisplayName } from './clinical.js';
 import {
-  findConflicts, validateRange, validateSlot, toBusyBlocks, anyOverlap, overlaps, isBlocking
+  findConflicts, validateRange, validateSlot, toBusyBlocks, anyOverlap, overlaps, isBlocking, resolvePrice, repeatSlots
 } from '../utils/agenda.js';
 import { isPractitioner } from '../utils/orgPermissions.js';
 import { freezeCommission } from './money.js';
@@ -79,7 +88,7 @@ function projectAppointment(a, { full, patientName }) {
     starts_at: a.starts_at, ends_at: a.ends_at, status: a.status,
     service_type: a.service_type, modality: a.modality,
     price: a.price ?? null, psych_percent: a.psych_percent ?? null, psych_fixed_fee: a.psych_fixed_fee ?? null,
-    invoice_id: a.invoice_id || null, admin_notes: a.admin_notes || null, created_at: a.created_at
+    invoice_id: a.invoice_id || null, admin_notes: a.admin_notes || null, series_id: a.series_id || null, created_at: a.created_at
   };
 }
 
@@ -280,38 +289,122 @@ export function registerAgendaRoutes(router, ctx) {
     return anyOverlap(blocks, startsAt, endsAt) ? ['CONFLICT_OTHER_WORKSPACE'] : [];
   }
 
-  router.post('/appointments', asyncRoute(async (req, res) => {
-    const body = req.body || {};
-    const v = await validateAppointmentInput(req, body);
-    const row = {
-      org_id: req.workspace.orgId,
-      member_id: v.member.id,
-      patient_id: v.patient?.id || null,
-      location_id: v.room?.location_id || trimOrNull(body.location_id, 64),
-      room_id: v.room?.id || null,
-      starts_at: v.slot.starts_at,
-      ends_at: v.slot.ends_at,
-      status: 'scheduled',
-      service_type: v.serviceType,
-      modality: v.modality,
-      price: money(body.price) ?? null,
-      admin_notes: trimOrNull(body.admin_notes, 1000),
-      created_by: String(req.authenticatedUserId),
-      updated_at: nowIso()
-    };
-    if (row.location_id && !v.room) {
-      const loc = await store.get('org_locations', row.location_id);
-      if (!loc || loc.org_id !== req.workspace.orgId) throw badRequest('Sede no encontrada.');
-    }
+  async function insertAppointment(req, row, v) {
     // La regla de comisión vigente se congela en la cita (cambiarla después no altera el pasado).
     Object.assign(row, await freezeCommission(store, req.workspace.orgId, v.member, v.patient, row));
     await checkConflicts(req, row);
     const warnings = await crossWorkspaceWarnings(req, v.member, row.starts_at, row.ends_at);
     const appt = await store.insert('org_appointments', row);
     await recordAccess({ org_id: req.workspace.orgId, actor_user_id: String(req.authenticatedUserId), action: 'agenda.appointment_created', resource_type: 'appointment', resource_id: appt.id });
+    return { appt, warnings };
+  }
+
+  router.post('/appointments', asyncRoute(async (req, res) => {
+    const body = req.body || {};
+    const v = await validateAppointmentInput(req, body);
+    let slots = [v.slot];
+    if (body.repeat) {
+      const r = repeatSlots(v.slot.starts_at, v.slot.ends_at, body.repeat);
+      if (r.error) throw badRequest(r.error, 'INVALID_REPEAT');
+      slots = r.slots;
+    }
+    const base = {
+      org_id: req.workspace.orgId,
+      member_id: v.member.id,
+      patient_id: v.patient?.id || null,
+      location_id: v.room?.location_id || trimOrNull(body.location_id, 64),
+      room_id: v.room?.id || null,
+      status: 'scheduled',
+      service_type: v.serviceType,
+      modality: v.modality,
+      price: resolvePrice({ explicit: money(body.price), patient: v.patient, servicePrices: req.workspace.org?.settings?.service_prices, serviceType: v.serviceType }),
+      admin_notes: trimOrNull(body.admin_notes, 1000),
+      series_id: slots.length > 1 ? crypto.randomUUID() : null,
+      created_by: String(req.authenticatedUserId),
+      updated_at: nowIso()
+    };
+    if (base.location_id && !v.room) {
+      const loc = await store.get('org_locations', base.location_id);
+      if (!loc || loc.org_id !== req.workspace.orgId) throw badRequest('Sede no encontrada.');
+    }
+    // La primera cita manda: si choca, error como siempre. Las repeticiones que
+    // chocan se saltan y se devuelven en `series.skipped`.
+    const first = await insertAppointment(req, { ...base, starts_at: slots[0].starts_at, ends_at: slots[0].ends_at }, v);
+    const created = [first.appt];
+    const skipped = [];
+    const warnings = new Set(first.warnings);
+    for (const slot of slots.slice(1)) {
+      try {
+        const r = await insertAppointment(req, { ...base, starts_at: slot.starts_at, ends_at: slot.ends_at }, v);
+        created.push(r.appt);
+        r.warnings.forEach(w => warnings.add(w));
+      } catch (err) {
+        if (err.status !== 409) throw err;
+        skipped.push({ starts_at: slot.starts_at, code: err.code, reason: err.message });
+      }
+    }
+    const patientName = v.patient ? patientDisplayName(v.patient) : null;
     res.status(201).json({
-      appointment: projectAppointment(appt, { full: true, patientName: v.patient ? patientDisplayName(v.patient) : null }),
-      warnings
+      appointment: projectAppointment(first.appt, { full: true, patientName }),
+      warnings: [...warnings],
+      ...(slots.length > 1 ? { series: { id: base.series_id, created: created.length, skipped } } : {})
+    });
+  }));
+
+  // Cerrar en bloque (Inicio → "citas pasadas sin cerrar"). Solo cambia el estado
+  // de citas programadas que ya han empezado; las facturadas no se tocan.
+  router.post('/appointments/bulk-status', asyncRoute(async (req, res) => {
+    const ws = req.workspace;
+    const status = req.body?.status;
+    if (!['completed', 'no_show', 'cancelled'].includes(status)) throw badRequest('Estado no válido.');
+    const ids = Array.isArray(req.body?.ids) ? [...new Set(req.body.ids.map(String))] : [];
+    if (!ids.length || ids.length > 200) throw badRequest('Indica entre 1 y 200 citas.');
+    const updated = [];
+    const skipped = [];
+    for (const id of ids) {
+      const a = await store.get('org_appointments', id);
+      if (!a || a.org_id !== ws.orgId) { skipped.push({ id, reason: 'No encontrada' }); continue; }
+      if (!ws.can('agenda.manage_all') && !(ws.can('agenda.manage_own') && a.member_id === ws.member.id)) { skipped.push({ id, reason: 'Sin permiso' }); continue; }
+      if (a.invoice_id) { skipped.push({ id, reason: 'Facturada' }); continue; }
+      if (a.status !== 'scheduled') { skipped.push({ id, reason: 'Ya estaba cerrada' }); continue; }
+      if (status !== 'cancelled' && new Date(a.starts_at) > new Date()) { skipped.push({ id, reason: 'Todavía no ha empezado' }); continue; }
+      await store.update('org_appointments', a.id, { status, updated_at: nowIso() });
+      updated.push(a.id);
+    }
+    if (updated.length) {
+      await recordAccess({ org_id: ws.orgId, actor_user_id: String(req.authenticatedUserId), action: 'agenda.appointments_bulk_status', resource_type: 'appointment', resource_id: `${status}:${updated.length}` });
+    }
+    res.json({ updated: updated.length, skipped });
+  }));
+
+  // Serie: cancelar esta cita y las siguientes programadas (no toca pasadas ni facturadas).
+  router.post('/appointments/:id/cancel-following', asyncRoute(async (req, res) => {
+    const ws = req.workspace;
+    const a = await loadIn('org_appointments', req, req.params.id, 'Cita');
+    if (!ws.can('agenda.manage_all') && !(ws.can('agenda.manage_own') && a.member_id === ws.member.id)) throw forbidden();
+    if (!a.series_id) throw badRequest('La cita no forma parte de una serie.', 'NOT_A_SERIES');
+    const rows = await store.list('org_appointments', { eq: { org_id: ws.orgId, series_id: a.series_id, status: 'scheduled' }, gte: { starts_at: new Date(a.starts_at).toISOString() }, limit: 200 });
+    let cancelled = 0;
+    for (const r of rows) {
+      if (r.invoice_id) continue;
+      await store.update('org_appointments', r.id, { status: 'cancelled', updated_at: nowIso() });
+      cancelled++;
+    }
+    await recordAccess({ org_id: ws.orgId, actor_user_id: String(req.authenticatedUserId), action: 'agenda.series_cancelled', resource_type: 'appointment', resource_id: a.id });
+    res.json({ cancelled });
+  }));
+
+  // Citas de un paciente (ficha → pestaña Citas). Quien no ve la agenda de
+  // todos ve las de otros profesionales como "ocupado".
+  router.get('/patients/:patientId/appointments', asyncRoute(async (req, res) => {
+    const ws = req.workspace;
+    const p = await store.get('org_patients', String(req.params.patientId));
+    if (!p || p.org_id !== ws.orgId || !canSeePatient(ws, p)) throw notFound('Paciente no encontrado');
+    if (!ws.can('agenda.view_all') && !ws.can('agenda.view_busy')) throw forbidden();
+    const rows = await store.list('org_appointments', { eq: { org_id: ws.orgId, patient_id: p.id }, order: '-starts_at', limit: 300 });
+    const viewAll = ws.can('agenda.view_all');
+    res.json({
+      appointments: rows.map(a => projectAppointment(a, { full: viewAll || a.member_id === ws.member.id, patientName: patientDisplayName(p) }))
     });
   }));
 

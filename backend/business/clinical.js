@@ -59,6 +59,7 @@ function projectPatient(p, memberNames = {}) {
     tax_id: p.tax_id || null,
     address: p.address || null,
     admin_notes: p.admin_notes || null,
+    default_price: p.default_price ?? null,
     status: p.status,
     acquisition_source: p.acquisition_source,
     lead_id: p.lead_id || null,
@@ -165,6 +166,15 @@ function patientFields(body, { partial }) {
   set('tax_id', body.tax_id !== undefined ? trimOrNull(body.tax_id, 20)?.toUpperCase() || null : undefined);
   set('address', body.address !== undefined ? trimOrNull(body.address, 300) : undefined);
   set('admin_notes', body.admin_notes !== undefined ? trimOrNull(body.admin_notes, 2000) : undefined);
+  if (body.default_price !== undefined) {
+    // Precio propio del paciente (tarifa reducida…). Vacío = tarifa de la clínica.
+    if (body.default_price === null || body.default_price === '') out.default_price = null;
+    else {
+      const n = Number(body.default_price);
+      if (!Number.isFinite(n) || n < 0 || n > 100000) throw badRequest('Precio no válido.');
+      out.default_price = Math.round(n * 100) / 100;
+    }
+  }
   if (body.status !== undefined) {
     if (!PATIENT_STATUSES.includes(body.status)) throw badRequest('Estado no válido.');
     out.status = body.status;
