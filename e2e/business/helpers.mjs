@@ -77,3 +77,12 @@ export async function shot(page, name) {
 export function assert(cond, msg) {
   if (!cond) throw new Error(`E2E: ${msg}`);
 }
+
+/**
+ * Abre el alta de clínica: está dentro de Ajustes (el modal del perfil, al
+ * pulsar en el usuario de la barra lateral), no a la vista en Pro.
+ */
+export async function openCreateClinic(page, user) {
+  await page.getByRole('button', { name: new RegExp(user.email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) }).first().click({ timeout: 30_000 });
+  await page.getByTestId('business-offer').getByRole('button', { name: 'Crear una clínica' }).click();
+}

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Building2, Plus, User as UserIcon, Mail } from 'lucide-react';
+import { Building2, User as UserIcon, Mail } from 'lucide-react';
 import type { BusinessMe } from '../../services/businessService';
 
 interface WorkspaceSwitcherProps {
@@ -8,16 +8,16 @@ interface WorkspaceSwitcherProps {
   current: string;
   personalLabel: string;
   onSelect: (workspace: string) => void;
-  onCreateClinic?: () => void;
   onOpenInvitations?: () => void;
 }
 
 /**
  * Selector de espacio de trabajo (mi consulta / clínicas). Solo se monta si el
- * usuario tiene alguna clínica, invitación o puede crear una: para el resto de
- * psicólogos la interfaz de mainds pro no cambia.
+ * usuario tiene alguna clínica o una invitación pendiente: para el resto de
+ * psicólogos la interfaz de mainds pro no cambia. Las clínicas se crean desde
+ * Ajustes (SettingsModal).
  */
-const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({ me, current, personalLabel, onSelect, onCreateClinic, onOpenInvitations }) => {
+const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({ me, current, personalLabel, onSelect, onOpenInvitations }) => {
   const pending = me.pendingInvitations?.length || 0;
   const itemClass = (active: boolean) =>
     `w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left transition-colors ${
@@ -52,12 +52,6 @@ const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({ me, current, pers
         <button type="button" onClick={onOpenInvitations} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-amber-800 bg-amber-50 hover:bg-amber-100">
           <Mail size={15} className="flex-shrink-0" />
           <span className="truncate">{pending === 1 ? '1 invitación pendiente' : `${pending} invitaciones pendientes`}</span>
-        </button>
-      )}
-      {me.canCreateOrg && onCreateClinic && (
-        <button type="button" onClick={onCreateClinic} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-indigo-700 hover:bg-indigo-50">
-          <Plus size={15} className="flex-shrink-0" />
-          <span>Crear clínica</span>
         </button>
       )}
     </div>

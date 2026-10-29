@@ -1,6 +1,6 @@
 // Recorrido exploratorio (no es un test): la titular de un centro que también
 // pasa consulta usa mainds business una semana. Capturas en e2e/.shots/explore-*.
-import { chromium, startStack, loggedInContext, shot, APP_URL } from './helpers.mjs';
+import { chromium, startStack, loggedInContext, shot, APP_URL, openCreateClinic } from './helpers.mjs';
 import { DPA } from '../../backend/test/business/helpers.js';
 
 const stack = await startStack({ BUSINESS_BETA_EMAILS: 'olga@centro.local' });
@@ -13,10 +13,10 @@ try {
   const page = await ctx.newPage();
   page.on('dialog', d => d.accept('Motivo de prueba suficientemente largo para el acceso'));
   await page.goto(APP_URL);
-  await page.getByTestId('workspace-switcher').waitFor({ timeout: 30000 });
+  await page.getByText('Mi Diario Personal').first().waitFor({ timeout: 30000 });
   await step(page, '01-pro-con-selector', async () => {});
   await step(page, '02-crear-centro', async () => {
-    await page.getByTestId('workspace-switcher').getByRole('button', { name: 'Crear clínica' }).click();
+    await openCreateClinic(page, olga);
     await page.getByPlaceholder('Centro de Psicología Mar Azul').fill('Centro Olga Martín Psicología');
     await page.getByLabel(/Acepto, en nombre/).check();
   });
