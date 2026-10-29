@@ -40,7 +40,8 @@ const BulkImportPanel = lazy(() => import('./components/BulkImportPanel'));
 const PsychologistAIChat = lazy(() => import('./components/PsychologistAIChat'));
 // Lazy-loaded: admin only
 const SuperAdmin = lazy(() => import('./components/SuperAdmin'));
-import { Mic, LayoutDashboard, Home, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock, AlertCircle, Smile, Shield, Building2, LogOut, Upload, Bot, FolderOpen, Phone, Mail, Filter } from 'lucide-react';
+const CollaboratorArea = lazy(() => import('./components/collaborators/CollaboratorArea'));
+import { Mic, LayoutDashboard, Home, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock, AlertCircle, Smile, Shield, Building2, LogOut, Upload, Bot, FolderOpen, Phone, Mail, Filter, Handshake } from 'lucide-react';
 
 // Custom Mainds Logo Component
 const MaindsLogo: React.FC<{ className?: string }> = ({ className = "w-12 h-12" }) => (
@@ -59,8 +60,11 @@ const App: React.FC = () => {
   const [phonePromptNumber, setPhonePromptNumber] = useState('');
   const [phonePromptSaving, setPhonePromptSaving] = useState(false);
   
-  const [psychViewMode, setPsychViewMode] = useState<'DASHBOARD' | 'PERSONAL' | 'ADMIN'>('DASHBOARD');
-  const [adminTab, setAdminTab] = useState<'dashboard' | 'funnel' | 'users' | 'sales' | 'agents' | 'templates' | 'email'>('dashboard');
+  const [psychViewMode, setPsychViewMode] = useState<'DASHBOARD' | 'PERSONAL' | 'ADMIN' | 'COLLABORATOR'>('DASHBOARD');
+  const [adminTab, setAdminTab] = useState<'dashboard' | 'funnel' | 'users' | 'sales' | 'agents' | 'templates' | 'email' | 'collaborators'>('dashboard');
+  // Programa de colaboradores: solo quien ha dado de alta un superadmin ve el
+  // botón "Área de colaborador" (y los superadmins, para ver cómo lo ven ellos).
+  const [collaboratorInfo, setCollaboratorInfo] = useState<{ is_collaborator: boolean; collaborator_id: string | null }>({ is_collaborator: false, collaborator_id: null });
   const [adminSidebarOpen, setAdminSidebarOpen] = useState(false);
   const [psychPanelView, setPsychPanelView] = useState<'home' | 'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule' | 'centros' | 'templates' | 'import' | 'ai-assistant' | 'materials'>('home');
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -289,6 +293,21 @@ const App: React.FC = () => {
 
   // Removed: Aggressive periodic connection check that was logging users out unnecessarily
   // Connection issues are now handled gracefully at the operation level
+
+  useEffect(() => {
+    if (!currentUser?.id || !USE_BACKEND) {
+      setCollaboratorInfo({ is_collaborator: false, collaborator_id: null });
+      return;
+    }
+    let cancelled = false;
+    AuthService.apiFetch(`${API_URL}/collaborator/me`)
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => {
+        if (!cancelled && d) setCollaboratorInfo({ is_collaborator: !!d.is_collaborator, collaborator_id: d.collaborator_id || null });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [currentUser?.id]);
 
   // Efecto para forzar vista de paciente si is_psychologist es false
   useEffect(() => {
@@ -1135,6 +1154,43 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
   // propia SUPERADMIN_EMAILS.
   const isSuperAdminUser = isSuperAdminEmail(currentUser?.email);
 
+  const canSeeCollaboratorArea = collaboratorInfo.is_collaborator || isSuperAdminUser;
+
+  if (psychViewMode === 'COLLABORATOR' && canSeeCollaboratorArea) {
+    const goBackFromCollaborator = () => setPsychViewMode(currentUser?.is_psychologist === true ? 'DASHBOARD' : 'PERSONAL');
+    return (
+      <div className="h-dvh bg-slate-50 text-slate-900 flex flex-col overflow-hidden">
+        <header className="flex items-center gap-3 px-4 md:px-8 py-3 bg-white border-b border-slate-200 flex-shrink-0">
+          <div className="w-8 h-8 bg-gradient-to-br from-indigo-600 to-fuchsia-600 rounded-lg flex items-center justify-center flex-shrink-0">
+            <Handshake size={17} className="text-white" />
+          </div>
+          <span className="font-bold text-slate-900 text-base md:text-lg flex-1 truncate">Área de colaborador</span>
+          {isSuperAdminUser && (
+            <button
+              onClick={() => { setAdminTab('collaborators'); setPsychViewMode('ADMIN'); }}
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100"
+            >
+              <Shield size={15} /> Gestionar
+            </button>
+          )}
+          <button
+            onClick={goBackFromCollaborator}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100"
+          >
+            <ArrowLeftRight size={15} />
+            <span className="hidden sm:inline">{currentUser?.is_psychologist === true ? 'Volver a mainds pro' : 'Volver a mi diario'}</span>
+            <span className="sm:hidden">Volver</span>
+          </button>
+        </header>
+        <main className="flex-1 overflow-y-auto px-4 md:px-8 py-6">
+          <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}>
+            <CollaboratorArea isSuperAdmin={isSuperAdminUser} ownCollaboratorId={collaboratorInfo.collaborator_id} />
+          </Suspense>
+        </main>
+      </div>
+    );
+  }
+
   if (psychViewMode === 'ADMIN' && isSuperAdminUser) {
     const goBackFromAdmin = () => setPsychViewMode(currentUser?.is_psychologist === true ? 'DASHBOARD' : 'PERSONAL');
     const adminNavItems = [
@@ -1145,7 +1201,8 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
       { id: 'agents'    as const, label: 'Agentes',    icon: <Bot size={18} /> },
       { id: 'templates' as const, label: 'Plantillas', icon: <FileText size={18} /> },
       { id: 'email'     as const, label: 'Buzón',      icon: <Mail size={18} /> },
-    ] as { id: 'dashboard' | 'funnel' | 'users' | 'sales' | 'agents' | 'templates' | 'email'; label: string; icon: React.ReactNode }[];
+      { id: 'collaborators' as const, label: 'Colaboradores', icon: <Handshake size={18} /> },
+    ] as { id: 'dashboard' | 'funnel' | 'users' | 'sales' | 'agents' | 'templates' | 'email' | 'collaborators'; label: string; icon: React.ReactNode }[];
     return (
       <div className="h-screen bg-slate-50 text-slate-900 flex flex-col overflow-hidden">
         {/* ── Mobile top bar ─────────────────────────── */}
@@ -1217,7 +1274,14 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
             </nav>
 
             {/* Footer */}
-            <div className="p-3 border-t border-slate-700">
+            <div className="p-3 border-t border-slate-700 space-y-1">
+              <button
+                onClick={() => { setPsychViewMode('COLLABORATOR'); setAdminSidebarOpen(false); }}
+                className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+              >
+                <Handshake size={16} />
+                <span>Ver área de colaborador</span>
+              </button>
               <button
                 onClick={goBackFromAdmin}
                 className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
@@ -1350,6 +1414,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   onSwitchToPersonal={() => { setPsychViewMode('PERSONAL'); setActiveTab('calendar'); }}
                   onOpenSettings={handleOpenSettings}
                   onSwitchToAdmin={() => setPsychViewMode('ADMIN')}
+                  onSwitchToCollaborator={canSeeCollaboratorArea ? () => setPsychViewMode('COLLABORATOR') : undefined}
                   isProfileIncomplete={isProfileIncomplete}
                   subscriptionInfo={psychSubscriptionInfo}
                   psychologistId={currentUser.id}
@@ -1802,6 +1867,16 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
           </nav>
 
           <div className={`${sidebarOpen ? 'block' : 'hidden'} md:block p-3 border-t border-slate-200 space-y-2`}>
+            {/* Área de colaborador - solo colaboradores dados de alta (y superadmins) */}
+            {canSeeCollaboratorArea && (
+              <button
+                onClick={() => { setPsychViewMode('COLLABORATOR'); if (window.innerWidth < 768) setSidebarOpen(false); }}
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium text-violet-700 bg-violet-50 hover:bg-violet-100"
+              >
+                <Handshake size={18} />
+                <span className={`${sidebarOpen ? 'inline' : 'hidden'} md:inline`}>Área de colaborador</span>
+              </button>
+            )}
             {/* Admin tab - solo para superadmins */}
             {isSuperAdminUser && (
               <button

@@ -25,6 +25,12 @@ import {
   bloqueadoPorId, emailBloqueado, emailsBloqueados, invalidarCacheBloqueos
 } from './utils/user-block.js';
 import {
+  idsColaboradoresActivos, esColaboradorActivo, esColaboradorActivoCacheado,
+  invalidarCacheColaboradores, validarEstructuraPagos, crearCodigo, cambiarEstadoCodigo,
+  registrarFacturaCobrada, actualizarEstadoReferido, panelColaborador, listarColaboradores,
+  TABLAS_COLABORADORES
+} from './utils/colaboradores.js';
+import {
   verificarFirmaResend, motivoDeSupresion, pideBaja,
   esRespuestaAutomatica, noQuierePropuestas
 } from './utils/resend-webhook.js';
@@ -1079,6 +1085,8 @@ const checkPsychAccess = (db, psychUserId) => {
   // Superadmin emails (env-configured) are treated as master/unlimited automatically
   const masterEmail = masterUser?.email || masterUser?.user_email || masterUser?.data?.email;
   if (isSuperAdmin(masterEmail)) return { allowed: true, isSubscribed: true, trialActive: false, trialDaysLeft: 0, isMaster: true };
+  // Colaboradores activos: premium incluido (ver backend/utils/colaboradores.js)
+  if (esColaboradorActivoCacheado(psychUserId)) return { allowed: true, isSubscribed: true, trialActive: false, trialDaysLeft: 0, isMaster: true, isCollaborator: true };
   const sub = getPsychSub(db, psychUserId);
   // Sync: use cached createdAt from local db users (may be inaccurate)
   const user = (db.users || []).find(u => u.id === psychUserId);
@@ -1115,6 +1123,10 @@ const checkPsychAccessAsync = async (db, psychUserId) => {
   // Superadmin emails (env-configured) are treated as master/unlimited automatically
   const masterEmail = masterUser?.email || masterUser?.user_email || masterUser?.data?.email;
   if (isSuperAdmin(masterEmail)) return { allowed: true, isSubscribed: true, trialActive: false, trialDaysLeft: 0, isMaster: true };
+  // Colaboradores activos: premium incluido (ver backend/utils/colaboradores.js)
+  if (supabaseAdmin && await esColaboradorActivo(supabaseAdmin, psychUserId)) {
+    return { allowed: true, isSubscribed: true, trialActive: false, trialDaysLeft: 0, isMaster: true, isCollaborator: true };
+  }
   const sub = getPsychSub(db, psychUserId);
   const userCreatedAt = await getSupabaseUserCreatedAt(psychUserId);
   return computeAccess(sub, userCreatedAt);
@@ -5132,11 +5144,12 @@ app.get('/api/admin/stats', authenticateRequest, async (req, res) => {
 
     const psychUsers = allUsers.filter(u => u.is_psychologist === true);
     let trialCount = 0, paidCount = 0, blockedCount = 0, mrr = 0;
+    const colaboradoresActivos = await idsColaboradoresActivos(supabaseAdmin);
 
     const psychDetails = psychUsers.map(u => {
       const sub = subsByPsychId[u.id] || { plan_id: DEFAULT_PSYCH_PLAN, stripe_status: null, access_blocked: false };
       const createdAt = getCreatedAt(u);
-      const isMaster = u.master === true || isSuperAdmin(u.email || u.user_email || u.data?.email);
+      const isMaster = u.master === true || isSuperAdmin(u.email || u.user_email || u.data?.email) || colaboradoresActivos.has(String(u.id));
       const plan = PSYCH_PLANS[sub.plan_id] || PSYCH_PLANS[DEFAULT_PSYCH_PLAN];
 
       let access;
@@ -5765,6 +5778,10 @@ const handleCreateCheckoutSession = async (req, res) => {
       const isPatientMaster = checkoutPatientUser
         ? (isSuperAdmin(checkoutPatientUser.email || checkoutPatientUser.user_email) || checkoutPatientUser.master === true)
         : false;
+      const isPatientCollaborator = await esColaboradorActivo(supabaseAdmin, requesterId);
+      if (isPatientCollaborator) {
+        return res.json({ master: true, message: 'Los colaboradores de mainds tienen premium incluido.' });
+      }
       if (isPatientMaster) {
         return res.json({ master: true, message: 'Master users have unlimited access — no subscription required.' });
       }
@@ -6612,6 +6629,7 @@ app.get('/api/subscription', authenticateRequest, async (req, res) => {
     blocked_reason: sub.blocked_reason ?? null,
     trial_expiry_date: userCreatedAt ? Math.floor((userCreatedAt + TRIAL_DAYS * 24 * 60 * 60 * 1000) / 1000) : null,
     is_master: isMaster,
+    is_collaborator: access.isCollaborator === true,
     // Plan info — only show when subscribed
     plan_id: plan ? sub.plan_id : null,
     plan_name: plan ? plan.name : null,
@@ -6666,9 +6684,9 @@ app.get('/api/patient-subscription', authenticateRequest, async (req, res) => {
       if (freshUser) patientUser = { ...patientUser, ...freshUser, email: freshUser.data?.email || freshUser.user_email };
     } catch (_) {}
   }
-  const isMaster = patientUser
+  const isMaster = (patientUser
     ? (isSuperAdmin(patientUser.email || patientUser.user_email) || patientUser.master === true)
-    : false;
+    : false) || await esColaboradorActivo(supabaseAdmin, String(patientId));
 
   // Trial: 14 days from account creation
   const createdAt = patientUser?.createdAt || patientUser?.created_at || null;
@@ -6866,6 +6884,10 @@ app.post(
       }
       case 'customer.subscription.updated': {
         const subscription = event.data.object;
+        if (supabaseAdmin) {
+          await actualizarEstadoReferido(supabaseAdmin, subscription)
+            .catch(e => console.error('[Webhook] colaboradores: estado del lead', e?.message || e));
+        }
         // Try psychologist first, then patient
         let sub = findSubByStripe(subscription.id, subscription.customer);
         if (sub) {
@@ -6940,6 +6962,10 @@ app.post(
       }
       case 'customer.subscription.deleted': {
         const subscription = event.data.object;
+        if (supabaseAdmin) {
+          await actualizarEstadoReferido(supabaseAdmin, subscription, { borrada: true })
+            .catch(e => console.error('[Webhook] colaboradores: estado del lead', e?.message || e));
+        }
         const sub = findSubByStripe(subscription.id, null);
         if (sub) {
           sub.stripe_status = 'canceled';
@@ -6981,6 +7007,16 @@ app.post(
       }
       case 'invoice.payment_succeeded': {
         const invoice = event.data.object;
+        // Programa de colaboradores: ¿entró con un código? → lead + comisión.
+        // Aislado: un fallo aquí no puede impedir que se active la suscripción.
+        if (supabaseAdmin) {
+          try {
+            const stripeColab = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2022-11-15' });
+            await registrarFacturaCobrada(supabaseAdmin, stripeColab, invoice);
+          } catch (e) {
+            console.error('[Webhook] colaboradores: no se pudo registrar la factura', invoice?.id, e?.message || e);
+          }
+        }
         const sub = findSubByStripe(invoice.subscription, invoice.customer);
         if (sub) {
           sub.stripe_status = 'active';
@@ -21517,6 +21553,260 @@ const handleOptout = async (req, res) => {
 
 app.get('/api/automation/optout', handleOptout);
 app.post('/api/automation/optout', express.urlencoded({ extended: false }), handleOptout);
+
+// ─── PROGRAMA DE COLABORADORES ────────────────────────────────────────────────
+// Lógica en backend/utils/colaboradores.js, tablas en
+// backend/scripts/add-collaborators-tables.sql.
+//
+// El colaborador ve su área (/api/collaborator/*). Todo lo demás (alta, baja,
+// códigos, estructura de pagos y pagos de la bolsa) lo hace solo un superadmin
+// (/api/admin/collaborators/*). Un superadmin también puede abrir el área de
+// cualquier colaborador para ver exactamente lo que ve él.
+
+const stripeColaboradores = () => (process.env.STRIPE_SECRET_KEY
+  ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2022-11-15' })
+  : null);
+
+const requireSupabaseColaboradores = (req, res, next) => {
+  if (!supabaseAdmin) return res.status(503).json({ error: 'El programa de colaboradores necesita Supabase' });
+  next();
+};
+
+const esSuperAdminPorId = async (userId) => {
+  const row = userId ? await readSupabaseRowById('users', String(userId)) : null;
+  return !!row && isSuperAdmin(row.email || row.user_email || row.data?.email);
+};
+
+const colaboradorDeUsuario = async (userId) => {
+  const { data } = await supabaseAdmin
+    .from(TABLAS_COLABORADORES.colaboradores).select('*').eq('user_id', String(userId)).maybeSingle();
+  return data || null;
+};
+
+// --- GET /api/collaborator/me — ¿Debe ver el botón "Área de colaborador"? ---
+app.get('/api/collaborator/me', authenticateRequest, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.json({ is_collaborator: false, is_superadmin: false });
+    const [colab, superadmin] = await Promise.all([
+      colaboradorDeUsuario(req.authenticatedUserId).catch(() => null),
+      esSuperAdminPorId(req.authenticatedUserId)
+    ]);
+    return res.json({
+      is_collaborator: !!colab?.active,
+      collaborator_id: colab?.active ? colab.id : null,
+      is_superadmin: superadmin
+    });
+  } catch (err) {
+    console.error('[collaborator/me]', err?.message || err);
+    return res.json({ is_collaborator: false, is_superadmin: false });
+  }
+});
+
+// --- GET /api/collaborator/dashboard[?collaborator_id=] ---
+// Un colaborador ve el suyo. Un superadmin puede pedir el de cualquiera.
+app.get('/api/collaborator/dashboard', authenticateRequest, requireSupabaseColaboradores, async (req, res) => {
+  try {
+    const superadmin = await esSuperAdminPorId(req.authenticatedUserId);
+    let colaboradorId = null;
+    if (superadmin && req.query.collaborator_id) {
+      colaboradorId = String(req.query.collaborator_id);
+    } else {
+      const colab = await colaboradorDeUsuario(req.authenticatedUserId);
+      if (colab?.active) colaboradorId = colab.id;
+    }
+    if (!colaboradorId) {
+      return res.status(superadmin ? 404 : 403).json({ error: superadmin ? 'No eres colaborador: elige uno para ver su área' : 'No eres colaborador de mainds' });
+    }
+    const panel = await panelColaborador(supabaseAdmin, colaboradorId, { vistaAdmin: false });
+    if (!panel) return res.status(404).json({ error: 'Colaborador no encontrado' });
+    return res.json(panel);
+  } catch (err) {
+    console.error('[collaborator/dashboard]', err?.message || err);
+    return res.status(500).json({ error: 'No se pudo cargar el área de colaborador' });
+  }
+});
+
+// --- GET /api/admin/collaborators — lista con el resumen de cada uno ---
+app.get('/api/admin/collaborators', authenticateRequest, requireSuperAdmin, requireSupabaseColaboradores, async (req, res) => {
+  try {
+    return res.json(await listarColaboradores(supabaseAdmin));
+  } catch (err) {
+    console.error('[admin/collaborators]', err?.message || err);
+    const sinTabla = /collaborators/.test(err?.message || '') && /does not exist|schema cache/.test(err?.message || '');
+    return res.status(500).json({
+      error: sinTabla
+        ? 'Faltan las tablas: ejecuta backend/scripts/add-collaborators-tables.sql en Supabase'
+        : 'No se pudo cargar la lista de colaboradores'
+    });
+  }
+});
+
+// --- POST /api/admin/collaborators — dar de alta a un usuario por su email ---
+app.post('/api/admin/collaborators', authenticateRequest, requireSuperAdmin, requireSupabaseColaboradores, async (req, res) => {
+  try {
+    const email = normalizarEmail(req.body?.email);
+    if (!email) return res.status(400).json({ error: 'Indica el email del usuario' });
+    const validacion = validarEstructuraPagos(req.body || {});
+    if (!validacion.ok) return res.status(400).json({ error: validacion.error });
+
+    const { data: usuarios } = await supabaseAdmin
+      .from('users').select('id, user_email, data').ilike('user_email', email.replace(/[\\%_]/g, '\\$&')).limit(1);
+    const usuario = usuarios?.[0];
+    if (!usuario) return res.status(404).json({ error: `No hay ningún usuario de mainds con el email ${email}. Tiene que registrarse primero.` });
+
+    const d = usuario.data || {};
+    const nombre = d.name || [d.firstName, d.lastName].filter(Boolean).join(' ') || null;
+    const existente = await colaboradorDeUsuario(usuario.id);
+    const ahora = new Date().toISOString();
+    let fila;
+    if (existente) {
+      // Ya lo fue: se reactiva con la estructura que se mande.
+      const { data, error } = await supabaseAdmin.from(TABLAS_COLABORADORES.colaboradores)
+        .update({ ...validacion.valores, active: true, deactivated_at: null, updated_at: ahora })
+        .eq('id', existente.id).select().single();
+      if (error) throw error;
+      fila = data;
+    } else {
+      const { data, error } = await supabaseAdmin.from(TABLAS_COLABORADORES.colaboradores).insert([{
+        user_id: String(usuario.id),
+        email: usuario.user_email || d.email || email,
+        name: nombre,
+        active: true,
+        created_by: req.superAdminEmail,
+        ...validacion.valores
+      }]).select().single();
+      if (error) throw error;
+      fila = data;
+    }
+    invalidarCacheColaboradores();
+    return res.json(await panelColaborador(supabaseAdmin, fila.id, { vistaAdmin: true }));
+  } catch (err) {
+    console.error('[admin/collaborators POST]', err?.message || err);
+    return res.status(500).json({ error: err?.message || 'No se pudo dar de alta al colaborador' });
+  }
+});
+
+// --- GET /api/admin/collaborators/:id — ficha completa (emails sin enmascarar) ---
+app.get('/api/admin/collaborators/:id', authenticateRequest, requireSuperAdmin, requireSupabaseColaboradores, async (req, res) => {
+  try {
+    const panel = await panelColaborador(supabaseAdmin, req.params.id, { vistaAdmin: true });
+    if (!panel) return res.status(404).json({ error: 'Colaborador no encontrado' });
+    return res.json(panel);
+  } catch (err) {
+    console.error('[admin/collaborators/:id]', err?.message || err);
+    return res.status(500).json({ error: 'No se pudo cargar el colaborador' });
+  }
+});
+
+// --- PATCH /api/admin/collaborators/:id — estructura de pagos, notas, alta/baja ---
+// Dar de baja (active=false): pierde el premium y el área, sus leads dejan de
+// generar comisión y sus códigos se desactivan en Stripe. Lo ya ganado sigue en
+// la bolsa para pagárselo.
+app.patch('/api/admin/collaborators/:id', authenticateRequest, requireSuperAdmin, requireSupabaseColaboradores, async (req, res) => {
+  try {
+    const validacion = validarEstructuraPagos(req.body || {});
+    if (!validacion.ok) return res.status(400).json({ error: validacion.error });
+    const { data: actual } = await supabaseAdmin
+      .from(TABLAS_COLABORADORES.colaboradores).select('*').eq('id', req.params.id).maybeSingle();
+    if (!actual) return res.status(404).json({ error: 'Colaborador no encontrado' });
+
+    const cambios = { ...validacion.valores, updated_at: new Date().toISOString() };
+    if (typeof req.body?.active === 'boolean' && req.body.active !== actual.active) {
+      cambios.active = req.body.active;
+      cambios.deactivated_at = req.body.active ? null : new Date().toISOString();
+      if (!req.body.active) {
+        const stripe = stripeColaboradores();
+        const { data: codigos } = await supabaseAdmin
+          .from(TABLAS_COLABORADORES.codigos).select('*').eq('collaborator_id', actual.id).eq('active', true);
+        for (const c of codigos || []) {
+          if (!stripe) break;
+          await cambiarEstadoCodigo(supabaseAdmin, stripe, c, false)
+            .catch(e => console.error('[admin/collaborators] no se pudo desactivar', c.code, e?.message || e));
+        }
+      }
+    }
+    const { error } = await supabaseAdmin
+      .from(TABLAS_COLABORADORES.colaboradores).update(cambios).eq('id', actual.id);
+    if (error) throw error;
+    invalidarCacheColaboradores();
+    return res.json(await panelColaborador(supabaseAdmin, actual.id, { vistaAdmin: true }));
+  } catch (err) {
+    console.error('[admin/collaborators PATCH]', err?.message || err);
+    return res.status(500).json({ error: err?.message || 'No se pudo guardar el colaborador' });
+  }
+});
+
+// --- POST /api/admin/collaborators/:id/codes — crear código de descuento en Stripe ---
+app.post('/api/admin/collaborators/:id/codes', authenticateRequest, requireSuperAdmin, requireSupabaseColaboradores, async (req, res) => {
+  try {
+    const stripe = stripeColaboradores();
+    if (!stripe) return res.status(500).json({ error: 'Stripe no está configurado en el servidor' });
+    const { data: colaborador } = await supabaseAdmin
+      .from(TABLAS_COLABORADORES.colaboradores).select('*').eq('id', req.params.id).maybeSingle();
+    if (!colaborador) return res.status(404).json({ error: 'Colaborador no encontrado' });
+    if (!colaborador.active) return res.status(400).json({ error: 'El colaborador está dado de baja' });
+    const r = await crearCodigo(supabaseAdmin, stripe, {
+      colaborador,
+      code: req.body?.code,
+      percentOff: req.body?.percent_off,
+      durationMonths: req.body?.duration_months,
+      maxRedemptions: req.body?.max_redemptions,
+      createdBy: req.superAdminEmail
+    });
+    if (!r.ok) return res.status(r.status).json({ error: r.error });
+    return res.json(await panelColaborador(supabaseAdmin, colaborador.id, { vistaAdmin: true }));
+  } catch (err) {
+    console.error('[admin/collaborators/codes POST]', err?.message || err);
+    return res.status(500).json({ error: err?.message || 'No se pudo crear el código' });
+  }
+});
+
+// --- PATCH /api/admin/collaborator-codes/:codeId — activar / desactivar un código ---
+app.patch('/api/admin/collaborator-codes/:codeId', authenticateRequest, requireSuperAdmin, requireSupabaseColaboradores, async (req, res) => {
+  try {
+    const stripe = stripeColaboradores();
+    if (!stripe) return res.status(500).json({ error: 'Stripe no está configurado en el servidor' });
+    if (typeof req.body?.active !== 'boolean') return res.status(400).json({ error: 'Falta active (true/false)' });
+    const { data: codigo } = await supabaseAdmin
+      .from(TABLAS_COLABORADORES.codigos).select('*').eq('id', req.params.codeId).maybeSingle();
+    if (!codigo) return res.status(404).json({ error: 'Código no encontrado' });
+    await cambiarEstadoCodigo(supabaseAdmin, stripe, codigo, req.body.active);
+    return res.json(await panelColaborador(supabaseAdmin, codigo.collaborator_id, { vistaAdmin: true }));
+  } catch (err) {
+    console.error('[admin/collaborator-codes PATCH]', err?.message || err);
+    return res.status(500).json({ error: err?.message || 'No se pudo cambiar el código' });
+  }
+});
+
+// --- POST /api/admin/collaborators/:id/payouts — pago de la bolsa o ajuste manual ---
+// type=payout: el superadmin le ha pagado `amount` € → se resta de la bolsa.
+// type=adjustment: corrección con signo (+ suma, − resta).
+app.post('/api/admin/collaborators/:id/payouts', authenticateRequest, requireSuperAdmin, requireSupabaseColaboradores, async (req, res) => {
+  try {
+    const tipo = req.body?.type === 'adjustment' ? 'adjustment' : 'payout';
+    const importe = Math.round(Number(req.body?.amount) * 100) / 100;
+    if (!Number.isFinite(importe) || importe === 0 || (tipo === 'payout' && importe < 0)) {
+      return res.status(400).json({ error: 'Importe no válido' });
+    }
+    const { data: colaborador } = await supabaseAdmin
+      .from(TABLAS_COLABORADORES.colaboradores).select('id').eq('id', req.params.id).maybeSingle();
+    if (!colaborador) return res.status(404).json({ error: 'Colaborador no encontrado' });
+    const descripcion = String(req.body?.description || '').trim().slice(0, 300)
+      || (tipo === 'payout' ? 'Pago de la bolsa' : 'Ajuste manual');
+    const { error } = await supabaseAdmin.from(TABLAS_COLABORADORES.apuntes).insert([{
+      collaborator_id: colaborador.id,
+      type: tipo,
+      amount: tipo === 'payout' ? -importe : importe,
+      description: descripcion,
+      created_by: req.superAdminEmail
+    }]);
+    if (error) throw error;
+    return res.json(await panelColaborador(supabaseAdmin, colaborador.id, { vistaAdmin: true }));
+  } catch (err) {
+    console.error('[admin/collaborators/payouts POST]', err?.message || err);
+    return res.status(500).json({ error: err?.message || 'No se pudo registrar el pago' });
+  }
+});
 
 // --- GET /api/admin/sales/pipeline — El embudo comercial real ---
 //
