@@ -19,6 +19,7 @@ import { apiFetch } from '../services/authService';
 const SalesPipeline = React.lazy(() => import('./sales/SalesPipeline'));
 const TemplatesPanel = React.lazy(() => import('./sales/TemplatesPanel'));
 const EmailInbox = React.lazy(() => import('./EmailInbox'));
+const CollaboratorsAdmin = React.lazy(() => import('./collaborators/CollaboratorsAdmin'));
 
 // ─────────────────── Types ───────────────────
 interface PsychologistStat {
@@ -88,7 +89,7 @@ interface UserDetail {
   lastActivity: string | null;
 }
 
-type Tab = 'dashboard' | 'funnel' | 'users' | 'sales' | 'agents' | 'templates' | 'email';
+type Tab = 'dashboard' | 'funnel' | 'users' | 'sales' | 'agents' | 'templates' | 'email' | 'collaborators';
 
 // ─────────────────── Equipo de ventas automatizado ───────────────────
 interface AgentConfig {
@@ -1641,6 +1642,13 @@ const SuperAdmin: React.FC<{ tab: Tab }> = ({ tab }) => {
       {tab === 'email' && (
         <React.Suspense fallback={<div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-2 border-indigo-200 border-t-indigo-600 rounded-full" /></div>}>
           <EmailInbox />
+        </React.Suspense>
+      )}
+
+      {/* ── COLABORADORES TAB ───────────────────── */}
+      {tab === 'collaborators' && (
+        <React.Suspense fallback={<div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-2 border-indigo-200 border-t-indigo-600 rounded-full" /></div>}>
+          <CollaboratorsAdmin />
         </React.Suspense>
       )}
 

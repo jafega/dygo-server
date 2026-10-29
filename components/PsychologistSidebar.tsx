@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Home, Users, FileText, User as UserIcon, Calendar, Menu, X, ArrowLeftRight, ShieldCheck, Shield, Link2, BarChart3, AlertCircle, ClipboardList, Building2, Scroll, Upload, Bot, Zap, RefreshCw, FolderOpen } from 'lucide-react';
+import { Home, Users, FileText, User as UserIcon, Calendar, Menu, X, ArrowLeftRight, ShieldCheck, Shield, Link2, BarChart3, AlertCircle, ClipboardList, Building2, Scroll, Upload, Bot, Zap, RefreshCw, FolderOpen, Handshake } from 'lucide-react';
 import { createCheckoutSession, createBillingPortalSession, apiFetch } from '../services/authService';
 import { API_URL, isSuperAdminEmail } from '../services/config';
 
@@ -39,6 +39,8 @@ interface PsychologistSidebarProps {
   onSwitchToPersonal: () => void;
   onOpenSettings: () => void;
   onSwitchToAdmin?: () => void;
+  /** Solo se pasa si el usuario es colaborador de mainds (o superadmin). */
+  onSwitchToCollaborator?: () => void;
   isProfileIncomplete?: boolean;
   subscriptionInfo?: SubscriptionInfo | null;
   psychologistId?: string;
@@ -57,6 +59,7 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
   onSwitchToPersonal,
   onOpenSettings,
   onSwitchToAdmin,
+  onSwitchToCollaborator,
   isProfileIncomplete = false,
   subscriptionInfo = null,
   psychologistId = '',
@@ -444,6 +447,15 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
             <ArrowLeftRight size={16} />
             <span>Mi Diario Personal</span>
           </button>
+          {onSwitchToCollaborator && (
+            <button
+              onClick={onSwitchToCollaborator}
+              className="w-full px-3 py-2 text-sm font-medium text-violet-700 bg-violet-50 hover:bg-violet-100 rounded-lg transition-colors text-left flex items-center gap-2 border border-violet-100"
+            >
+              <Handshake size={16} />
+              <span>Área de colaborador</span>
+            </button>
+          )}
           {onSwitchToAdmin && isSuperAdminEmail(userEmail) && (
             <button
               onClick={onSwitchToAdmin}
