@@ -26,6 +26,7 @@ import {
 } from './billing.js';
 import { registerAgendaTopLevel, registerAgendaRoutes } from './agenda.js';
 import { registerClinicalRoutes } from './clinical.js';
+import { registerMoneyRoutes } from './money.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_STORE_FILE = path.resolve(__dirname, '..', '.business-store.local.json');
@@ -89,6 +90,7 @@ export function createBusinessRouter({ store, authenticateRequest, isSuperAdmin,
   registerBillingRoutes(scoped, ctx);
   registerAgendaRoutes(scoped, ctx);
   registerClinicalRoutes(scoped, ctx);
+  registerMoneyRoutes(scoped, ctx);
   for (const register of deps.registerScoped || []) register(scoped, ctx);
   orgRouter.use('/:orgId', authenticateRequest, scoped);
 

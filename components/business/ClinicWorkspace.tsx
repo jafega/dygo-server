@@ -1,7 +1,7 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Building2, Users, CreditCard, Settings, Home, Loader2, ArrowLeftRight, Menu, X, AlertTriangle, Clock,
-  CalendarDays, UserRound, MapPin, FileSignature, ShieldCheck
+  CalendarDays, UserRound, MapPin, FileSignature, ShieldCheck, Receipt, Wallet
 } from 'lucide-react';
 import { getOrganization, ROLE_LABELS, type Organization, type OrgMember } from '../../services/businessService';
 import TeamPanel from './TeamPanel';
@@ -11,6 +11,8 @@ const AgendaPanel = lazy(() => import('./AgendaPanel'));
 const PatientsPanel = lazy(() => import('./PatientsPanel'));
 const LocationsRoomsPanel = lazy(() => import('./ClinicSetupPanels').then(m => ({ default: m.LocationsRoomsPanel })));
 const ConsentTemplatesPanel = lazy(() => import('./ClinicSetupPanels').then(m => ({ default: m.ConsentTemplatesPanel })));
+const ClinicBillingPanel = lazy(() => import('./ClinicBillingPanel'));
+const SettlementsPanel = lazy(() => import('./SettlementsPanel'));
 const AuditPanel = lazy(() => import('./ClinicSetupPanels').then(m => ({ default: m.AuditPanel })));
 
 export interface ClinicContext {
@@ -72,6 +74,16 @@ const SECTIONS: SectionDef[] = [
     id: 'patients', label: 'Pacientes', icon: <UserRound size={18} />,
     visible: (c) => c.can('patients.contact_all') || c.can('patients.contact_assigned'),
     render: (c) => <PatientsPanel c={c} />
+  },
+  {
+    id: 'billing', label: 'Facturación', icon: <Receipt size={18} />,
+    visible: (c) => c.can('billing.manage') || c.can('billing.own') || c.can('billing.read_export'),
+    render: (c) => <ClinicBillingPanel c={c} />
+  },
+  {
+    id: 'settlements', label: 'Liquidaciones', icon: <Wallet size={18} />,
+    visible: (c) => c.can('settlements.manage') || c.can('settlements.read') || c.can('settlements.own'),
+    render: (c) => <SettlementsPanel c={c} />
   },
   {
     id: 'team', label: 'Equipo', icon: <Users size={18} />,

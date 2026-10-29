@@ -10,7 +10,7 @@
 1. **Registro de facturación de alta** (y de anulación), generado en el momento de expedir la factura.
 2. **Huella (hash) SHA-256 encadenada** con el registro anterior **del mismo obligado tributario (NIF emisor)**. Se calcula sobre esta concatenación, en este orden:
    `IDEmisorFactura=…&NumSerieFactura=…&FechaExpedicionFactura=dd-mm-aaaa&TipoFactura=F1|F2|R1…R5&CuotaTotal=…&ImporteTotal=…&Huella=<huella anterior o vacío>&FechaHoraHusoGenRegistro=aaaa-mm-ddThh:mm:ss+hh:mm`
-   La salida es hexadecimal en mayúsculas, de 64 caracteres. Los importes van sin ceros a la derecha superfluos, con punto decimal.
+   La salida es hexadecimal en mayúsculas, de 64 caracteres. La AEAT recalcula la huella con los valores que recibe en el XML, así que los textos deben ser **idénticos** a los del envío. mainds usa punto decimal y siempre 2 decimales (`formatAmount`: "60.00", "-12.35"); el envío XML tendrá que usar exactamente esos mismos textos.
 3. **QR tributario** en la factura (ISO/IEC 18004, nivel de corrección M, de 30×30 a 40×40 mm) con la URL de cotejo:
    - Producción: `https://www2.agenciatributaria.gob.es/wlpl/TIKE-CONT/ValidarQR?nif=…&numserie=…&fecha=dd-mm-aaaa&importe=…`
    - Pruebas: `https://prewww2.aeat.es/wlpl/TIKE-CONT/ValidarQR?…`
@@ -40,3 +40,16 @@
 - El encadenamiento es **por NIF emisor**, no por usuario ni por organización: una clínica con dos CIF tiene dos cadenas.
 - Concurrencia: el siguiente registro necesita la huella del anterior, así que la emisión se serializa por emisor (índice único y reintento, o bloqueo en BD).
 - Hacen falta un certificado de sello de la empresa y su custodia (secreto del entorno) para el envío. Fuera del repo.
+
+## Estado tras la Fase 3 (implementado)
+- `backend/business/verifactu.js`:
+  - Huella oficial, con test contra los **dos ejemplos publicados por la AEAT** (registro inicial y encadenado). Ambos coinciden byte a byte.
+  - Cadena por NIF emisor, con índice único `(issuer_tax_id, previous_hash)` para que dos emisiones simultáneas no bifurquen la cadena.
+  - Hora con huso de Madrid.
+  - URL del QR (modo "no verifactu" por defecto; `VERIFACTU_MODE` y `VERIFACTU_ENV` para cambiarlo) e imagen PNG.
+- Facturas de la clínica (`org_invoices`):
+  - Una factura emitida es inmutable, también en la BD por trigger.
+  - Rectificativas R4/R5 por diferencias, con importes negativos.
+  - Factura simplificada F2 para pacientes sin NIF, hasta 400 €.
+- Numeración por **NIF** y serie, compartida entre clínicas: un profesional que factura a dos clínicas no repite número.
+- **Limitación conocida:** las facturas de mainds pro (tabla `invoices`) aún no generan registros. Un autónomo que facture en Pro y en Business con el mismo NIF tendrá, de momento, una cadena que solo incluye las de Business. Unificarlo es parte de la sesión "Verifactu Pro + envío a la AEAT".

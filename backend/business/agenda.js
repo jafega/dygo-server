@@ -18,6 +18,7 @@ import {
   findConflicts, validateRange, validateSlot, toBusyBlocks, anyOverlap, overlaps, isBlocking
 } from '../utils/agenda.js';
 import { isPractitioner } from '../utils/orgPermissions.js';
+import { freezeCommission } from './money.js';
 
 export const SERVICE_TYPES = ['session', 'first_visit', 'couple', 'family', 'group', 'evaluation', 'other'];
 export const MODALITIES = ['in_person', 'online'];
@@ -302,9 +303,8 @@ export function registerAgendaRoutes(router, ctx) {
       const loc = await store.get('org_locations', row.location_id);
       if (!loc || loc.org_id !== req.workspace.orgId) throw badRequest('Sede no encontrada.');
     }
-    if (typeof ctx.deps?.freezeCommission === 'function') {
-      Object.assign(row, await ctx.deps.freezeCommission(ctx, req.workspace, v.member, v.patient, row));
-    }
+    // La regla de comisión vigente se congela en la cita (cambiarla después no altera el pasado).
+    Object.assign(row, await freezeCommission(store, req.workspace.orgId, v.member, v.patient, row));
     await checkConflicts(req, row);
     const warnings = await crossWorkspaceWarnings(req, v.member, row.starts_at, row.ends_at);
     const appt = await store.insert('org_appointments', row);
@@ -339,6 +339,10 @@ export function registerAgendaRoutes(router, ctx) {
     if (v.room) patch.location_id = v.room.location_id;
     if (body.price !== undefined) patch.price = money(body.price);
     if (body.admin_notes !== undefined) patch.admin_notes = trimOrNull(body.admin_notes, 1000);
+    // Si cambia quién atiende o el tipo de servicio, se vuelve a congelar la regla.
+    if (patch.member_id !== existing.member_id || patch.service_type !== existing.service_type) {
+      Object.assign(patch, await freezeCommission(store, ws.orgId, v.member, v.patient, { ...existing, ...patch }));
+    }
     const candidate = { ...existing, ...patch };
     const moved = patch.starts_at !== new Date(existing.starts_at).toISOString() || patch.ends_at !== new Date(existing.ends_at).toISOString() ||
       patch.room_id !== (existing.room_id || null) || patch.member_id !== existing.member_id ||

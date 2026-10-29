@@ -72,7 +72,10 @@ export const UNIQUE_KEYS = {
     { columns: ['org_id', 'user_id'] },
     { columns: ['invitation_token_hash'] }
   ],
-  org_invoices: [{ columns: ['issuer_key', 'series', 'number'] }]
+  org_invoices: [{ columns: ['issuer_key', 'series', 'number'] }],
+  org_settlements: [{ columns: ['org_id', 'member_id', 'period'] }],
+  // Dos registros del mismo NIF no pueden encadenarse al mismo anterior.
+  verifactu_records: [{ columns: ['issuer_tax_id', 'previous_hash'] }, { columns: ['invoice_id', 'record_type'] }]
 };
 
 function uniqueValue(row, key) {

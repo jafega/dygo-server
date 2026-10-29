@@ -356,3 +356,21 @@ CREATE TABLE public.org_members (
 -- org_consent_templates(id, org_id, name, content, version, active, created_by)
 -- org_patient_consents(id, org_id, patient_id, template_id, template_name, template_version,
 --                      content_snapshot, content_sha256, method, signed_at, registered_by, revoked_at)
+-- business-004-money.sql — Fase 3. RLS activado sin políticas. Ver el fichero para
+-- CHECKs, índices únicos y triggers (factura emitida inmutable; verifactu solo inserción).
+-- org_members.billing_profile jsonb (nombre fiscal, NIF, dirección, prefijo de serie, IBAN, cuota de alquiler)
+-- org_billing_entities(id, org_id, legal_name, tax_id, address, postal_code, city, province, iban, email,
+--                      series_prefix, start_numbers, vat_exempt, exemption_text, active)
+-- org_commission_rules(id, org_id, member_id, service_type, lead_source, psych_percent | fixed_fee,
+--                      valid_from, valid_to, active, created_by)
+-- org_invoices(id, org_id, kind, issuer_type, billing_entity_id, issuer_member_id, issuer_key 'nif:<NIF>',
+--              issuer_*, recipient_*, member_id, series, number, full_number, aeat_type, lines, vat_breakdown,
+--              subtotal, vat_total, irpf_rate, irpf_total, total, exemption_text, status, issue_date, issued_at,
+--              rectifies_invoice_id, rectification_reason, settlement_id, appointment_ids, notes, paid_at,
+--              payment_method, verifactu_record_id, verifactu_hash, created_by)
+--   UNIQUE (issuer_key, series, number) WHERE number IS NOT NULL
+-- org_settlements(id, org_id, member_id, period 'YYYY-MM', billing_model, status, data, validated_at,
+--                 validated_by, invoice_id, paid_at)   UNIQUE (org_id, member_id, period)
+-- verifactu_records(id, org_id, invoice_id, record_type, issuer_tax_id, series_number, issue_date,
+--                   invoice_type, vat_total, total, previous_hash, chain_index, generated_at, hash, qr_url,
+--                   mode, status)   UNIQUE (issuer_tax_id, previous_hash), UNIQUE (invoice_id, record_type)

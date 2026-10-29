@@ -3,6 +3,8 @@
 // descarguen los paneles de la clínica (carga diferida) y no el bundle de Pro.
 
 import { call, orgApi, type OrgMember } from './businessService';
+import { apiFetch } from './authService';
+import { API_URL } from './config';
 
 export * from './businessService';
 
@@ -148,3 +150,114 @@ export const offboardMember = (orgId: string, memberId: string, reassign: Record
 /** Profesionales que atienden pacientes (para agenda y asignaciones). */
 export const isClinicalMember = (m: OrgMember) =>
   m.status === 'active' && (m.role === 'psicologo' || m.role === 'director_clinico' || m.role === 'en_practicas' || (m.role === 'titular' && m.is_clinical));
+
+// ── Fase 3: emisores, comisiones, facturas, liquidaciones ──────────────────
+export interface BillingEntity {
+  id: string; legal_name: string; tax_id: string; address: string | null; postal_code: string | null; city: string | null;
+  province: string | null; iban: string | null; email: string | null; series_prefix: string;
+  start_numbers: Record<string, number>; vat_exempt: boolean; exemption_text: string | null; active: boolean;
+}
+export interface BillingProfile { legal_name?: string | null; tax_id?: string | null; address?: string | null; series_prefix?: string; iban?: string | null; monthly_rent?: number | null }
+export interface CommissionRule {
+  id: string; member_id: string | null; service_type: string | null; lead_source: 'clinic' | 'own' | null;
+  psych_percent: number | null; fixed_fee: number | null; valid_from: string; valid_to: string | null; active: boolean;
+}
+export interface InvoiceLine { description: string; quantity: number; unit_price: number; vat_rate: number; base: number; vat: number; amount: number }
+export type InvoiceKind = 'patient' | 'psych_to_org' | 'org_to_psych';
+export interface ClinicInvoice {
+  id: string; kind: InvoiceKind; status: 'draft' | 'issued' | 'rectified' | 'paid'; series: string; number: number | null;
+  full_number: string | null; aeat_type: string; issue_date: string | null;
+  issuer_type: 'entity' | 'member'; issuer_member_id: string | null; issuer_name: string; issuer_tax_id: string; issuer_address: string | null;
+  recipient_name: string; recipient_tax_id: string | null; recipient_address: string | null; recipient_member_id: string | null;
+  member_id: string | null; lines: InvoiceLine[]; vat_breakdown: { vat_rate: number; base: number; vat: number }[];
+  subtotal: number; vat_total: number; irpf_rate: number; irpf_total: number; total: number; exemption_text: string | null;
+  rectifies_invoice_id: string | null; rectification_reason: string | null; settlement_id: string | null;
+  notes: string | null; paid_at: string | null; payment_method: string | null; verifactu_hash: string | null; created_at: string;
+}
+export interface VerifactuInfo { hash: string; previous_hash: string; generated_at: string; qr_url: string; status: string; invoice_type: string }
+export interface BillableAppointment { id: string; patient_id: string; patient_name: string | null; member_id: string; starts_at: string; service_type: string; price: number | null }
+export interface SettlementData {
+  model: string; period: string; invoice_kind: InvoiceKind | null;
+  lines: { appointment_id: string; date: string; service_type: string; minutes: number; price: number; psych_amount: number; clinic_amount: number }[];
+  summary: { sessions: number; hours: number; revenue: number; psych_amount: number; clinic_amount: number };
+  invoice: { lines: InvoiceLine[]; irpf_rate: number; subtotal: number; vat: number; irpf: number; total: number } | null;
+  deductions: { concept: string; amount: number }[]; net_payable: number | null; warnings: { code: string; appointment_id?: string }[];
+}
+export interface Settlement {
+  id: string; member_id: string; member_name: string | null; period: string; billing_model: string;
+  status: 'draft' | 'validated' | 'invoiced' | 'paid'; data: SettlementData; validated_at: string | null;
+  invoice_id: string | null; paid_at: string | null;
+}
+export interface ProductivityRow { member_id: string; member_name: string; billing_model: string; sessions: number; hours: number; revenue: number; psych_amount: number; clinic_amount: number; no_shows: number; cancelled: number }
+
+export const INVOICE_KIND_LABELS: Record<InvoiceKind, string> = {
+  patient: 'A paciente', psych_to_org: 'Profesional → clínica', org_to_psych: 'Clínica → profesional'
+};
+export const INVOICE_STATUS_LABELS: Record<ClinicInvoice['status'], string> = {
+  draft: 'Borrador', issued: 'Emitida', rectified: 'Rectificada', paid: 'Pagada'
+};
+export const SETTLEMENT_STATUS_LABELS: Record<Settlement['status'], string> = {
+  draft: 'Pendiente de validar', validated: 'Validada', invoiced: 'Facturada', paid: 'Pagada'
+};
+
+export const listBillingEntities = (orgId: string) => orgApi<{ entities: BillingEntity[] }>('GET', orgId, '/billing-entities');
+export const createBillingEntity = (orgId: string, body: Partial<BillingEntity>) => orgApi<{ entity: BillingEntity }>('POST', orgId, '/billing-entities', body);
+export const updateBillingEntity = (orgId: string, id: string, body: Partial<BillingEntity>) => orgApi<{ entity: BillingEntity }>('PATCH', orgId, `/billing-entities/${id}`, body);
+export const getMyBillingProfile = (orgId: string) => orgApi<{ billing_profile: BillingProfile }>('GET', orgId, '/members/me/billing-profile');
+export const saveMyBillingProfile = (orgId: string, body: BillingProfile) => orgApi<{ billing_profile: BillingProfile }>('PUT', orgId, '/members/me/billing-profile', body);
+export const setMemberRent = (orgId: string, memberId: string, monthlyRent: number | null) => orgApi<{ monthly_rent: number | null }>('PUT', orgId, `/members/${memberId}/rent`, { monthly_rent: monthlyRent });
+
+export const listCommissionRules = (orgId: string) => orgApi<{ rules: CommissionRule[] }>('GET', orgId, '/commission-rules');
+export const createCommissionRule = (orgId: string, body: Partial<CommissionRule>) => orgApi<{ rule: CommissionRule }>('POST', orgId, '/commission-rules', body);
+export const endCommissionRule = (orgId: string, id: string, validTo: string) => orgApi<{ rule: CommissionRule }>('PATCH', orgId, `/commission-rules/${id}`, { valid_to: validTo });
+
+export const listBillable = (orgId: string, patientId?: string) =>
+  orgApi<{ appointments: BillableAppointment[] }>('GET', orgId, `/billing/billable${patientId ? `?patientId=${encodeURIComponent(patientId)}` : ''}`);
+export const listClinicInvoices = (orgId: string, params: { status?: string; kind?: string } = {}) => {
+  const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v) as [string, string][]).toString();
+  return orgApi<{ invoices: ClinicInvoice[] }>('GET', orgId, `/invoices${qs ? `?${qs}` : ''}`);
+};
+export const createClinicInvoice = (orgId: string, body: { patient_id: string; appointment_ids: string[]; issuer?: 'entity' | 'member'; billing_entity_id?: string; recipient_tax_id?: string; notes?: string }) =>
+  orgApi<{ invoice: ClinicInvoice }>('POST', orgId, '/invoices', body);
+export const getClinicInvoice = (orgId: string, id: string) =>
+  orgApi<{ invoice: ClinicInvoice; verifactu: VerifactuInfo | null; qr_data_url: string | null }>('GET', orgId, `/invoices/${id}`);
+export const deleteClinicInvoice = (orgId: string, id: string) => orgApi<{ ok: boolean }>('DELETE', orgId, `/invoices/${id}`);
+export const issueClinicInvoice = (orgId: string, id: string) => orgApi<{ invoice: ClinicInvoice }>('POST', orgId, `/invoices/${id}/issue`);
+export const rectifyClinicInvoice = (orgId: string, id: string, reason: string) => orgApi<{ invoice: ClinicInvoice }>('POST', orgId, `/invoices/${id}/rectify`, { reason });
+export const markClinicInvoicePaid = (orgId: string, id: string, method: string) => orgApi<{ invoice: ClinicInvoice }>('POST', orgId, `/invoices/${id}/mark-paid`, { method });
+export const exportInvoicesCsv = (orgId: string, from?: string, to?: string) => {
+  const qs = new URLSearchParams();
+  if (from) qs.set('from', from);
+  if (to) qs.set('to', to);
+  return downloadOrgFile(orgId, `/invoices/export.csv${qs.toString() ? `?${qs}` : ''}`, `facturas-${from || 'inicio'}-${to || 'hoy'}.csv`);
+};
+
+export const generateSettlements = (orgId: string, period: string) => orgApi<{ settlements: Settlement[] }>('POST', orgId, '/settlements/generate', { period });
+export const listSettlements = (orgId: string, period?: string) => orgApi<{ settlements: Settlement[] }>('GET', orgId, `/settlements${period ? `?period=${period}` : ''}`);
+export const validateSettlement = (orgId: string, id: string) => orgApi<{ settlement: Settlement }>('POST', orgId, `/settlements/${id}/validate`);
+export const invoiceSettlement = (orgId: string, id: string) => orgApi<{ settlement: Settlement; invoice: ClinicInvoice }>('POST', orgId, `/settlements/${id}/invoice`);
+export const markSettlementPaid = (orgId: string, id: string) => orgApi<{ settlement: Settlement }>('POST', orgId, `/settlements/${id}/mark-paid`);
+export const getProductivity = (orgId: string, period: string) => orgApi<{ period: string; members: ProductivityRow[] }>('GET', orgId, `/reports/productivity?period=${period}`);
+
+/** Descarga un fichero de la API de la clínica (con la sesión) y lo guarda. */
+export async function downloadOrgFile(orgId: string, path: string, filename: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await apiFetch(`${API_URL}/org/${orgId}${path}`);
+    if (!res.ok) {
+      const j = await res.json().catch(() => null);
+      return { ok: false, error: j?.error || 'No se pudo descargar' };
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    return { ok: true };
+  } catch {
+    return { ok: false, error: 'No hay conexión con el servidor' };
+  }
+}
