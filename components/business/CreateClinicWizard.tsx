@@ -124,11 +124,12 @@ const CreateClinicWizard: React.FC<CreateClinicWizardProps> = ({ dpaVersion, onC
               ))}
             </div>
             <p className="text-xs text-slate-500 mt-2">Recepción, gerencia y gestoría no pagan licencia. Pacientes ilimitados. IVA no incluido.</p>
+            <p className="text-xs text-slate-500 mt-1">La clínica se factura aparte: si pagas mainds pro, tu suscripción personal sigue igual y se cobra por separado.</p>
           </fieldset>
 
           <label className="flex items-start gap-3 text-sm text-slate-700">
             <input type="checkbox" checked={isClinical} onChange={e => setIsClinical(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600" />
-            <span>Yo también atiendo pacientes en la clínica <span className="text-slate-500">(ocupas una licencia de profesional)</span></span>
+            <span>Yo también atiendo pacientes en la clínica <span className="text-slate-500">(ocupas una licencia de profesional de la clínica, que paga la clínica)</span></span>
           </label>
 
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-2">

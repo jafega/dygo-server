@@ -103,7 +103,9 @@ const MODES = [
   { label: 'flag encendido', env: { BUSINESS_ENABLED: 'true', BUSINESS_STORE: 'file', BUSINESS_BETA_EMAILS: 'pro@golden.local' }, generate: false },
   // El Pro es además titular de una clínica con un paciente invitado como
   // miembro: su espacio personal tiene que seguir idéntico.
-  { label: 'flag encendido y el Pro es titular de una clínica', env: { BUSINESS_ENABLED: 'true', BUSINESS_STORE: 'file', BUSINESS_BETA_EMAILS: 'pro@golden.local' }, generate: false, withClinic: true }
+  { label: 'flag encendido y el Pro es titular de una clínica', env: { BUSINESS_ENABLED: 'true', BUSINESS_STORE: 'file', BUSINESS_BETA_EMAILS: 'pro@golden.local' }, generate: false, withClinic: true },
+  // Cierra su centro y sigue solo como psicólogo en Pro: nada cambia.
+  { label: 'el Pro abrió y cerró su clínica', env: { BUSINESS_ENABLED: 'true', BUSINESS_STORE: 'file', BUSINESS_BETA_EMAILS: 'pro@golden.local' }, generate: false, withClinic: true, closeClinic: true }
 ];
 
 for (const mode of MODES) {
@@ -130,6 +132,10 @@ for (const mode of MODES) {
       assert.equal(inv.status, 201, inv.text);
       const token = new URL(inv.body.invite_url).searchParams.get('org_invite');
       assert.equal((await srv.request('POST', '/api/org/invitations/accept', { token: p2.token, body: { token } })).status, 200);
+      if (mode.closeClinic) {
+        const closed = await srv.request('POST', `/api/org/${org.body.organization.id}/close`, { token: pro.token, body: { confirm_name: 'Clínica Golden' } });
+        assert.equal(closed.status, 200, closed.text);
+      }
     }
 
     for (const c of CASES) {
