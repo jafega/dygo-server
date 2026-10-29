@@ -1,7 +1,7 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Building2, Users, CreditCard, Settings, Home, Loader2, ArrowLeftRight, Menu, X, AlertTriangle, Clock,
-  CalendarDays, UserRound, MapPin, FileSignature, ShieldCheck, Receipt, Wallet, Megaphone
+  CalendarDays, UserRound, MapPin, FileSignature, ShieldCheck, Receipt, Wallet, Megaphone, GraduationCap, LayoutDashboard
 } from 'lucide-react';
 import { getOrganization, ROLE_LABELS, type Organization, type OrgMember } from '../../services/businessService';
 import TeamPanel from './TeamPanel';
@@ -14,6 +14,8 @@ const ConsentTemplatesPanel = lazy(() => import('./ClinicSetupPanels').then(m =>
 const ClinicBillingPanel = lazy(() => import('./ClinicBillingPanel'));
 const SettlementsPanel = lazy(() => import('./SettlementsPanel'));
 const LeadsPanel = lazy(() => import('./LeadsPanel'));
+const KnowledgePanel = lazy(() => import('./KnowledgePanel'));
+const DashboardPanel = lazy(() => import('./DashboardPanel'));
 const AuditPanel = lazy(() => import('./ClinicSetupPanels').then(m => ({ default: m.AuditPanel })));
 
 export interface ClinicContext {
@@ -67,6 +69,11 @@ const ClinicHome: React.FC<{ c: ClinicContext; go: (id: string) => void; section
 // permiten los permisos de la membresía (el backend vuelve a comprobarlo).
 const SECTIONS: SectionDef[] = [
   {
+    id: 'dashboard', label: 'Panel de la clínica', icon: <LayoutDashboard size={18} />,
+    visible: (c) => c.can('team.manage'),
+    render: (c) => <DashboardPanel c={c} />
+  },
+  {
     id: 'agenda', label: 'Agenda', icon: <CalendarDays size={18} />,
     visible: (c) => c.can('agenda.view_all') || c.can('agenda.view_busy'),
     render: (c) => <AgendaPanel c={c} />
@@ -90,6 +97,11 @@ const SECTIONS: SectionDef[] = [
     id: 'settlements', label: 'Liquidaciones', icon: <Wallet size={18} />,
     visible: (c) => c.can('settlements.manage') || c.can('settlements.read') || c.can('settlements.own'),
     render: (c) => <SettlementsPanel c={c} />
+  },
+  {
+    id: 'knowledge', label: 'Formación', icon: <GraduationCap size={18} />,
+    visible: (c) => c.can('library.consume') || c.can('library.manage'),
+    render: (c) => <KnowledgePanel c={c} />
   },
   {
     id: 'team', label: 'Equipo', icon: <Users size={18} />,

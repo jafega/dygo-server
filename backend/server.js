@@ -24150,6 +24150,14 @@ try {
       return true;
     },
     extraDeps: {
+      // Asistente de la biblioteca de la clínica: recibe solo la pregunta
+      // (anonimizada en el navegador) y textos de la biblioteca.
+      askAI: process.env.GEMINI_API_KEY ? async ({ prompt }) => {
+        const genai = await getGenAIv2();
+        if (!genai) throw new Error('IA no disponible');
+        const r = await genai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt });
+        return typeof r.text === 'string' ? r.text : (r.text ?? '');
+      } : null,
       // Agenda unificada: huecos ocupados de la consulta personal (mainds pro).
       // Solo lectura y solo inicio/fin: ningún dato del paciente sale de aquí.
       readPersonalBusy: async (userId, fromIso, toIso) => {

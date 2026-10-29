@@ -299,3 +299,35 @@ export const updateLead = (orgId: string, id: string, body: { status?: LeadStatu
 export const assignLead = (orgId: string, id: string, memberId: string | 'round_robin' | null) => orgApi<{ lead: Lead }>('POST', orgId, `/leads/${id}/assign`, { member_id: memberId });
 export const convertLead = (orgId: string, id: string) => orgApi<{ lead: Lead; patient_id: string }>('POST', orgId, `/leads/${id}/convert`);
 export const getLeadMetrics = (orgId: string) => orgApi<LeadMetrics>('GET', orgId, '/leads/metrics');
+
+// ── Fase 5: conocimiento y panel del dueño ─────────────────────────────────
+export type LibraryKind = 'protocolo' | 'material' | 'plantilla' | 'enlace';
+export interface LibraryItem { id: string; kind: LibraryKind; title: string; body: string | null; url: string | null; tags: string[]; active: boolean; updated_at?: string }
+export interface CourseModule { id: string; course_id: string; title: string; body: string | null; url: string | null; minutes: number; position: number; completed: boolean }
+export interface Course { id: string; title: string; description: string | null; required_for: string[]; active: boolean; modules: CourseModule[]; total_minutes: number; my_completed: number; required: boolean }
+export interface TrainingHoursRow { member_id: string; name: string; role: string; training_hours: number; modules_completed: number; supervision_hours: number }
+export interface SupervisionLog { id: string; supervisor_member_id: string; supervisor_name: string | null; supervisee_member_id: string; supervisee_name: string | null; session_date: string; minutes: number; topics: string[]; notes: string | null; unreadable: boolean }
+export interface ClinicDashboard {
+  period: string; production: number; invoiced: number; sessions: number; no_shows: number; no_show_rate: number; cancelled: number;
+  room_occupancy: number; rooms: { room_id: string; name: string; occupancy: number; hours: number }[];
+  patients_active: number; patients_seen: number; leads: number; leads_converted: number; lead_conversion: number;
+  settlements_pending: number; settlements_pending_amount: number;
+  by_member: { member_id: string; name: string; sessions: number; production: number }[];
+  by_location: { location_id: string | null; name: string; sessions: number; production: number }[];
+}
+export const LIBRARY_KIND_LABELS: Record<LibraryKind, string> = { protocolo: 'Protocolo', material: 'Material', plantilla: 'Plantilla', enlace: 'Enlace' };
+
+export const listLibrary = (orgId: string) => orgApi<{ items: LibraryItem[] }>('GET', orgId, '/library');
+export const createLibraryItem = (orgId: string, body: Partial<LibraryItem>) => orgApi<{ item: LibraryItem }>('POST', orgId, '/library', body);
+export const updateLibraryItem = (orgId: string, id: string, body: Partial<LibraryItem>) => orgApi<{ item: LibraryItem }>('PATCH', orgId, `/library/${id}`, body);
+export const deleteLibraryItem = (orgId: string, id: string) => orgApi<{ ok: boolean }>('DELETE', orgId, `/library/${id}`);
+export const askLibrary = (orgId: string, question: string) => orgApi<{ answer: string; sources: { n: number; id: string; title: string }[] }>('POST', orgId, '/library/ask', { question });
+export const listCourses = (orgId: string) => orgApi<{ courses: Course[] }>('GET', orgId, '/courses');
+export const createCourse = (orgId: string, body: { title: string; description?: string; required_for?: string[] }) => orgApi<{ course: Course }>('POST', orgId, '/courses', body);
+export const addCourseModule = (orgId: string, courseId: string, body: { title: string; minutes: number; body?: string; url?: string }) => orgApi<{ module: CourseModule }>('POST', orgId, `/courses/${courseId}/modules`, body);
+export const completeModule = (orgId: string, courseId: string, moduleId: string) => orgApi<unknown>('POST', orgId, `/courses/${courseId}/modules/${moduleId}/complete`);
+export const getTrainingHours = (orgId: string) => orgApi<{ members: TrainingHoursRow[] }>('GET', orgId, '/training/hours');
+export const listSupervision = (orgId: string) => orgApi<{ logs: SupervisionLog[] }>('GET', orgId, '/supervision');
+export const createSupervision = (orgId: string, body: { supervisee_member_id: string; session_date: string; minutes: number; topics?: string[]; notes?: string }) =>
+  orgApi<{ log: SupervisionLog }>('POST', orgId, '/supervision', body);
+export const getDashboard = (orgId: string, period: string) => orgApi<ClinicDashboard>('GET', orgId, `/dashboard?period=${period}`);

@@ -73,7 +73,9 @@ export async function startServer(opts = {}) {
     BUSINESS_STORE_FILE: path.join(tmpDir, 'business-store.json'),
     SUPERADMIN_EMAILS: SUPERADMIN_EMAIL,
     AUDIT_DISABLED: 'true',
-    MAINDS_TEST_NO_RATE_LIMIT: '1'
+    MAINDS_TEST_NO_RATE_LIMIT: '1',
+    // Cada escritura de Business se valida contra las columnas de las migraciones SQL.
+    BUSINESS_STORE_SCHEMA_CHECK: '1'
   }, opts.env || {});
 
   const child = spawn(process.execPath, ['server.js'], {

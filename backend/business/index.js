@@ -17,6 +17,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFlags, resolveStoreDriver } from './flags.js';
 import { createStore } from './store.js';
+import { loadBusinessSchema } from './schema.js';
 import { asyncRoute, sendError, notFound } from './errors.js';
 import { createAuditRecorder } from './audit.js';
 import { requireMember, enforceWritable } from './workspace.js';
@@ -28,6 +29,7 @@ import { registerAgendaTopLevel, registerAgendaRoutes } from './agenda.js';
 import { registerClinicalRoutes } from './clinical.js';
 import { registerMoneyRoutes } from './money.js';
 import { registerLeadsRoutes, registerLeadsPublic } from './leads.js';
+import { registerKnowledgeRoutes } from './knowledge.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_STORE_FILE = path.resolve(__dirname, '..', '.business-store.local.json');
@@ -93,6 +95,7 @@ export function createBusinessRouter({ store, authenticateRequest, isSuperAdmin,
   registerClinicalRoutes(scoped, ctx);
   registerMoneyRoutes(scoped, ctx);
   registerLeadsRoutes(scoped, ctx);
+  registerKnowledgeRoutes(scoped, ctx);
   for (const register of deps.registerScoped || []) register(scoped, ctx);
   orgRouter.use('/:orgId', authenticateRequest, scoped);
 
@@ -139,7 +142,9 @@ export function mountBusiness(app, {
     if (flags.enabled) {
       const r = resolveStoreDriver({ requested: flags.requestedStore, hasSupabase: !!supabase, isServerless });
       if (r.driver) {
-        store = createStore({ driver: r.driver, supabase, file: flags.storeFile || DEFAULT_STORE_FILE });
+        // En local (tests) se puede exigir que cada escritura use columnas reales.
+        const schema = r.driver !== 'supabase' && env.BUSINESS_STORE_SCHEMA_CHECK === '1' ? loadBusinessSchema() : null;
+        store = createStore({ driver: r.driver, supabase, file: flags.storeFile || DEFAULT_STORE_FILE, schema });
       } else {
         reason = r.reason;
       }

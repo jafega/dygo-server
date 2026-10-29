@@ -75,7 +75,8 @@ export const UNIQUE_KEYS = {
   org_invoices: [{ columns: ['issuer_key', 'series', 'number'] }],
   org_settlements: [{ columns: ['org_id', 'member_id', 'period'] }],
   // Dos registros del mismo NIF no pueden encadenarse al mismo anterior.
-  verifactu_records: [{ columns: ['issuer_tax_id', 'previous_hash'] }, { columns: ['invoice_id', 'record_type'] }]
+  verifactu_records: [{ columns: ['issuer_tax_id', 'previous_hash'] }, { columns: ['invoice_id', 'record_type'] }],
+  org_course_progress: [{ columns: ['member_id', 'module_id'] }]
 };
 
 function uniqueValue(row, key) {
@@ -325,8 +326,20 @@ function createSupabaseDriver(supabase) {
 /**
  * @param {{ driver: 'supabase'|'file'|'memory', supabase?: any, file?: string, initial?: object }} opts
  */
-export function createStore({ driver, supabase, file, initial } = {}) {
+export function createStore({ driver, supabase, file, initial, schema = null } = {}) {
   let impl;
+  // schema: { tabla: Set(columnas) } (business/schema.js). Solo en local: cada
+  // escritura se comprueba contra las columnas reales de las migraciones.
+  const assertColumns = (table, rowOrRows) => {
+    if (!schema) return;
+    const cols = schema[table];
+    if (!cols) throw new StoreError('SCHEMA_MISMATCH', `La tabla ${table} no existe en las migraciones`, { table });
+    for (const row of Array.isArray(rowOrRows) ? rowOrRows : [rowOrRows]) {
+      for (const k of Object.keys(row || {})) {
+        if (!cols.has(k)) throw new StoreError('SCHEMA_MISMATCH', `Columna ${table}.${k} no existe en las migraciones`, { table });
+      }
+    }
+  };
   if (driver === 'supabase') impl = createSupabaseDriver(supabase);
   else if (driver === 'file') impl = createFileDriver(file);
   else if (driver === 'memory') impl = createMemoryDriver(initial);
@@ -345,11 +358,13 @@ export function createStore({ driver, supabase, file, initial } = {}) {
     async insert(table, rowOrRows) {
       assertTable(table);
       if (!rowOrRows || typeof rowOrRows !== 'object') throw new StoreError('BAD_QUERY', 'insert necesita una fila');
+      assertColumns(table, rowOrRows);
       return impl.insert(table, rowOrRows);
     },
     async update(table, id, patch) {
       assertTable(table);
       assertWritable(table, 'update');
+      assertColumns(table, patch);
       return impl.update(table, id, patch);
     },
     async remove(table, id) {

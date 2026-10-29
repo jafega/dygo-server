@@ -55,3 +55,11 @@ cd backend && npm run test:webhook   # test del handler de webhooks de Stripe
 - TypeScript en front; respeta los patrones ya existentes en `components/` y `services/`.
 - No introduzcas dependencias nuevas sin justificarlo.
 - Cambios pequeños y revisables; explica el "por qué" en el mensaje de commit.
+
+## mainds business (clínicas)
+
+- Producto para clínicas dentro del mismo repo: ver `docs/business/README.md` (estado, activación, pendientes) y `docs/business/BACKLOG.md` (reglas R1–R14).
+- Backend en `backend/business/*` (montado desde `server.js` con `mountBusiness`), lógica pura en `backend/utils/{orgPermissions,agenda,commissions,settlements,invoiceMath,nif,leads,knowledge,dashboard,fieldCrypto}.js`, migraciones `backend/scripts/business-00N-*.sql`.
+- Frontend en `components/business/*` (carga diferida) y `services/businessService.ts` (núcleo) / `services/businessApi.ts` (paneles).
+- **Regla de oro:** Business nunca escribe en tablas de Pro (lista blanca en `backend/business/store.js`). Los permisos salen solo de `orgPermissions.js`.
+- Tests: `cd backend && npm test` (incluye golden de no regresión de Pro) y E2E `node e2e/business/fN.spec.mjs`.

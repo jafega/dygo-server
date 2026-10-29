@@ -379,3 +379,10 @@ CREATE TABLE public.org_members (
 --           utm, consent_at, consent_version, status, assigned_member_id, assigned_at, patient_id,
 --           discarded_at, converted_at, events, ip_hash (sin IP en claro), created_by)
 -- Configuración de la página pública: organizations.settings.public_page; perfil público: org_members.public_profile.
+-- business-006-knowledge.sql — Fase 5. RLS activado sin políticas.
+-- org_library_items(id, org_id, kind, title, body, url, tags text[], active, created_by)
+-- org_courses(id, org_id, title, description, required_for text[], active, created_by)
+-- org_course_modules(id, org_id, course_id, title, body, url, minutes, position)
+-- org_course_progress(id, org_id, course_id, module_id, member_id, minutes, completed_at)  UNIQUE (member_id, module_id)
+-- org_supervision_logs(id, org_id, supervisor_member_id, supervisee_member_id, session_date, minutes, topics,
+--                      notes_enc 'enc:v1:…', created_by)
