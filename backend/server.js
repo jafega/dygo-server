@@ -116,7 +116,10 @@ const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'http://localhost
 const app = express();
 app.set('trust proxy', 1); // Trust Vercel/reverse-proxy X-Forwarded-For header
 const PORT = process.env.PORT || 3001;
-const DB_FILE = path.join(__dirname, 'db.json');
+// MAINDS_DB_FILE permite apuntar a otro fichero (los tests usan uno temporal para no tocar db.json).
+const DB_FILE = process.env.MAINDS_DB_FILE
+  ? path.resolve(process.env.MAINDS_DB_FILE)
+  : path.join(__dirname, 'db.json');
 const IS_SERVERLESS = !!(process.env.VERCEL || process.env.VERCEL_ENV);
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -445,9 +448,14 @@ app.use((req, res, next) => {
 });
 
 // --- RATE LIMITING (Protección contra fuerza bruta - LOPD/GDPR Art. 32) ---
+// Los tests de integración crean muchos usuarios desde 127.0.0.1. Solo se
+// saltan los límites si se piden las DOS cosas a la vez (nunca en producción).
+const skipRateLimitInTests = () =>
+  process.env.NODE_ENV === 'test' && process.env.MAINDS_TEST_NO_RATE_LIMIT === '1' && !IS_SERVERLESS;
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
   max: 10, // máximo 10 intentos por ventana
+  skip: skipRateLimitInTests,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Demasiados intentos. Inténtalo de nuevo en 15 minutos.' },
@@ -456,6 +464,7 @@ const authLimiter = rateLimit({
 const generalLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minuto
   max: 100, // 100 requests por minuto
+  skip: skipRateLimitInTests,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Demasiadas solicitudes. Inténtalo más tarde.' },
@@ -801,6 +810,33 @@ async function isAuthorizedForUser(requesterId, targetUserId, db) {
     }
   }
   return false;
+}
+
+// --- PROPIETARIO O SUPERADMIN (centros y plantillas, mainds business F0) ---
+// Algunas rutas reciben el id del psicólogo en la query o el body y lo usaban
+// tal cual: cualquiera autenticado podía leer o tocar los datos de otro.
+async function requesterIsSuperAdmin(userId) {
+  if (!userId) return false;
+  let row = null;
+  if (supabaseAdmin) {
+    try { row = await readSupabaseRowById('users', String(userId)); } catch { row = null; }
+  }
+  if (!row) row = (getDb().users || []).find(u => String(u.id) === String(userId)) || null;
+  return !!row && isSuperAdmin(row.email || row.user_email || row.data?.email);
+}
+
+/**
+ * Comprueba que el id de psicólogo que manda el cliente es el del usuario
+ * autenticado (o que este es superadmin). Si no, responde 403 y devuelve true.
+ * Uso: `if (await denyUnlessSelfOrSuperAdmin(req, res, psychologistId)) return;`
+ */
+async function denyUnlessSelfOrSuperAdmin(req, res, claimedUserId) {
+  const authId = String(req.authenticatedUserId || '');
+  if (authId && claimedUserId != null && String(claimedUserId) === authId) return false;
+  if (await requesterIsSuperAdmin(authId)) return false;
+  auditLog('ACCESO_DENEGADO_AJENO', { userId: authId, ruta: `${req.method} ${req.path}` });
+  res.status(403).json({ error: 'Acceso denegado' });
+  return true;
 }
 
 // --- AUDIT LOG (LOPD/GDPR Art. 30 - Registro de actividades) ---
@@ -3055,7 +3091,7 @@ const getDb = () => {
     try {
       if (fs.existsSync(DB_FILE)) {
         const backupName = `db.corrupt.${Date.now()}.json`;
-        fs.renameSync(DB_FILE, path.join(__dirname, backupName));
+        fs.renameSync(DB_FILE, path.join(path.dirname(DB_FILE), backupName));
         console.log(`📦 Backup creado: ${backupName}`);
       }
     } catch (errBackup) {
@@ -6756,6 +6792,9 @@ const upsertPatientSubToSupabase = async (patientId, patSub) => {
   }
 };
 
+// mainds business (se asigna al montar Business, al final del fichero).
+let businessApi = null;
+
 app.post(
   ['/webhook', '/api/webhook', '/api/stripe/webhook', '/api/stripe-webhook', '/api/webhooks/stripe'],
   async (req, res) => {
@@ -6775,6 +6814,16 @@ app.post(
   } catch (err) {
     console.warn('Webhook signature verification failed, event rejected:', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  // mainds business: los eventos de una clínica (metadata mainds_kind=organization)
+  // se procesan aparte y NUNCA llegan a la lógica de suscripciones de Pro.
+  if (businessApi) {
+    const r = await businessApi.handleStripeEvent(event)
+      .catch(() => ({ handled: businessApi.isOrgStripeEvent(event), ok: false }));
+    if (r?.handled) {
+      return r.ok ? res.json({ received: true }) : res.status(500).send('Business webhook error');
+    }
   }
 
   try {
@@ -19180,6 +19229,7 @@ app.get('/api/centers', authenticateRequest, async (req, res) => {
     if (!psychologistId) {
       return res.status(400).json({ error: 'psychologistId es requerido' });
     }
+    if (await denyUnlessSelfOrSuperAdmin(req, res, psychologistId)) return;
 
     console.log(`[GET /api/centers] Obteniendo centros para psychologistId: ${psychologistId}`);
 
@@ -19223,6 +19273,7 @@ app.post('/api/centers', authenticateRequest, async (req, res) => {
         error: 'Faltan campos requeridos: psychologistId, center_name, cif, address' 
       });
     }
+    if (await denyUnlessSelfOrSuperAdmin(req, res, psychologistId)) return;
 
     console.log(`[POST /api/centers] Creando centro para psychologistId: ${psychologistId}`);
 
@@ -19276,6 +19327,7 @@ app.patch('/api/centers/:id', authenticateRequest, async (req, res) => {
     if (!psychologistId) {
       return res.status(400).json({ error: 'psychologistId es requerido' });
     }
+    if (await denyUnlessSelfOrSuperAdmin(req, res, psychologistId)) return;
 
     console.log(`[PATCH /api/centers/${id}] Actualizando centro`);
 
@@ -19339,6 +19391,7 @@ app.delete('/api/centers/:id', authenticateRequest, async (req, res) => {
     if (!psychologistId) {
       return res.status(400).json({ error: 'psychologistId es requerido' });
     }
+    if (await denyUnlessSelfOrSuperAdmin(req, res, psychologistId)) return;
 
     console.log(`[DELETE /api/centers/${id}] Eliminando centro`);
 
@@ -19382,6 +19435,7 @@ app.get('/api/center/:centerId/unbilled', authenticateRequest, async (req, res) 
     if (!psychologistId) {
       return res.status(400).json({ error: 'psychologistId es requerido' });
     }
+    if (await denyUnlessSelfOrSuperAdmin(req, res, psychologistId)) return;
     
     if (supabaseAdmin) {
       try {
@@ -19534,6 +19588,7 @@ app.get('/api/templates', authenticateRequest, async (req, res) => {
   try {
     const { psych_user_id } = req.query;
     if (!psych_user_id) return res.status(400).json({ error: 'Se requiere psych_user_id' });
+    if (await denyUnlessSelfOrSuperAdmin(req, res, psych_user_id)) return;
 
     if (supabaseAdmin) {
       // Fetch own templates
@@ -19573,6 +19628,7 @@ app.post('/api/templates', authenticateRequest, async (req, res) => {
     if (!psych_user_id || !content) {
       return res.status(400).json({ error: 'Se requiere psych_user_id y content' });
     }
+    if (await denyUnlessSelfOrSuperAdmin(req, res, psych_user_id)) return;
 
     if (supabaseAdmin) {
       const { data, error } = await supabaseAdmin
@@ -19601,6 +19657,7 @@ app.put('/api/templates/:id', authenticateRequest, async (req, res) => {
     if (!psych_user_id || !content) {
       return res.status(400).json({ error: 'Se requiere psych_user_id y content' });
     }
+    if (await denyUnlessSelfOrSuperAdmin(req, res, psych_user_id)) return;
 
     if (supabaseAdmin) {
       // Verify ownership and that it's not a master template
@@ -19642,6 +19699,7 @@ app.delete('/api/templates/:id', authenticateRequest, async (req, res) => {
     const { psych_user_id } = req.query;
 
     if (!psych_user_id) return res.status(400).json({ error: 'Se requiere psych_user_id' });
+    if (await denyUnlessSelfOrSuperAdmin(req, res, psych_user_id)) return;
 
     if (supabaseAdmin) {
       const { data: existing, error: fetchErr } = await supabaseAdmin
@@ -19684,6 +19742,7 @@ app.patch('/api/templates/:id/archive', authenticateRequest, async (req, res) =>
     const { psych_user_id } = req.body;
 
     if (!psych_user_id) return res.status(400).json({ error: 'Se requiere psych_user_id' });
+    if (await denyUnlessSelfOrSuperAdmin(req, res, psych_user_id)) return;
 
     if (supabaseAdmin) {
       const { data: existing, error: fetchErr } = await supabaseAdmin
@@ -19721,6 +19780,7 @@ app.patch('/api/templates/:id/unarchive', authenticateRequest, async (req, res) 
     const { psych_user_id } = req.body;
 
     if (!psych_user_id) return res.status(400).json({ error: 'Se requiere psych_user_id' });
+    if (await denyUnlessSelfOrSuperAdmin(req, res, psych_user_id)) return;
 
     if (supabaseAdmin) {
       const { data: existing, error: fetchErr } = await supabaseAdmin
@@ -24061,6 +24121,69 @@ try {
   await initializeSupabase();
 } catch (err) {
   console.error('❌ Database initialization error:', err);
+}
+
+// --- MAINDS BUSINESS (backend/business/*): /api/org y /api/public/org ---
+// Se monta tras initializeSupabase para saber si hay cliente de Supabase. Si
+// falla, Pro sigue igual y Business queda apagado.
+try {
+  const { mountBusiness } = await import('./business/index.js');
+  businessApi = mountBusiness(app, {
+    supabase: supabaseAdmin,
+    isServerless: IS_SERVERLESS,
+    authenticateRequest,
+    isSuperAdmin,
+    auditLog,
+    getUser: async (id) => {
+      let row = null;
+      if (supabaseAdmin) row = await readSupabaseRowById('users', String(id)).catch(() => null);
+      return row || (getDb().users || []).find(u => String(u.id) === String(id)) || null;
+    },
+    stripe: () => (process.env.STRIPE_SECRET_KEY
+      ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2022-11-15' })
+      : null),
+    sendEmail: async ({ to, subject, html }) => {
+      if (!process.env.RESEND_API_KEY) return false;
+      const { Resend } = await import('resend');
+      const resend = new Resend(process.env.RESEND_API_KEY);
+      await resend.emails.send({ from: 'mainds <no-reply@mainds.app>', to, reply_to: 'info@mainds.app', subject, html });
+      return true;
+    },
+    extraDeps: {
+      // Asistente de la biblioteca de la clínica: recibe solo la pregunta
+      // (anonimizada en el navegador) y textos de la biblioteca.
+      askAI: process.env.GEMINI_API_KEY ? async ({ prompt }) => {
+        const genai = await getGenAIv2();
+        if (!genai) throw new Error('IA no disponible');
+        const r = await genai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt });
+        return typeof r.text === 'string' ? r.text : (r.text ?? '');
+      } : null,
+      // Agenda unificada: huecos ocupados de la consulta personal (mainds pro).
+      // Solo lectura y solo inicio/fin: ningún dato del paciente sale de aquí.
+      readPersonalBusy: async (userId, fromIso, toIso) => {
+        let rows;
+        if (supabaseAdmin) {
+          const { data, error } = await supabaseAdmin.from('sessions')
+            .select('starts_on, ends_on, status')
+            .eq('psychologist_user_id', String(userId))
+            .eq('status', 'scheduled')
+            .lte('starts_on', toIso).gte('ends_on', fromIso)
+            .limit(500);
+          if (error) throw error;
+          rows = data || [];
+        } else {
+          rows = (getDb().sessions || [])
+            .filter(x => String(x.psychologist_user_id || x.psychologistId) === String(userId));
+        }
+        return rows
+          .filter(r => r.status === 'scheduled' && r.starts_on && r.ends_on &&
+            new Date(r.starts_on) < new Date(toIso) && new Date(fromIso) < new Date(r.ends_on))
+          .map(r => ({ starts_at: new Date(r.starts_on).toISOString(), ends_at: new Date(r.ends_on).toISOString() }));
+      }
+    }
+  });
+} catch (err) {
+  console.error('❌ [business] No se pudo montar mainds business:', err?.message || err);
 }
 
 if (!process.env.VERCEL && !process.env.VERCEL_ENV) {

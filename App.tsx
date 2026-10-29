@@ -11,6 +11,7 @@ import AuthScreen from './components/AuthScreen';
 import SettingsModal from './components/SettingsModal';
 import PsychologistSidebar from './components/PsychologistSidebar';
 import UpgradeModal from './components/UpgradeModal';
+import * as BusinessService from './services/businessService';
 import type { PatientDashboardHandle } from './components/PatientDashboard';
 import type { CentrosPanelRef } from './components/CentrosPanel';
 // Lazy-loaded: patient panels (not needed by psychologists on initial load)
@@ -41,6 +42,12 @@ const PsychologistAIChat = lazy(() => import('./components/PsychologistAIChat'))
 // Lazy-loaded: admin only
 const SuperAdmin = lazy(() => import('./components/SuperAdmin'));
 const CollaboratorArea = lazy(() => import('./components/collaborators/CollaboratorArea'));
+// Lazy-loaded: mainds business (clínicas). Solo se descarga si el usuario tiene
+// alguna clínica, invitación o acceso a la beta.
+const ClinicWorkspace = lazy(() => import('./components/business/ClinicWorkspace'));
+const WorkspaceSwitcher = lazy(() => import('./components/business/WorkspaceSwitcher'));
+const CreateClinicWizard = lazy(() => import('./components/business/CreateClinicWizard'));
+const InviteAcceptModal = lazy(() => import('./components/business/InviteAcceptModal'));
 import { Mic, LayoutDashboard, Home, Calendar, Target, BookOpen, User as UserIcon, Users, Stethoscope, ArrowLeftRight, CheckSquare, Loader2, MessageCircle, Menu, X, CalendarIcon, Heart, TrendingUp, FileText, Briefcase, Link2, Plus, Clock, AlertCircle, Smile, Shield, Building2, LogOut, Upload, Bot, FolderOpen, Phone, Mail, Filter, Handshake } from 'lucide-react';
 
 // Custom Mainds Logo Component
@@ -60,11 +67,18 @@ const App: React.FC = () => {
   const [phonePromptNumber, setPhonePromptNumber] = useState('');
   const [phonePromptSaving, setPhonePromptSaving] = useState(false);
   
-  const [psychViewMode, setPsychViewMode] = useState<'DASHBOARD' | 'PERSONAL' | 'ADMIN' | 'COLLABORATOR'>('DASHBOARD');
+  const [psychViewMode, setPsychViewMode] = useState<'DASHBOARD' | 'PERSONAL' | 'ADMIN' | 'COLLABORATOR' | 'CLINIC'>('DASHBOARD');
   const [adminTab, setAdminTab] = useState<'dashboard' | 'funnel' | 'users' | 'sales' | 'agents' | 'templates' | 'email' | 'collaborators'>('dashboard');
   // Programa de colaboradores: solo quien ha dado de alta un superadmin ve el
   // botón "Área de colaborador" (y los superadmins, para ver cómo lo ven ellos).
   const [collaboratorInfo, setCollaboratorInfo] = useState<{ is_collaborator: boolean; collaborator_id: string | null }>({ is_collaborator: false, collaborator_id: null });
+  // mainds business: clínicas del usuario y espacio de trabajo activo. Sin
+  // clínicas ni beta, nada de esto se muestra y mainds pro queda igual.
+  const [businessMe, setBusinessMe] = useState<BusinessService.BusinessMe>({ enabled: false, memberships: [] });
+  const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
+  const [showCreateClinic, setShowCreateClinic] = useState(false);
+  const [orgInviteToken, setOrgInviteToken] = useState<string | null>(() => BusinessService.captureInviteToken());
+  const [showOrgInviteModal, setShowOrgInviteModal] = useState(false);
   const [adminSidebarOpen, setAdminSidebarOpen] = useState(false);
   const [psychPanelView, setPsychPanelView] = useState<'home' | 'patients' | 'billing' | 'profile' | 'dashboard' | 'sessions' | 'schedule' | 'centros' | 'templates' | 'import' | 'ai-assistant' | 'materials'>('home');
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -306,6 +320,45 @@ const App: React.FC = () => {
         if (!cancelled && d) setCollaboratorInfo({ is_collaborator: !!d.is_collaborator, collaborator_id: d.collaborator_id || null });
       })
       .catch(() => {});
+    return () => { cancelled = true; };
+  }, [currentUser?.id]);
+
+  // mainds business: una sola llamada a /api/org/me tras el login. Si falla o
+  // Business está apagado, todo sigue como siempre.
+  useEffect(() => {
+    if (!currentUser?.id || !USE_BACKEND) {
+      setBusinessMe({ enabled: false, memberships: [] });
+      setActiveOrgId(null);
+      return;
+    }
+    let cancelled = false;
+    const userId = currentUser.id;
+    const isPsych = currentUser.is_psychologist === true;
+    BusinessService.getBusinessMe().then(me => {
+      if (cancelled) return;
+      setBusinessMe(me);
+      const params = new URLSearchParams(window.location.search);
+      const billingReturnOrg = params.get('org_billing') ? params.get('org') : null;
+      if (billingReturnOrg) {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('org_billing');
+        url.searchParams.delete('org');
+        window.history.replaceState({}, '', url.toString());
+      }
+      const isMember = (id: string | null) => !!id && me.memberships.some(m => m.orgId === id);
+      const stored = BusinessService.getStoredWorkspace(userId);
+      const target = isMember(billingReturnOrg) ? billingReturnOrg
+        : isMember(stored) ? stored
+        // Quien no es psicólogo y solo usa mainds por una clínica (recepción, gestoría…) entra directo en ella.
+        : (!isPsych && !stored && me.memberships.length > 0) ? me.memberships[0].orgId
+        : null;
+      if (stored && !isMember(stored)) BusinessService.storeWorkspace(userId, null);
+      if (target) {
+        setActiveOrgId(target);
+        setPsychViewMode('CLINIC');
+      }
+      if (BusinessService.getPendingInviteToken()) setShowOrgInviteModal(true);
+    });
     return () => { cancelled = true; };
   }, [currentUser?.id]);
 
@@ -1156,6 +1209,99 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
 
   const canSeeCollaboratorArea = collaboratorInfo.is_collaborator || isSuperAdminUser;
 
+  // ── mainds business: selector de espacio y modales ──
+  const personalWorkspaceLabel = currentUser?.is_psychologist === true ? 'Mi consulta' : 'Mi espacio personal';
+  const selectWorkspace = (ws: string) => {
+    if (!currentUser) return;
+    if (ws === 'personal') {
+      BusinessService.storeWorkspace(currentUser.id, null);
+      setActiveOrgId(null);
+      setPsychViewMode(currentUser.is_psychologist === true ? 'DASHBOARD' : 'PERSONAL');
+    } else {
+      BusinessService.storeWorkspace(currentUser.id, ws);
+      setActiveOrgId(ws);
+      setPsychViewMode('CLINIC');
+    }
+  };
+  const refreshBusinessMe = async () => {
+    const me = await BusinessService.getBusinessMe();
+    setBusinessMe(me);
+    return me;
+  };
+  const handleLeftClinic = () => {
+    refreshBusinessMe();
+    selectWorkspace('personal');
+  };
+  const showWorkspaceSwitcher = businessMe.enabled && (
+    businessMe.memberships.length > 0 || !!businessMe.canCreateOrg || (businessMe.pendingInvitations?.length || 0) > 0
+  );
+  const workspaceSwitcherNode = showWorkspaceSwitcher ? (
+    <Suspense fallback={null}>
+      <WorkspaceSwitcher
+        me={businessMe}
+        current={psychViewMode === 'CLINIC' && activeOrgId ? activeOrgId : 'personal'}
+        personalLabel={personalWorkspaceLabel}
+        onSelect={selectWorkspace}
+        onCreateClinic={() => setShowCreateClinic(true)}
+        onOpenInvitations={() => setShowOrgInviteModal(true)}
+      />
+    </Suspense>
+  ) : null;
+  const businessModals = (showCreateClinic || showOrgInviteModal) ? (
+    <Suspense fallback={null}>
+      {showCreateClinic && (
+        <CreateClinicWizard
+          dpaVersion={businessMe.dpaVersion || ''}
+          onClose={() => setShowCreateClinic(false)}
+          onCreated={async (org) => {
+            setShowCreateClinic(false);
+            await refreshBusinessMe();
+            selectWorkspace(org.id);
+          }}
+        />
+      )}
+      {showOrgInviteModal && (
+        <InviteAcceptModal
+          token={orgInviteToken || BusinessService.getPendingInviteToken()}
+          pending={businessMe.pendingInvitations || []}
+          userEmail={currentUser?.email}
+          onClose={() => {
+            BusinessService.clearPendingInviteToken();
+            setOrgInviteToken(null);
+            setShowOrgInviteModal(false);
+            refreshBusinessMe();
+          }}
+          onAccepted={async (orgId) => {
+            BusinessService.clearPendingInviteToken();
+            setOrgInviteToken(null);
+            setShowOrgInviteModal(false);
+            await refreshBusinessMe();
+            selectWorkspace(orgId);
+          }}
+        />
+      )}
+    </Suspense>
+  ) : null;
+
+  if (psychViewMode === 'CLINIC' && activeOrgId && currentUser) {
+    return (
+      <>
+        <Suspense fallback={<div className="h-dvh flex items-center justify-center bg-slate-50"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}>
+          <ClinicWorkspace
+            key={activeOrgId}
+            orgId={activeOrgId}
+            currentUser={{ id: currentUser.id, name: currentUser.name, email: currentUser.email }}
+            backLabel={currentUser.is_psychologist === true ? 'Volver a mi consulta' : 'Volver a mi espacio personal'}
+            onExit={() => selectWorkspace('personal')}
+            onLeft={handleLeftClinic}
+            switcher={workspaceSwitcherNode}
+          />
+        </Suspense>
+        {businessModals}
+      </>
+    );
+  }
+
   if (psychViewMode === 'COLLABORATOR' && canSeeCollaboratorArea) {
     const goBackFromCollaborator = () => setPsychViewMode(currentUser?.is_psychologist === true ? 'DASHBOARD' : 'PERSONAL');
     return (
@@ -1415,12 +1561,14 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                   onOpenSettings={handleOpenSettings}
                   onSwitchToAdmin={() => setPsychViewMode('ADMIN')}
                   onSwitchToCollaborator={canSeeCollaboratorArea ? () => setPsychViewMode('COLLABORATOR') : undefined}
+                  workspaceSwitcher={workspaceSwitcherNode}
                   isProfileIncomplete={isProfileIncomplete}
                   subscriptionInfo={psychSubscriptionInfo}
                   psychologistId={currentUser.id}
                   onNeedUpgrade={() => setShowAppUpgradeModal(true)}
                   showPendingBadge={showPendingSessionsBadge}
                />
+               {businessModals}
                
                {/* Main Content */}
                <div className="flex-1 overflow-y-auto px-4 md:px-8 py-2 md:py-3">
@@ -1627,6 +1775,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
   // Patient View
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 pb-20 md:pb-0">
+      {businessModals}
       {showFirstTimeRoleModal && (
         <div className="fixed inset-0 z-[9999] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-sm bg-white rounded-2xl shadow-xl p-6">
@@ -1867,6 +2016,8 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
           </nav>
 
           <div className={`${sidebarOpen ? 'block' : 'hidden'} md:block p-3 border-t border-slate-200 space-y-2`}>
+            {/* mainds business: selector de espacio (solo con clínicas, invitaciones o beta) */}
+            {workspaceSwitcherNode}
             {/* Área de colaborador - solo colaboradores dados de alta (y superadmins) */}
             {canSeeCollaboratorArea && (
               <button
