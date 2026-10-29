@@ -23,7 +23,7 @@ import { createAuditRecorder } from './audit.js';
 import { requireMember, enforceWritable } from './workspace.js';
 import { buildMe, registerTopLevelRoutes, registerScopedRoutes } from './orgs.js';
 import {
-  readPriceIds, createSeatSync, registerBillingRoutes, handleOrgStripeEvent, isOrgStripeEvent
+  readPriceIds, createSeatSync, createPriceResolver, registerBillingRoutes, handleOrgStripeEvent, isOrgStripeEvent
 } from './billing.js';
 import { registerAgendaTopLevel, registerAgendaRoutes } from './agenda.js';
 import { registerClinicalRoutes } from './clinical.js';
@@ -55,10 +55,12 @@ export function createBusinessRouter({ store, authenticateRequest, isSuperAdmin,
   const recordAccess = createAuditRecorder({ store, fallback: deps.auditLog });
   const prices = deps.prices || readPriceIds(deps.env || process.env);
   const frontendUrl = String(deps.frontendUrl || (deps.env || process.env).FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
-  const seats = store ? createSeatSync({ store, stripe, prices }) : { sync: async () => ({ ok: false }) };
+  // Los precios que no vengan por env se buscan o crean en Stripe al primer uso.
+  const resolvePrices = createPriceResolver({ stripe, prices });
+  const seats = store ? createSeatSync({ store, stripe, prices, resolvePrices }) : { sync: async () => ({ ok: false }) };
   const ctx = {
     store, flags, isSuperAdmin, stripe, getUser, recordAccess, authenticateRequest,
-    prices, frontendUrl, seats, sendEmail: deps.sendEmail || null,
+    prices, resolvePrices, frontendUrl, seats, sendEmail: deps.sendEmail || null,
     deps
   };
 

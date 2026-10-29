@@ -847,8 +847,13 @@ const auditLog = (action, details) => {
     ...details
   };
   console.log(`[AUDIT] ${JSON.stringify(entry)}`);
-  // In production, write to a persistent audit log (file, DB, or external service)
-  if (process.env.NODE_ENV === 'production') {
+  // Con Supabase, el registro duradero es la tabla access_audit (solo
+  // inserción). Sin emails ni datos personales: solo ids, ruta e IP. En Vercel
+  // el disco es de solo lectura, así que el fichero queda para local.
+  if (supabaseAdmin) {
+    supabaseAdmin.from('access_audit').insert(proAuditRow(action, details))
+      .then(({ error }) => { if (error) console.error('Failed to write audit log:', error.message); }, (e) => console.error('Failed to write audit log:', e?.message));
+  } else if (process.env.NODE_ENV === 'production' && !IS_SERVERLESS) {
     try {
       const logFile = path.join(__dirname, 'audit.log');
       fs.appendFileSync(logFile, JSON.stringify(entry) + '\n', 'utf-8');
@@ -857,6 +862,21 @@ const auditLog = (action, details) => {
     }
   }
 };
+
+/** Fila de access_audit para un evento de auditoría de Pro (org_id NULL = espacio personal). */
+function proAuditRow(action, details = {}) {
+  const s = (v, max = 200) => (v === null || v === undefined || v === '' ? null : String(v).slice(0, max));
+  const actor = details.userId ?? details.authUserId ?? details.patientUserId ?? details.actorUserId;
+  return {
+    org_id: null,
+    actor_user_id: s(actor) || 'anonimo',
+    action: s(action, 100) || 'desconocida',
+    resource_type: details.ruta ? 'ruta' : (details.via ? 'auth' : null),
+    resource_id: s(details.ruta ?? details.via),
+    patient_user_id: s(details.patientUserId),
+    ip: s(details.ip, 100)
+  };
+}
 
 // --- INPUT SANITIZATION (Protección contra XSS/Injection) ---
 const sanitizeString = (str) => {
