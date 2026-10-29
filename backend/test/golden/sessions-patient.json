@@ -1,0 +1,6 @@
+{
+  "body": {
+    "error": "Supabase no está configurado. Las sesiones solo se cargan desde Supabase."
+  },
+  "status": 503
+}

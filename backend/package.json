@@ -11,9 +11,10 @@
     "build": "echo \"backend: no build step\"",
     "start": "node server.js",
     "dev": "node start-server.js",
+    "test": "node --test \"test/**/*.test.js\"",
     "post-test-event": "node scripts/post_test_event.js test/fixtures/invoice_payment_failed.json",
     "check-checkout": "node scripts/check_checkout.js",
-    "test:webhook": "node test/webhook_handler.test.js"
+    "test:webhook": "node --test test/webhook_handler.test.js"
   },
   "dependencies": {
     "@google/genai": "^2.2.0",

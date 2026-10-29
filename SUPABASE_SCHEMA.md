@@ -276,3 +276,19 @@ CREATE TABLE public.lead_email_templates (
   created_by text,
   CONSTRAINT lead_email_templates_pkey PRIMARY KEY (id)
 );
+-- ═══ mainds business (backend/scripts/business-00N-*.sql) ═══
+-- business-001-foundations.sql — Fase 0. RLS activado sin políticas; solo inserción (trigger).
+CREATE TABLE public.access_audit (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  at timestamp with time zone NOT NULL DEFAULT now(),
+  org_id uuid,
+  actor_user_id text NOT NULL,
+  action text NOT NULL,
+  resource_type text,
+  resource_id text,
+  patient_user_id text,
+  justification text,
+  ip text,
+  CONSTRAINT access_audit_pkey PRIMARY KEY (id)
+);

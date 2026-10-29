@@ -1,0 +1,31 @@
+{
+  "body": [
+    {
+      "amount": 60,
+      "currency": "EUR",
+      "date": "2030-03-05",
+      "id": "inv-golden-1",
+      "invoiceNumber": "F2030-0001",
+      "invoice_date": "2030-03-05",
+      "invoice_type": "patient",
+      "items": [
+        {
+          "description": "Sesión de psicoterapia",
+          "quantity": 1,
+          "unitPrice": 60
+        }
+      ],
+      "patientId": "<P1>",
+      "patient_user_id": "<P1>",
+      "psychologistId": "<PRO>",
+      "psychologist_user_id": "<PRO>",
+      "sessionIds": [
+        "ses-golden-1"
+      ],
+      "status": "pending",
+      "tax": 0,
+      "total": 60
+    }
+  ],
+  "status": 200
+}

@@ -431,4 +431,4 @@
   4. DPA revisado por un abogado.
   5. Precios de Stripe creados y webhook probado en modo test.
   6. Validación del asesor fiscal antes de facturar.
-- **Verifactu para Pro:** obligatorio para autónomos desde el **1 de julio de 2027** (RD 254/2025). Hay que planificar la sesión "Verifactu Pro + envío a la AEAT".
+- **Verifactu para Pro:** obligatorio para autónomos desde el **1 de julio de 2027** (ver `docs/business/VERIFACTU.md`; comprobar el plazo vigente). Hay que planificar la sesión "Verifactu Pro + envío a la AEAT".

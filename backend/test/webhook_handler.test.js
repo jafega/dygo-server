@@ -1,33 +1,61 @@
-import fs from 'fs';
-import path from 'path';
-import http from 'http';
+// Test de integración del webhook de Stripe (npm run test:webhook).
+//
+// Arranca server.js aislado (puerto aleatorio, base de datos temporal, sin
+// Supabase) con un secreto de webhook de prueba, y le envía el fixture
+// test/fixtures/invoice_payment_failed.json firmado como lo firmaría Stripe.
+// No llama a la API de Stripe.
 
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import Stripe from 'stripe';
+import { startServer } from './helpers/server.js';
 
-// This is a very small integration-style test: start the server and POST a fixture to /webhook
-// NOTE: It's intentionally lightweight and not run in CI automatically in this demo.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const WEBHOOK_SECRET = 'whsec_test_mainds_local';
+const fixture = fs.readFileSync(path.join(__dirname, 'fixtures', 'invoice_payment_failed.json'), 'utf-8');
 
-const serverPath = path.resolve(process.cwd(), 'server.js');
+let srv;
 
-const startServer = () => {
-  return new Promise((resolve, reject) => {
-    const child = require('child_process').spawn('node', [serverPath], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PORT: '3002' } });
-    child.stdout.on('data', (d) => console.log('[server]', d.toString()));
-    child.stderr.on('data', (d) => console.error('[server-err]', d.toString()));
-    setTimeout(() => resolve(child), 1000);
+test.before(async () => {
+  srv = await startServer({
+    env: { STRIPE_SECRET_KEY: 'sk_test_dummy_no_network', STRIPE_WEBHOOK_SECRET: WEBHOOK_SECRET },
+    db: {
+      users: [],
+      subscriptions: [{
+        id: 'psych-webhook-1', psychologist_user_id: 'psych-webhook-1',
+        stripe_subscription_id: 'sub_test_123', stripe_customer_id: 'cus_test_123',
+        stripe_status: 'active', access_blocked: false
+      }]
+    }
   });
-};
+});
 
-(async () => {
-  const child = await startServer();
-  try {
-    const fixture = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'test/fixtures/invoice_payment_failed.json'), 'utf-8'));
-    const res = await fetch('http://localhost:3002/webhook', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fixture) });
-    console.log('Webhook post status:', res.status);
-    const text = await res.text();
-    console.log('Body:', text);
-  } catch (err) {
-    console.error(err);
-  } finally {
-    process.exit(0);
-  }
-})();
+test.after(async () => { await srv?.stop(); });
+
+const post = (urlPath, body, headers = {}) => fetch(srv.baseUrl + urlPath, {
+  method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body
+});
+
+test('webhook sin firma → 400 y no toca la suscripción', async () => {
+  const r = await post('/webhook', fixture);
+  assert.equal(r.status, 400);
+  assert.equal(srv.readDb().subscriptions[0].stripe_status, 'active');
+});
+
+test('webhook con firma inválida → 400', async () => {
+  const r = await post('/api/webhook', fixture, { 'stripe-signature': 't=1,v1=deadbeef' });
+  assert.equal(r.status, 400);
+});
+
+test('invoice.payment_failed firmado → 200 y bloquea la suscripción', async () => {
+  const stripe = new Stripe('sk_test_dummy_no_network', { apiVersion: '2022-11-15' });
+  const header = stripe.webhooks.generateTestHeaderString({ payload: fixture, secret: WEBHOOK_SECRET });
+  const r = await post('/webhook', fixture, { 'stripe-signature': header });
+  assert.equal(r.status, 200);
+  const sub = srv.readDb().subscriptions.find(s => s.stripe_subscription_id === 'sub_test_123');
+  assert.equal(sub.stripe_status, 'past_due');
+  assert.equal(sub.access_blocked, true);
+});

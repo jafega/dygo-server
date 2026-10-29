@@ -1,0 +1,13 @@
+{
+  "body": [
+    {
+      "createdAt": "<ts>",
+      "default_psych_percent": 100,
+      "default_session_price": 60,
+      "id": "rel-golden-1",
+      "patient_user_id": "<P1>",
+      "psychologist_user_id": "<PRO>"
+    }
+  ],
+  "status": 200
+}
