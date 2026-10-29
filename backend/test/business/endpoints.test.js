@@ -38,10 +38,10 @@ test('flag encendido con driver file: /me con canCreateOrg según la lista beta'
 
   const mePro = await srv.request('GET', '/api/org/me', { token: pro.token });
   assert.equal(mePro.status, 200);
-  assert.deepEqual(mePro.body, { enabled: true, canCreateOrg: false, dpaVersion: 'v1-borrador', memberships: [], pendingInvitations: [] });
+  assert.deepEqual(mePro.body, { enabled: true, canCreateOrg: false, createVia: null, dpaVersion: 'v1-borrador', memberships: [], pendingInvitations: [] });
 
   const meOwner = await srv.request('GET', '/api/org/me', { token: owner.token });
-  assert.deepEqual(meOwner.body, { enabled: true, canCreateOrg: true, dpaVersion: 'v1-borrador', memberships: [], pendingInvitations: [] });
+  assert.deepEqual(meOwner.body, { enabled: true, canCreateOrg: true, createVia: 'beta', dpaVersion: 'v1-borrador', memberships: [], pendingInvitations: [] });
 
   const x = await srv.request('GET', '/api/org/x', { token: pro.token });
   assert.equal(x.status, 404);

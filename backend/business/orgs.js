@@ -21,7 +21,7 @@ import {
 } from '../utils/orgPermissions.js';
 import { asyncRoute, httpError, badRequest, forbidden, notFound } from './errors.js';
 import { orgAccess, hasPlus, requireAction } from './workspace.js';
-import { canCreateOrganization } from './flags.js';
+import { organizationCreationAccess } from './flags.js';
 import { SERVICE_TYPES } from './agenda.js';
 import { normalizeServicePrices } from '../utils/agenda.js';
 
@@ -39,6 +39,12 @@ const RESERVED_SLUGS = new Set(['admin', 'api', 'me', 'invitations', 'org', 'pub
 const nowIso = () => new Date().toISOString();
 export const normEmail = (e) => String(e || '').trim().toLowerCase();
 const emailOf = (user) => normEmail(user?.email || user?.user_email || user?.data?.email);
+/** ¿Es una cuenta de psicólogo? (columna is_psychologist; role es el campo antiguo) */
+export const isPsychologistUser = (user) =>
+  user?.is_psychologist === true || user?.isPsychologist === true || String(user?.role || '').toUpperCase() === 'PSYCHOLOGIST';
+const creationAccess = (flags, isSuperAdmin, user) => organizationCreationAccess(emailOf(user), {
+  betaEmails: flags.betaEmails, isSuperAdmin, selfServe: flags.selfServe, isPsychologist: isPsychologistUser(user)
+});
 const nameOf = (user) => String(user?.name || user?.data?.name || '').trim() || null;
 const isEmail = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 export const hashToken = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
@@ -145,7 +151,7 @@ const ROLE_LABEL_ES = {
 export async function buildMe(ctx, user, userId) {
   const { store, flags, isSuperAdmin } = ctx;
   const email = emailOf(user);
-  const canCreateOrg = canCreateOrganization(email, { betaEmails: flags.betaEmails, isSuperAdmin });
+  const createVia = creationAccess(flags, isSuperAdmin, user);
 
   const memberRows = await store.list('org_members', { eq: { user_id: String(userId) }, limit: 100 });
   const memberships = [];
@@ -174,7 +180,7 @@ export async function buildMe(ctx, user, userId) {
     }
   }
 
-  return { enabled: true, canCreateOrg, dpaVersion: flags.dpaVersion, memberships, pendingInvitations };
+  return { enabled: true, canCreateOrg: !!createVia, createVia, dpaVersion: flags.dpaVersion, memberships, pendingInvitations };
 }
 
 // ── Rutas de nivel superior ─────────────────────────────────────────────────
@@ -186,8 +192,10 @@ export function registerTopLevelRoutes(router, ctx) {
     const userId = String(req.authenticatedUserId);
     const user = await getUser(userId);
     const email = emailOf(user);
-    if (!canCreateOrganization(email, { betaEmails: flags.betaEmails, isSuperAdmin })) {
-      throw httpError(403, 'BUSINESS_NOT_ALLOWED', 'mainds business está en beta privada. Escríbenos para darte de alta.');
+    if (!creationAccess(flags, isSuperAdmin, user)) {
+      throw httpError(403, 'BUSINESS_NOT_ALLOWED', flags.selfServe
+        ? 'mainds business es para profesionales: crea la clínica desde una cuenta de psicólogo.'
+        : 'mainds business está en beta privada. Escríbenos para darte de alta.');
     }
     if (!email) throw badRequest('Tu cuenta no tiene email.');
 

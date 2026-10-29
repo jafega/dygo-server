@@ -1232,9 +1232,12 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
     refreshBusinessMe();
     selectWorkspace('personal');
   };
+  // Con autoservicio sin clínica no hay selector: Pro queda igual y la clínica se
+  // crea desde Mi Perfil. Lo ven los miembros, los invitados y la beta.
   const showWorkspaceSwitcher = businessMe.enabled && (
-    businessMe.memberships.length > 0 || !!businessMe.canCreateOrg || (businessMe.pendingInvitations?.length || 0) > 0
+    businessMe.memberships.length > 0 || businessMe.createVia === 'beta' || (businessMe.pendingInvitations?.length || 0) > 0
   );
+  const offerBusiness = businessMe.enabled && !!businessMe.canCreateOrg && businessMe.memberships.length === 0;
   const workspaceSwitcherNode = showWorkspaceSwitcher ? (
     <Suspense fallback={null}>
       <WorkspaceSwitcher
@@ -1702,7 +1705,7 @@ const hasTodayEntry = safeEntries.some(e => e.createdBy !== 'PSYCHOLOGIST' && e.
                     {psychPanelView === 'sessions' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><SessionsList psychologistId={currentUser.id} /></Suspense>}
                     {psychPanelView === 'billing' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><BillingPanel psychologistId={currentUser.id} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} /></Suspense>}
                     {psychPanelView === 'centros' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><CentrosPanel ref={centrosPanelRef} psychologistId={currentUser.id} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} /></Suspense>}
-                    {psychPanelView === 'profile' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><PsychologistProfilePanel userId={currentUser.id} userEmail={currentUser.email} onBadgeSettingChange={setShowPendingSessionsBadge} /></Suspense>}
+                    {psychPanelView === 'profile' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><PsychologistProfilePanel userId={currentUser.id} userEmail={currentUser.email} onBadgeSettingChange={setShowPendingSessionsBadge} onCreateClinic={offerBusiness ? () => setShowCreateClinic(true) : undefined} /></Suspense>}
                     {psychPanelView === 'schedule' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><PsychologistSchedule psychologistId={currentUser.id} canCreate={psychCanCreate} onNeedUpgrade={() => setShowAppUpgradeModal(true)} onOpenSettings={handleOpenSettings} /></Suspense>}
                     {psychPanelView === 'ai-assistant' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><PsychologistAIChat psychologistId={currentUser.id} psychologistName={currentUser.name} /></Suspense>}
                     {psychPanelView === 'connections' && <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>}><ConnectionsPanel currentUser={currentUser} /></Suspense>}

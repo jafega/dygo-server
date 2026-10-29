@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Save, Building, Phone, Mail, MapPin, CreditCard, User as UserIcon, FileText, Calendar, CheckCircle, AlertCircle, Link2, Image as ImageIcon, Upload, Trash2 } from 'lucide-react';
+import { Save, Building2, Building, Phone, Mail, MapPin, CreditCard, User as UserIcon, FileText, Calendar, CheckCircle, AlertCircle, Link2, Image as ImageIcon, Upload, Trash2 } from 'lucide-react';
 import { API_URL } from '../services/config';
 import { apiFetch } from '../services/authService';
 import { normalizePhone, detectDefaultPrefix } from '../services/phoneUtils';
@@ -39,9 +39,11 @@ interface PsychologistProfileProps {
   userId: string;
   userEmail: string;
   onBadgeSettingChange?: (value: boolean) => void;
+  /** Si llega, se ofrece mainds business (crear la clínica propia). */
+  onCreateClinic?: () => void;
 }
 
-const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, userEmail, onBadgeSettingChange }) => {
+const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, userEmail, onBadgeSettingChange, onCreateClinic }) => {
   const [profile, setProfile] = useState<PsychologistProfile>({
     name: '',
     professionalId: '',
@@ -880,6 +882,17 @@ const PsychologistProfilePanel: React.FC<PsychologistProfileProps> = ({ userId, 
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {onCreateClinic && (
+        <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-6 flex flex-col sm:flex-row sm:items-center gap-4" data-testid="business-offer">
+          <div className="w-10 h-10 rounded-lg bg-indigo-50 text-indigo-700 flex items-center justify-center flex-shrink-0"><Building2 size={20} /></div>
+          <div className="flex-1">
+            <h3 className="text-base font-semibold text-slate-900">¿Tienes un centro de psicología?</h3>
+            <p className="text-sm text-slate-600">Con mainds business gestionas el equipo, la agenda compartida, la facturación de la clínica y las liquidaciones. 14 días de prueba. Tu consulta personal no cambia.</p>
+          </div>
+          <button onClick={onCreateClinic} className="px-4 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg whitespace-nowrap">Crear mi clínica</button>
         </div>
       )}
     </div>

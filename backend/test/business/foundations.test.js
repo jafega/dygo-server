@@ -1,7 +1,7 @@
 // Fase 0 — flags (R1/R3), errores (R12) y auditoría (0.6) de Business.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFlags, resolveStoreDriver, canCreateOrganization } from '../../business/flags.js';
+import { readFlags, resolveStoreDriver, canCreateOrganization, organizationCreationAccess } from '../../business/flags.js';
 import { toHttp, httpError, notFound, forbidden } from '../../business/errors.js';
 import { StoreError, createStore } from '../../business/store.js';
 import { FieldCryptoError } from '../../utils/fieldCrypto.js';
@@ -33,6 +33,19 @@ test('flags: solo beta y superadmin crean organizaciones', () => {
   assert.equal(canCreateOrganization('otro@x.com', opts), false);
   assert.equal(canCreateOrganization('', opts), false);
   assert.equal(canCreateOrganization(null, { betaEmails: [] }), false);
+});
+
+test('flags: autoservicio solo para psicólogos y solo con BUSINESS_SELF_SERVE', () => {
+  assert.equal(readFlags({}).selfServe, false);
+  assert.equal(readFlags({ BUSINESS_SELF_SERVE: 'true' }).selfServe, true);
+  const isSuperAdmin = (e) => e === 'root@x.com';
+  const on = { betaEmails: ['beta@x.com'], isSuperAdmin, selfServe: true };
+  assert.equal(organizationCreationAccess('psico@x.com', { ...on, isPsychologist: true }), 'self_serve');
+  assert.equal(organizationCreationAccess('paciente@x.com', { ...on, isPsychologist: false }), null);
+  assert.equal(organizationCreationAccess('psico@x.com', { ...on, selfServe: false, isPsychologist: true }), null);
+  assert.equal(organizationCreationAccess('beta@x.com', { ...on, isPsychologist: true }), 'beta', 'la lista beta manda');
+  assert.equal(organizationCreationAccess('root@x.com', on), 'beta');
+  assert.equal(organizationCreationAccess('', { ...on, isPsychologist: true }), null);
 });
 
 test('store: supabase por defecto si hay cliente; si no, file', () => {

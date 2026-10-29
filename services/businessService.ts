@@ -36,6 +36,8 @@ export interface PendingInvitation {
 export interface BusinessMe {
   enabled: boolean;
   canCreateOrg?: boolean;
+  /** 'beta' (superadmin o lista beta) | 'self_serve' (lo activa el psicólogo desde su perfil) */
+  createVia?: 'beta' | 'self_serve' | null;
   dpaVersion?: string;
   memberships: OrgMembershipSummary[];
   pendingInvitations?: PendingInvitation[];
@@ -157,6 +159,7 @@ export async function getBusinessMe(): Promise<BusinessMe> {
   return {
     enabled: !!r.data.enabled,
     canCreateOrg: !!r.data.canCreateOrg,
+    createVia: r.data.createVia ?? null,
     dpaVersion: r.data.dpaVersion,
     memberships: Array.isArray(r.data.memberships) ? r.data.memberships : [],
     pendingInvitations: Array.isArray(r.data.pendingInvitations) ? r.data.pendingInvitations : []

@@ -115,5 +115,5 @@ test('mountBusiness: driver memory con flag encendido', async (t) => {
   const s = await serve(app);
   t.after(s.close);
   assert.deepEqual((await s.get('/api/org/me')).body,
-    { enabled: true, canCreateOrg: false, dpaVersion: 'v1-borrador', memberships: [], pendingInvitations: [] });
+    { enabled: true, canCreateOrg: false, createVia: null, dpaVersion: 'v1-borrador', memberships: [], pendingInvitations: [] });
 });
