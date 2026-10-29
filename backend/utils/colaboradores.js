@@ -208,6 +208,9 @@ export async function crearCodigo(supabase, stripe, {
     promo = await stripe.promotionCodes.create({
       coupon: coupon.id,
       code: codigo,
+      // Solo para quien nunca ha pagado mainds: un cliente que ya paga (o que
+      // ya es lead de un colaborador) no puede "cambiarse" de colaborador.
+      restrictions: { first_time_transaction: true },
       ...(maxUsos ? { max_redemptions: maxUsos } : {}),
       metadata
     });
@@ -267,14 +270,41 @@ async function datosUsuario(supabase, userId) {
 }
 
 /**
- * Busca (o crea, si la suscripción entró con un código de colaborador) el
- * referido de una suscripción. Devuelve null si no tiene nada que ver con el
- * programa.
+ * El referido (lead) al que pertenece la suscripción de una factura, o null si
+ * no tiene nada que ver con el programa.
+ *
+ * El lead es el CLIENTE, no la suscripción: cada cliente tiene como mucho un
+ * colaborador, el del primer código con el que entró, y lo conserva para
+ * siempre. Si cancela y se vuelve a suscribir (con o sin código, aunque sea el
+ * de otro colaborador) la nueva suscripción se cuelga del mismo lead y sigue
+ * sumando meses al colaborador original. Lo garantizan los índices únicos de
+ * collaborator_referrals (referred_user_id y stripe_customer_id).
  */
 async function referidoDeSuscripcion(supabase, stripe, stripeSubId, invoice) {
-  const { data: existente } = await supabase
-    .from(TABLA.referidos).select('*').eq('stripe_subscription_id', stripeSubId).maybeSingle();
-  if (existente) return existente;
+  const buscar = async (campo, valor) => {
+    if (!valor) return null;
+    const { data } = await supabase.from(TABLA.referidos).select('*').eq(campo, String(valor)).maybeSingle();
+    return data || null;
+  };
+  const reasignar = async (referido, suscripcion) => {
+    const { data } = await supabase.from(TABLA.referidos).update({
+      stripe_subscription_id: stripeSubId,
+      stripe_status: suscripcion?.status || 'active',
+      canceled_at: null,
+      updated_at: new Date().toISOString()
+    }).eq('id', referido.id).select().single();
+    console.log(`🤝 [colaboradores] ${referido.referred_email || referido.referred_user_id} vuelve con otra suscripción: sigue con su colaborador`);
+    return data || referido;
+  };
+
+  const porSuscripcion = await buscar('stripe_subscription_id', stripeSubId);
+  if (porSuscripcion) return porSuscripcion;
+
+  // Cliente que ya era lead de alguien y estrena suscripción. El customer de
+  // Stripe va en la factura: comprobarlo no cuesta ninguna llamada a Stripe.
+  const customerId = idDe(invoice?.customer);
+  const porCliente = await buscar('stripe_customer_id', customerId);
+  if (porCliente) return reasignar(porCliente, null);
 
   // El descuento de la suscripción se copia a cada factura mientras dura, y la
   // primera factura siempre lo lleva. Si esta no trae código, no es nuestra: así
@@ -287,13 +317,17 @@ async function referidoDeSuscripcion(supabase, stripe, stripeSubId, invoice) {
   if (!codigo) return null;
   // Es nuestra: ahora sí hace falta la suscripción, por su metadata (quién es el lead).
   const suscripcion = await stripe.subscriptions.retrieve(stripeSubId).catch(() => null);
-  const { data: colab } = await supabase
-    .from(TABLA.colaboradores).select('*').eq('id', codigo.collaborator_id).maybeSingle();
-  if (!colab) return null;
-
   const meta = suscripcion?.metadata || invoice?.subscription_details?.metadata || {};
   const tipo = meta.subscription_type || (meta.patient_user_id ? 'patient' : 'psychologist');
   const referidoUserId = meta.psychologist_user_id || meta.patient_user_id || null;
+
+  // El mismo usuario con otro customer de Stripe (raro, pero pasa): mismo lead.
+  const porUsuario = await buscar('referred_user_id', referidoUserId);
+  if (porUsuario) return reasignar(porUsuario, suscripcion);
+
+  const { data: colab } = await supabase
+    .from(TABLA.colaboradores).select('*').eq('id', codigo.collaborator_id).maybeSingle();
+  if (!colab) return null;
   // Usar tu propio código no cuenta.
   if (referidoUserId && String(referidoUserId) === String(colab.user_id)) return null;
 
@@ -307,17 +341,18 @@ async function referidoDeSuscripcion(supabase, stripe, stripeSubId, invoice) {
     referred_name: usuario.name || invoice?.customer_name || null,
     subscription_type: tipo,
     plan_id: meta.plan_id || null,
-    stripe_customer_id: idDe(invoice?.customer) || idDe(suscripcion?.customer),
+    stripe_customer_id: customerId || idDe(suscripcion?.customer),
     stripe_subscription_id: stripeSubId,
     stripe_status: suscripcion?.status || 'active'
   };
   const { data: creado, error } = await supabase
     .from(TABLA.referidos).insert([fila]).select().single();
   if (error) {
-    // Dos webhooks a la vez: el otro ya lo creó.
-    const { data: otro } = await supabase
-      .from(TABLA.referidos).select('*').eq('stripe_subscription_id', stripeSubId).maybeSingle();
-    if (otro) return otro;
+    // Dos webhooks a la vez (o webhook y cron): el otro ya lo creó.
+    const otro = await buscar('stripe_subscription_id', stripeSubId)
+      || await buscar('stripe_customer_id', fila.stripe_customer_id)
+      || await buscar('referred_user_id', referidoUserId);
+    if (otro) return otro.stripe_subscription_id === stripeSubId ? otro : reasignar(otro, suscripcion);
     throw error;
   }
   console.log(`🤝 [colaboradores] nuevo lead ${fila.referred_email || referidoUserId} con el código ${codigo.code}`);
