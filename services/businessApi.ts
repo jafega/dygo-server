@@ -24,6 +24,8 @@ export interface OrgPatient {
   tax_id: string | null;
   address: string | null;
   admin_notes: string | null;
+  /** Precio propio del paciente; null = tarifa de la clínica. */
+  default_price?: number | null;
   status: PatientStatus;
   acquisition_source: 'own' | 'clinic_lead' | 'referral' | 'other';
   assigned_member_ids: string[];
@@ -48,7 +50,11 @@ export interface OrgAppointment {
   price?: number | null;
   invoice_id?: string | null;
   admin_notes?: string | null;
+  series_id?: string | null;
 }
+
+export interface RepeatRule { every_weeks: number; count: number }
+export interface SeriesResult { id: string; created: number; skipped: { starts_at: string; code: string; reason: string }[] }
 
 export interface ClinicalNote {
   id: string;
@@ -115,8 +121,13 @@ export const listAppointments = (orgId: string, from: string, to: string, filter
   if (filters.locationId) qs.set('locationId', filters.locationId);
   return orgApi<{ appointments: OrgAppointment[] }>('GET', orgId, `/appointments?${qs}`);
 };
-export const createAppointment = (orgId: string, body: Partial<OrgAppointment>) =>
-  orgApi<{ appointment: OrgAppointment; warnings: string[] }>('POST', orgId, '/appointments', body);
+export const createAppointment = (orgId: string, body: Partial<OrgAppointment> & { repeat?: RepeatRule }) =>
+  orgApi<{ appointment: OrgAppointment; warnings: string[]; series?: SeriesResult }>('POST', orgId, '/appointments', body);
+export const bulkAppointmentStatus = (orgId: string, ids: string[], status: 'completed' | 'no_show' | 'cancelled') =>
+  orgApi<{ updated: number; skipped: { id: string; reason: string }[] }>('POST', orgId, '/appointments/bulk-status', { ids, status });
+export const cancelFollowing = (orgId: string, id: string) => orgApi<{ cancelled: number }>('POST', orgId, `/appointments/${id}/cancel-following`);
+export const listPatientAppointments = (orgId: string, patientId: string) =>
+  orgApi<{ appointments: OrgAppointment[] }>('GET', orgId, `/patients/${patientId}/appointments`);
 export const updateAppointment = (orgId: string, id: string, body: Partial<OrgAppointment>) =>
   orgApi<{ appointment: OrgAppointment; warnings: string[] }>('PATCH', orgId, `/appointments/${id}`, body);
 
@@ -224,6 +235,13 @@ export const getClinicInvoice = (orgId: string, id: string) =>
 export const deleteClinicInvoice = (orgId: string, id: string) => orgApi<{ ok: boolean }>('DELETE', orgId, `/invoices/${id}`);
 export const issueClinicInvoice = (orgId: string, id: string) => orgApi<{ invoice: ClinicInvoice }>('POST', orgId, `/invoices/${id}/issue`);
 export const rectifyClinicInvoice = (orgId: string, id: string, reason: string) => orgApi<{ invoice: ClinicInvoice }>('POST', orgId, `/invoices/${id}/rectify`, { reason });
+export interface BulkInvoiceResult {
+  created: { id: string; patient_id: string; patient_name: string; appointments: number; total: number }[];
+  skipped: { patient_id: string; patient_name: string; appointments: number; code: string; reason: string }[];
+}
+export const bulkInvoice = (orgId: string, body: { from?: string; to?: string } = {}) => orgApi<BulkInvoiceResult>('POST', orgId, '/invoices/bulk', body);
+export const issueInvoiceBatch = (orgId: string, ids: string[]) =>
+  orgApi<{ issued: { id: string; full_number: string }[]; failed: { id: string; reason: string }[] }>('POST', orgId, '/invoices/issue-batch', { ids });
 export const markClinicInvoicePaid = (orgId: string, id: string, method: string) => orgApi<{ invoice: ClinicInvoice }>('POST', orgId, `/invoices/${id}/mark-paid`, { method });
 export const exportInvoicesCsv = (orgId: string, from?: string, to?: string) => {
   const qs = new URLSearchParams();
@@ -331,3 +349,21 @@ export const listSupervision = (orgId: string) => orgApi<{ logs: SupervisionLog[
 export const createSupervision = (orgId: string, body: { supervisee_member_id: string; session_date: string; minutes: number; topics?: string[]; notes?: string }) =>
   orgApi<{ log: SupervisionLog }>('POST', orgId, '/supervision', body);
 export const getDashboard = (orgId: string, period: string) => orgApi<ClinicDashboard>('GET', orgId, `/dashboard?period=${period}`);
+
+// ── Inicio (Fase 6) ──
+export type SetupStep = 'billing_entity' | 'prices' | 'location' | 'team' | 'patient' | 'appointment' | 'public_page';
+export interface HomeAppointment { id: string; starts_at: string; ends_at: string; status: AppointmentStatus; service_type: string; patient_id: string | null; patient_name: string | null; room_name: string | null; invoice_id: string | null }
+export interface ClinicHomeData {
+  date: string;
+  today: { mine: HomeAppointment[] | null; clinic: { total: number; by_member: { member_id: string; name: string; count: number }[] } | null };
+  pending: {
+    to_close: { count: number; items: { id: string; starts_at: string; member_id: string; member_name: string; patient_name: string | null }[] } | null;
+    unbilled: { count: number; amount: number; without_price: number } | null;
+    drafts: number | null;
+    leads_new: number | null;
+    settlements_to_validate: number | null;
+    invitations_pending: number | null;
+  };
+  setup: { id: SetupStep; done: boolean }[] | null;
+}
+export const getClinicHome = (orgId: string) => orgApi<ClinicHomeData>('GET', orgId, '/home');

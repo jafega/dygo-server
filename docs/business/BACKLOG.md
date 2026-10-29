@@ -418,11 +418,84 @@
 
 **Riesgos.** Alucinaciones (la interfaz muestra un aviso y las fuentes). Coste de Gemini (límite de peticiones por miembro).
 
+### Fase 6 — Operativa diaria (feedback de la titular)
+
+> Sale de la evaluación de una titular que también pasa consulta: [`EVALUACION_TITULAR.md`](EVALUACION_TITULAR.md).
+
+**Migración `business-007-daily-ops.sql`.** Aditiva e idempotente:
+- `org_patients.default_price`;
+- `org_appointments.series_id`;
+- índices para los pendientes.
+
+Las tarifas por servicio van en `organizations.settings.service_prices` y no necesitan columna.
+
+**Alcance**
+- **6.1 Tarifas y precio en el servidor.**
+  - `PATCH /api/org/:orgId` acepta `service_prices` (`org.settings`).
+  - Al crear una cita, el precio se resuelve así: el indicado, si no el del paciente, si no la tarifa del servicio. Es una función pura, `resolvePrice`.
+  - `0` es un precio válido (sesión gratuita), no "sin precio".
+- **6.2 Citas periódicas.**
+  - `POST /appointments` acepta `repeat: { every_weeks: 1-4, count: 2-26 }`.
+  - Se mantiene la hora de reloj de España con el cambio de hora (`addDaysLocal`).
+  - Si la primera cita choca, `409` como siempre.
+  - Las repeticiones que chocan se saltan y se devuelven en `series.skipped`.
+  - `POST /appointments/:id/cancel-following` no toca citas pasadas ni facturadas.
+- **6.3 Inicio.** `GET /home` en una sola llamada, filtrado por permisos:
+  - mis citas de hoy (si atiendo pacientes);
+  - la clínica hoy (`agenda.view_all`);
+  - pendientes: citas pasadas sin cerrar, sesiones sin facturar con su importe y las que no tienen precio, borradores, solicitudes nuevas, liquidaciones por validar e invitaciones;
+  - primeros pasos (`team.manage`/`org.settings`).
+- **6.4 Cierre en bloque.** `POST /appointments/bulk-status`:
+  - solo citas programadas ya empezadas y no facturadas;
+  - cada una con su permiso (un psicólogo solo cierra las suyas).
+- **6.5 Facturación en lote** (`billing.manage`).
+  - `POST /invoices/bulk` crea un borrador por paciente con el mismo creador que la factura individual (`createPatientDraft`).
+  - Las citas sin precio se informan (`MISSING_PRICE`).
+  - `POST /invoices/issue-batch` emite cada borrador por separado (número y Verifactu).
+- **6.6 Citas de un paciente.** `GET /patients/:id/appointments`. Quien solo ve huecos ve las citas de otros profesionales como "ocupado".
+- **6.7 Interfaz.**
+  - Inicio con saludo, acciones rápidas, "Tu día", "Pendiente" y "Primeros pasos", con el mismo formato que mainds pro.
+  - Navegación entre secciones con parámetros (`ClinicContext.open`).
+  - Menú agrupado (Día a día, Gestión, Equipo, Clínica), sin el botón duplicado de volver.
+  - Agenda:
+    - alta rápida de paciente;
+    - precio sugerido;
+    - repetición;
+    - vista de día (por defecto en el móvil);
+    - detalle de la cita con Ficha, Nota de la sesión y Facturar.
+  - Ficha:
+    - pestaña Citas y "Nueva cita";
+    - precio propio;
+    - profesional por defecto al crear el paciente.
+  - Facturación: pestañas "Facturar pendientes" y "Tarifas".
+  - Escape cierra los modales.
+
+**Criterios de aceptación**
+- Los tests de `f6-daily-ops.test.js` pasan:
+  - `resolvePrice`;
+  - repetición a través del cambio de hora;
+  - día de Madrid;
+  - permisos de `/home`;
+  - serie con conflicto saltado;
+  - cierre en bloque con permisos;
+  - lote sin duplicados;
+  - `MISSING_PRICE`;
+  - emisión con Verifactu.
+- E2E `f6.spec.mjs`: primeros pasos → tarifas → cita semanal con paciente nuevo → ficha con citas → cerrar pasadas desde Inicio → facturar y emitir → "Todo al día" → agenda de día en el móvil.
+- La migración 007 se aplica dos veces en Postgres 16.
+- Los golden de Pro no cambian.
+
+**Fase 7 (siguiente)**
+- Recordatorios a pacientes por email o SMS, con consentimiento y sobre `series_id`.
+- El paciente ve "Clínica X" en su app.
+- Tarifa por profesional.
+- Reserva directa desde el widget con las tarifas.
+
 ---
 
 ## 3. Orden y requisitos para producción
 
-- **Orden:** 0 → 1 → 2 → 3 → 4 → 5. QA valida cada fase antes de pasar a la siguiente.
+- **Orden:** 0 → 1 → 2 → 3 → 4 → 5 → 6. QA valida cada fase antes de pasar a la siguiente.
 - **Se despliega ya, sin flag:** el arreglo de autorización 0.1.
 - **Antes de `BUSINESS_ENABLED=true` en producción con datos reales:**
   1. Migraciones aplicadas y RLS comprobado.

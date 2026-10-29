@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { X, Building2, Loader2, ShieldCheck, Check } from 'lucide-react';
 import { createOrganization, PLAN_INFO, type OrgPlan, type Organization } from '../../services/businessService';
+import { useEscapeToClose } from './useEscapeToClose';
 
 interface CreateClinicWizardProps {
   dpaVersion: string;
@@ -30,6 +31,7 @@ const PLAN_FEATURES: Record<OrgPlan, string[]> = {
 };
 
 const CreateClinicWizard: React.FC<CreateClinicWizardProps> = ({ dpaVersion, onClose, onCreated }) => {
+  useEscapeToClose();
   const [name, setName] = useState('');
   const [slugTouched, setSlugTouched] = useState(false);
   const [slugInput, setSlugInput] = useState('');

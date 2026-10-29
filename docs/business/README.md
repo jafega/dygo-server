@@ -1,8 +1,8 @@
 # mainds business — estado, puesta en marcha y siguientes pasos
 
-> Producto para clínicas y despachos de psicología dentro de mainds: mismo repo, misma infraestructura, misma cuenta de usuario. Plan: [`MAINDS_BUSINESS_PLAN.md`](MAINDS_BUSINESS_PLAN.md) · Backlog con criterios de aceptación: [`BACKLOG.md`](BACKLOG.md) · Verifactu: [`VERIFACTU.md`](VERIFACTU.md) · DPA (borrador): [`legal/DPA_v1.md`](legal/DPA_v1.md)
+> Producto para clínicas y despachos de psicología dentro de mainds: mismo repo, misma infraestructura, misma cuenta de usuario. Plan: [`MAINDS_BUSINESS_PLAN.md`](MAINDS_BUSINESS_PLAN.md) · Backlog con criterios de aceptación: [`BACKLOG.md`](BACKLOG.md) · Evaluación de una titular: [`EVALUACION_TITULAR.md`](EVALUACION_TITULAR.md) · Verifactu: [`VERIFACTU.md`](VERIFACTU.md) · DPA (borrador): [`legal/DPA_v1.md`](legal/DPA_v1.md)
 
-## Qué está construido (Fases 0–5)
+## Qué está construido (Fases 0–6)
 
 | Fase | Qué incluye |
 |---|---|
@@ -12,6 +12,7 @@
 | **3. Dinero** | Emisores (CIF), reglas de comisión congeladas en cada cita, facturas (numeración por NIF y serie, F1/F2, rectificativas R4/R5), liquidaciones para los 4 modelos (nómina, autónomo al que factura la clínica, autónomo que factura él, alquiler de despacho), huella Verifactu oficial y QR, exportación CSV. |
 | **4. Captación** | Página pública `/c/:slug`, widget embebible, solicitudes con consentimiento, honeypot y límite por IP, bandeja con reparto manual, rotatorio o por profesional elegido, conversión a paciente (activa la comisión de lead), métricas por canal y por profesional. |
 | **5. Conocimiento** | Biblioteca, cursos con progreso y horas, registro de supervisión cifrado, asistente IA sobre la biblioteca (la pregunta se anonimiza en el navegador) y panel del dueño. |
+| **6. Operativa diaria** | Lo que pidió la evaluación de una titular que también pasa consulta. Inicio con el día, los pendientes que bloquean dinero y los primeros pasos. Tarifas por servicio y precio por paciente. Citas semanales o quincenales. Alta rápida de paciente desde la cita. Cierre en bloque de citas pasadas. Facturación en lote con emisión de una vez. Ficha con sus citas. Menú agrupado y agenda de día en el móvil. |
 
 **Garantía para Pro:** todo vive en tablas propias (`organizations`, `org_*`, `access_audit`, `verifactu_records`). Business no escribe en ninguna tabla de mainds pro.
 - El store tiene una lista blanca de tablas y hay un test que lo comprueba.
@@ -27,6 +28,7 @@
    4. `backend/scripts/business-004-money.sql`
    5. `backend/scripts/business-005-leads.sql`
    6. `backend/scripts/business-006-knowledge.sql`
+   7. `backend/scripts/business-007-daily-ops.sql`
 
    Todas se han probado en Postgres 16: se aplican dos veces sin error y sus triggers y restricciones se han verificado.
 2. **Variables de entorno** (Vercel):
@@ -58,13 +60,14 @@
 ## Cómo se prueba
 
 ```bash
-cd backend && npm test                  # 187 tests: unitarios, integración con el servidor real y golden de Pro
-node e2e/business/f1.spec.mjs           # E2E con Playwright (f1…f5), arrancan backend y Vite solos
+cd backend && npm test                  # 192 tests: unitarios, integración con el servidor real y golden de Pro
+node e2e/business/f1.spec.mjs           # E2E con Playwright (f1…f6), arrancan backend y Vite solos
+node e2e/business/explore-owner.mjs     # recorrido exploratorio de la titular (capturas, no es un test)
 ```
 
 Los E2E guardan capturas en `e2e/.shots/` (ignorado por git).
 
-## Pendiente (Fase 6 y siguientes)
+## Pendiente (Fase 7 y siguientes)
 
 - **Bloqueante para producción:** 2FA, Verifactu con envío a la AEAT (también para Pro) y textos legales revisados.
 - **Integración con Pro:**
@@ -74,7 +77,7 @@ Los E2E guardan capturas en `e2e/.shots/` (ignorado por git).
   - convergencia de paneles (backlog D1).
 - **Cobro online** con Stripe Connect.
 - **Reserva directa de huecos** desde el widget (necesita disponibilidad por espacio).
-- **Comunicaciones:** recordatorios de cita de la clínica, WhatsApp entrante y avisos de nuevas solicitudes.
+- **Comunicaciones:** recordatorios de cita a pacientes (el primer agujero de dinero según la evaluación; se apoyan en las series), WhatsApp entrante y avisos de nuevas solicitudes.
 - **Otros:**
   - exportaciones A3/Holded y exportación completa por organización;
   - firma digital del paciente;

@@ -54,7 +54,7 @@ try {
     await shot(page, 'f1-05-invitacion-creada');
 
     // Volver a la consulta personal: la vista Pro de siempre.
-    await page.getByRole('button', { name: 'Volver a mi consulta' }).click();
+    await page.getByTestId('workspace-switcher').getByRole('button', { name: 'Mi consulta', exact: true }).click();
     await page.getByText('Mi Diario Personal').first().waitFor();
     await ctx.close();
   }

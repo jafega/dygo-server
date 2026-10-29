@@ -16,8 +16,9 @@ const PatientsPanel: React.FC<{ c: ClinicContext }> = ({ c }) => {
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [openId, setOpenId] = useState<string | null>(null);
+  // Abierta desde otra sección: ficha de un paciente o "Nuevo paciente".
+  const [creating, setCreating] = useState(c.params.tab === 'new' && !c.readOnly);
+  const [openId, setOpenId] = useState<string | null>(c.params.patientId || null);
 
   const all = c.can('patients.contact_all');
   const load = useCallback(async () => {
@@ -31,7 +32,7 @@ const PatientsPanel: React.FC<{ c: ClinicContext }> = ({ c }) => {
   useEffect(() => { listMembers(c.orgId).then(r => r.ok && r.data && setMembers(r.data.members)); }, [c.orgId]);
 
   if (openId) {
-    return <PatientDetail c={c} patientId={openId} members={members} onBack={() => { setOpenId(null); load(); }} />;
+    return <PatientDetail c={c} patientId={openId} members={members} initialTab={openId === c.params.patientId ? c.params.tab : undefined} onBack={() => { setOpenId(null); load(); }} />;
   }
 
   return (
@@ -91,7 +92,10 @@ const PatientsPanel: React.FC<{ c: ClinicContext }> = ({ c }) => {
 };
 
 const NewPatientModal: React.FC<{ c: ClinicContext; clinicians: OrgMember[]; onClose: () => void; onCreated: (p: OrgPatient) => void }> = ({ c, clinicians, onClose, onCreated }) => {
-  const [f, setF] = useState({ first_name: '', last_name: '', email: '', phone: '', birth_date: '', tax_id: '', acquisition_source: 'own', assigned: '' });
+  // Profesional por defecto: quien lo crea si atiende pacientes, o el único clínico.
+  const defaultAssignee = clinicians.find(m => m.id === c.member.id)?.id || (clinicians.length === 1 ? clinicians[0].id : '');
+  const [f, setF] = useState({ first_name: '', last_name: '', email: '', phone: '', birth_date: '', tax_id: '', acquisition_source: 'own', assigned: defaultAssignee });
+  useEffect(() => { if (!f.assigned && defaultAssignee) setF(x => ({ ...x, assigned: defaultAssignee })); }, [defaultAssignee]); // eslint-disable-line react-hooks/exhaustive-deps
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const all = c.can('patients.contact_all');

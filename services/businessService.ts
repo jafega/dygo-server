@@ -56,6 +56,8 @@ export interface Organization {
   trial: boolean;
   trial_days_left: number;
   plus: boolean;
+  /** Tarifas por servicio (€). Rellenan el precio de las citas. */
+  service_prices?: Record<string, number>;
 }
 
 export interface OrgMember {
@@ -169,7 +171,7 @@ export const createOrganization = (body: {
 export const getOrganization = (orgId: string) =>
   call<{ organization: Organization; membership: OrgMember & { permissions: string[] } }>('GET', `/${orgId}`);
 
-export const updateOrganization = (orgId: string, body: Partial<Pick<Organization, 'name' | 'legal_name' | 'cif' | 'logo_url' | 'slug'>>) =>
+export const updateOrganization = (orgId: string, body: Partial<Pick<Organization, 'name' | 'legal_name' | 'cif' | 'logo_url' | 'slug' | 'service_prices'>>) =>
   call<{ organization: Organization }>('PATCH', `/${orgId}`, body);
 
 export const listMembers = (orgId: string) => call<{ members: OrgMember[] }>('GET', `/${orgId}/members`);

@@ -1,21 +1,23 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, Loader2, Lock, ShieldAlert, FileSignature, Pencil, Trash2, CornerDownRight, Save } from 'lucide-react';
+import { ArrowLeft, Loader2, Lock, ShieldAlert, FileSignature, Pencil, Trash2, CornerDownRight, Save, CalendarPlus, Repeat } from 'lucide-react';
 import {
   getPatient, updatePatient, setPatientAssignments, listNotes, createNote, updatePrivateNote, deletePrivateNote, breakGlass,
-  listConsentTemplates, listPatientConsents, registerConsent, isClinicalMember, PATIENT_STATUS_LABELS,
-  type OrgPatient, type OrgMember, type ClinicalNote, type ConsentTemplate, type PatientConsent, type PatientStatus
+  listConsentTemplates, listPatientConsents, registerConsent, isClinicalMember, listPatientAppointments, PATIENT_STATUS_LABELS,
+  SERVICE_TYPE_LABELS, APPOINTMENT_STATUS_LABELS,
+  type OrgPatient, type OrgMember, type ClinicalNote, type ConsentTemplate, type PatientConsent, type PatientStatus, type OrgAppointment
 } from '../../services/businessApi';
 import type { ClinicContext } from './ClinicWorkspace';
 
-type Tab = 'ficha' | 'historia' | 'privadas' | 'consentimientos';
+type Tab = 'ficha' | 'citas' | 'historia' | 'privadas' | 'consentimientos';
+const TABS: Tab[] = ['ficha', 'citas', 'historia', 'privadas', 'consentimientos'];
 
 const fmt = (iso: string) => new Date(iso).toLocaleString('es-ES', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-const PatientDetail: React.FC<{ c: ClinicContext; patientId: string; members: OrgMember[]; onBack: () => void }> = ({ c, patientId, members, onBack }) => {
+const PatientDetail: React.FC<{ c: ClinicContext; patientId: string; members: OrgMember[]; initialTab?: string; onBack: () => void }> = ({ c, patientId, members, initialTab, onBack }) => {
   const [patient, setPatient] = useState<OrgPatient | null>(null);
   const [clinicalAccess, setClinicalAccess] = useState(false);
   const [canBreakGlass, setCanBreakGlass] = useState(false);
-  const [tab, setTab] = useState<Tab>('ficha');
+  const [tab, setTab] = useState<Tab>(TABS.includes(initialTab as Tab) ? initialTab as Tab : 'ficha');
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -33,10 +35,15 @@ const PatientDetail: React.FC<{ c: ClinicContext; patientId: string; members: Or
 
   const tabs: { id: Tab; label: string; show: boolean }[] = [
     { id: 'ficha', label: 'Ficha', show: true },
+    { id: 'citas', label: 'Citas', show: c.can('agenda.view_all') || c.can('agenda.view_busy') },
     { id: 'historia', label: 'Historia clínica', show: clinicalAccess || canBreakGlass },
     { id: 'privadas', label: 'Mis anotaciones privadas', show: clinicalAccess && c.member.permissions.includes('agenda.manage_own') },
     { id: 'consentimientos', label: 'Consentimientos', show: true }
   ];
+
+  const visible = tabs.filter(t => t.show);
+  // Pestaña pedida sin permiso (p. ej. historia sin acceso): se muestra la ficha.
+  const current = visible.some(t => t.id === tab) ? tab : 'ficha';
 
   return (
     <div className="space-y-4 max-w-4xl">
@@ -46,19 +53,20 @@ const PatientDetail: React.FC<{ c: ClinicContext; patientId: string; members: Or
         <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{PATIENT_STATUS_LABELS[patient.status]}</span>
       </div>
       <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">
-        {tabs.filter(t => t.show).map(t => (
+        {visible.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
-            className={`px-3 py-2 text-sm font-medium whitespace-nowrap border-b-2 -mb-px ${tab === t.id ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
+            className={`px-3 py-2 text-sm font-medium whitespace-nowrap border-b-2 -mb-px ${current === t.id ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
             {t.id === 'privadas' && <Lock size={13} className="inline mr-1 -mt-0.5" />}{t.label}
           </button>
         ))}
       </div>
-      {tab === 'ficha' && <Ficha c={c} patient={patient} members={members} onSaved={setPatient} />}
-      {tab === 'historia' && (clinicalAccess
+      {current === 'ficha' && <Ficha c={c} patient={patient} members={members} onSaved={setPatient} />}
+      {current === 'citas' && <Appointments c={c} patient={patient} members={members} />}
+      {current === 'historia' && (clinicalAccess
         ? <Notes c={c} patientId={patient.id} visibility="clinical_record" />
         : <BreakGlass c={c} patientId={patient.id} />)}
-      {tab === 'privadas' && <Notes c={c} patientId={patient.id} visibility="private_annotation" />}
-      {tab === 'consentimientos' && <Consents c={c} patientId={patient.id} />}
+      {current === 'privadas' && <Notes c={c} patientId={patient.id} visibility="private_annotation" />}
+      {current === 'consentimientos' && <Consents c={c} patientId={patient.id} />}
     </div>
   );
 };
@@ -67,7 +75,7 @@ const Ficha: React.FC<{ c: ClinicContext; patient: OrgPatient; members: OrgMembe
   const [f, setF] = useState({
     first_name: patient.first_name, last_name: patient.last_name || '', email: patient.email || '', phone: patient.phone || '',
     birth_date: patient.birth_date || '', tax_id: patient.tax_id || '', address: patient.address || '', admin_notes: patient.admin_notes || '',
-    status: patient.status
+    status: patient.status, default_price: patient.default_price == null ? '' : String(patient.default_price)
   });
   const [assigned, setAssigned] = useState<string[]>(patient.assigned_member_ids);
   const [busy, setBusy] = useState(false);
@@ -79,7 +87,7 @@ const Ficha: React.FC<{ c: ClinicContext; patient: OrgPatient; members: OrgMembe
     e.preventDefault();
     setBusy(true);
     setMsg(null);
-    const r = await updatePatient(c.orgId, patient.id, { ...f, last_name: f.last_name || null, email: f.email || null, phone: f.phone || null, birth_date: f.birth_date || null, tax_id: f.tax_id || null, address: f.address || null, admin_notes: f.admin_notes || null } as any);
+    const r = await updatePatient(c.orgId, patient.id, { ...f, last_name: f.last_name || null, email: f.email || null, phone: f.phone || null, birth_date: f.birth_date || null, tax_id: f.tax_id || null, address: f.address || null, admin_notes: f.admin_notes || null, default_price: f.default_price === '' ? null : Number(f.default_price) } as any);
     let p = r.data?.patient;
     if (r.ok && canAssign && JSON.stringify([...assigned].sort()) !== JSON.stringify([...patient.assigned_member_ids].sort())) {
       const a = await setPatientAssignments(c.orgId, patient.id, assigned);
@@ -100,7 +108,11 @@ const Ficha: React.FC<{ c: ClinicContext; patient: OrgPatient; members: OrgMembe
       <label className="block"><span className="text-sm font-medium text-slate-700">Email</span><input disabled={ro} type="email" className={input} value={f.email} onChange={e => setF({ ...f, email: e.target.value })} /></label>
       <label className="block"><span className="text-sm font-medium text-slate-700">Fecha de nacimiento</span><input disabled={ro} type="date" className={input} value={f.birth_date} onChange={e => setF({ ...f, birth_date: e.target.value })} /></label>
       <label className="block"><span className="text-sm font-medium text-slate-700">NIF/NIE</span><input disabled={ro} className={input} value={f.tax_id} onChange={e => setF({ ...f, tax_id: e.target.value.toUpperCase() })} /></label>
-      <label className="block sm:col-span-2"><span className="text-sm font-medium text-slate-700">Dirección</span><input disabled={ro} className={input} value={f.address} onChange={e => setF({ ...f, address: e.target.value })} /></label>
+      <label className="block"><span className="text-sm font-medium text-slate-700">Dirección</span><input disabled={ro} className={input} value={f.address} onChange={e => setF({ ...f, address: e.target.value })} /></label>
+      <label className="block"><span className="text-sm font-medium text-slate-700">Precio por sesión (€)</span>
+        <input disabled={ro} type="number" min={0} step="0.01" className={input} value={f.default_price} onChange={e => setF({ ...f, default_price: e.target.value })}
+          placeholder={c.org.service_prices?.session != null ? `Tarifa de la clínica: ${c.org.service_prices.session} €` : 'Tarifa de la clínica'} />
+        <span className="text-xs text-slate-500">Solo si es distinto de la tarifa (precio reducido, convenio…).</span></label>
       <label className="block"><span className="text-sm font-medium text-slate-700">Estado</span>
         <select disabled={ro} className={`${input} bg-white`} value={f.status} onChange={e => setF({ ...f, status: e.target.value as PatientStatus })}>
           {Object.entries(PATIENT_STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
@@ -221,6 +233,58 @@ const Notes: React.FC<{ c: ClinicContext; patientId: string; visibility: Clinica
             </li>
           ))}
         </ol>
+      )}
+    </div>
+  );
+};
+
+/** Citas del paciente: próximas y pasadas, con "Nueva cita" (abre la agenda). */
+const Appointments: React.FC<{ c: ClinicContext; patient: OrgPatient; members: OrgMember[] }> = ({ c, patient, members }) => {
+  const [rows, setRows] = useState<OrgAppointment[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    listPatientAppointments(c.orgId, patient.id).then(r => { if (r.ok && r.data) setRows(r.data.appointments); else setError(r.error || 'No se pudieron cargar las citas'); });
+  }, [c.orgId, patient.id]);
+  const name = (id: string) => { const m = members.find(x => x.id === id); return m?.display_name || m?.email || 'Profesional'; };
+  const now = Date.now();
+  const upcoming = (rows || []).filter(a => new Date(a.ends_at).getTime() > now && a.status !== 'cancelled').reverse();
+  const past = (rows || []).filter(a => !upcoming.includes(a));
+  const canBook = (c.can('agenda.manage_all') || c.can('agenda.manage_own')) && !c.readOnly && patient.status !== 'archived';
+  const row = (a: OrgAppointment) => (
+    <li key={a.id} className="flex flex-wrap items-center gap-2 px-4 py-2.5 text-sm">
+      <span className="w-40 text-slate-700">{new Date(a.starts_at).toLocaleString('es-ES', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+      <span className="flex-1 min-w-[120px] text-slate-600">{a.busy ? 'Otro profesional' : `${SERVICE_TYPE_LABELS[a.service_type || 'session']} · ${name(a.member_id)}`}</span>
+      {a.series_id && <Repeat size={13} className="text-slate-400" aria-label="Serie" />}
+      {!a.busy && <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{APPOINTMENT_STATUS_LABELS[a.status || 'scheduled']}</span>}
+      {!a.busy && a.status === 'completed' && <span className={`text-xs ${a.invoice_id ? 'text-emerald-700' : 'text-amber-700'}`}>{a.invoice_id ? 'Facturada' : 'Sin facturar'}</span>}
+    </li>
+  );
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <p className="text-sm text-slate-600 flex-1">{rows ? `${rows.filter(a => a.status === 'completed').length} sesiones realizadas` : ''}</p>
+        {canBook && (
+          <button onClick={() => c.open('agenda', { newAppointmentFor: patient.id })} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700">
+            <CalendarPlus size={16} /> Nueva cita
+          </button>
+        )}
+      </div>
+      {error && <p className="text-sm text-red-700" role="alert">{error}</p>}
+      {!rows ? <div className="flex justify-center py-8"><Loader2 className="animate-spin text-indigo-400" size={24} /></div> : (
+        <>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">Próximas</p>
+            <ul className="bg-white rounded-xl border border-slate-200 divide-y divide-slate-100">
+              {upcoming.length ? upcoming.map(row) : <li className="px-4 py-3 text-sm text-slate-500">Sin citas próximas.</li>}
+            </ul>
+          </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">Anteriores</p>
+            <ul className="bg-white rounded-xl border border-slate-200 divide-y divide-slate-100">
+              {past.length ? past.map(row) : <li className="px-4 py-3 text-sm text-slate-500">Todavía no hay citas.</li>}
+            </ul>
+          </div>
+        </>
       )}
     </div>
   );

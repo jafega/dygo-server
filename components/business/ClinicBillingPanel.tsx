@@ -1,16 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, Plus, X, FileText, Printer, Undo2, CheckCircle2, Trash2, Download, ShieldCheck } from 'lucide-react';
+import { Loader2, Plus, X, FileText, Printer, Undo2, CheckCircle2, Trash2, Download, ShieldCheck, AlertTriangle } from 'lucide-react';
 import {
   listClinicInvoices, getClinicInvoice, createClinicInvoice, deleteClinicInvoice, issueClinicInvoice, rectifyClinicInvoice,
   markClinicInvoicePaid, listBillable, listPatients, listBillingEntities, createBillingEntity, updateBillingEntity,
   listCommissionRules, createCommissionRule, endCommissionRule, listMembers, isClinicalMember, setMemberRent, exportInvoicesCsv,
+  bulkInvoice, issueInvoiceBatch, updateOrganization, type BulkInvoiceResult,
   INVOICE_KIND_LABELS, INVOICE_STATUS_LABELS, SERVICE_TYPE_LABELS,
   type ClinicInvoice, type VerifactuInfo, type BillableAppointment, type OrgPatient, type BillingEntity, type CommissionRule, type OrgMember
 } from '../../services/businessApi';
 import { printHtmlAsPdf } from '../../services/printUtils';
 import type { ClinicContext } from './ClinicWorkspace';
 
-type Tab = 'invoices' | 'new' | 'entities' | 'rules' | 'export';
+type Tab = 'invoices' | 'bulk' | 'new' | 'prices' | 'entities' | 'rules' | 'export';
 const eur = (n: number | null | undefined) => (n == null ? '—' : `${Number(n).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`);
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
 const input = 'rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500';
@@ -56,12 +57,15 @@ const ClinicBillingPanel: React.FC<{ c: ClinicContext }> = ({ c }) => {
   const issuesOwn = c.can('billing.own') && ['psych_invoices', 'fixed_rent'].includes(c.member.billing_model || '');
   const tabs: { id: Tab; label: string; show: boolean }[] = [
     { id: 'invoices', label: 'Facturas', show: true },
+    { id: 'bulk', label: 'Facturar pendientes', show: canManage && !c.readOnly },
     { id: 'new', label: 'Nueva factura', show: (canManage || issuesOwn) && !c.readOnly },
+    { id: 'prices', label: 'Tarifas', show: c.can('org.settings') },
     { id: 'entities', label: 'Emisores', show: c.can('org.settings') },
     { id: 'rules', label: 'Comisiones y alquileres', show: c.can('team.manage') || c.can('settlements.manage') || c.can('settlements.read') },
     { id: 'export', label: 'Exportar', show: canExport }
   ];
-  const [tab, setTab] = useState<Tab>('invoices');
+  // Abierta desde otra sección (Inicio, agenda): pestaña y paciente pedidos.
+  const [tab, setTab] = useState<Tab>(() => tabs.find(t => t.id === c.params.tab && t.show)?.id || 'invoices');
   const [openInvoice, setOpenInvoice] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -77,7 +81,9 @@ const ClinicBillingPanel: React.FC<{ c: ClinicContext }> = ({ c }) => {
         ))}
       </div>
       {tab === 'invoices' && <InvoicesList key={refreshKey} c={c} onOpen={setOpenInvoice} />}
-      {tab === 'new' && <NewInvoice c={c} canManage={canManage} issuesOwn={issuesOwn} onCreated={(id) => { setTab('invoices'); setOpenInvoice(id); }} />}
+      {tab === 'bulk' && <BulkInvoicing c={c} onDone={() => { setTab('invoices'); setRefreshKey(k => k + 1); }} />}
+      {tab === 'new' && <NewInvoice c={c} canManage={canManage} issuesOwn={issuesOwn} initialPatientId={c.params.patientId} onCreated={(id) => { setTab('invoices'); setOpenInvoice(id); }} />}
+      {tab === 'prices' && <Prices c={c} />}
       {tab === 'entities' && <Entities c={c} />}
       {tab === 'rules' && <Rules c={c} />}
       {tab === 'export' && <ExportCsv c={c} />}
@@ -217,9 +223,170 @@ const InvoiceDetail: React.FC<{ c: ClinicContext; id: string; onClose: () => voi
   );
 };
 
-const NewInvoice: React.FC<{ c: ClinicContext; canManage: boolean; issuesOwn: boolean; onCreated: (id: string) => void }> = ({ c, canManage, issuesOwn, onCreated }) => {
+/**
+ * Facturar todo lo pendiente: un borrador por paciente con sus sesiones
+ * realizadas sin facturar, y después emitirlos de una vez (como en mainds pro).
+ */
+const BulkInvoicing: React.FC<{ c: ClinicContext; onDone: () => void }> = ({ c, onDone }) => {
+  const [to, setTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [pending, setPending] = useState<BillableAppointment[] | null>(null);
+  const [result, setResult] = useState<BulkInvoiceResult | null>(null);
+  // id del borrador → número asignado al emitir.
+  const [issued, setIssued] = useState<Record<string, string> | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => { listBillable(c.orgId).then(r => setPending(r.ok && r.data ? r.data.appointments : [])); }, [c.orgId]);
+
+  const groups = useMemo(() => {
+    const map = new Map<string, { name: string; sessions: number; total: number; noPrice: number }>();
+    for (const a of pending || []) {
+      if (a.starts_at.slice(0, 10) > to) continue;
+      const g = map.get(a.patient_id) || { name: a.patient_name || 'Paciente', sessions: 0, total: 0, noPrice: 0 };
+      if (a.price == null) g.noPrice++; else { g.sessions++; g.total += Number(a.price); }
+      map.set(a.patient_id, g);
+    }
+    return [...map.entries()].map(([id, g]) => ({ id, ...g })).sort((x, y) => x.name.localeCompare(y.name));
+  }, [pending, to]);
+  const ready = groups.filter(g => g.sessions > 0);
+
+  const prepare = async () => {
+    setBusy(true);
+    setError(null);
+    const r = await bulkInvoice(c.orgId, { to });
+    setBusy(false);
+    if (r.ok && r.data) setResult(r.data); else setError(r.error || 'No se pudieron preparar las facturas');
+  };
+  const issueAll = async () => {
+    if (!result) return;
+    setBusy(true);
+    setError(null);
+    const r = await issueInvoiceBatch(c.orgId, result.created.map(x => x.id));
+    setBusy(false);
+    if (r.ok && r.data) {
+      setIssued(Object.fromEntries(r.data.issued.map(i => [i.id, i.full_number])));
+      if (r.data.failed.length) setError(`${r.data.failed.length} no se han podido emitir: ${r.data.failed.map(f => f.reason).join(' · ')}`);
+    } else setError(r.error || 'No se pudieron emitir');
+  };
+
+  if (pending === null) return <div className="flex justify-center py-8"><Loader2 className="animate-spin text-indigo-400" size={24} /></div>;
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4 max-w-3xl" data-testid="bulk-invoicing">
+      {!result && (
+        <>
+          <div className="flex flex-wrap items-end gap-3">
+            <p className="text-sm text-slate-600 flex-1 min-w-[220px]">Se prepara <strong>un borrador por paciente</strong> con sus sesiones realizadas y sin facturar. Revísalos y emítelos de una vez.</p>
+            <label className="text-sm"><span className="block text-slate-700 font-medium">Sesiones hasta</span>
+              <input type="date" value={to} onChange={e => setTo(e.target.value)} className={`${input} mt-1`} /></label>
+          </div>
+          {groups.length === 0 ? <p className="text-sm text-slate-500">No hay sesiones realizadas pendientes de facturar. Si faltan, ciérralas en Inicio o en la agenda.</p> : (
+            <ul className="divide-y divide-slate-100 border border-slate-200 rounded-lg">
+              {groups.map(g => (
+                <li key={g.id} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
+                  <span className="flex-1 min-w-[140px] text-slate-800">{g.name}</span>
+                  <span className="text-slate-500">{g.sessions} {g.sessions === 1 ? 'sesión' : 'sesiones'}</span>
+                  <span className="w-24 text-right font-medium">{eur(g.total)}</span>
+                  {g.noPrice > 0 && <span className="w-full text-xs text-amber-700 flex items-center gap-1"><AlertTriangle size={12} /> {g.noPrice === 1 ? 'Una sesión sin precio queda fuera' : `${g.noPrice} sesiones sin precio quedan fuera`}: ponle precio en la agenda.</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-slate-700 flex-1">Total: <strong>{eur(ready.reduce((s, g) => s + g.total, 0))}</strong> en {ready.length} {ready.length === 1 ? 'factura' : 'facturas'}</span>
+            <button disabled={busy || !ready.length} onClick={prepare} className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2">
+              {busy && <Loader2 size={16} className="animate-spin" />} Preparar {ready.length} {ready.length === 1 ? 'borrador' : 'borradores'}
+            </button>
+          </div>
+        </>
+      )}
+      {result && (
+        <>
+          <p className="text-sm text-slate-700">{result.created.length} {result.created.length === 1 ? 'borrador preparado' : 'borradores preparados'}.</p>
+          {result.created.length > 0 && (
+            <ul className="divide-y divide-slate-100 border border-slate-200 rounded-lg">
+              {result.created.map(x => (
+                <li key={x.id} className="flex items-center gap-2 px-3 py-2 text-sm">
+                  <span className="flex-1">{x.patient_name}</span>
+                  <span className="text-slate-500">{x.appointments} {x.appointments === 1 ? 'sesión' : 'sesiones'}</span>
+                  <span className="w-24 text-right">{eur(x.total)}</span>
+                  {issued?.[x.id] && <span className="text-xs text-emerald-700 w-20 text-right">{issued[x.id]}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+          {result.skipped.length > 0 && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              <p className="font-medium mb-1">Pendiente de revisar</p>
+              <ul className="list-disc pl-5 space-y-0.5">{result.skipped.map((x, i) => <li key={i}>{x.patient_name}: {x.reason}</li>)}</ul>
+            </div>
+          )}
+          <div className="flex flex-wrap justify-end gap-2">
+            {issued ? (
+              <button onClick={onDone} className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700">Ver facturas</button>
+            ) : (
+              <>
+                <button onClick={onDone} className="px-4 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-100">Revisar uno a uno</button>
+                {result.created.length > 0 && (
+                  <button disabled={busy} onClick={issueAll} className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-2">
+                    {busy && <Loader2 size={16} className="animate-spin" />} Emitir {result.created.length} {result.created.length === 1 ? 'factura' : 'facturas'}
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+          {issued && <p className="text-xs text-slate-500">Emitidas con número y registro Verifactu. Una factura emitida no se modifica: se corrige con una rectificativa.</p>}
+        </>
+      )}
+      {error && <p className="text-sm text-red-700" role="alert">{error}</p>}
+    </div>
+  );
+};
+
+/** Tarifas por servicio: rellenan el precio de las citas (el paciente puede tener uno propio). */
+const Prices: React.FC<{ c: ClinicContext }> = ({ c }) => {
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries(Object.keys(SERVICE_TYPE_LABELS).map(k => [k, c.org.service_prices?.[k] != null ? String(c.org.service_prices[k]) : ''])));
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const canEdit = c.can('org.settings') && !c.readOnly;
+  const save = async () => {
+    setBusy(true);
+    setMsg(null);
+    const prices: Record<string, number> = {};
+    for (const [k, v] of Object.entries(values)) if (v !== '') prices[k] = Number(v);
+    const r = await updateOrganization(c.orgId, { service_prices: prices });
+    setBusy(false);
+    if (r.ok) { setMsg({ ok: true, text: 'Tarifas guardadas. Las citas nuevas ya las usan.' }); c.reload(); } else setMsg({ ok: false, text: r.error || 'No se pudieron guardar' });
+  };
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4 max-w-xl">
+      <p className="text-sm text-slate-600">Precio de cada servicio. Al dar una cita se rellena solo; si un paciente tiene precio propio (en su ficha), manda el suyo. Cambiar una tarifa no cambia las citas ya creadas.</p>
+      <div className="grid sm:grid-cols-2 gap-3">
+        {Object.entries(SERVICE_TYPE_LABELS).map(([k, label]) => (
+          <label key={k} className="block"><span className="text-sm font-medium text-slate-700">{label}</span>
+            <div className="relative mt-1">
+              <input aria-label={`Tarifa ${label}`} type="number" min={0} step="0.01" disabled={!canEdit} value={values[k]} onChange={e => setValues({ ...values, [k]: e.target.value })} className={`${input} w-full pr-8 disabled:bg-slate-50`} placeholder="Sin tarifa" />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">€</span>
+            </div>
+          </label>
+        ))}
+      </div>
+      {msg && <p className={`text-sm ${msg.ok ? 'text-emerald-700' : 'text-red-700'}`} role="status">{msg.text}</p>}
+      {canEdit && (
+        <div className="flex justify-end">
+          <button disabled={busy} onClick={save} className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2">
+            {busy && <Loader2 size={16} className="animate-spin" />} Guardar tarifas
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const NewInvoice: React.FC<{ c: ClinicContext; canManage: boolean; issuesOwn: boolean; initialPatientId?: string; onCreated: (id: string) => void }> = ({ c, canManage, issuesOwn, initialPatientId, onCreated }) => {
   const [patients, setPatients] = useState<OrgPatient[]>([]);
-  const [patientId, setPatientId] = useState('');
+  const [patientId, setPatientId] = useState(initialPatientId || '');
   const [billable, setBillable] = useState<BillableAppointment[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [issuer, setIssuer] = useState<'entity' | 'member'>(canManage ? 'entity' : 'member');
@@ -233,10 +400,15 @@ const NewInvoice: React.FC<{ c: ClinicContext; canManage: boolean; issuesOwn: bo
     if (!patientId) { setBillable([]); return; }
     listBillable(c.orgId, patientId).then(r => {
       const rows = r.ok && r.data ? r.data.appointments : [];
-      setBillable(issuer === 'member' ? rows.filter(a => a.member_id === c.member.id) : rows);
+      const mine = issuer === 'member' ? rows.filter(a => a.member_id === c.member.id) : rows;
+      setBillable(mine);
+      // Desde la cita o la ficha: todo lo facturable ya marcado.
+      if (patientId === initialPatientId) setSelected(mine.filter(a => a.price != null).map(a => a.id));
     });
     setTaxId(patients.find(p => p.id === patientId)?.tax_id || '');
   }, [c.orgId, patientId, issuer]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Los pacientes llegan después que el paciente preseleccionado: su NIF también.
+  useEffect(() => { if (patientId && !taxId) setTaxId(patients.find(p => p.id === patientId)?.tax_id || ''); }, [patients]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const total = billable.filter(a => selected.includes(a.id)).reduce((s, a) => s + Number(a.price || 0), 0);
   const create = async () => {
@@ -269,9 +441,9 @@ const NewInvoice: React.FC<{ c: ClinicContext; canManage: boolean; issuesOwn: bo
               <ul className="space-y-1">
                 {billable.map(a => (
                   <li key={a.id}><label className="flex items-center gap-2 text-sm">
-                    <input type="checkbox" checked={selected.includes(a.id)} onChange={e => setSelected(e.target.checked ? [...selected, a.id] : selected.filter(x => x !== a.id))} />
+                    <input type="checkbox" disabled={a.price == null} checked={selected.includes(a.id)} onChange={e => setSelected(e.target.checked ? [...selected, a.id] : selected.filter(x => x !== a.id))} />
                     <span className="flex-1">{new Date(a.starts_at).toLocaleDateString('es-ES')} · {SERVICE_TYPE_LABELS[a.service_type] || a.service_type}</span>
-                    <span>{eur(a.price)}</span>
+                    {a.price == null ? <span className="text-xs text-amber-700">Sin precio: pónselo en la agenda</span> : <span>{eur(a.price)}</span>}
                   </label></li>
                 ))}
               </ul>

@@ -6,7 +6,9 @@ import {
 import { getOrganization, ROLE_LABELS, type Organization, type OrgMember } from '../../services/businessService';
 import TeamPanel from './TeamPanel';
 import { SubscriptionPanel, OrgSettingsPanel } from './ClinicAdminPanels';
+import { useEscapeToClose } from './useEscapeToClose';
 
+const ClinicHomePanel = lazy(() => import('./ClinicHomePanel'));
 const AgendaPanel = lazy(() => import('./AgendaPanel'));
 const PatientsPanel = lazy(() => import('./PatientsPanel'));
 const LocationsRoomsPanel = lazy(() => import('./ClinicSetupPanels').then(m => ({ default: m.LocationsRoomsPanel })));
@@ -18,6 +20,17 @@ const KnowledgePanel = lazy(() => import('./KnowledgePanel'));
 const DashboardPanel = lazy(() => import('./DashboardPanel'));
 const AuditPanel = lazy(() => import('./ClinicSetupPanels').then(m => ({ default: m.AuditPanel })));
 
+/** Parámetros al abrir una sección desde otra (p. ej. la ficha de un paciente). */
+export interface NavParams {
+  patientId?: string;
+  /** Pestaña inicial de la sección (ficha del paciente o facturación). */
+  tab?: string;
+  /** Agenda: día a mostrar (AAAA-MM-DD). */
+  date?: string;
+  /** Agenda: abrir "Nueva cita" con este paciente. */
+  newAppointmentFor?: string;
+}
+
 export interface ClinicContext {
   orgId: string;
   org: Organization;
@@ -26,11 +39,21 @@ export interface ClinicContext {
   readOnly: boolean;
   plus: boolean;
   currentUser: { id: string; name?: string; email?: string };
+  /** Abre otra sección de la clínica (el paso siguiente del flujo). */
+  open: (section: string, params?: NavParams) => void;
+  /** Parámetros con los que se abrió la sección actual. */
+  params: NavParams;
+  /** Vuelve a cargar la clínica (tras cambiar ajustes o tarifas). */
+  reload: () => void;
 }
+
+type SectionGroup = 'dia' | 'gestion' | 'equipo' | 'clinica';
+const GROUP_LABELS: Record<SectionGroup, string> = { dia: 'Día a día', gestion: 'Gestión', equipo: 'Equipo', clinica: 'Clínica' };
 
 interface SectionDef {
   id: string;
   label: string;
+  group?: SectionGroup;
   icon: React.ReactNode;
   visible: (c: ClinicContext) => boolean;
   render: (c: ClinicContext, helpers: { reload: () => void; exit: () => void; setOrg: (o: Organization) => void }) => React.ReactNode;
@@ -48,88 +71,71 @@ interface ClinicWorkspaceProps {
   switcher?: React.ReactNode;
 }
 
-const ClinicHome: React.FC<{ c: ClinicContext; go: (id: string) => void; sections: SectionDef[] }> = ({ c, go, sections }) => (
-  <div className="space-y-6 max-w-3xl">
-    <div>
-      <h1 className="text-2xl font-bold text-slate-900">{c.org.name}</h1>
-      <p className="text-sm text-slate-500">Estás en el espacio de la clínica como <strong>{ROLE_LABELS[c.member.role]}</strong>. Lo que hagas aquí no se mezcla con tu espacio personal.</p>
-    </div>
-    <div className="grid sm:grid-cols-2 gap-3">
-      {sections.filter(s => s.id !== 'home').map(s => (
-        <button key={s.id} onClick={() => go(s.id)} className="flex items-center gap-3 bg-white rounded-xl border border-slate-200 p-4 text-left hover:border-indigo-300 hover:shadow-sm">
-          <span className="w-9 h-9 rounded-lg bg-indigo-50 text-indigo-700 flex items-center justify-center">{s.icon}</span>
-          <span className="font-semibold text-slate-800">{s.label}</span>
-        </button>
-      ))}
-    </div>
-  </div>
-);
-
 // Secciones de la clínica, en el orden del menú. Solo se muestran las que
 // permiten los permisos de la membresía (el backend vuelve a comprobarlo).
 const SECTIONS: SectionDef[] = [
   {
-    id: 'dashboard', label: 'Panel de la clínica', icon: <LayoutDashboard size={18} />,
-    visible: (c) => c.can('team.manage'),
-    render: (c) => <DashboardPanel c={c} />
-  },
-  {
-    id: 'agenda', label: 'Agenda', icon: <CalendarDays size={18} />,
+    id: 'agenda', label: 'Agenda', group: 'dia', icon: <CalendarDays size={18} />,
     visible: (c) => c.can('agenda.view_all') || c.can('agenda.view_busy'),
     render: (c) => <AgendaPanel c={c} />
   },
   {
-    id: 'patients', label: 'Pacientes', icon: <UserRound size={18} />,
+    id: 'patients', label: 'Pacientes', group: 'dia', icon: <UserRound size={18} />,
     visible: (c) => c.can('patients.contact_all') || c.can('patients.contact_assigned'),
     render: (c) => <PatientsPanel c={c} />
   },
   {
-    id: 'leads', label: 'Captación', icon: <Megaphone size={18} />,
+    id: 'leads', label: 'Captación', group: 'dia', icon: <Megaphone size={18} />,
     visible: (c) => c.can('leads.manage') || c.can('leads.assigned') || c.can('org.settings'),
     render: (c) => <LeadsPanel c={c} />
   },
   {
-    id: 'billing', label: 'Facturación', icon: <Receipt size={18} />,
+    id: 'dashboard', label: 'Panel de la clínica', group: 'gestion', icon: <LayoutDashboard size={18} />,
+    visible: (c) => c.can('team.manage'),
+    render: (c) => <DashboardPanel c={c} />
+  },
+  {
+    id: 'billing', label: 'Facturación', group: 'gestion', icon: <Receipt size={18} />,
     visible: (c) => c.can('billing.manage') || c.can('billing.own') || c.can('billing.read_export'),
     render: (c) => <ClinicBillingPanel c={c} />
   },
   {
-    id: 'settlements', label: 'Liquidaciones', icon: <Wallet size={18} />,
+    id: 'settlements', label: 'Liquidaciones', group: 'gestion', icon: <Wallet size={18} />,
     visible: (c) => c.can('settlements.manage') || c.can('settlements.read') || c.can('settlements.own'),
     render: (c) => <SettlementsPanel c={c} />
   },
   {
-    id: 'knowledge', label: 'Formación', icon: <GraduationCap size={18} />,
-    visible: (c) => c.can('library.consume') || c.can('library.manage'),
-    render: (c) => <KnowledgePanel c={c} />
-  },
-  {
-    id: 'team', label: 'Equipo', icon: <Users size={18} />,
+    id: 'team', label: 'Equipo', group: 'equipo', icon: <Users size={18} />,
     visible: () => true,
     render: (c) => <TeamPanel orgId={c.orgId} canManage={c.can('team.manage')} myMemberId={c.member.id} readOnly={c.readOnly} />
   },
   {
-    id: 'locations', label: 'Sedes y salas', icon: <MapPin size={18} />,
+    id: 'knowledge', label: 'Formación', group: 'equipo', icon: <GraduationCap size={18} />,
+    visible: (c) => c.can('library.consume') || c.can('library.manage'),
+    render: (c) => <KnowledgePanel c={c} />
+  },
+  {
+    id: 'locations', label: 'Sedes y salas', group: 'clinica', icon: <MapPin size={18} />,
     visible: (c) => c.can('team.manage'),
     render: (c) => <LocationsRoomsPanel c={c} />
   },
   {
-    id: 'consents', label: 'Consentimientos', icon: <FileSignature size={18} />,
+    id: 'consents', label: 'Consentimientos', group: 'clinica', icon: <FileSignature size={18} />,
     visible: (c) => c.can('team.manage') || c.can('clinical.read_all'),
     render: (c) => <ConsentTemplatesPanel c={c} />
   },
   {
-    id: 'audit', label: 'Registro de accesos', icon: <ShieldCheck size={18} />,
+    id: 'audit', label: 'Registro de accesos', group: 'clinica', icon: <ShieldCheck size={18} />,
     visible: (c) => c.can('audit.view'),
     render: (c) => <AuditPanel c={c} />
   },
   {
-    id: 'subscription', label: 'Suscripción', icon: <CreditCard size={18} />,
+    id: 'subscription', label: 'Suscripción', group: 'clinica', icon: <CreditCard size={18} />,
     visible: (c) => c.can('org.subscription'),
     render: (c) => <SubscriptionPanel orgId={c.orgId} />
   },
   {
-    id: 'settings', label: 'Ajustes', icon: <Settings size={18} />,
+    id: 'settings', label: 'Ajustes', group: 'clinica', icon: <Settings size={18} />,
     visible: () => true,
     render: (c, h) => (
       <OrgSettingsPanel
@@ -144,8 +150,10 @@ const ClinicWorkspace: React.FC<ClinicWorkspaceProps> = ({ orgId, currentUser, b
   const [org, setOrg] = useState<Organization | null>(null);
   const [member, setMember] = useState<(OrgMember & { permissions: string[] }) | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [active, setActive] = useState<string>('home');
+  // `key` cambia en cada navegación: la sección se monta de nuevo con sus parámetros.
+  const [nav, setNav] = useState<{ id: string; params: NavParams; key: number }>({ id: 'home', params: {}, key: 0 });
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  useEscapeToClose();
 
   const load = useCallback(async () => {
     const r = await getOrganization(orgId);
@@ -160,19 +168,27 @@ const ClinicWorkspace: React.FC<ClinicWorkspaceProps> = ({ orgId, currentUser, b
     }
   }, [orgId, onLeft]);
 
-  useEffect(() => { setActive('home'); setOrg(null); load(); }, [orgId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setNav({ id: 'home', params: {}, key: 0 }); setOrg(null); load(); }, [orgId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const go = useCallback((id: string, params: NavParams = {}) => {
+    setNav(n => ({ id, params, key: n.key + 1 }));
+    setSidebarOpen(false);
+  }, []);
 
   const ctx: ClinicContext | null = useMemo(() => (org && member ? {
     orgId, org, member,
     can: (a: string) => member.permissions.includes(a),
     readOnly: org.access !== 'full',
     plus: org.plus,
-    currentUser
-  } : null), [org, member, orgId, currentUser]);
+    currentUser,
+    open: go,
+    params: nav.params,
+    reload: load
+  } : null), [org, member, orgId, currentUser, go, nav.params, load]);
 
   const sections: SectionDef[] = useMemo(() => {
     if (!ctx) return [];
-    const home: SectionDef = { id: 'home', label: 'Inicio', icon: <Home size={18} />, visible: () => true, render: () => null };
+    const home: SectionDef = { id: 'home', label: 'Inicio', icon: <Home size={18} />, visible: () => true, render: (c) => <ClinicHomePanel c={c} /> };
     return [home, ...SECTIONS.filter(s => s.visible(ctx))];
   }, [ctx]);
 
@@ -188,8 +204,7 @@ const ClinicWorkspace: React.FC<ClinicWorkspaceProps> = ({ orgId, currentUser, b
     return <div className="h-dvh flex items-center justify-center bg-slate-50"><Loader2 className="animate-spin text-indigo-400" size={32} /></div>;
   }
 
-  const current = sections.find(s => s.id === active) || sections[0];
-  const go = (id: string) => { setActive(id); setSidebarOpen(false); };
+  const current = sections.find(s => s.id === nav.id) || sections[0];
   const helpers = { reload: load, exit: onLeft, setOrg };
 
   return (
@@ -206,19 +221,26 @@ const ClinicWorkspace: React.FC<ClinicWorkspaceProps> = ({ orgId, currentUser, b
           </div>
           <button className="md:hidden p-1 text-slate-500" onClick={() => setSidebarOpen(false)} aria-label="Cerrar menú"><X size={18} /></button>
         </div>
-        <nav className="flex-1 overflow-y-auto p-3 space-y-1">
-          {sections.map(s => (
-            <button key={s.id} onClick={() => go(s.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${current.id === s.id ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
-              {s.icon}<span>{s.label}</span>
-            </button>
+        <nav className="flex-1 overflow-y-auto p-3 space-y-0.5">
+          {sections.map((s, i) => (
+            <React.Fragment key={s.id}>
+              {s.group && s.group !== sections[i - 1]?.group && (
+                <p className="px-3 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{GROUP_LABELS[s.group]}</p>
+              )}
+              <button onClick={() => go(s.id)} aria-current={current.id === s.id ? 'page' : undefined}
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${current.id === s.id ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
+                {s.icon}<span>{s.label}</span>
+              </button>
+            </React.Fragment>
           ))}
         </nav>
         <div className="p-3 border-t border-slate-200 space-y-2">
-          {switcher}
-          <button onClick={onExit} className="w-full px-3 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg flex items-center gap-2 border border-indigo-100">
-            <ArrowLeftRight size={16} /><span className="truncate">{backLabel}</span>
-          </button>
+          {/* El selector ya incluye el espacio personal; sin selector, botón para volver. */}
+          {switcher || (
+            <button onClick={onExit} className="w-full px-3 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg flex items-center gap-2 border border-indigo-100">
+              <ArrowLeftRight size={16} /><span className="truncate">{backLabel}</span>
+            </button>
+          )}
         </div>
       </aside>
 
@@ -245,9 +267,7 @@ const ClinicWorkspace: React.FC<ClinicWorkspaceProps> = ({ orgId, currentUser, b
         )}
         <main className="flex-1 overflow-y-auto px-4 md:px-8 py-6">
           <Suspense fallback={<div className="flex justify-center py-12"><Loader2 className="animate-spin text-indigo-400" size={28} /></div>}>
-            {current.id === 'home'
-              ? <ClinicHome c={ctx} go={go} sections={sections} />
-              : current.render(ctx, helpers)}
+            <React.Fragment key={nav.key}>{current.render(ctx, helpers)}</React.Fragment>
           </Suspense>
         </main>
       </div>
