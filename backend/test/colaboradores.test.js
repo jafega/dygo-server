@@ -51,3 +51,92 @@ test('enmascararEmail', () => {
   assert.equal(enmascararEmail('maria.lopez@gmail.com'), 'ma***@gmail.com');
   assert.equal(enmascararEmail(null), null);
 });
+
+// ── Flujo del webhook con Stripe y Supabase simulados ───────────────────────
+import { registrarFacturaCobrada, actualizarEstadoReferido } from '../utils/colaboradores.js';
+
+// Supabase en memoria: solo lo que usa colaboradores.js.
+function fakeSupabase(tablas) {
+  let n = 0;
+  const unicos = { collaborator_earnings: e => `${e.stripe_invoice_id}|${e.type}` };
+  return {
+    from(t) {
+      const rows = (tablas[t] ||= []);
+      let filtros = [], op = 'select', payload = null;
+      const match = r => filtros.every(([k, v]) => String(r[k]) === String(v));
+      const run = () => {
+        if (op === 'insert') {
+          for (const p of payload) {
+            const clave = unicos[t]?.(p);
+            if (clave && !clave.startsWith('undefined') && rows.some(r => unicos[t](r) === clave)) {
+              return { data: null, error: { message: 'duplicate key value violates unique constraint' } };
+            }
+            if (t === 'collaborator_referrals' && rows.some(r => r.stripe_subscription_id === p.stripe_subscription_id)) {
+              return { data: null, error: { message: 'duplicate key' } };
+            }
+          }
+          const ins = payload.map(p => ({ id: `id${++n}`, created_at: new Date().toISOString(), paid_invoice_ids: [], months_paid: 0, total_paid: 0, ...p }));
+          rows.push(...ins);
+          return { data: ins, error: null };
+        }
+        if (op === 'update') {
+          const hit = rows.filter(match); hit.forEach(r => Object.assign(r, payload));
+          return { data: hit, error: null };
+        }
+        return { data: rows.filter(match), error: null };
+      };
+      const q = {
+        select() { return q; }, eq(k, v) { filtros.push([k, v]); return q; }, limit() { return q; },
+        insert(p) { op = 'insert'; payload = p; return q; }, update(p) { op = 'update'; payload = p; return q; },
+        maybeSingle: async () => { const r = run(); return { data: r.data?.[0] || null, error: r.error }; },
+        single: async () => { const r = run(); return { data: r.data?.[0] || null, error: r.error }; },
+        then(res, rej) { return Promise.resolve(run()).then(res, rej); }
+      };
+      return q;
+    }
+  };
+}
+
+test('webhook: lead con código → referido + comisiones, idempotente y sin auto-referido', async () => {
+  const tablas = {
+    collaborators: [{ id: 'col1', user_id: 'laura', active: true, payout_model: 'recurring', payout_amount_type: 'percent', payout_percent: 20, payout_amount: 0, payout_min_months: 1, payout_max_months: 2 }],
+    collaborator_codes: [{ id: 'k1', collaborator_id: 'col1', code: 'LAURA20', stripe_promotion_code_id: 'promo_1' }],
+    users: [{ id: 'pablo', user_email: 'pablo@x.com', data: { name: 'Pablo' } }]
+  };
+  const sb = fakeSupabase(tablas);
+  const stripe = { subscriptions: { retrieve: async () => ({ status: 'active', customer: 'cus_1', metadata: { psychologist_user_id: 'pablo', subscription_type: 'psychologist', plan_id: 'pro' } }) } };
+  const factura = (id, cents, tax = 0) => ({ id, subscription: 'sub_1', customer: 'cus_1', amount_paid: cents, tax, discount: { promotion_code: 'promo_1' } });
+
+  // Prueba a 0 €: crea el lead, no cuenta mes ni comisión.
+  await registrarFacturaCobrada(sb, stripe, factura('in_0', 0));
+  assert.equal(tablas.collaborator_referrals.length, 1);
+  assert.equal(tablas.collaborator_referrals[0].referred_email, 'pablo@x.com');
+  assert.equal((tablas.collaborator_earnings || []).length, 0);
+
+  // Mes 1: 40 € + 8,40 IVA → 20 % de 40 = 8 €.
+  await registrarFacturaCobrada(sb, stripe, factura('in_1', 4840, 840));
+  // Reintento del mismo webhook: nada nuevo.
+  await registrarFacturaCobrada(sb, stripe, factura('in_1', 4840, 840));
+  assert.equal(tablas.collaborator_earnings.length, 1);
+  assert.equal(tablas.collaborator_earnings[0].amount, 8);
+  assert.equal(tablas.collaborator_referrals[0].months_paid, 1);
+
+  // Mes 2 cobra; mes 3 supera el tope de 2 → sin comisión. Tras el cupón la factura ya no trae descuento.
+  await registrarFacturaCobrada(sb, stripe, { ...factura('in_2', 4840, 840) });
+  await registrarFacturaCobrada(sb, stripe, { ...factura('in_3', 4840, 840), discount: null });
+  assert.equal(tablas.collaborator_earnings.length, 2);
+  assert.equal(tablas.collaborator_referrals[0].months_paid, 3);
+
+  // Baja en Stripe → estado del lead.
+  await actualizarEstadoReferido(sb, { id: 'sub_1', status: 'canceled' }, { borrada: true });
+  assert.equal(tablas.collaborator_referrals[0].stripe_status, 'canceled');
+
+  // La propia colaboradora usando su código: no cuenta.
+  const stripeSelf = { subscriptions: { retrieve: async () => ({ status: 'active', metadata: { psychologist_user_id: 'laura' } }) } };
+  await registrarFacturaCobrada(sb, stripeSelf, { ...factura('in_x', 4840), subscription: 'sub_self' });
+  assert.equal(tablas.collaborator_referrals.length, 1);
+
+  // Factura sin código de colaborador: ni se pregunta a Stripe.
+  const stripeNo = { subscriptions: { retrieve: async () => { throw new Error('no debería llamarse'); } } };
+  assert.equal(await registrarFacturaCobrada(sb, stripeNo, { id: 'in_y', subscription: 'sub_otro', amount_paid: 1000 }), null);
+});
