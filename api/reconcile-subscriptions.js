@@ -21,6 +21,7 @@ import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
 import { trackEvent, EVENTS } from '../backend/utils/events.js';
 import { sincronizarLeadConSuscripcion } from '../backend/utils/lead-suscripcion.js';
+import { reconciliarColaboradores } from '../backend/utils/colaboradores.js';
 
 export const config = { api: { bodyParser: true } };
 
@@ -220,6 +221,17 @@ export default async function handler(req, res) {
       orphans.push({ user_id: id, stripe_status: row.stripe_status, stripe_subscription_id: row.stripe_subscription_id || null });
     }
 
+    /* ── 6. Programa de colaboradores: leads y comisiones desde el histórico ── */
+    // Red de seguridad del webhook invoice.payment_succeeded. Aislado: si falla
+    // (p. ej. tablas sin crear) no tumba la reconciliación de suscripciones.
+    let collaborators = null;
+    try {
+      collaborators = await reconciliarColaboradores(supabase, stripe, { suscripciones: stripeSubs, dryRun });
+    } catch (e) {
+      collaborators = { error: e?.message || String(e) };
+      console.error('[reconcile-subscriptions] colaboradores:', collaborators.error);
+    }
+
     const summary = {
       ok: true,
       dry_run: dryRun,
@@ -230,6 +242,7 @@ export default async function handler(req, res) {
       churned: changes.filter(c => c.transition === 'churned').length,
       drift: changes.filter(c => c.transition === 'drift').length,
       orphans_active_in_supabase_only: orphans,
+      collaborators,
       errors,
       changes
     };

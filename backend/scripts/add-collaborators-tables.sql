@@ -141,3 +141,13 @@ ALTER TABLE public.collaborators ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.collaborator_codes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.collaborator_referrals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.collaborator_earnings ENABLE ROW LEVEL SECURITY;
+
+-- ═══════════════════════════════════════════════════════════════
+-- 5. Un cliente, un colaborador (para siempre)
+-- ═══════════════════════════════════════════════════════════════
+-- El lead es el cliente, no la suscripción: si cancela y vuelve, la nueva
+-- suscripción se cuelga de la misma fila (ver referidoDeSuscripcion).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_collaborator_referrals_user
+  ON public.collaborator_referrals(referred_user_id) WHERE referred_user_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_collaborator_referrals_customer
+  ON public.collaborator_referrals(stripe_customer_id) WHERE stripe_customer_id IS NOT NULL;

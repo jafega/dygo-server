@@ -71,7 +71,9 @@ function fakeSupabase(tablas) {
             if (clave && !clave.startsWith('undefined') && rows.some(r => unicos[t](r) === clave)) {
               return { data: null, error: { message: 'duplicate key value violates unique constraint' } };
             }
-            if (t === 'collaborator_referrals' && rows.some(r => r.stripe_subscription_id === p.stripe_subscription_id)) {
+            if (t === 'collaborator_referrals' && rows.some(r => r.stripe_subscription_id === p.stripe_subscription_id
+              || (p.referred_user_id && r.referred_user_id === p.referred_user_id)
+              || (p.stripe_customer_id && r.stripe_customer_id === p.stripe_customer_id))) {
               return { data: null, error: { message: 'duplicate key' } };
             }
           }
@@ -139,4 +141,68 @@ test('webhook: lead con código → referido + comisiones, idempotente y sin aut
   // Factura sin código de colaborador: ni se pregunta a Stripe.
   const stripeNo = { subscriptions: { retrieve: async () => { throw new Error('no debería llamarse'); } } };
   assert.equal(await registrarFacturaCobrada(sb, stripeNo, { id: 'in_y', subscription: 'sub_otro', amount_paid: 1000 }), null);
+});
+
+test('reconciliación diaria: recoge del histórico de Stripe lo que el webhook no apuntó', async () => {
+  const { reconciliarColaboradores } = await import('../utils/colaboradores.js');
+  const tablas = {
+    collaborators: [{ id: 'col1', user_id: 'laura', active: true, payout_model: 'one_time', payout_amount_type: 'fixed', payout_amount: 50, payout_percent: 0, payout_min_months: 2, payout_max_months: null }],
+    collaborator_codes: [{ id: 'k1', collaborator_id: 'col1', code: 'LAURA20', stripe_promotion_code_id: 'promo_1' }],
+    users: []
+  };
+  const sb = fakeSupabase(tablas);
+  const inv = (id, created) => ({ id, created, subscription: 'sub_9', customer: 'cus_9', amount_paid: 3000, tax: 0, discount: { promotion_code: 'promo_1' } });
+  const historico = [inv('in_b', 200), { id: 'in_ajena', created: 150, subscription: 'sub_x', amount_paid: 5000 }, inv('in_a', 100)];
+  const stripe = {
+    invoices: { list: () => (async function* () { yield* historico; })() },
+    subscriptions: { retrieve: async () => ({ status: 'active', metadata: { psychologist_user_id: 'pepa' } }) }
+  };
+  const r1 = await reconciliarColaboradores(sb, stripe, { suscripciones: [{ id: 'sub_9', status: 'past_due' }] });
+  assert.equal(r1.facturas_con_codigo, 2);
+  assert.equal(tablas.collaborator_referrals.length, 1);
+  assert.equal(tablas.collaborator_referrals[0].months_paid, 2);
+  assert.equal(tablas.collaborator_referrals[0].stripe_status, 'past_due');
+  assert.deepEqual(tablas.collaborator_earnings.map(e => [e.type, e.amount]), [['one_time', 50]]);
+  // Al día siguiente vuelve a pasar: no duplica nada.
+  await reconciliarColaboradores(sb, stripe, {});
+  assert.equal(tablas.collaborator_earnings.length, 1);
+  assert.equal(tablas.collaborator_referrals[0].months_paid, 2);
+});
+
+test('un cliente, un colaborador: si vuelve, aunque sea con el código de otro, sigue con el primero', async () => {
+  const tablas = {
+    collaborators: [
+      { id: 'col1', user_id: 'laura', active: true, payout_model: 'recurring', payout_amount_type: 'fixed', payout_amount: 5, payout_percent: 0, payout_min_months: 1, payout_max_months: null },
+      { id: 'col2', user_id: 'marta', active: true, payout_model: 'recurring', payout_amount_type: 'fixed', payout_amount: 9, payout_percent: 0, payout_min_months: 1, payout_max_months: null }
+    ],
+    collaborator_codes: [
+      { id: 'k1', collaborator_id: 'col1', code: 'LAURA20', stripe_promotion_code_id: 'promo_laura' },
+      { id: 'k2', collaborator_id: 'col2', code: 'MARTA30', stripe_promotion_code_id: 'promo_marta' }
+    ],
+    users: []
+  };
+  const sb = fakeSupabase(tablas);
+  const llamadas = [];
+  const stripe = { subscriptions: { retrieve: async (id) => { llamadas.push(id); return { id, status: 'active', metadata: { psychologist_user_id: 'pepa' } }; } } };
+  const inv = (id, sub, promo, customer = 'cus_pepa') => ({ id, subscription: sub, customer, amount_paid: 3000, tax: 0, discount: promo ? { promotion_code: promo } : null });
+
+  await registrarFacturaCobrada(sb, stripe, inv('in_1', 'sub_a', 'promo_laura'));
+  await actualizarEstadoReferido(sb, { id: 'sub_a', status: 'canceled' }, { borrada: true });
+  // Vuelve meses después sin código: sigue siendo de Laura y suma el mes 2.
+  await registrarFacturaCobrada(sb, stripe, inv('in_2', 'sub_b', null));
+  // Y otra vez con el código de Marta: sigue siendo de Laura.
+  await registrarFacturaCobrada(sb, stripe, inv('in_3', 'sub_c', 'promo_marta'));
+  // Mismo usuario con otro customer de Stripe y código de Marta: también de Laura.
+  await registrarFacturaCobrada(sb, stripe, inv('in_4', 'sub_d', 'promo_marta', 'cus_otro'));
+
+  assert.equal(tablas.collaborator_referrals.length, 1);
+  const r = tablas.collaborator_referrals[0];
+  assert.equal(r.collaborator_id, 'col1');
+  assert.equal(r.stripe_subscription_id, 'sub_d');
+  assert.equal(r.stripe_status, 'active');
+  assert.equal(r.canceled_at, null);
+  assert.equal(r.months_paid, 4);
+  assert.deepEqual(tablas.collaborator_earnings.map(e => [e.collaborator_id, e.amount]), Array(4).fill(['col1', 5]));
+  // Volver con el mismo customer de Stripe no pregunta a Stripe: solo el alta y el customer nuevo.
+  assert.deepEqual(llamadas, ['sub_a', 'sub_d']);
 });
