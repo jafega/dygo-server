@@ -6786,6 +6786,9 @@ const upsertPatientSubToSupabase = async (patientId, patSub) => {
   }
 };
 
+// mainds business (se asigna al montar Business, al final del fichero).
+let businessApi = null;
+
 app.post(
   ['/webhook', '/api/webhook', '/api/stripe/webhook', '/api/stripe-webhook', '/api/webhooks/stripe'],
   async (req, res) => {
@@ -6805,6 +6808,16 @@ app.post(
   } catch (err) {
     console.warn('Webhook signature verification failed, event rejected:', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  // mainds business: los eventos de una clínica (metadata mainds_kind=organization)
+  // se procesan aparte y NUNCA llegan a la lógica de suscripciones de Pro.
+  if (businessApi) {
+    const r = await businessApi.handleStripeEvent(event)
+      .catch(() => ({ handled: businessApi.isOrgStripeEvent(event), ok: false }));
+    if (r?.handled) {
+      return r.ok ? res.json({ received: true }) : res.status(500).send('Business webhook error');
+    }
   }
 
   try {
@@ -24109,7 +24122,7 @@ try {
 // falla, Pro sigue igual y Business queda apagado.
 try {
   const { mountBusiness } = await import('./business/index.js');
-  mountBusiness(app, {
+  businessApi = mountBusiness(app, {
     supabase: supabaseAdmin,
     isServerless: IS_SERVERLESS,
     authenticateRequest,
@@ -24122,7 +24135,14 @@ try {
     },
     stripe: () => (process.env.STRIPE_SECRET_KEY
       ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2022-11-15' })
-      : null)
+      : null),
+    sendEmail: async ({ to, subject, html }) => {
+      if (!process.env.RESEND_API_KEY) return false;
+      const { Resend } = await import('resend');
+      const resend = new Resend(process.env.RESEND_API_KEY);
+      await resend.emails.send({ from: 'mainds <no-reply@mainds.app>', to, reply_to: 'info@mainds.app', subject, html });
+      return true;
+    }
   });
 } catch (err) {
   console.error('❌ [business] No se pudo montar mainds business:', err?.message || err);

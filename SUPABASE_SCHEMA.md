@@ -292,3 +292,53 @@ CREATE TABLE public.access_audit (
   ip text,
   CONSTRAINT access_audit_pkey PRIMARY KEY (id)
 );
+-- business-002-orgs.sql — Fase 1. RLS activado sin políticas.
+CREATE TABLE public.organizations (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  name text NOT NULL,
+  slug text NOT NULL,              -- único (lower)
+  legal_name text,
+  cif text,
+  logo_url text,
+  settings jsonb NOT NULL DEFAULT '{}'::jsonb,
+  plan_id text NOT NULL DEFAULT 'essential',        -- essential | plus
+  billing_interval text NOT NULL DEFAULT 'month',   -- month | year
+  status text NOT NULL DEFAULT 'trialing',          -- trialing | active | past_due | canceled
+  trial_ends_at timestamp with time zone,
+  stripe_customer_id text,
+  stripe_subscription_id text,
+  seats_billed integer,
+  dpa_accepted_at timestamp with time zone,
+  dpa_version text,
+  dpa_accepted_by text,
+  created_by text NOT NULL,
+  CONSTRAINT organizations_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.org_members (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  org_id uuid NOT NULL,            -- FK organizations(id) ON DELETE CASCADE
+  user_id text,                    -- users.id (NULL hasta aceptar); único por org
+  email text NOT NULL,             -- único por org (lower)
+  display_name text,
+  role text NOT NULL,              -- titular | gerente | director_clinico | psicologo | en_practicas | recepcion | contable
+  is_clinical boolean NOT NULL DEFAULT false,
+  permissions_override jsonb NOT NULL DEFAULT '{}'::jsonb,
+  employment_type text NOT NULL DEFAULT 'employee', -- employee | freelance | room_rental | intern
+  billing_model text NOT NULL DEFAULT 'payroll',    -- payroll | org_invoices | psych_invoices | fixed_rent
+  seat_billable boolean NOT NULL DEFAULT false,
+  status text NOT NULL DEFAULT 'invited',           -- invited | active | suspended | left | declined
+  invitation_token_hash text,                       -- sha256 del token; único
+  invitation_expires_at timestamp with time zone,
+  invited_by text,
+  joined_at timestamp with time zone,
+  left_at timestamp with time zone,
+  supervisor_member_id uuid,       -- FK org_members(id)
+  irpf_rate numeric(5,2),
+  public_profile jsonb NOT NULL DEFAULT '{}'::jsonb,
+  accepts_leads boolean NOT NULL DEFAULT false,
+  CONSTRAINT org_members_pkey PRIMARY KEY (id)
+);

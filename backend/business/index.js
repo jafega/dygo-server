@@ -15,17 +15,20 @@
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readFlags, resolveStoreDriver, canCreateOrganization } from './flags.js';
+import { readFlags, resolveStoreDriver } from './flags.js';
 import { createStore } from './store.js';
 import { asyncRoute, sendError, notFound } from './errors.js';
 import { createAuditRecorder } from './audit.js';
+import { requireMember, enforceWritable } from './workspace.js';
+import { buildMe, registerTopLevelRoutes, registerScopedRoutes } from './orgs.js';
+import {
+  readPriceIds, createSeatSync, registerBillingRoutes, handleOrgStripeEvent, isOrgStripeEvent
+} from './billing.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_STORE_FILE = path.resolve(__dirname, '..', '.business-store.local.json');
 
 const DISABLED_ME = Object.freeze({ enabled: false, memberships: [] });
-
-const emailOf = (user) => String(user?.email || user?.user_email || user?.data?.email || '').trim().toLowerCase();
 
 /**
  * Crea los routers de Business.
@@ -33,18 +36,24 @@ const emailOf = (user) => String(user?.email || user?.user_email || user?.data?.
  * @param {object|null} opts.store             Store (business/store.js) o null si Business no puede funcionar.
  * @param {Function} opts.authenticateRequest  Middleware de sesión de server.js (rellena req.authenticatedUserId).
  * @param {(email:string)=>boolean} opts.isSuperAdmin
- * @param {Function|null} [opts.stripe]        Factoría perezosa del cliente de Stripe (Fase 1).
- * @param {object} [opts.deps]                 { flags, getUser(id), auditLog(action, details) }
- * @returns {{ orgRouter: express.Router, publicRouter: express.Router, active: boolean, recordAccess: Function, ctx: object }}
+ * @param {Function|object|null} [opts.stripe] Cliente de Stripe o factoría perezosa.
+ * @param {object} [opts.deps]                 { flags, getUser(id), auditLog(action, details), sendEmail, frontendUrl, prices, env }
+ * @returns {{ orgRouter: express.Router, publicRouter: express.Router, active: boolean, recordAccess: Function, ctx: object, handleStripeEvent: Function }}
  */
 export function createBusinessRouter({ store, authenticateRequest, isSuperAdmin, stripe = null, deps = {} }) {
   if (typeof authenticateRequest !== 'function') throw new Error('createBusinessRouter necesita authenticateRequest');
-  const flags = deps.flags || readFlags();
+  const flags = deps.flags || readFlags(deps.env || process.env);
   const active = !!(flags.enabled && store);
   const getUser = typeof deps.getUser === 'function' ? deps.getUser : async () => null;
   const recordAccess = createAuditRecorder({ store, fallback: deps.auditLog });
-  // Disponible para las rutas de fases siguientes.
-  const ctx = { store, flags, isSuperAdmin, stripe, getUser, recordAccess };
+  const prices = deps.prices || readPriceIds(deps.env || process.env);
+  const frontendUrl = String(deps.frontendUrl || (deps.env || process.env).FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
+  const seats = store ? createSeatSync({ store, stripe, prices }) : { sync: async () => ({ ok: false }) };
+  const ctx = {
+    store, flags, isSuperAdmin, stripe, getUser, recordAccess, authenticateRequest,
+    prices, frontendUrl, seats, sendEmail: deps.sendEmail || null,
+    deps
+  };
 
   const orgRouter = express.Router();
   const publicRouter = express.Router();
@@ -52,30 +61,14 @@ export function createBusinessRouter({ store, authenticateRequest, isSuperAdmin,
   // GET /api/org/me — siempre existe; es lo único que llama el frontend de Pro.
   orgRouter.get('/me', authenticateRequest, asyncRoute(async (req, res) => {
     if (!active) return res.json(DISABLED_ME);
-
-    let memberRows;
     try {
-      memberRows = await store.list('org_members', { eq: { user_id: String(req.authenticatedUserId) }, limit: 100 });
+      const user = await getUser(req.authenticatedUserId);
+      return res.json(await buildMe(ctx, user, req.authenticatedUserId));
     } catch (err) {
       // R2: tablas sin migrar → Business apagado para este usuario, nunca 500.
       if (err?.code === 'BUSINESS_NOT_MIGRATED') return res.json(DISABLED_ME);
       throw err;
     }
-
-    const user = await getUser(req.authenticatedUserId);
-    const canCreateOrg = canCreateOrganization(emailOf(user), { betaEmails: flags.betaEmails, isSuperAdmin });
-
-    const memberships = [];
-    for (const m of memberRows) {
-      if (m.status !== 'active') continue;
-      const org = await store.get('organizations', m.org_id);
-      if (!org) continue;
-      memberships.push({
-        orgId: org.id, name: org.name, slug: org.slug, logo_url: org.logo_url || null,
-        role: m.role, status: m.status
-      });
-    }
-    return res.json({ enabled: true, canCreateOrg, memberships });
   }));
 
   // Con Business apagado nada más existe (ni se pide sesión: no se revela nada).
@@ -83,17 +76,38 @@ export function createBusinessRouter({ store, authenticateRequest, isSuperAdmin,
   orgRouter.use(gate);
   publicRouter.use(gate);
 
-  // Aquí se registrarán las rutas de las fases 1-5, que reciben `ctx`.
+  // Nivel superior: crear clínica, invitaciones, soporte.
+  registerTopLevelRoutes(orgRouter, ctx);
 
-  orgRouter.use((req, res) => sendError(res, notFound()));
-  publicRouter.use((req, res) => sendError(res, notFound()));
+  // Rutas de una clínica: sesión → miembro activo → suscripción (R8, R9).
+  const scoped = express.Router({ mergeParams: true });
+  scoped.use(requireMember(ctx), enforceWritable);
+  registerScopedRoutes(scoped, ctx);
+  registerBillingRoutes(scoped, ctx);
+  for (const register of deps.registerScoped || []) register(scoped, ctx);
+  orgRouter.use('/:orgId', authenticateRequest, scoped);
 
-  return { orgRouter, publicRouter, active, recordAccess, ctx };
+  for (const register of deps.registerPublic || []) register(publicRouter, ctx);
+
+  const fallthrough = (req, res) => sendError(res, notFound());
+  const onError = (err, req, res, next) => sendError(res, err); // eslint-disable-line no-unused-vars
+  orgRouter.use(fallthrough);
+  orgRouter.use(onError);
+  publicRouter.use(fallthrough);
+  publicRouter.use(onError);
+
+  const handleStripeEvent = async (event) => {
+    if (!active) return { handled: isOrgStripeEvent(event), ok: true };
+    return handleOrgStripeEvent({ store }, event);
+  };
+
+  return { orgRouter, publicRouter, active, recordAccess, ctx, handleStripeEvent, isOrgStripeEvent };
 }
 
 /**
  * Monta Business en la app de server.js. Nunca lanza: si algo falla, Pro sigue
  * funcionando y Business queda apagado.
+ * @returns {{ active:boolean, store:object|null, reason:string|null, handleStripeEvent:Function, isOrgStripeEvent:Function }}
  */
 export function mountBusiness(app, {
   supabase = null,
@@ -102,9 +116,11 @@ export function mountBusiness(app, {
   isSuperAdmin,
   getUser,
   auditLog,
+  sendEmail = null,
   stripe = null,
   env = process.env,
-  logger = console
+  logger = console,
+  extraDeps = {}
 } = {}) {
   const flags = readFlags(env);
   let store = null;
@@ -123,9 +139,9 @@ export function mountBusiness(app, {
     reason = `No se pudo crear el store: ${err?.message || err}`;
   }
 
-  const { orgRouter, publicRouter, active } = createBusinessRouter({
+  const { orgRouter, publicRouter, active, handleStripeEvent } = createBusinessRouter({
     store, authenticateRequest, isSuperAdmin, stripe,
-    deps: { flags, getUser, auditLog }
+    deps: { flags, getUser, auditLog, sendEmail, env, ...extraDeps }
   });
   app.use('/api/org', orgRouter);
   app.use('/api/public/org', publicRouter);
@@ -133,5 +149,5 @@ export function mountBusiness(app, {
   logger.log(active
     ? `🏥 mainds business ACTIVO (store: ${store.driver})`
     : `🏥 mainds business apagado (${reason})`);
-  return { active, store, reason };
+  return { active, store, reason, handleStripeEvent, isOrgStripeEvent };
 }

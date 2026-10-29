@@ -41,6 +41,8 @@ interface PsychologistSidebarProps {
   onSwitchToAdmin?: () => void;
   /** Solo se pasa si el usuario es colaborador de mainds (o superadmin). */
   onSwitchToCollaborator?: () => void;
+  /** mainds business: selector de espacio (solo si el usuario tiene clínicas o acceso a la beta). */
+  workspaceSwitcher?: React.ReactNode;
   isProfileIncomplete?: boolean;
   subscriptionInfo?: SubscriptionInfo | null;
   psychologistId?: string;
@@ -60,6 +62,7 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
   onOpenSettings,
   onSwitchToAdmin,
   onSwitchToCollaborator,
+  workspaceSwitcher,
   isProfileIncomplete = false,
   subscriptionInfo = null,
   psychologistId = '',
@@ -421,6 +424,7 @@ const PsychologistSidebar: React.FC<PsychologistSidebarProps> = ({
 
         {/* Footer */}
         <div className="p-3 border-t border-slate-200 space-y-2">
+          {workspaceSwitcher}
           {renderSubscriptionCard()}
           <button
             onClick={onOpenSettings}

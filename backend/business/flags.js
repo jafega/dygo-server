@@ -7,6 +7,8 @@
 //   BUSINESS_STORE         'supabase' | 'file' | 'memory'. Por defecto:
 //                          supabase si hay cliente; si no, file.
 //   BUSINESS_STORE_FILE    Ruta del fichero del driver file.
+//   BUSINESS_DPA_VERSION   Versión vigente del contrato de encargo (DPA) que
+//                          se acepta al crear una clínica.
 
 const TRUE_VALUES = new Set(['1', 'true', 'yes', 'on']);
 
@@ -17,6 +19,9 @@ const parseList = (v) => String(v || '')
   .map(s => s.trim().toLowerCase())
   .filter(Boolean);
 
+// Borrador pendiente de revisión legal (docs/business/legal/DPA_v1.md).
+export const DEFAULT_DPA_VERSION = 'v1-borrador';
+
 export const STORE_DRIVERS = ['supabase', 'file', 'memory'];
 
 export function readFlags(env = process.env) {
@@ -24,7 +29,8 @@ export function readFlags(env = process.env) {
     enabled: parseBool(env.BUSINESS_ENABLED),
     betaEmails: parseList(env.BUSINESS_BETA_EMAILS),
     requestedStore: String(env.BUSINESS_STORE || '').trim().toLowerCase() || null,
-    storeFile: String(env.BUSINESS_STORE_FILE || '').trim() || null
+    storeFile: String(env.BUSINESS_STORE_FILE || '').trim() || null,
+    dpaVersion: String(env.BUSINESS_DPA_VERSION || '').trim() || DEFAULT_DPA_VERSION
   };
 }
 

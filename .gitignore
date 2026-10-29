@@ -32,3 +32,4 @@ backend/.env.local
 # mainds business: store local (driver file) — nunca se commitea
 backend/.business-store.local.json
 backend/.business-store.local.json.tmp-*
+e2e/.shots/

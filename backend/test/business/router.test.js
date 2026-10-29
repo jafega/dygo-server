@@ -67,10 +67,17 @@ test('membresías activas aparecen en /me; las demás no', async (t) => {
   const s = await serve(appWith(store, { enabled: true, betaEmails: ['a@x.com'] }));
   t.after(s.close);
   const r = await s.get('/api/org/me');
-  assert.deepEqual(r.body, {
-    enabled: true, canCreateOrg: true,
-    memberships: [{ orgId: org.id, name: 'Clínica Sol', slug: 'sol', logo_url: null, role: 'psicologo', status: 'active' }]
-  });
+  assert.equal(r.body.enabled, true);
+  assert.equal(r.body.canCreateOrg, true);
+  assert.deepEqual(r.body.pendingInvitations, []);
+  assert.equal(r.body.memberships.length, 1);
+  const m = r.body.memberships[0];
+  assert.deepEqual(
+    { orgId: m.orgId, name: m.name, slug: m.slug, logo_url: m.logo_url, role: m.role, status: m.status },
+    { orgId: org.id, name: 'Clínica Sol', slug: 'sol', logo_url: null, role: 'psicologo', status: 'active' }
+  );
+  assert.ok(m.permissions.includes('agenda.manage_own'));
+  assert.ok(!m.permissions.includes('team.manage'));
   assert.deepEqual((await s.get('/api/org/me', 'u2')).body.memberships, []);
 });
 
@@ -107,5 +114,6 @@ test('mountBusiness: driver memory con flag encendido', async (t) => {
   assert.equal(res.store.driver, 'memory');
   const s = await serve(app);
   t.after(s.close);
-  assert.deepEqual((await s.get('/api/org/me')).body, { enabled: true, canCreateOrg: false, memberships: [] });
+  assert.deepEqual((await s.get('/api/org/me')).body,
+    { enabled: true, canCreateOrg: false, dpaVersion: 'v1-borrador', memberships: [], pendingInvitations: [] });
 });

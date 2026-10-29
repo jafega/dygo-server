@@ -66,7 +66,11 @@ function assertWritable(table, op) {
 // `ci` = columnas comparadas sin distinguir mayúsculas.
 export const UNIQUE_KEYS = {
   organizations: [{ columns: ['slug'], ci: ['slug'] }],
-  org_members: [{ columns: ['org_id', 'email'], ci: ['email'] }],
+  org_members: [
+    { columns: ['org_id', 'email'], ci: ['email'] },
+    { columns: ['org_id', 'user_id'] },
+    { columns: ['invitation_token_hash'] }
+  ],
   org_invoices: [{ columns: ['issuer_key', 'series', 'number'] }]
 };
 

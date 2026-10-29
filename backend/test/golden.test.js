@@ -100,7 +100,10 @@ const CASES = [
 // flag apagado.
 const MODES = [
   { label: 'flag apagado', env: {}, generate: true },
-  { label: 'flag encendido', env: { BUSINESS_ENABLED: 'true', BUSINESS_STORE: 'file', BUSINESS_BETA_EMAILS: 'pro@golden.local' }, generate: false }
+  { label: 'flag encendido', env: { BUSINESS_ENABLED: 'true', BUSINESS_STORE: 'file', BUSINESS_BETA_EMAILS: 'pro@golden.local' }, generate: false },
+  // El Pro es además titular de una clínica con un paciente invitado como
+  // miembro: su espacio personal tiene que seguir idéntico.
+  { label: 'flag encendido y el Pro es titular de una clínica', env: { BUSINESS_ENABLED: 'true', BUSINESS_STORE: 'file', BUSINESS_BETA_EMAILS: 'pro@golden.local' }, generate: false, withClinic: true }
 ];
 
 for (const mode of MODES) {
@@ -114,6 +117,20 @@ for (const mode of MODES) {
     const users = { pro, p1, p2 };
     const ids = new Map([[pro.id, '<PRO>'], [p1.id, '<P1>'], [p2.id, '<P2>']]);
     srv.writeDb(seed(srv.readDb(), users));
+
+    if (mode.withClinic) {
+      const org = await srv.request('POST', '/api/org', {
+        token: pro.token,
+        body: { name: 'Clínica Golden', dpa_accepted: true, dpa_version: 'v1-borrador', is_clinical: true }
+      });
+      assert.equal(org.status, 201, org.text);
+      const inv = await srv.request('POST', `/api/org/${org.body.organization.id}/members/invite`, {
+        token: pro.token, body: { email: p2.email, role: 'psicologo' }
+      });
+      assert.equal(inv.status, 201, inv.text);
+      const token = new URL(inv.body.invite_url).searchParams.get('org_invite');
+      assert.equal((await srv.request('POST', '/api/org/invitations/accept', { token: p2.token, body: { token } })).status, 200);
+    }
 
     for (const c of CASES) {
       await t.test(`GET ${c.name}`, async () => {

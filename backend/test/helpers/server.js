@@ -61,7 +61,8 @@ export async function startServer(opts = {}) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mainds-test-'));
   const dbFile = path.join(tmpDir, 'db.json');
   if (opts.db) fs.writeFileSync(dbFile, JSON.stringify(opts.db, null, 2), 'utf-8');
-  const port = await freePort();
+  // opts.env.PORT fija el puerto (los E2E usan 3001, al que apunta el proxy de Vite).
+  const port = opts.env?.PORT ? Number(opts.env.PORT) : await freePort();
 
   const env = { ...process.env };
   for (const k of BLANKED_ENV) env[k] = '';
