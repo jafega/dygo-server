@@ -3,6 +3,9 @@
 // Precio = base por clínica + licencia por profesional (seat). Precios por env:
 //   STRIPE_PRICE_ID_BUSINESS_{ESSENTIAL|PLUS}_{BASE|SEAT}           (mensual)
 //   STRIPE_PRICE_ID_BUSINESS_{ESSENTIAL|PLUS}_{BASE|SEAT}_YEARLY    (anual)
+// Los que no estén en env se buscan en Stripe por lookup_key
+// (mainds_business_<plan>_<base|seat>_<month|year>) y, si no existen, se crean
+// la primera vez con las tarifas de PRICE_CENTS (ensureStripePrices).
 //
 // Separación total de Pro: los objetos de Stripe de una clínica llevan
 // metadata { mainds_kind: 'organization', organization_id }. El webhook de
@@ -14,6 +17,83 @@ import { requireAction } from './workspace.js';
 import { PLANS, INTERVALS } from './orgs.js';
 
 export const ORG_KIND = 'organization';
+
+// Tarifas del plan (céntimos, IVA no incluido). Anual = 10 meses (2 gratis).
+export const PRICE_CENTS = {
+  essential: { base: 3900, seat: 1900 },
+  plus: { base: 7900, seat: 2500 }
+};
+const PLAN_NAMES = { essential: 'Essential', plus: 'Plus' };
+export const priceLookupKey = (plan, part, interval) => `mainds_business_${plan}_${part}_${interval}`;
+
+/**
+ * Completa en `prices` (en sitio) los precios que falten: los busca en Stripe
+ * por lookup_key y crea los que no existan. Idempotente; con
+ * transfer_lookup_key, dos instancias a la vez no dejan claves duplicadas.
+ * @returns {Promise<boolean>} true si todos los precios quedan resueltos
+ */
+export async function ensureStripePrices(client, prices) {
+  const missing = [];
+  for (const plan of PLANS) for (const interval of INTERVALS) for (const part of ['base', 'seat']) {
+    if (!prices[plan]?.[interval]?.[part]) missing.push({ plan, interval, part, key: priceLookupKey(plan, part, interval) });
+  }
+  if (!missing.length) return true;
+  if (!client) return false;
+  const found = await client.prices.list({ lookup_keys: missing.map(m => m.key), active: true, limit: 100 });
+  const byKey = new Map((found.data || []).map(p => [p.lookup_key, p]));
+  const productOf = {};
+  for (const p of byKey.values()) {
+    const [, , plan, part] = String(p.lookup_key).split('_');
+    productOf[`${plan}_${part}`] = typeof p.product === 'string' ? p.product : p.product?.id;
+  }
+  for (const m of missing) {
+    let price = byKey.get(m.key);
+    if (!price) {
+      const pk = `${m.plan}_${m.part}`;
+      if (!productOf[pk]) {
+        const product = await client.products.create({
+          name: `mainds business ${PLAN_NAMES[m.plan]} · ${m.part === 'base' ? 'clínica' : 'licencia de profesional'}`,
+          metadata: { mainds_kind: ORG_KIND, plan: m.plan, part: m.part }
+        });
+        productOf[pk] = product.id;
+      }
+      const monthly = PRICE_CENTS[m.plan][m.part];
+      price = await client.prices.create({
+        product: productOf[pk],
+        currency: 'eur',
+        unit_amount: m.interval === 'year' ? monthly * 10 : monthly,
+        recurring: { interval: m.interval },
+        lookup_key: m.key,
+        transfer_lookup_key: true,
+        metadata: { mainds_kind: ORG_KIND, plan: m.plan, part: m.part, interval: m.interval }
+      });
+    }
+    prices[m.plan] ||= {};
+    prices[m.plan][m.interval] ||= {};
+    prices[m.plan][m.interval][m.part] = price.id;
+  }
+  return true;
+}
+
+/**
+ * Resolver perezoso: la primera llamada completa los precios en Stripe; si
+ * falla, la siguiente lo reintenta.
+ */
+export function createPriceResolver({ stripe, prices, logger = console }) {
+  let pending = null;
+  return async function resolvePrices() {
+    const client = typeof stripe === 'function' ? stripe() : stripe;
+    if (!pending) {
+      pending = ensureStripePrices(client, prices).catch(err => {
+        try { logger.warn('[business] no se pudieron preparar los precios de Stripe', JSON.stringify({ code: err?.code || err?.type || null })); } catch { /* */ }
+        return false;
+      });
+    }
+    const ok = await pending;
+    if (!ok) pending = null;
+    return prices;
+  };
+}
 
 export function readPriceIds(env = process.env) {
   const out = {};
@@ -68,10 +148,11 @@ export async function countSeats(store, orgId) {
  * Crea el sincronizador de licencias. sync(orgId) nunca lanza: si Stripe falla
  * marca settings.seat_sync_pending y el cambio de equipo sigue adelante.
  */
-export function createSeatSync({ store, stripe, prices, logger = console }) {
-  const seatIds = allSeatPriceIds(prices);
+export function createSeatSync({ store, stripe, prices, logger = console, resolvePrices = null }) {
   async function sync(orgId) {
     try {
+      if (resolvePrices) await resolvePrices();
+      const seatIds = allSeatPriceIds(prices);
       const org = await store.get('organizations', orgId);
       if (!org) return { ok: false, reason: 'no_org' };
       const quantity = await countSeats(store, orgId);
@@ -172,10 +253,12 @@ export async function handleOrgStripeEvent({ store }, event) {
 
 export function registerBillingRoutes(router, ctx) {
   const { store, stripe, prices, frontendUrl, getUser, seats } = ctx;
+  const resolvePrices = ctx.resolvePrices || (async () => prices);
 
   router.get('/billing', requireAction('org.subscription'), asyncRoute(async (req, res) => {
     const { org, access } = req.workspace;
     const seatCount = await countSeats(store, org.id);
+    await resolvePrices();
     const p = prices[org.plan_id]?.[org.billing_interval] || {};
     res.json({
       plan_id: org.plan_id,
@@ -202,6 +285,7 @@ export function registerBillingRoutes(router, ctx) {
       throw httpError(409, 'ALREADY_SUBSCRIBED', 'La clínica ya tiene una suscripción activa.');
     }
     const client = typeof stripe === 'function' ? stripe() : stripe;
+    await resolvePrices();
     const p = prices[plan]?.[interval] || {};
     if (!client || !p.base || !p.seat) {
       throw httpError(503, 'STRIPE_NOT_CONFIGURED', 'Los pagos de mainds business todavía no están configurados.');

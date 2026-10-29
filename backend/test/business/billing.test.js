@@ -5,7 +5,8 @@ import assert from 'node:assert/strict';
 import { createStore } from '../../business/store.js';
 import { orgAccess, hasPlus, enforceWritable } from '../../business/workspace.js';
 import {
-  isOrgStripeEvent, handleOrgStripeEvent, mapStripeStatus, createSeatSync, countSeats, readPriceIds
+  isOrgStripeEvent, handleOrgStripeEvent, mapStripeStatus, createSeatSync, countSeats, readPriceIds,
+  ensureStripePrices, createPriceResolver, priceLookupKey
 } from '../../business/billing.js';
 
 const DAY = 24 * 3600 * 1000;
@@ -181,4 +182,60 @@ test('syncSeats: sin Stripe o sin suscripción no hace nada; si Stripe falla mar
   const r = await createSeatSync({ store, stripe: () => broken, prices: PRICES, logger }).sync(org.id);
   assert.equal(r.ok, false);
   assert.equal((await store.get('organizations', org.id)).settings.seat_sync_pending, true);
+});
+
+// ── Precios de Stripe por lookup_key ──
+function fakeStripePrices(existing = []) {
+  const calls = { list: 0, products: [], prices: [] };
+  const prices = [...existing];
+  return {
+    calls,
+    client: {
+      prices: {
+        async list({ lookup_keys }) { calls.list++; return { data: prices.filter(p => lookup_keys.includes(p.lookup_key)) }; },
+        async create(params) { const p = { id: `price_${params.lookup_key}`, product: params.product, ...params }; calls.prices.push(params); prices.push(p); return p; }
+      },
+      products: { async create(params) { const id = `prod_${calls.products.length + 1}`; calls.products.push({ id, ...params }); return { id }; } }
+    }
+  };
+}
+
+test('ensureStripePrices: reutiliza los de Stripe, crea los que faltan y respeta los de env', async () => {
+  const existing = [{ id: 'price_old', lookup_key: priceLookupKey('essential', 'base', 'month'), product: 'prod_ess_base' }];
+  const fake = fakeStripePrices(existing);
+  const prices = readPriceIds({ STRIPE_PRICE_ID_BUSINESS_PLUS_SEAT: 'price_env' });
+  assert.equal(await ensureStripePrices(fake.client, prices), true);
+  assert.equal(prices.essential.month.base, 'price_old', 'el existente se reutiliza');
+  assert.equal(prices.plus.month.seat, 'price_env', 'el de env manda');
+  assert.equal(fake.calls.prices.length, 6, '8 precios − 1 en Stripe − 1 en env');
+  const essBaseYear = fake.calls.prices.find(p => p.lookup_key === priceLookupKey('essential', 'base', 'year'));
+  assert.equal(essBaseYear.product, 'prod_ess_base', 'mismo producto para mensual y anual');
+  assert.equal(essBaseYear.unit_amount, 39000, 'anual = 10 meses');
+  const plusSeatYear = fake.calls.prices.find(p => p.lookup_key === priceLookupKey('plus', 'seat', 'year'));
+  assert.equal(plusSeatYear.unit_amount, 25000);
+  assert.equal(plusSeatYear.currency, 'eur');
+  assert.equal(plusSeatYear.recurring.interval, 'year');
+  assert.equal(plusSeatYear.transfer_lookup_key, true);
+  assert.equal(fake.calls.products.length, 3, 'un producto por plan y parte (essential seat, plus base, plus seat)');
+  // Segunda vez: nada que hacer.
+  assert.equal(await ensureStripePrices(fake.client, prices), true);
+  assert.equal(fake.calls.list, 1);
+  // Sin Stripe y con huecos: no resuelve.
+  assert.equal(await ensureStripePrices(null, readPriceIds({})), false);
+});
+
+test('createPriceResolver: reintenta si Stripe falla y deja de llamar cuando ya están', async () => {
+  let fail = true;
+  const fake = fakeStripePrices();
+  const flaky = { ...fake.client, prices: { ...fake.client.prices, list: async (q) => { if (fail) throw Object.assign(new Error('x'), { code: 'api_error' }); return fake.client.prices.list(q); } } };
+  const prices = readPriceIds({});
+  const resolve = createPriceResolver({ stripe: () => flaky, prices, logger: { warn() {} } });
+  await resolve();
+  assert.equal(prices.essential.month.base, null);
+  fail = false;
+  await resolve();
+  assert.ok(prices.essential.month.base);
+  const n = fake.calls.list;
+  await resolve();
+  assert.equal(fake.calls.list, n);
 });
