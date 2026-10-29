@@ -131,7 +131,7 @@ export const PLAN_INFO: Record<OrgPlan, { name: string; base: number; seat: numb
 
 const BASE = `${API_URL}/org`;
 
-async function call<T>(method: string, path: string, body?: unknown): Promise<ApiResult<T>> {
+export async function call<T>(method: string, path: string, body?: unknown): Promise<ApiResult<T>> {
   try {
     const res = await apiFetch(`${BASE}${path}`, {
       method,

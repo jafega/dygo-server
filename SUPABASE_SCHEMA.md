@@ -342,3 +342,17 @@ CREATE TABLE public.org_members (
   accepts_leads boolean NOT NULL DEFAULT false,
   CONSTRAINT org_members_pkey PRIMARY KEY (id)
 );
+-- business-003-clinical.sql — Fase 2. RLS activado sin políticas. Ver el fichero
+-- para índices, CHECKs y el trigger que hace inmutables las notas de historia.
+-- org_locations(id, org_id, name, address, active)
+-- org_rooms(id, org_id, location_id, name, hourly_rate, active)
+-- org_patients(id, org_id, first_name, last_name, email, phone, birth_date, tax_id, address,
+--              admin_notes, assigned_member_ids uuid[], acquisition_source, lead_id, status, created_by)
+-- org_appointments(id, org_id, member_id, patient_id, location_id, room_id, starts_at, ends_at, status,
+--                  service_type, modality, price, psych_percent, psych_fixed_fee, commission_rule_id,
+--                  invoice_id, admin_notes, created_by)
+-- org_clinical_notes(id, org_id, patient_id, author_member_id, appointment_id, visibility,
+--                    content_enc 'enc:v1:…', amends_note_id)   -- historia inmutable (trigger)
+-- org_consent_templates(id, org_id, name, content, version, active, created_by)
+-- org_patient_consents(id, org_id, patient_id, template_id, template_name, template_version,
+--                      content_snapshot, content_sha256, method, signed_at, registered_by, revoked_at)

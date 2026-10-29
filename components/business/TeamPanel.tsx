@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { UserPlus, Loader2, Copy, Check, X, Pause, Play, Trash2, Pencil, Mail } from 'lucide-react';
 import {
-  listMembers, inviteMember, updateMember, suspendMember, reactivateMember, removeMember,
+  listMembers, inviteMember, updateMember, suspendMember, reactivateMember, removeMember, listPatients, offboardMember, isClinicalMember,
   ROLE_LABELS, EMPLOYMENT_LABELS, BILLING_MODEL_LABELS,
-  type OrgMember, type OrgRole, type EmploymentType, type BillingModel
-} from '../../services/businessService';
+  type OrgMember, type OrgRole, type EmploymentType, type BillingModel, type OrgPatient
+} from '../../services/businessApi';
 
 interface TeamPanelProps {
   orgId: string;
@@ -49,6 +49,7 @@ const TeamPanel: React.FC<TeamPanelProps> = ({ orgId, canManage, myMemberId, rea
   const [inviteLink, setInviteLink] = useState<{ url: string; emailSent: boolean } | null>(null);
   const [copied, setCopied] = useState(false);
   const [showFormer, setShowFormer] = useState(false);
+  const [offboarding, setOffboarding] = useState<OrgMember | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -185,7 +186,9 @@ const TeamPanel: React.FC<TeamPanelProps> = ({ orgId, canManage, myMemberId, rea
                     )}
                     {(m.status === 'active' || m.status === 'invited' || m.status === 'suspended') && (
                       <button
-                        onClick={() => act(() => removeMember(orgId, m.id), m.status === 'invited' ? '¿Anular la invitación?' : `¿Dar de baja a ${m.display_name || m.email}? Perderá el acceso a la clínica; su cuenta personal no se toca.`)}
+                        onClick={() => (m.status !== 'invited' && isClinicalMember({ ...m, status: 'active' }))
+                          ? setOffboarding(m)
+                          : act(() => removeMember(orgId, m.id), m.status === 'invited' ? '¿Anular la invitación?' : `¿Dar de baja a ${m.display_name || m.email}? Perderá el acceso a la clínica; su cuenta personal no se toca.`)}
                         className="p-2 rounded-lg hover:bg-red-50 text-red-600" title={m.status === 'invited' ? 'Anular invitación' : 'Dar de baja'}
                       ><Trash2 size={15} /></button>
                     )}
@@ -204,6 +207,11 @@ const TeamPanel: React.FC<TeamPanelProps> = ({ orgId, canManage, myMemberId, rea
         <button onClick={() => setShowFormer(s => !s)} className="text-sm text-slate-500 hover:text-slate-700">
           {showFormer ? 'Ocultar antiguos miembros' : 'Ver antiguos miembros'}
         </button>
+      )}
+
+      {offboarding && (
+        <OffboardModal orgId={orgId} member={offboarding} clinicians={members.filter(x => isClinicalMember(x) && x.id !== offboarding.id)}
+          onClose={() => setOffboarding(null)} onDone={() => { setOffboarding(null); load(); }} />
       )}
 
       {formOpen && (
@@ -286,6 +294,67 @@ const TeamPanel: React.FC<TeamPanelProps> = ({ orgId, canManage, myMemberId, rea
           </form>
         </div>
       )}
+    </div>
+  );
+};
+
+/** Baja de un profesional: cada paciente pasa a otro profesional o se queda sin asignar. */
+const OffboardModal: React.FC<{ orgId: string; member: OrgMember; clinicians: OrgMember[]; onClose: () => void; onDone: () => void }> = ({ orgId, member, clinicians, onClose, onDone }) => {
+  const [patients, setPatients] = useState<OrgPatient[] | null>(null);
+  const [reassign, setReassign] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    listPatients(orgId, { status: 'all' }).then(r => {
+      setPatients(r.ok && r.data ? r.data.patients.filter(p => p.assigned_member_ids.includes(member.id)) : []);
+    });
+  }, [orgId, member.id]);
+
+  const confirm = async () => {
+    setBusy(true);
+    const clean = Object.fromEntries(Object.entries(reassign).filter(([, v]) => v));
+    const r = await offboardMember(orgId, member.id, clean);
+    setBusy(false);
+    if (r.ok) onDone(); else setError(r.error || 'No se pudo completar la baja');
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] bg-slate-900/50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[92dvh] overflow-y-auto">
+        <div className="flex items-center px-6 py-4 border-b border-slate-200">
+          <h3 className="text-lg font-bold text-slate-900 flex-1">Dar de baja a {member.display_name || member.email}</h3>
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-slate-100 text-slate-500" aria-label="Cerrar"><X size={18} /></button>
+        </div>
+        <div className="px-6 py-5 space-y-3 text-sm text-slate-700">
+          <p>Perderá el acceso a la clínica (su cuenta y su consulta personal no se tocan). Las notas que escribió siguen en la historia con su autoría.</p>
+          {patients === null ? <Loader2 className="animate-spin text-indigo-400" size={20} /> : patients.length === 0 ? (
+            <p className="text-slate-500">No tiene pacientes asignados.</p>
+          ) : (
+            <>
+              <p className="font-medium">¿Quién atiende a sus pacientes? Las citas futuras pasan al nuevo profesional si está libre; si no, se cancelan.</p>
+              <ul className="space-y-2">
+                {patients.map(p => (
+                  <li key={p.id} className="flex flex-wrap items-center gap-2">
+                    <span className="flex-1 min-w-[140px]">{p.name}</span>
+                    <select value={reassign[p.id] || ''} onChange={e => setReassign({ ...reassign, [p.id]: e.target.value })} className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm bg-white">
+                      <option value="">Sin asignar</option>
+                      {clinicians.map(c => <option key={c.id} value={c.id}>{c.display_name || c.email}</option>)}
+                    </select>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {error && <p className="text-red-700" role="alert">{error}</p>}
+        </div>
+        <div className="flex justify-end gap-2 px-6 py-4 border-t border-slate-200">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-100">Cancelar</button>
+          <button onClick={confirm} disabled={busy || patients === null} className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 flex items-center gap-2">
+            {busy && <Loader2 size={16} className="animate-spin" />} Dar de baja
+          </button>
+        </div>
+      </div>
     </div>
   );
 };

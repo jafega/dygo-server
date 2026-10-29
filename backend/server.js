@@ -448,9 +448,14 @@ app.use((req, res, next) => {
 });
 
 // --- RATE LIMITING (Protección contra fuerza bruta - LOPD/GDPR Art. 32) ---
+// Los tests de integración crean muchos usuarios desde 127.0.0.1. Solo se
+// saltan los límites si se piden las DOS cosas a la vez (nunca en producción).
+const skipRateLimitInTests = () =>
+  process.env.NODE_ENV === 'test' && process.env.MAINDS_TEST_NO_RATE_LIMIT === '1' && !IS_SERVERLESS;
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
   max: 10, // máximo 10 intentos por ventana
+  skip: skipRateLimitInTests,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Demasiados intentos. Inténtalo de nuevo en 15 minutos.' },
@@ -459,6 +464,7 @@ const authLimiter = rateLimit({
 const generalLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minuto
   max: 100, // 100 requests por minuto
+  skip: skipRateLimitInTests,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Demasiadas solicitudes. Inténtalo más tarde.' },
@@ -24142,6 +24148,30 @@ try {
       const resend = new Resend(process.env.RESEND_API_KEY);
       await resend.emails.send({ from: 'mainds <no-reply@mainds.app>', to, reply_to: 'info@mainds.app', subject, html });
       return true;
+    },
+    extraDeps: {
+      // Agenda unificada: huecos ocupados de la consulta personal (mainds pro).
+      // Solo lectura y solo inicio/fin: ningún dato del paciente sale de aquí.
+      readPersonalBusy: async (userId, fromIso, toIso) => {
+        let rows;
+        if (supabaseAdmin) {
+          const { data, error } = await supabaseAdmin.from('sessions')
+            .select('starts_on, ends_on, status')
+            .eq('psychologist_user_id', String(userId))
+            .eq('status', 'scheduled')
+            .lte('starts_on', toIso).gte('ends_on', fromIso)
+            .limit(500);
+          if (error) throw error;
+          rows = data || [];
+        } else {
+          rows = (getDb().sessions || [])
+            .filter(x => String(x.psychologist_user_id || x.psychologistId) === String(userId));
+        }
+        return rows
+          .filter(r => r.status === 'scheduled' && r.starts_on && r.ends_on &&
+            new Date(r.starts_on) < new Date(toIso) && new Date(fromIso) < new Date(r.ends_on))
+          .map(r => ({ starts_at: new Date(r.starts_on).toISOString(), ends_at: new Date(r.ends_on).toISOString() }));
+      }
     }
   });
 } catch (err) {

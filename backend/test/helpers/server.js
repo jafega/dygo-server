@@ -72,7 +72,8 @@ export async function startServer(opts = {}) {
     MAINDS_DB_FILE: dbFile,
     BUSINESS_STORE_FILE: path.join(tmpDir, 'business-store.json'),
     SUPERADMIN_EMAILS: SUPERADMIN_EMAIL,
-    AUDIT_DISABLED: 'true'
+    AUDIT_DISABLED: 'true',
+    MAINDS_TEST_NO_RATE_LIMIT: '1'
   }, opts.env || {});
 
   const child = spawn(process.execPath, ['server.js'], {

@@ -8,7 +8,8 @@
 //
 // Interfaz (todas async):
 //   get(table, id)                                   → fila | null
-//   list(table, { eq, in, gte, lte, order, limit })  → filas
+//   list(table, { eq, in, gte, lte, contains, order, limit }) → filas
+//     contains: { columna_array: valor } → filas cuyo array incluye el valor
 //   insert(table, row | rows)                        → fila | filas
 //   update(table, id, patch)                         → fila | null
 //   remove(table, id)                                → boolean
@@ -123,7 +124,10 @@ function compare(a, b) {
   return String(a) < String(b) ? -1 : 1;
 }
 
-function matches(row, { eq, in: inn, gte, lte } = {}) {
+function matches(row, { eq, in: inn, gte, lte, contains } = {}) {
+  for (const [col, v] of Object.entries(contains || {})) {
+    if (!Array.isArray(row[col]) || !row[col].includes(v)) return false;
+  }
   for (const [col, v] of Object.entries(eq || {})) {
     if (v === null) { if (row[col] !== null && row[col] !== undefined) return false; continue; }
     if (row[col] !== v) return false;
@@ -292,6 +296,7 @@ function createSupabaseDriver(supabase) {
       for (const [col, vals] of Object.entries(opts.in || {})) q = q.in(col, vals);
       for (const [col, v] of Object.entries(opts.gte || {})) q = q.gte(col, v);
       for (const [col, v] of Object.entries(opts.lte || {})) q = q.lte(col, v);
+      for (const [col, v] of Object.entries(opts.contains || {})) q = q.contains(col, [v]);
       for (const o of normalizeOrder(opts.order)) q = q.order(o.column, { ascending: o.ascending });
       q = q.limit(limit);
       return (await run(table, q)) || [];

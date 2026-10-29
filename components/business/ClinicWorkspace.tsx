@@ -1,10 +1,17 @@
-import React, { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Building2, Users, CreditCard, Settings, Home, Loader2, ArrowLeftRight, Menu, X, AlertTriangle, Clock
+  Building2, Users, CreditCard, Settings, Home, Loader2, ArrowLeftRight, Menu, X, AlertTriangle, Clock,
+  CalendarDays, UserRound, MapPin, FileSignature, ShieldCheck
 } from 'lucide-react';
 import { getOrganization, ROLE_LABELS, type Organization, type OrgMember } from '../../services/businessService';
 import TeamPanel from './TeamPanel';
 import { SubscriptionPanel, OrgSettingsPanel } from './ClinicAdminPanels';
+
+const AgendaPanel = lazy(() => import('./AgendaPanel'));
+const PatientsPanel = lazy(() => import('./PatientsPanel'));
+const LocationsRoomsPanel = lazy(() => import('./ClinicSetupPanels').then(m => ({ default: m.LocationsRoomsPanel })));
+const ConsentTemplatesPanel = lazy(() => import('./ClinicSetupPanels').then(m => ({ default: m.ConsentTemplatesPanel })));
+const AuditPanel = lazy(() => import('./ClinicSetupPanels').then(m => ({ default: m.AuditPanel })));
 
 export interface ClinicContext {
   orgId: string;
@@ -57,9 +64,34 @@ const ClinicHome: React.FC<{ c: ClinicContext; go: (id: string) => void; section
 // permiten los permisos de la membresía (el backend vuelve a comprobarlo).
 const SECTIONS: SectionDef[] = [
   {
+    id: 'agenda', label: 'Agenda', icon: <CalendarDays size={18} />,
+    visible: (c) => c.can('agenda.view_all') || c.can('agenda.view_busy'),
+    render: (c) => <AgendaPanel c={c} />
+  },
+  {
+    id: 'patients', label: 'Pacientes', icon: <UserRound size={18} />,
+    visible: (c) => c.can('patients.contact_all') || c.can('patients.contact_assigned'),
+    render: (c) => <PatientsPanel c={c} />
+  },
+  {
     id: 'team', label: 'Equipo', icon: <Users size={18} />,
     visible: () => true,
     render: (c) => <TeamPanel orgId={c.orgId} canManage={c.can('team.manage')} myMemberId={c.member.id} readOnly={c.readOnly} />
+  },
+  {
+    id: 'locations', label: 'Sedes y salas', icon: <MapPin size={18} />,
+    visible: (c) => c.can('team.manage'),
+    render: (c) => <LocationsRoomsPanel c={c} />
+  },
+  {
+    id: 'consents', label: 'Consentimientos', icon: <FileSignature size={18} />,
+    visible: (c) => c.can('team.manage') || c.can('clinical.read_all'),
+    render: (c) => <ConsentTemplatesPanel c={c} />
+  },
+  {
+    id: 'audit', label: 'Registro de accesos', icon: <ShieldCheck size={18} />,
+    visible: (c) => c.can('audit.view'),
+    render: (c) => <AuditPanel c={c} />
   },
   {
     id: 'subscription', label: 'Suscripción', icon: <CreditCard size={18} />,

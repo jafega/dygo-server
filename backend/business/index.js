@@ -24,6 +24,8 @@ import { buildMe, registerTopLevelRoutes, registerScopedRoutes } from './orgs.js
 import {
   readPriceIds, createSeatSync, registerBillingRoutes, handleOrgStripeEvent, isOrgStripeEvent
 } from './billing.js';
+import { registerAgendaTopLevel, registerAgendaRoutes } from './agenda.js';
+import { registerClinicalRoutes } from './clinical.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_STORE_FILE = path.resolve(__dirname, '..', '.business-store.local.json');
@@ -76,14 +78,17 @@ export function createBusinessRouter({ store, authenticateRequest, isSuperAdmin,
   orgRouter.use(gate);
   publicRouter.use(gate);
 
-  // Nivel superior: crear clínica, invitaciones, soporte.
+  // Nivel superior: crear clínica, invitaciones, soporte, agenda unificada.
   registerTopLevelRoutes(orgRouter, ctx);
+  registerAgendaTopLevel(orgRouter, ctx);
 
   // Rutas de una clínica: sesión → miembro activo → suscripción (R8, R9).
   const scoped = express.Router({ mergeParams: true });
   scoped.use(requireMember(ctx), enforceWritable);
   registerScopedRoutes(scoped, ctx);
   registerBillingRoutes(scoped, ctx);
+  registerAgendaRoutes(scoped, ctx);
+  registerClinicalRoutes(scoped, ctx);
   for (const register of deps.registerScoped || []) register(scoped, ctx);
   orgRouter.use('/:orgId', authenticateRequest, scoped);
 
