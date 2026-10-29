@@ -2,7 +2,7 @@
 // espacio. Y un Pro sin clínica no ve nada nuevo.
 //
 //   node e2e/business/f1.spec.mjs
-import { chromium, startStack, loggedInContext, shot, assert, APP_URL } from './helpers.mjs';
+import { chromium, startStack, loggedInContext, shot, assert, APP_URL, openCreateClinic } from './helpers.mjs';
 
 const stack = await startStack({ BUSINESS_BETA_EMAILS: 'olga@clinic.local' });
 const browser = await chromium.launch();
@@ -30,10 +30,12 @@ try {
     const ctx = await loggedInContext(browser, owner);
     const page = await ctx.newPage();
     await page.goto(APP_URL);
-    const switcher = page.getByTestId('workspace-switcher');
-    await switcher.waitFor({ timeout: 30_000 });
-    await shot(page, 'f1-02-titular-selector');
-    await switcher.getByRole('button', { name: 'Crear clínica' }).click();
+    await page.getByText('Mi Diario Personal').first().waitFor({ timeout: 30_000 });
+    await page.waitForTimeout(1500); // da tiempo a /api/org/me
+    // Beta sin clínica: tampoco ve el selector; la clínica se crea desde Ajustes.
+    assert(await page.getByTestId('workspace-switcher').count() === 0, 'sin clínica no hay selector, aunque esté en la beta');
+    await shot(page, 'f1-02-titular-sin-selector');
+    await openCreateClinic(page, owner);
     await page.getByPlaceholder('Centro de Psicología Mar Azul').fill('Centro Mar Azul');
     await page.getByLabel(/Acepto, en nombre de la clínica/).check();
     await shot(page, 'f1-03-crear-clinica');

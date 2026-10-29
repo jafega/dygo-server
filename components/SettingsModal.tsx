@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { UserSettings, User } from '../types';
 import { getCurrentUser, updateUser, uploadAvatar, apiFetch } from '../services/authService';
-import { X, Clock, Shield, LogOut, Globe, Mic, Camera, UserCheck, Calendar, CheckCircle, AlertCircle } from 'lucide-react';
+import { X, Clock, Shield, LogOut, Globe, Mic, Camera, UserCheck, Calendar, CheckCircle, AlertCircle, Building2 } from 'lucide-react';
 import * as AuthService from '../services/authService';
 import { isTempEmail } from '../services/textUtils';
 import { API_URL } from '../services/config';
@@ -13,9 +13,11 @@ interface SettingsModalProps {
   onClose: () => void;
   onLogout?: () => void;
   onUserUpdate?: (user: User) => void;
+  /** Si llega, se ofrece crear una clínica de mainds business (discreto, al final). */
+  onCreateClinic?: () => void;
 }
 
-const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose, onLogout, onUserUpdate }) => {
+const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose, onLogout, onUserUpdate, onCreateClinic }) => {
   const [enabled, setEnabled] = useState(settings.notificationsEnabled);
     const [feedbackEnabled, setFeedbackEnabled] = useState(settings.feedbackNotificationsEnabled ?? true);
   const [time, setTime] = useState(settings.notificationTime);
@@ -502,6 +504,16 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose
                             </div>
                         )}
                     </div>
+
+                    {onCreateClinic && (
+                        <div className="space-y-2 pt-2 border-t border-slate-100" data-testid="business-offer">
+                            <h3 className="text-xs font-bold uppercase text-slate-400">mainds business</h3>
+                            <p className="text-xs text-slate-500">¿Tienes un centro de psicología? Gestiona el equipo, la agenda compartida y la facturación de la clínica. 14 días de prueba; tu consulta personal no cambia.</p>
+                            <button type="button" onClick={() => { onClose(); onCreateClinic(); }} className="inline-flex items-center gap-2 text-sm font-medium text-indigo-700 hover:text-indigo-900">
+                                <Building2 size={15} /> Crear una clínica
+                            </button>
+                        </div>
+                    )}
                 </div>
             </div>
             

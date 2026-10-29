@@ -51,7 +51,7 @@
 |---|---|---|
 | `BUSINESS_ENABLED=true` | Enciende Business. Apagado, Pro no cambia y `/api/org/*` responde 404. | Sí |
 | `BUSINESS_BETA_EMAILS` | Emails (separados por comas) que pueden **crear** clínicas. Los invitados se unen siempre. | Sí, en beta |
-| `BUSINESS_SELF_SERVE=true` | Business a demanda: cualquier **psicólogo** crea su clínica desde *Mi Perfil* ("¿Tienes un centro de psicología?"). Quien no lo hace no ve ningún cambio en Pro: el selector de espacio solo aparece al tener clínica o invitación. | No |
+| `BUSINESS_SELF_SERVE=true` | Business a demanda: cualquier **psicólogo** crea su clínica desde *Ajustes* (el modal del perfil, sección "mainds business"). Quien no lo hace no ve ningún cambio en Pro: el selector *Mi consulta / Clínica* solo aparece a quien tiene clínica, trabaja en una o tiene una invitación pendiente. | No |
 | `CLINICAL_ENCRYPTION_KEY` | 64 caracteres hex (`node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`). **Guárdala fuera del repo**: sin ella no se puede leer la historia clínica. | Sí |
 | `STRIPE_PRICE_ID_BUSINESS_{ESSENTIAL\|PLUS}_{BASE\|SEAT}[_YEARLY]` | 8 precios en Stripe: base por clínica y licencia por profesional, mensual y anual. | Para cobrar |
 | `BUSINESS_DPA_VERSION` | Versión vigente del DPA. Por defecto `v1-borrador`. | Al publicar el DPA revisado |
