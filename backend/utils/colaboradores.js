@@ -393,6 +393,58 @@ export async function actualizarEstadoReferido(supabase, subscription, { borrada
   await supabase.from(TABLA.referidos).update(cambios).eq('stripe_subscription_id', subscription.id);
 }
 
+/**
+ * Red de seguridad del webhook: lo llama a diario api/reconcile-subscriptions.js.
+ *
+ * Recorre en el histórico de Stripe las facturas cobradas de los últimos `dias`
+ * y pasa por registrarFacturaCobrada las que llevan un código de colaborador.
+ * Si el webhook ya las apuntó no hace nada (es idempotente); si el webhook se
+ * perdió o el evento no está activado en Stripe, las apunta ahora. Así el panel
+ * sabe quién ha pagado con cada código aunque falle el camino rápido.
+ *
+ * También pone al día el estado de cada lead con las suscripciones de Stripe
+ * que el cron ya ha descargado (`suscripciones`).
+ */
+export async function reconciliarColaboradores(supabase, stripe, { suscripciones = [], dias = 40, dryRun = false } = {}) {
+  const resumen = { codigos: 0, facturas_con_codigo: 0, procesadas: 0, estados_actualizados: 0, errores: [] };
+  const { data: codigos, error } = await supabase.from(TABLA.codigos).select('stripe_promotion_code_id');
+  if (error) throw error;
+  const promos = new Set((codigos || []).map(c => c.stripe_promotion_code_id));
+  resumen.codigos = promos.size;
+  if (!promos.size) return resumen;
+
+  // Más antiguas primero: el número de mes de cada comisión sale en orden.
+  const facturas = [];
+  const desde = Math.floor(Date.now() / 1000) - dias * 24 * 60 * 60;
+  for await (const inv of stripe.invoices.list({ status: 'paid', created: { gte: desde }, limit: 100 })) {
+    if (inv.subscription && promos.has(promocionDeFactura(inv))) facturas.push(inv);
+  }
+  facturas.sort((a, b) => a.created - b.created);
+  resumen.facturas_con_codigo = facturas.length;
+
+  if (!dryRun) {
+    for (const inv of facturas) {
+      try {
+        await registrarFacturaCobrada(supabase, stripe, inv);
+        resumen.procesadas++;
+      } catch (err) {
+        resumen.errores.push({ invoice: inv.id, error: err?.message || String(err) });
+      }
+    }
+    const { data: referidos } = await supabase
+      .from(TABLA.referidos).select('stripe_subscription_id, stripe_status');
+    const porId = new Map(suscripciones.map(s => [s.id, s]));
+    for (const r of referidos || []) {
+      const sub = porId.get(r.stripe_subscription_id);
+      if (sub && sub.status !== r.stripe_status) {
+        await actualizarEstadoReferido(supabase, sub);
+        resumen.estados_actualizados++;
+      }
+    }
+  }
+  return resumen;
+}
+
 // ── Lectura para los paneles ─────────────────────────────────────────────────
 
 /** "maria.lopez@gmail.com" → "ma***@gmail.com". El colaborador no necesita más. */

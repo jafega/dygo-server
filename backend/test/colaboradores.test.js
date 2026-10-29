@@ -140,3 +140,29 @@ test('webhook: lead con código → referido + comisiones, idempotente y sin aut
   const stripeNo = { subscriptions: { retrieve: async () => { throw new Error('no debería llamarse'); } } };
   assert.equal(await registrarFacturaCobrada(sb, stripeNo, { id: 'in_y', subscription: 'sub_otro', amount_paid: 1000 }), null);
 });
+
+test('reconciliación diaria: recoge del histórico de Stripe lo que el webhook no apuntó', async () => {
+  const { reconciliarColaboradores } = await import('../utils/colaboradores.js');
+  const tablas = {
+    collaborators: [{ id: 'col1', user_id: 'laura', active: true, payout_model: 'one_time', payout_amount_type: 'fixed', payout_amount: 50, payout_percent: 0, payout_min_months: 2, payout_max_months: null }],
+    collaborator_codes: [{ id: 'k1', collaborator_id: 'col1', code: 'LAURA20', stripe_promotion_code_id: 'promo_1' }],
+    users: []
+  };
+  const sb = fakeSupabase(tablas);
+  const inv = (id, created) => ({ id, created, subscription: 'sub_9', customer: 'cus_9', amount_paid: 3000, tax: 0, discount: { promotion_code: 'promo_1' } });
+  const historico = [inv('in_b', 200), { id: 'in_ajena', created: 150, subscription: 'sub_x', amount_paid: 5000 }, inv('in_a', 100)];
+  const stripe = {
+    invoices: { list: () => (async function* () { yield* historico; })() },
+    subscriptions: { retrieve: async () => ({ status: 'active', metadata: { psychologist_user_id: 'pepa' } }) }
+  };
+  const r1 = await reconciliarColaboradores(sb, stripe, { suscripciones: [{ id: 'sub_9', status: 'past_due' }] });
+  assert.equal(r1.facturas_con_codigo, 2);
+  assert.equal(tablas.collaborator_referrals.length, 1);
+  assert.equal(tablas.collaborator_referrals[0].months_paid, 2);
+  assert.equal(tablas.collaborator_referrals[0].stripe_status, 'past_due');
+  assert.deepEqual(tablas.collaborator_earnings.map(e => [e.type, e.amount]), [['one_time', 50]]);
+  // Al día siguiente vuelve a pasar: no duplica nada.
+  await reconciliarColaboradores(sb, stripe, {});
+  assert.equal(tablas.collaborator_earnings.length, 1);
+  assert.equal(tablas.collaborator_referrals[0].months_paid, 2);
+});
